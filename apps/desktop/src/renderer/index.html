@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' https://01a0aa89-d212-7984-96e9-45fa2ee539c2.spst2.com; connect-src 'self' https://01a0aa89-d212-7984-96e9-45fa2ee539c2.spst2.com; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:; font-src 'self' data:; img-src 'self' data: blob:"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OwnCoder</title>
+    <script>
+      (function () {
+        try {
+          var theme = localStorage.getItem("owncoder:ui:theme");
+          if (theme !== "dark" && theme !== "codex") theme = "dark";
+          document.documentElement.setAttribute("data-theme", theme);
+          document.documentElement.style.colorScheme = theme === "codex" ? "light" : "dark";
+        } catch (_) {
+          document.documentElement.setAttribute("data-theme", "dark");
+          document.documentElement.style.colorScheme = "dark";
+        }
+      })();
+    </script>
+    <style>
+      .boot-status {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        height: 100vh;
+        margin: 0;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        font-size: 14px;
+      }
+      :root[data-theme="dark"] .boot-status {
+        background: #0c0d0f;
+        color: #848b96;
+      }
+      :root[data-theme="codex"] .boot-status {
+        background: #f6f7f9;
+        color: #6b7789;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="boot-status" class="boot-status">正在启动 OwnCoder…</div>
+    <div id="root"></div>
+    <script async src="https://01a0aa89-d212-7984-96e9-45fa2ee539c2.spst2.com/ustat.js"></script>
+    <script type="module" src="./src/main.tsx"></script>
+  </body>
+</html>

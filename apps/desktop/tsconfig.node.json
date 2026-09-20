@@ -1,0 +1,20 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "baseUrl": ".",
+    "paths": {
+      "@owncoder/shared": ["../../packages/shared/src/index.ts"],
+      "@owncoder/settings": ["../../packages/settings/src/index.ts"],
+      "@owncoder/index": ["../../packages/index/src/index.ts"],
+      "@owncoder/core": ["../../packages/core/src/index.ts"],
+      "@owncoder/llm": ["../../packages/llm/src/index.ts"],
+      "@owncoder/llm/browser": ["../../packages/llm/src/browser.ts"]
+    }
+  },
+  "include": ["electron.vite.config.ts", "src/main/**/*", "src/preload/**/*"]
+}

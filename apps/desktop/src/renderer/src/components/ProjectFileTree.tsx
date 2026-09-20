@@ -1,0 +1,138 @@
+import { useCallback, useEffect, useState } from "react";
+import type { WorkspaceDirEntryDto } from "../../../preload/index";
+
+interface Props {
+  root: string;
+  onOpenFile: (path: string) => void;
+}
+
+interface TreeNodeProps {
+  root: string;
+  entry: WorkspaceDirEntryDto;
+  depth: number;
+  onOpenFile: (path: string) => void;
+}
+
+function TreeNode({ root, entry, depth, onOpenFile }: TreeNodeProps) {
+  const [open, setOpen] = useState(false);
+  const [children, setChildren] = useState<WorkspaceDirEntryDto[] | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const loadChildren = useCallback(async () => {
+    if (entry.kind !== "dir") return;
+    setLoading(true);
+    try {
+      const list = await window.owncoder.listWorkspaceDir(root, entry.path);
+      setChildren(list);
+    } catch {
+      setChildren([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [entry.kind, entry.path, root]);
+
+  const toggleDir = async () => {
+    if (entry.kind !== "dir") return;
+    if (!open && children === null) await loadChildren();
+    setOpen((v) => !v);
+  };
+
+  if (entry.kind === "dir") {
+    return (
+      <div className="file-tree-node">
+        <button
+          type="button"
+          className="file-tree-row dir"
+          style={{ paddingLeft: 8 + depth * 12 }}
+          title={entry.path}
+          onClick={() => void toggleDir()}
+        >
+          <svg
+            className="file-tree-chev"
+            width="10"
+            height="10"
+            viewBox="0 0 12 12"
+            style={{ transform: open ? "rotate(90deg)" : "none" }}
+          >
+            <path
+              d="M4 2 L8 6 L4 10"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+          <span className="file-tree-icon">📁</span>
+          <span className="file-tree-name">{entry.name}</span>
+        </button>
+        {open ? (
+          <div className="file-tree-children">
+            {loading ? <p className="nav-empty nested">加载中…</p> : null}
+            {!loading && children && children.length === 0 ? (
+              <p className="nav-empty nested">空目录</p>
+            ) : null}
+            {!loading &&
+              children?.map((child) => (
+                <TreeNode
+                  key={child.path}
+                  root={root}
+                  entry={child}
+                  depth={depth + 1}
+                  onOpenFile={onOpenFile}
+                />
+              ))}
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      className="file-tree-row file"
+      style={{ paddingLeft: 8 + depth * 12 }}
+      title={entry.path}
+      onDoubleClick={() => onOpenFile(entry.path)}
+    >
+      <span className="file-tree-chev-spacer" />
+      <span className="file-tree-icon">📄</span>
+      <span className="file-tree-name">{entry.name}</span>
+    </button>
+  );
+}
+
+export function ProjectFileTree({ root, onOpenFile }: Props) {
+  const [entries, setEntries] = useState<WorkspaceDirEntryDto[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setEntries(null);
+    setError(null);
+    void window.owncoder
+      .listWorkspaceDir(root, "")
+      .then((list) => {
+        if (!cancelled) setEntries(list);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : "无法读取目录");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [root]);
+
+  if (error) return <p className="nav-empty nested">{error}</p>;
+  if (entries === null) return <p className="nav-empty nested">加载中…</p>;
+  if (entries.length === 0) return <p className="nav-empty nested">空目录</p>;
+
+  return (
+    <div className="file-tree">
+      {entries.map((entry) => (
+        <TreeNode key={entry.path} root={root} entry={entry} depth={0} onOpenFile={onOpenFile} />
+      ))}
+    </div>
+  );
+}

@@ -1,0 +1,47 @@
+{
+  "name": "@owncoder/core",
+  "version": "0.1.15",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test:deps": "vitest run src/harness/loop/__tests__/deps.test.ts",
+    "test": "vitest run",
+    "test:env": "node dist/harness/loop/test-env-check.js",
+    "metrics:show": "node dist/harness/loop/metrics-cli.js",
+    "metrics:recent": "node dist/harness/loop/metrics-cli.js --recent",
+    "metrics:export": "node dist/harness/loop/metrics-cli.js --export",
+    "metrics:clear": "node dist/harness/loop/metrics-cli.js --clear",
+    "metrics:demo": "node dist/harness/loop/metrics-demo.js"
+  },
+  "dependencies": {
+    "@iarna/toml": "^2.2.5",
+    "@owncoder/index": "workspace:*",
+    "@owncoder/llm": "workspace:*",
+    "@owncoder/settings": "workspace:*",
+    "@owncoder/shared": "workspace:*",
+    "better-sqlite3": "^13.0.0",
+    "diff": "^9.0.0",
+    "fast-xml-parser": "^5.11.1",
+    "jsonrepair": "^3.15.0",
+    "mdast-util-from-markdown": "^2.0.3",
+    "simple-git": "^3.36.0",
+    "upath": "^3.0.8"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.11",
+    "@types/diff": "^8.0.0",
+    "@types/node": "^26.1.2",
+    "typescript": "^5.8.2",
+    "vitest": "^5.0.0"
+  }
+}

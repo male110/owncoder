@@ -1,0 +1,136 @@
+{
+  "name": "@owncoder/desktop",
+  "version": "0.1.15",
+  "private": true,
+  "description": "OwnCoder desktop shell",
+  "main": "./out/main/index.js",
+  "scripts": {
+    "dev": "node ./scripts/dev.mjs",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "rebuild": "electron-rebuild -f -w node-pty -w better-sqlite3",
+    "pack:win": "pnpm build && electron-builder --win",
+    "pack:mac": "pnpm build && electron-builder --mac",
+    "pack:linux": "pnpm build && electron-builder --linux",
+    "publish:oss": "node ./scripts/publish-release.mjs",
+    "typecheck": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.web.json --noEmit"
+  },
+  "dependencies": {
+    "@huggingface/tokenizers": "^0.2.0",
+    "@monaco-editor/react": "^4.7.0",
+    "@owncoder/core": "workspace:*",
+    "@owncoder/llm": "workspace:*",
+    "@owncoder/settings": "workspace:*",
+    "@owncoder/shared": "workspace:*",
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/xterm": "^5.5.0",
+    "better-sqlite3": "^13.0.0",
+    "electron-updater": "^6.6.2",
+    "monaco-editor": "^0.52.2",
+    "node-pty": "^1.0.0",
+    "onnxruntime-node": "^1.29.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-virtuoso": "^4.18.13",
+    "sqlite-vec": "^0.1.9",
+    "zustand": "^5.0.3"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^4.2.0",
+    "@types/better-sqlite3": "^7.6.11",
+    "@types/node": "^26.1.2",
+    "@types/react": "^19.0.10",
+    "@types/react-dom": "^19.0.4",
+    "@vitejs/plugin-react": "^4.3.4",
+    "electron": "^43.3.0",
+    "electron-builder": "^26.15.3",
+    "electron-vite": "^3.0.0",
+    "typescript": "^5.8.2",
+    "vite": "^6.2.0"
+  },
+  "build": {
+    "appId": "com.owncoder.desktop",
+    "productName": "OwnCoder",
+    "compression": "maximum",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "out/**/*",
+      "!out/node_modules/**",
+      "!node_modules/@types/**",
+      "!node_modules/node-addon-api/**",
+      "!node_modules/@owncoder/**",
+      "!node_modules/monaco-editor/min/**",
+      "!node_modules/monaco-editor/dev/**",
+      "!node_modules/monaco-editor/min-maps/**",
+      "!node_modules/node-pty/prebuilds/darwin-*/**",
+      "!node_modules/node-pty/prebuilds/win32-arm64/**",
+      "!node_modules/node-pty/third_party/conpty/**/win10-arm64/**",
+      "!node_modules/better-sqlite3/prebuilds/darwin-*/**",
+      "!node_modules/better-sqlite3/prebuilds/linux-*/**",
+      "!node_modules/better-sqlite3/prebuilds/linuxmusl-*/**",
+      "!node_modules/better-sqlite3/prebuilds/win32-arm64/**",
+      "!node_modules/better-sqlite3/build/Release/obj.target/**",
+      "!node_modules/better-sqlite3/build/Release/obj/**",
+      "!node_modules/better-sqlite3/build/Release/.deps/**",
+      "!node_modules/better-sqlite3/build/Release/*.pdb",
+      "!node_modules/better-sqlite3/build/Release/*.exp",
+      "!node_modules/better-sqlite3/build/Release/*.lib",
+      "!node_modules/better-sqlite3/build/Release/*.pch",
+      "!node_modules/@xterm/*/src/**",
+      "!node_modules/@monaco-editor/*/src/**",
+      "!node_modules/**/*.map",
+      "!node_modules/**/*.d.ts.map",
+      "!node_modules/**/*.test.*",
+      "!node_modules/**/*.spec.*",
+      "!node_modules/**/test/**",
+      "!node_modules/**/tests/**",
+      "!node_modules/**/__tests__/**",
+      "!node_modules/**/*.md",
+      "!node_modules/**/CHANGELOG*",
+      "!node_modules/**/CODE_OF_CONDUCT*",
+      "!node_modules/**/ThirdPartyNotices*",
+      "!node_modules/**/tsconfig*.json",
+      "!node_modules/**/.babelrc",
+      "!node_modules/**/.prettierrc*",
+      "!node_modules/**/eslint*",
+      "!node_modules/**/playground/**",
+      "!node_modules/**/tea.yaml",
+      "!node_modules/**/.npmignore",
+      "!node_modules/**/rollup.config.*",
+      "!node_modules/**/vitest.config.*",
+      "!node_modules/**/tsup.config.*"
+    ],
+    "extraResources": [
+      {
+        "from": "assets/embedding-model",
+        "to": "embedding-model"
+      }
+    ],
+    "asarUnpack": [
+      "node_modules/node-pty/**/*",
+      "node_modules/sqlite-vec*/**/*"
+    ],
+    "afterPack": "./scripts/after-pack.mjs",
+    "win": {
+      "target": [
+        {
+          "target": "nsis-web",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "differentialPackage": true
+    },
+    "publish": {
+      "provider": "generic",
+      "url": "https://zy-1310897501.cos.ap-nanjing.myqcloud.com/owncoder/"
+    }
+  }
+}

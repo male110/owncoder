@@ -1,0 +1,33 @@
+{
+  "name": "@owncoder/index",
+  "version": "0.1.15",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest"
+  },
+  "dependencies": {
+    "@owncoder/shared": "workspace:*",
+    "better-sqlite3": "^13.0.0",
+    "ignore": "^6.0.2",
+    "tree-sitter-wasms": "^0.1.13",
+    "upath": "^3.0.8",
+    "web-tree-sitter": "^0.24.4"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.11",
+    "@types/node": "^26.1.2",
+    "typescript": "^5.8.2",
+    "vitest": "^5.0.0"
+  }
+}
