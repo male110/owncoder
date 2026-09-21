@@ -352,7 +352,7 @@ export async function buildDecomposeContext(
   const historySections: string[] = [];
   if (roundLines.length > 0) {
     historySections.push(
-      `### Recent conversation rounds (background only, current user message takes precedence)\n${roundLines.join("\n\n")}`,
+      `### Recent conversation rounds (background)\n${roundLines.join("\n\n")}`,
     );
   }
   if (recalled.length > 0) {
@@ -402,6 +402,7 @@ export async function buildDecomposeContext(
 type DecomposeRelevantHistory = NonNullable<TaskItem["relevantHistory"]>;
 
 interface DecomposeAnswer {
+  intent: string;
   understanding: string;
   goal?: string;
   scope?: string[];
@@ -845,6 +846,7 @@ export function parseDecomposeAnswer(text: string): DecomposeAnswer | null {
   const relevantHistory = parseRelevantHistory(obj.relevantHistory);
 
   return {
+    intent: typeof obj.intent === "string" ? obj.intent.trim() : "",
     understanding: typeof obj.understanding === "string" ? obj.understanding.trim() : "",
     userConstraints: Array.isArray(obj.userConstraints)
       ? obj.userConstraints
@@ -1074,19 +1076,15 @@ export async function runTaskDecompose(
   // explicitly supplies `prompt`, that override wins.
   const systemPrompt = prompt?.trim() || BUILTIN_TASK_DECOMPOSE_PROMPT;
   try {
-    const { tagUserInput, PRIORITY_HIERARCHY_NOTICE } = await import("../../message-tags.js");
+    const { tagUserInput } = await import("../../message-tags.js");
     const decomposeMessages: ChatMessage[] = [
       { role: "system", content: systemPrompt },
       { role: "system", content: OS_LOCALE_SYSTEM_PROMPT },
       {
         role: "user",
         content: [
-          // 用户最新输入用 <user_input> 标签标记为最高优先级，历史上下文用
-          // <conversation_history> 标签标记为低优先级背景。配合优先级体系提示词，
-          // 让 LLM 明确区分"当前指令"和"历史背景"，避免把历史中的旧说法当成新请求。
-          tagUserInput(`## USER MESSAGE (highest priority — this is the current request)\n\n${opts.userMessage}`),
-          PRIORITY_HIERARCHY_NOTICE,
-          `## CONTEXT (background information — lower priority than USER MESSAGE)\n${await buildDecomposeContext(opts, budgets)}`,
+          tagUserInput(opts.userMessage),
+          `## CONTEXT (background information)\n${await buildDecomposeContext(opts, budgets)}`,
         ].join("\n\n"),
       },
     ];
@@ -1119,6 +1117,8 @@ export async function runTaskDecompose(
     // 模型把短句判成 discuss 而留下空 steps。
     if (answer) {
       answer = recoverEmptyDecomposeSteps(answer, opts.userMessage);
+      // 兼容旧的自定义 prompt；内置 prompt 会显式返回 intent。
+      if (!answer.intent) answer.intent = answer.understanding || opts.userMessage;
     }
 
     // 循环检测：检查是否有异常多的步骤或重复模式
@@ -1233,6 +1233,7 @@ export async function runTaskDecompose(
 
     // 构建原始任务分解结果（steps[].relevantHistory 供 React 循环直接复用）
     const rawDecompose = {
+      intent: answer.intent,
       understanding: answer.understanding || opts.userMessage,
       userConstraints: answer.userConstraints,
       progressStatus: answer.progressStatus,

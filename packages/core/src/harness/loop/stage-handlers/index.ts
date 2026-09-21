@@ -99,7 +99,7 @@ export async function injectHistoryAndUserMessage(ctx: SchedulerContext): Promis
   const packedHistory = relevantHistory?.trim() ?? "";
   if (packedHistory) {
     const contextLines: string[] = [
-      `## 当前任务（最高权重）`,
+      `## 当前任务`,
       ``,
       opts.userMessage,
       ``,
@@ -128,8 +128,8 @@ export async function injectHistoryAndUserMessage(ctx: SchedulerContext): Promis
       role: "user",
       content: tagUserInput(
         recentFileHints
-          ? `## 当前任务（最高权重）\n\n${opts.userMessage}\n\n${recentFileHints}`
-          : `## 当前任务（最高权重）\n\n${opts.userMessage}`,
+          ? `## 当前任务\n\n${opts.userMessage}\n\n${recentFileHints}`
+          : `## 当前任务\n\n${opts.userMessage}`,
       ),
     });
 

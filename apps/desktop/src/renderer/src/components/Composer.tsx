@@ -611,9 +611,12 @@ function ComposerImpl({
                 </div>
               ) : (
                 <>
-                  {/* 内联双栏：避免右侧绝对定位 flyout 被 agent-chat overflow:hidden 裁切 */}
+                  {/*
+                    经典二级菜单：两列同在文档流 + align-items:flex-start，
+                    高度互不拉伸；各自 height:auto / max-height 独立滚动。
+                  */}
                   <div className="model-menu-body">
-                    <div className="model-menu-providers" role="tablist" aria-label="模型平台">
+                    <nav className="model-menu-providers" role="tablist" aria-label="模型平台">
                       {groupedModels.map((group) => (
                         <button
                           key={group.providerId}
@@ -631,7 +634,7 @@ function ComposerImpl({
                           </span>
                         </button>
                       ))}
-                    </div>
+                    </nav>
                     <ul className="model-menu-models" role="group">
                       {(groupedModels.find((g) => g.providerId === selectedProviderId)?.models ?? []).map((m) => (
                         <li key={m.id}>
@@ -639,7 +642,11 @@ function ComposerImpl({
                             type="button"
                             role="option"
                             aria-selected={m.id === availableModels[0]?.id}
-                            className={m.id === availableModels[0]?.id ? "selected" : ""}
+                            className={`${m.id === availableModels[0]?.id ? "selected" : ""} ${
+                              (groupedModels.find((g) => g.providerId === selectedProviderId)?.models.length ?? 0) === 1
+                                ? "single-model"
+                                : ""
+                            }`}
                             onClick={() => {
                               setModelMenuOpen(false);
                               setSelectedProviderId(null);

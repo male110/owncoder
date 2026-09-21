@@ -214,7 +214,7 @@ function ToolCardImpl({ turn }: { turn: ChatTurnDto }) {
                   <strong>保留的重要片段：</strong>
                   <ul>
                     {turn.importantSnippets!.map((snippet, i) => (
-                      <li key={i} title={snippet}>{snippet}</li>
+                      <li key={`${snippet}-${i}`} title={snippet}>{snippet}</li>
                     ))}
                   </ul>
                 </div>
@@ -448,7 +448,7 @@ function DecomposeCard({ decomposition }: { decomposition: DecompositionSnapshot
               <div className="decompose-section-label">用户约束</div>
               <ul className="decompose-constraints">
                 {userConstraints.map((c, i) => (
-                  <li key={i}>{c}</li>
+                  <li key={`${c}-${i}`}>{c}</li>
                 ))}
               </ul>
             </div>
@@ -603,7 +603,7 @@ function UserBubbleImpl({ turn }: { turn: ChatTurnDto }) {
                   <strong>保留的重要片段：</strong>
                   <ul>
                     {turn.importantSnippets!.slice(0, 3).map((snippet, i) => (
-                      <li key={i}>{snippet}</li>
+                      <li key={`${snippet}-${i}`}>{snippet}</li>
                     ))}
                   </ul>
                 </div>
@@ -698,7 +698,7 @@ function AssistantBubbleImpl({
               <strong>保留的重要片段：</strong>
               <ul>
                 {turn.importantSnippets!.map((snippet, i) => (
-                  <li key={i} title={snippet}>{snippet}</li>
+                  <li key={`${snippet}-${i}`} title={snippet}>{snippet}</li>
                 ))}
               </ul>
             </div>

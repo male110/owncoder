@@ -14,26 +14,25 @@ function inlineFormat(text: string): ReactNode[] {
   const re = /(`[^`]+`|\*\*[^*]+\*\*|\*[^*\n]+\*|\[[^\]]+\]\([^)]+\))/g;
   let last = 0;
   let m: RegExpExecArray | null;
-  let key = 0;
 
   while ((m = re.exec(text)) !== null) {
     if (m.index > last) parts.push(text.slice(last, m.index));
     const token = m[0];
     if (token.startsWith("`")) {
       parts.push(
-        <code key={key++} className="md-inline-code">
+        <code key={m.index} className="md-inline-code">
           {token.slice(1, -1)}
         </code>,
       );
     } else if (token.startsWith("**")) {
-      parts.push(<strong key={key++}>{token.slice(2, -2)}</strong>);
+      parts.push(<strong key={m.index}>{token.slice(2, -2)}</strong>);
     } else if (token.startsWith("*")) {
-      parts.push(<em key={key++}>{token.slice(1, -1)}</em>);
+      parts.push(<em key={m.index}>{token.slice(1, -1)}</em>);
     } else {
       const linkMatch = token.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
       if (linkMatch) {
         parts.push(
-          <a key={key++} href={linkMatch[2]} target="_blank" rel="noreferrer">
+          <a key={m.index} href={linkMatch[2]} target="_blank" rel="noreferrer">
             {linkMatch[1]}
           </a>,
         );

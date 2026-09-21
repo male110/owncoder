@@ -273,7 +273,7 @@ export function SessionChatPanel({
           </span>
           <ol className="queued-messages-list">
             {queuedMessages.map((msg, i) => (
-              <li key={i} className="queued-messages-item">
+              <li key={`${msg}-${i}`} className="queued-messages-item">
                 <span className="queued-messages-text">
                   {msg.length > 80 ? `${msg.slice(0, 80)}…` : msg}
                 </span>
