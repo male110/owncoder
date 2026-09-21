@@ -60,7 +60,7 @@ interface Props {
   onNewSession: () => void;
   onAddProject: () => void;
   onOpenSettings: () => void;
-  onSelectProject: (root: string) => Promise<void>;
+  onSelectProject: (root: string, focusSessionId?: string) => Promise<void>;
   onRemoveProject: (root: string) => Promise<void>;
   onSwitchSession: (id: string) => Promise<void>;
   onDeleteSession: (id: string, projectRoot: string) => void;
@@ -310,15 +310,14 @@ export function AgentSidebar({
                                       title={running ? "需要确认命令（点击查看）" : "需要确认命令（点击清除）"}
                                       onClick={async (e) => {
                                         e.stopPropagation();
-                                        // Must await onSelectProject first so the
-                                        // workspace is fully switched in the backend
-                                        // before switching the session — otherwise
-                                        // applySessionState inside applyOpened can
-                                        // overwrite the activeSessionId just set by
-                                        // onSwitchSession, losing the target session's
-                                        // messages from the UI.
-                                        if (!isCurrent) await onSelectProject(p.root);
-                                        await onSwitchSession(s.id);
+                                        // Cross-project session clicks must be one
+                                        // navigation: project switch + focus session.
+                                        // Sequential onSelectProject → onSwitchSession
+                                        // bumps navigationVersion and can cancel the
+                                        // first history hydrate, leaving only the
+                                        // composer until a later revisit.
+                                        if (!isCurrent) await onSelectProject(p.root, s.id);
+                                        else await onSwitchSession(s.id);
                                         // If the session is no longer running,
                                         // the confirmation is stale — clear the
                                         // icon so it doesn't get stuck forever.
@@ -335,8 +334,8 @@ export function AgentSidebar({
                                 type="button"
                                 className="session-row"
                                 onClick={async () => {
-                                  if (!isCurrent) await onSelectProject(p.root);
-                                  await onSwitchSession(s.id);
+                                  if (!isCurrent) await onSelectProject(p.root, s.id);
+                                  else await onSwitchSession(s.id);
                                   // 切换到当前会话时去掉小绿点
                                   onClearSessionStatus?.(s.id);
                                 }}

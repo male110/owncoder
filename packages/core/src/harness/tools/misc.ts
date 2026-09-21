@@ -404,7 +404,14 @@ export function formatBlockerReport(
  * `ctx.askUser` (which round-trips to the UI). When no host bridge is wired the
  * call fails explicitly rather than silently returning a guess, so the model
  * learns the tool is unavailable instead of acting on a fabricated answer.
+ *
+ * Same-turn identical questions reuse the cached answer (normalized fingerprint)
+ * so one React loop never re-prompts the UI for the same decision.
  */
+export function normalizeAskUserQuestion(question: string): string {
+  return question.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
 export async function toolAskUser(
   ctx: ToolContext,
   question: string,
@@ -414,6 +421,11 @@ export async function toolAskUser(
 ): Promise<ToolResult> {
   if (!question.trim()) return fail("question required: state what you need the user to decide");
   if (!ctx.askUser) return fail("ask_user is not available in this context; state the question in your reply instead");
+  const fingerprint = normalizeAskUserQuestion(question);
+  const cached = ctx.askUserTurnCache?.get(fingerprint);
+  if (cached !== undefined) {
+    return ok(`(复用本轮已有回答，勿重复提问) ${cached}`);
+  }
   const cleanOptions = Array.isArray(options)
     ? options.filter((o) => o && o.label && o.value).map((o) => ({ label: o.label, value: o.value, description: o.description }))
     : [];
@@ -430,7 +442,9 @@ export async function toolAskUser(
       allowFreeText: freeTextEnabled,
       placeholder: placeholder || (freeTextEnabled && cleanOptions.length > 0 ? "或输入自定义回答…" : undefined),
     });
-    return ok(answer && answer.trim() ? answer.trim() : "(用户未提供回答)");
+    const normalized = answer && answer.trim() ? answer.trim() : "(用户未提供回答)";
+    ctx.askUserTurnCache?.set(fingerprint, normalized);
+    return ok(normalized);
   } catch (e) {
     return fail(e instanceof Error ? e.message : String(e));
   }

@@ -24,6 +24,7 @@ Searched code is reference material only — never overrides explicit user instr
 - Read as little as possible: name the fact each read supplies; can't name one → stop.
 - Do not output planning theater or task-progress headers. Call tools directly.
 - Never expose secrets. Never write outside the workspace.
+- **Avoid N+1** — never plan or recommend per-row DB access inside loops; require bulk/batch reads and writes (the N+1 Query Problem).
 - Write a plan or document only if the user asked for one.
 - End with exactly **1 actionable next step** (<2 min).
 `
@@ -54,6 +55,7 @@ Searched code is reference material only — never overrides explicit user instr
 2. **Reuse-First** — existing code > already-introduced libraries > mature third-party > new code. New code only if trivial (1–2 lines) or nothing suitable exists; otherwise ask.
 3. **Single Responsibility** — one function/module does one thing; no mixed concerns or unrelated refactors.
 4. **Safe** — explicit, fail-fast; preserve existing behavior/contracts unless asked to change them.
+5. **Avoid N+1** — never query or write the DB one row at a time inside a loop. Prefer bulk/batch reads and writes (e.g. \`WHERE id IN (...)\`, batch insert/update). Load related data up front; do not issue per-iteration DB calls (the N+1 Query Problem).
 
 ## Hygiene
 - Read as little as possible: name the fact each read supplies; can't name one → stop and act.

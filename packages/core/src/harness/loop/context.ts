@@ -23,17 +23,6 @@ import { emitStage } from "./stages.ts";
 import { ContextControlState, resolveContextControlConfig } from "./context-control.ts";
 import type { AgentLoopOpts } from "./types.ts";
 
-/** Strip repo-map stubs that the index emits when there is nothing meaningful
- * to render (no symbols, native not compiled, no workspace). Returning "" lets
- * the caller omit the `## Repository map` block instead of pushing a placeholder. */
-export function isMeaningfulRepoMap(text: string): boolean {
-  const trimmed = text.trim();
-  if (!trimmed) return false;
-  if (trimmed.includes("(stub)")) return false;
-  if (trimmed.includes("(no symbols indexed yet)")) return false;
-  return true;
-}
-
 export interface BuildContextArgs {
   opts: AgentLoopOpts;
   memory: MemoryManager;
@@ -55,78 +44,6 @@ export interface BuildContextResult {
   fixedSegments: FixedSegments;
   /** Token-based context budget computed from fixed segments. */
   tokenBudget: ContextBudget;
-}
-
-interface RetrievalHit {
-  id: string;
-  path: string;
-  content: string;
-}
-
-interface RetrievalResult {
-  label: string;
-  paths: string[];
-  hits: RetrievalHit[];
-}
-
-async function runRetrieval(
-  opts: AgentLoopOpts,
-  ctxEnabled: boolean,
-  _ctxParams: Record<string, unknown>,
-  filesBudget: number,
-): Promise<RetrievalResult | null> {
-  // 代码召回 - 不记日志
-  if (!ctxEnabled) return null;
-
-  if (opts.index.ragSearch) {
-    try {
-      opts.onEvent?.({ type: "semantic_search", results: 0 });
-      const hits = await opts.index.ragSearch(opts.userMessage, 8);
-      if (hits.length > 0) {
-        const perHitBudget = Math.max(320, Math.floor((filesBudget * 0.6) / hits.length));
-        const result: RetrievalResult = {
-          label: "Semantic search (RAG embedding)",
-          paths: hits.map((hit) => hit.filePath),
-          hits: hits.map((hit, index) => ({
-            id: `rag:${index}:${hit.filePath}:${hit.symbol}`,
-            path: hit.filePath,
-            content: clampText(formatRagHit(hit), perHitBudget),
-          })),
-        };
-        opts.onEvent?.({ type: "semantic_search", results: hits.length });
-        return result;
-      }
-    } catch {
-      /* retrieval is best effort */
-    }
-  }
-
-  return null;
-}
-
-function formatRagHit(hit: {
-  filePath: string;
-  symbol: string;
-  content: string;
-  language: string;
-  score: number;
-  semanticScore: number;
-}): string {
-  const preview = hit.content.slice(0, 200).replace(/\n/g, " ");
-  return [
-    `### ${hit.filePath} \`${hit.symbol}\``,
-    `Score: ${(hit.score * 100).toFixed(0)}%; semantic: ${(hit.semanticScore * 100).toFixed(0)}%`,
-    `\`\`\`${hit.language}`,
-    `${preview}${hit.content.length > 200 ? "..." : ""}`,
-    "\`\`\`",
-  ].join("\n");
-}
-
-function retrievalGuidance(label: string, count: number): string {
-  return [
-    `## ${label} (${count} selected result${count === 1 ? "" : "s"})`,
-    "Treat these excerpts as navigation evidence for analysis and planning. Before an edit, read the current source when exact content, a decision-critical detail, or file freshness matters. Search excerpts are not verified source evidence.",
-  ].join("\n\n");
 }
 
 function freshReadGuidance(paths: readonly string[]): string {
@@ -1331,13 +1248,12 @@ export async function buildInitialContext(args: BuildContextArgs): Promise<Build
     tagPlatformInfo,
     tagProjectContext,
     tagMemory,
-    tagRetrievedContext,
   } = await import("../message-tags.js");
   
   // Track which semantic sections we're building
   const projectContextParts: string[] = [];
   
-  const pushSystem = (content: string, tag?: "platform" | "project" | "memory" | "retrieved"): void => {
+  const pushSystem = (content: string, tag?: "platform" | "project" | "memory"): void => {
     if (!content.trim()) return;
     
     // If a semantic tag is specified, collect it for later wrapping
@@ -1355,8 +1271,6 @@ export async function buildInitialContext(args: BuildContextArgs): Promise<Build
       platformInfoTokens += estimateTokens(content);
     } else if (tag === "memory") {
       wrappedContent = tagMemory(content);
-    } else if (tag === "retrieved") {
-      wrappedContent = tagRetrievedContext(content);
     }
     
     messages.push({ role: "system", content: wrappedContent });
@@ -1373,7 +1287,6 @@ export async function buildInitialContext(args: BuildContextArgs): Promise<Build
     ctxEnabled && ctxParams.injectMentions !== false
       ? loadMentionedFiles(opts.workspaceRoot, mentionPaths)
       : Promise.resolve([]);
-  const retrievalPromise = runRetrieval(opts, ctxEnabled, ctxParams, budgets.files);
 
   // ── Adaptive Prompt Optimization: inject learned failure patterns ──
   // This is a fixed segment that is ALWAYS sent and NEVER truncated.
@@ -1555,21 +1468,6 @@ export async function buildInitialContext(args: BuildContextArgs): Promise<Build
     }
   }
 
-  const retrieval = await retrievalPromise;
-  log("retrieval done", { hits: retrieval?.paths.length ?? 0 });
-  if (retrieval) {
-    for (const hit of retrieval.hits) {
-      addCandidate({
-        id: hit.id,
-        source: "retrieval",
-        content: hit.content,
-        path: hit.path,
-        provenance: retrieval.label,
-        freshness: "indexed",
-      });
-    }
-  }
-
   if (anchorsEnabled) {
     if (anchorsNode) emitStage(opts.onEvent, "start", anchorsNode);
     if (opts.activePlan) {
@@ -1610,9 +1508,8 @@ export async function buildInitialContext(args: BuildContextArgs): Promise<Build
     });
   }
 
-  // Knowledge graph population — independent of repo map context injection.
-  // NOTE: Repo map is no longer injected as system context. It is available as
-  // the `repo_map` tool for LLM to call on demand.
+  // Knowledge graph population (index → memory). Repo map / git / deps are
+  // available on demand via `repo_map` / `git_status` / `project_deps` tools.
   if (ctxEnabled && !opts.disableKnowledgeGraph) {
     try {
       await memory.populateFromIndex(opts.index, opts.workspaceRoot);
@@ -1621,11 +1518,6 @@ export async function buildInitialContext(args: BuildContextArgs): Promise<Build
       /* knowledge graph population is best effort */
     }
   }
-
-    // Git state is no longer injected as system context. It is available as
-  // the `git_status` tool (plus readonly shell commands) for the LLM to call on demand.
-  // Project dependencies are no longer injected as system context either.
-  // They are available via the `project_deps` tool for the LLM to call on demand.
 
   // ── Compute token-based budget ──
   // Use new token-based budget system alongside legacy budgets for transition.
@@ -1659,15 +1551,11 @@ export async function buildInitialContext(args: BuildContextArgs): Promise<Build
 
   const candidateCharacters = candidates.reduce((total, candidate) => total + candidate.content.length, 0);
   const candidateTokens = candidates.reduce((total, candidate) => total + candidate.estimatedTokens, 0);
-  const guidanceReservation = retrieval
-    ? retrievalGuidance(retrieval.label, retrieval.hits.length)
-    : "";
-  const guidanceTokens = estimateTokens(guidanceReservation);
   // Use token budget for capacity when available, with legacy fallback
   const promptTokenCapacity = proportionalTokenCapacity(
     tokenBudget.inputBudget,
-    contextCharsUsed + candidateCharacters + guidanceReservation.length,
-    budgetUsed + candidateTokens + guidanceTokens,
+    contextCharsUsed + candidateCharacters,
+    budgetUsed + candidateTokens,
   );
   const defaultSelectionTokenBudget = proportionalTokenCapacity(
     tokenBudget.segments.toolResults + tokenBudget.segments.techStack,
@@ -1678,7 +1566,7 @@ export async function buildInitialContext(args: BuildContextArgs): Promise<Build
     ctxParams.contextSelection,
     defaultSelectionTokenBudget,
   );
-  const availableCandidateTokens = Math.max(0, promptTokenCapacity - budgetUsed - guidanceTokens);
+  const availableCandidateTokens = Math.max(0, promptTokenCapacity - budgetUsed);
   const selectionConfig = requestedSelectionConfig.mode === "off"
     ? requestedSelectionConfig
     : {
@@ -1739,19 +1627,9 @@ export async function buildInitialContext(args: BuildContextArgs): Promise<Build
     pushSystem(freshReadGuidance(contextPlan.requiresFreshRead));
   }
 
-  let insertedRetrievalGuidance = false;
-  const selectedRetrievals = materialized.filter((candidate) => candidate.source === "retrieval");
   for (const candidate of materialized) {
-    if (candidate.source === "retrieval" && !insertedRetrievalGuidance) {
-      pushSystem(retrievalGuidance(retrieval?.label ?? "Retrieval", selectedRetrievals.length));
-      insertedRetrievalGuidance = true;
-    }
-    
     // Tag content based on its source type
     switch (candidate.source) {
-      case "retrieval":
-        pushSystem(candidate.content, "retrieved");
-        break;
       case "memory":
       case "knowledge":
       case "short-term":

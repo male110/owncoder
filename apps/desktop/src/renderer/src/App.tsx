@@ -460,7 +460,7 @@ export function App() {
           onNewSession={() => void onNewSession()}
           onAddProject={() => void onAddProject()}
           onOpenSettings={() => { setSettingsTab("models"); setSettingsOpen(true); }}
-          onSelectProject={(root) => onSelectProject(root)}
+          onSelectProject={(root, focusSessionId) => onSelectProject(root, focusSessionId)}
           onToggleExpand={onToggleExpand}
           onRemoveProject={(root) => onRemoveProject(root)}
           onSwitchSession={(id) => onSwitchSession(id)}

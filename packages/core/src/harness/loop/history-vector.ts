@@ -28,6 +28,15 @@ export interface HistoryChunk {
 }
 
 /**
+ * 向量召回命中：在 HistoryChunk 之上附带 [0,1] 相关度。
+ * score 越高越相关；调用方应按 score 降序，并丢弃低于阈值（如 0.6）的命中。
+ */
+export interface HistorySearchHit extends HistoryChunk {
+  /** 与查询向量的相关度，范围约 [0,1]；1 表示最相似。 */
+  score: number;
+}
+
+/**
  * 待归档的历史片段（尚未分配 turnIndex）。
  * 与 `HistoryChunk` 分离，因为 turnIndex 只能由 store 在写入时单调分配，
  * 调用方传入的数组下标会因历史压缩而漂移。
@@ -50,9 +59,9 @@ export interface HistoryVectorStore {
   hasContentHash(contentHash: string): boolean;
   /**
    * 余弦相似度 top-K 召回。sessionId 可选（null 表示不限会话）；
-   * 返回按「相似度从高到低」排列（distance ASC，距离越小=相似度越高）。
+   * 返回按 score 降序（等价于 distance ASC）；score = clamp(1 - distance, 0, 1)。
    */
-  search(queryVector: Float32Array, topK: number, sessionId?: string | null): HistoryChunk[];
+  search(queryVector: Float32Array, topK: number, sessionId?: string | null): HistorySearchHit[];
   /**
    * 该会话已归档的 chunk 数量。用于「归档覆盖率检测」：升级前的历史轮次
    * 未归档时，向量召回只能覆盖极少量片段，此时应回退到「最近 N 轮 → LLM 过滤」。

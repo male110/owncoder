@@ -17,11 +17,9 @@ export type ContextSource =
   | "knowledge"
   | "short-term"
   | "mention"
-  | "retrieval"
   | "plan"
   | "todo"
   | "workflow"
-  | "repo-map"
   | "deps"
   | "tech-stack"
   | "project-size"
@@ -83,11 +81,9 @@ const SOURCE_VALUE: Record<ContextSource, number> = {
   knowledge: 50,
   "short-term": 48,
   mention: 120,
-  retrieval: 66,
   plan: 118,
   todo: 112,
   workflow: 116,
-  "repo-map": 72,
   deps: 28,
   "tech-stack": 35,
   "project-size": 38,
@@ -172,8 +168,18 @@ export function planMinimumContext(input: {
   );
   let remainingSlots = Math.max(0, config.maxCandidates - mandatory.length);
 
-  const optional = usable
-    .filter((candidate) => !candidate.mandatory)
+  const optionalCandidates: ContextCandidate[] = [];
+  for (const candidate of usable.filter((item) => !item.mandatory)) {
+    const duplicate = optionalCandidates.some((kept) =>
+      similarity(contentSketch(candidate), contentSketch(kept)) >= REDUNDANT_SIMILARITY,
+    );
+    if (duplicate) {
+      omitted.push({ id: candidate.id, source: candidate.source, reason: "redundant" });
+    } else {
+      optionalCandidates.push(candidate);
+    }
+  }
+  const optional = optionalCandidates
     .map((candidate) => ({ candidate, utility: candidateUtility(candidate, task) }))
     .sort((left, right) => {
       const efficiencyDelta = efficiency(right) - efficiency(left);
@@ -272,8 +278,6 @@ function candidateUtility(candidate: ContextCandidate, task: ContextTaskSignal):
   if (candidate.freshness === "current") utility += 6;
   if (candidate.freshness === "indexed" && task.intent === "change") utility -= 12;
   if (candidate.source === "deps" && DEPENDENCY_QUERY.test(task.query)) utility += 52;
-  if (candidate.source === "repo-map" && (task.intent === "inspect" || task.intent === "plan")) utility += 16;
-  if (candidate.source === "retrieval" && task.intent === "debug") utility += 12;
 
   return Math.max(1, utility);
 }

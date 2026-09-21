@@ -208,34 +208,65 @@ export function extractStructuredHistory(
   return rounds.slice(-minRounds);
 }
 
+/** 向量召回相关度下限：低于此值的历史片段丢弃（60%）。 */
+export const RELEVANT_HISTORY_SCORE_THRESHOLD = 0.6;
+
+/** 召回历史片段（含相关度，已按 score 降序且过滤阈值）。 */
+export interface RecalledHistoryChunk {
+  turnIndex: number;
+  role: string;
+  content: string;
+  /** [0,1] 相关度；越高越相关。 */
+  score: number;
+}
+
 /** 将向量召回的历史片段格式化为分解上下文段落（整段不截断）。 */
 export function formatRecalledHistoryChunks(
-  chunks: Array<{ turnIndex: number; role: string; content: string }>,
+  chunks: Array<{ turnIndex: number; role: string; content: string; score?: number }>,
 ): string {
   return chunks
     .map((chunk, idx) => {
-      return `## Recalled ${idx + 1} [turnIndex=${chunk.turnIndex}] [${chunk.role}]\n${chunk.content}`;
+      const scorePart = typeof chunk.score === "number"
+        ? ` [score=${(chunk.score * 100).toFixed(0)}%]`
+        : "";
+      return `## Recalled ${idx + 1} [turnIndex=${chunk.turnIndex}] [${chunk.role}]${scorePart}\n${chunk.content}`;
     })
     .join("\n\n");
 }
 
 /**
+ * 按相关度降序排列，并丢弃 score < threshold 的命中。
+ * 无 score 的项视为 0（不保留），避免未评分噪声进入上下文。
+ */
+export function rankAndFilterByRelevance<T extends { score?: number }>(
+  items: readonly T[],
+  threshold = RELEVANT_HISTORY_SCORE_THRESHOLD,
+): T[] {
+  return items
+    .filter((item) => typeof item.score === "number" && Number.isFinite(item.score) && item.score >= threshold)
+    .slice()
+    .sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+}
+
+/**
  * 按当前用户输入做向量召回；失败时返回空数组，不阻断分解。
- * 召回结果与最近 5 轮一并放入同一历史容器，整轮/整段不截断。
+ * 结果按相关度降序，并丢弃 score < 0.6 的片段；与最近 5 轮一并放入同一历史容器，整轮/整段不截断。
  */
 export async function recallHistoryByUserInput(
   opts: Pick<AgentLoopOpts, "userMessage" | "sessionId" | "historyVector">,
-): Promise<Array<{ turnIndex: number; role: string; content: string }>> {
+): Promise<RecalledHistoryChunk[]> {
   const hv = opts.historyVector;
   if (!hv || !opts.userMessage.trim()) return [];
   try {
     const topK = hv.topK ?? 5;
     const queryVector = await hv.embedding.embed(opts.userMessage);
-    return hv.store.search(queryVector, topK, opts.sessionId ?? null).map((chunk) => ({
+    const hits = hv.store.search(queryVector, topK, opts.sessionId ?? null).map((chunk) => ({
       turnIndex: chunk.turnIndex,
       role: chunk.role,
       content: chunk.content,
+      score: typeof chunk.score === "number" && Number.isFinite(chunk.score) ? chunk.score : 0,
     }));
+    return rankAndFilterByRelevance(hits, RELEVANT_HISTORY_SCORE_THRESHOLD);
   } catch (err) {
     writeEventLog({
       category: "other",
@@ -514,13 +545,71 @@ function parseRelevantHistory(value: unknown): DecomposeRelevantHistory | undefi
 const MAX_FALLBACK_HISTORY_CHARS = 12_000;
 
 /**
+ * 从查询中提取用于相关度匹配的词元：
+ * - 拉丁/数字标识符（长度 ≥2）
+ * - 连续中文按 2-gram 切分，避免整句中文变成一个超长 token 导致几乎永不命中
+ */
+function relevanceTerms(query: string): string[] {
+  const q = query.trim().toLocaleLowerCase();
+  if (!q) return [];
+  const terms = new Set<string>();
+  for (const raw of q.match(/[\p{L}\p{N}_./:-]+/gu) ?? []) {
+    const token = raw.trim();
+    if (!token) continue;
+    if (/[\u4e00-\u9fff]/.test(token)) {
+      if (token.length === 1) {
+        terms.add(token);
+      } else {
+        for (let i = 0; i < token.length - 1; i++) {
+          terms.add(token.slice(i, i + 2));
+        }
+        // 短词整段保留，便于「缓存」「登录」等直接命中
+        if (token.length <= 4) terms.add(token);
+      }
+    } else if (token.length >= 2) {
+      terms.add(token);
+    }
+  }
+  return [...terms].slice(0, 32);
+}
+
+/**
+ * 简易文本相关度（0–1）：查询词元在候选文本中的覆盖率。
+ * 用于 fallback 打包时对已读文件 / 对话要点排序与 <0.6 过滤。
+ */
+export function estimateTextRelevance(query: string, text: string): number {
+  const q = query.trim().toLocaleLowerCase();
+  const t = text.trim().toLocaleLowerCase();
+  if (!q || !t) return 0;
+
+  const terms = relevanceTerms(q);
+  if (terms.length === 0) {
+    return t.includes(q) ? 1 : 0;
+  }
+  const hits = terms.filter((term) => t.includes(term)).length;
+  let score = hits / terms.length;
+
+  // 路径/标识符强命中加权：basename 或关键 token 命中时抬到至少阈值，避免「login.ts」被中文噪声词拖死
+  const strong = terms.filter((term) =>
+    /^[a-z0-9_./:-]+$/i.test(term) && term.length >= 3 && t.includes(term),
+  );
+  if (strong.length > 0) {
+    score = Math.max(score, Math.min(1, 0.5 + 0.2 * strong.length));
+  }
+  return Math.max(0, Math.min(1, score));
+}
+
+/**
  * 若 LLM 未返回 relevantHistory，从近期历史本地打包成文本（已读文件 + 对话要点等），
- * 供 React 循环直接复用。
+ * 按与当前用户输入的相关度降序，并丢弃 < 0.6 的块，供 React 循环直接复用。
  */
 export function packFallbackRelevantHistory(
-  opts: Pick<AgentLoopOpts, "history">,
+  opts: Pick<AgentLoopOpts, "history" | "userMessage">,
 ): DecomposeRelevantHistory | undefined {
   const sections: string[] = [];
+  const query = opts.userMessage?.trim() ?? "";
+  // 无当前用户输入时无法打分：保留原顺序与上限，不做 <0.6 丢弃。
+  const canScore = query.length > 0;
 
   const collected = collectReadEvidenceFromTurns(
     opts.history.map((turn) => ({
@@ -529,13 +618,15 @@ export function packFallbackRelevantHistory(
       content: typeof turn.content === "string" ? turn.content : undefined,
     })),
   );
-  const files: Array<{
+  type ScoredFile = {
     path: string;
     content: string;
     startLine?: number;
     endLine?: number;
     note?: string;
-  }> = [];
+    score: number;
+  };
+  const files: ScoredFile[] = [];
   const seen = new Set<string>();
   for (const item of collected) {
     const path = item.path?.trim();
@@ -544,19 +635,36 @@ export function packFallbackRelevantHistory(
     const key = `${path}:${item.startLine ?? ""}:${item.endLine ?? ""}`;
     if (seen.has(key)) continue;
     seen.add(key);
+    const score = canScore
+      ? estimateTextRelevance(query, `${path}\n${content}\n${item.summary ?? ""}`)
+      : 1;
     files.push({
       path,
       content,
       startLine: item.startLine,
       endLine: item.endLine,
       note: item.summary || "Already read in recent history; reuse instead of reading again",
+      score,
     });
-    if (files.length >= 8) break;
+    if (!canScore && files.length >= 8) break;
   }
-  const fileText = normalizeRelevantHistory({ files });
+  const rankedFiles = (canScore
+    ? rankAndFilterByRelevance(files, RELEVANT_HISTORY_SCORE_THRESHOLD)
+    : files
+  ).slice(0, 8);
+  const fileText = normalizeRelevantHistory({
+    files: rankedFiles.map(({ path, content, startLine, endLine, note }) => ({
+      path,
+      content,
+      startLine,
+      endLine,
+      note,
+    })),
+  });
   if (fileText) sections.push(fileText);
 
-  const dialogueBlocks: string[] = [];
+  type ScoredDialogue = { text: string; score: number };
+  const dialogueBlocks: ScoredDialogue[] = [];
   for (const round of extractStructuredHistory(opts.history, 5, true)) {
     const parts: string[] = [];
     if (round.userInput && round.userInput !== "(empty)") {
@@ -583,10 +691,20 @@ export function packFallbackRelevantHistory(
     if (round.assistantReport) {
       parts.push(`assistant: ${clipBlock(round.assistantReport, 600)}`);
     }
-    if (parts.length > 0) dialogueBlocks.push(parts.join("\n"));
+    if (parts.length > 0) {
+      const text = parts.join("\n");
+      dialogueBlocks.push({
+        text,
+        score: canScore ? estimateTextRelevance(query, text) : 1,
+      });
+    }
   }
-  if (dialogueBlocks.length > 0) {
-    sections.push(`## 近期对话要点\n\n${dialogueBlocks.join("\n\n")}`);
+  const rankedDialogue = (canScore
+    ? rankAndFilterByRelevance(dialogueBlocks, RELEVANT_HISTORY_SCORE_THRESHOLD)
+    : dialogueBlocks
+  ).map((block) => block.text);
+  if (rankedDialogue.length > 0) {
+    sections.push(`## 近期对话要点\n\n${rankedDialogue.join("\n\n")}`);
   }
 
   const packed = sections.join("\n\n").trim();

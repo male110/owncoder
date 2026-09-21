@@ -75,6 +75,11 @@ export interface ToolContext {
   confirmDangerousBash?: (command: string) => Promise<boolean>;
   /** Ask the user a question and await their answer (options or free text). */
   askUser?: (request: AskUserRequest) => Promise<string>;
+  /**
+   * Same-turn ask_user answers keyed by normalized question fingerprint.
+   * Prevents re-prompting the UI for an identical question within one userMsg / React loop.
+   */
+  askUserTurnCache?: Map<string, string>;
   onTerminal?: (entry: TerminalEntry) => void;
   onEvent?: ToolEventSink;
 

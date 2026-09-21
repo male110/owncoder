@@ -197,6 +197,67 @@ export async function loadTurn(root: string, sessionId: string, turnId: string):
   });
 }
 
+/**
+ * Flatten durable conversation turns into UI ChatTurn rows.
+ * Dedupes user/assistant copies *within one turn* that can appear both as
+ * turn.user and as legacy_message / final.history payloads. Does not collapse
+ * identical messages across different turns (user may send "hello" twice).
+ */
+export function projectConversationTurns(turns: ConversationTurn[]): ChatTurn[] {
+  const projected: ChatTurn[] = [];
+  for (const turn of turns) {
+    const local: ChatTurn[] = [];
+    const pushUnique = (item: ChatTurn) => {
+      if (item.role === "user" || item.role === "assistant") {
+        const dup = local.some(
+          (h) =>
+            h.role === item.role &&
+            h.content === item.content &&
+            (h.id && item.id ? h.id === item.id : true),
+        );
+        if (dup) return;
+      }
+      local.push(item);
+    };
+    if (
+      turn.user &&
+      typeof turn.user.content === "string" &&
+      (turn.user.role === "user" ||
+        turn.user.role === "assistant" ||
+        turn.user.role === "tool" ||
+        turn.user.role === "system")
+    ) {
+      pushUnique({ ...turn.user });
+    }
+    for (const event of turn.events) {
+      const payload = event.payload as Partial<ChatTurn> | undefined;
+      if (
+        payload &&
+        typeof payload === "object" &&
+        (payload.role === "user" ||
+          payload.role === "assistant" ||
+          payload.role === "tool" ||
+          payload.role === "system") &&
+        typeof payload.content === "string"
+      ) {
+        pushUnique({ ...payload } as ChatTurn);
+      }
+    }
+    const final = turn.final as Partial<ChatTurn> | { history?: ChatTurn[] } | undefined;
+    const candidate =
+      final && typeof final === "object" && "role" in final
+        ? (final as ChatTurn)
+        : final && "history" in final && Array.isArray(final.history)
+          ? [...final.history].reverse().find((h) => h.role === "assistant")
+          : undefined;
+    if (candidate?.role === "assistant" && typeof candidate.content === "string") {
+      pushUnique({ ...candidate });
+    }
+    projected.push(...local);
+  }
+  return projected;
+}
+
 export async function migrateLegacyHistory(root: string, sessionId: string, history: ChatTurn[]): Promise<void> {
   if (history.length === 0) return;
   return serial(lockKey(root, sessionId), async () => {

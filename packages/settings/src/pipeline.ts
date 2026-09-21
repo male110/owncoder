@@ -307,7 +307,6 @@ export const PipelineNodeParamsSchema = z
       ignoreEarlyStopForWeakModel: z.boolean().optional(),
     }).optional(),
     injectRules: z.boolean().optional(),
-    injectRepoMap: z.boolean().optional(),
     injectMentions: z.boolean().optional(),
     /** @deprecated Dependencies are no longer injected; use the `project_deps` tool on demand. */
     injectDeps: z.boolean().optional(),
@@ -466,7 +465,7 @@ export function builtinPlanPipeline(): ModePipeline {
       {
         id: "context", type: "context_gather", label: "收集上下文", enabled: true,
         position: { x: 300, y: 170 },
-        params: { injectRules: true, injectRepoMap: true, injectMentions: true },
+        params: { injectRules: true, injectMentions: true },
       },
       {
         id: "llm",     type: "explore_tools",  label: "调用模型", enabled: true,
@@ -496,7 +495,7 @@ export function builtinAgentPipeline(): ModePipeline {
       {
         id: "context",    type: "context_gather",   label: "收集上下文", enabled: true,
         position: { x: 300, y: 170 },
-        params: { injectRules: true, injectRepoMap: true, injectMentions: true, injectAnchors: true },
+        params: { injectRules: true, injectMentions: true, injectAnchors: true },
       },
       {
         id: "decompose",  type: "task_decompose",   label: "理解与任务分解", enabled: true,

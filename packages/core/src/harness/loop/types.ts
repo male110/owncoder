@@ -16,6 +16,18 @@ import type { TaskItem } from "../../plans.ts";
 import type { TraceReport } from "../observability.ts";
 import type { ContextControlState } from "./context-control.ts";
 
+/** Public, bounded ReAct decision summary; excludes private chain-of-thought. */
+export interface ReactDecisionSummary {
+  iteration: number;
+  goal: string;
+  action: string;
+  reasonSummary: string;
+  expectedObservation: string;
+  actualObservationSummary?: string;
+  nextDecision?: string;
+  timestamp: number;
+}
+
 /**
  * Discriminated event payloads. `sessionId` is stamped at the loop / session
  * boundary so individual emit sites can omit it; the stamp rejects empty ids.
@@ -57,6 +69,8 @@ type TurnEventFields =
   | { type: "context_warning"; message: string; fixedTotal: number; inputBudget: number }
   // "done" event removed — turn_complete handles all completion duties
   | { type: "reasoning_step"; stepType: string; content: string }
+  | { type: "decision_summary"; summary: ReactDecisionSummary }
+  | { type: "recovery"; errorType: import("../recovery.ts").RecoveryErrorType; action: import("../recovery.ts").RecoveryAction; retryable: boolean; summary: string }
   | { type: "verification_result"; passed: boolean; summary: string }
   | { type: "trace_report"; summary: string }
   | { type: "semantic_search"; results: number }
@@ -398,6 +412,8 @@ export interface AgentLoopResult {
   lastPlanPath?: string;
   /** Undefined = unchanged; null = implementation plan saved and the flow completed. */
   documentWorkflow?: DocumentWorkflowState | null;
+  /** Public bounded summaries of ReAct choices. */
+  decisionSummaries?: ReactDecisionSummary[];
   presentChanges?: boolean;
   reasoningTrace?: ReasoningTrace;
   verification?: { passed: boolean; summary: string };

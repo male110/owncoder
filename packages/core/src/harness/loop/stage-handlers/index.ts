@@ -57,6 +57,7 @@ export {
 
 export {
   runPostVerify,
+  sealPostVerifyFailure,
   verifyHandler,
   postVerifyHandler,
 } from "./verify.ts";
@@ -206,7 +207,7 @@ export async function doPlainCompletion(ctx: SchedulerContext): Promise<string> 
 
 // ── Additional Handlers ─────────────────────────────────────────────
 
-/** context_gather: assemble project context (rules, retrieval, repo map, git, anchors). */
+/** context_gather: assemble project context (rules, memories, tech stack, project size, anchors). */
 const contextGatherHandler: StageHandler = {
   async run(ctx) {
     const { opts, memory, budgets, messages, state, node, anchorsNode } = ctx;

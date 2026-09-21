@@ -487,14 +487,19 @@ export async function toolReadSymbol(
   try {
     tags = await ctx.index.getTags(rel);
   } catch (error) {
-    return fail(`Cannot query the symbol index for \"${rel}\": ${error instanceof Error ? error.message : String(error)}`);
+    // Index query failure is not fatal — LLM can still fall back to read_file/grep.
+    return ok(
+      `Cannot query the symbol index for \"${rel}\": ${error instanceof Error ? error.message : String(error)}. ` +
+        "Continue with read_file or grep; do not treat this as a fatal error.",
+    );
   }
 
   const matches = tags.filter((tag) => tag.name === requestedSymbol);
   if (matches.length === 0) {
-    return fail(
+    // Soft miss: missing index entry must not stop the agent loop.
+    return ok(
       `Symbol \"${requestedSymbol}\" was not found in the current index for \"${rel}\". ` +
-        "Use read_file, grep, or search_symbols to locate the current source before retrying.",
+        "Continue with read_file, grep, or search_symbols to locate the current source; do not treat this as a fatal error.",
     );
   }
   if (matches.length > 1) {
@@ -502,9 +507,9 @@ export async function toolReadSymbol(
       .slice(0, 8)
       .map((tag) => `${tag.kind} at line ${tag.line}`)
       .join(", ");
-    return fail(
+    return ok(
       `Symbol \"${requestedSymbol}\" is ambiguous in \"${rel}\" (${locations}). ` +
-        "Use read_file or choose a unique symbol name instead of guessing.",
+        "Continue with read_file or choose a unique symbol name; do not treat this as a fatal error.",
     );
   }
 

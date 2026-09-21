@@ -93,13 +93,6 @@ export function tagPlatformInfo(content: string): string {
 }
 
 /**
- * Retrieved or searched documents/code.
- */
-export function tagRetrievedContext(content: string): string {
-  return wrapWithTag("retrieved_context", content);
-}
-
-/**
  * Verification results or test outputs.
  */
 export function tagVerificationResult(content: string): string {

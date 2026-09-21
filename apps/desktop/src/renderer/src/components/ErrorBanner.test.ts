@@ -18,6 +18,11 @@ describe("isVerificationGateError", () => {
     ).toBe(true);
   });
 
+  it("matches auto-fix limit and semantic_diff export-removal warnings", () => {
+    expect(isVerificationGateError("自动修复达到上限（3 次）：### semantic_diff")).toBe(true);
+    expect(isVerificationGateError("packages/core/src/harness/loop/context.ts: 移除了导出: export function foo")).toBe(true);
+  });
+
   it("ignores unrelated errors", () => {
     expect(isVerificationGateError("未配置 LLM API Key")).toBe(false);
     expect(isVerificationGateError({ code: "UNKNOWN", message: "其他警告" })).toBe(false);

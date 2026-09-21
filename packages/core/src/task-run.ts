@@ -12,6 +12,16 @@ export interface VerificationCheck {
   output: string;
   duration: number;
   errors: VerificationError[];
+  /**
+   * 是否阻断成功门禁。
+   * - skipped / passed / 纯建议性 semantic_diff → false
+   * - 硬失败（typecheck/lint/execution error）→ true
+   */
+  blocking?: boolean;
+  /** 与 status==="skipped" 对齐，便于旧消费者不读 status。 */
+  skipped?: boolean;
+  /** 检查来源，如 tsc / eslint / semantic_diff / post_verify。 */
+  source?: string;
 }
 export interface VerificationResult {
   status: VerificationStatus;
@@ -214,17 +224,76 @@ export type TaskEvent =
 
 export function verificationStatus(passed: boolean, checks: readonly VerificationCheck[]): VerificationStatus {
   if (checks.length === 0) return "not_run";
-  return passed && checks.every((check) => check.status === "passed" && check.passed) ? "passed" : "failed";
+  const active = checks.filter((check) => check.status !== "skipped" && check.skipped !== true);
+  if (active.length === 0) return "skipped";
+  const hasBlockingFailure = active.some((check) => {
+    const blocking =
+      typeof check.blocking === "boolean"
+        ? check.blocking
+        : check.type !== "semantic_diff";
+    return blocking && !(check.status === "passed" && check.passed);
+  });
+  if (hasBlockingFailure) return "failed";
+  if (active.every((check) => (check.status === "passed" && check.passed) || check.blocking === false)) {
+    return "passed";
+  }
+  return passed ? "passed" : "failed";
+}
+
+function defaultCheckSource(check: Pick<VerificationCheck, "name" | "type" | "source">): string {
+  if (typeof check.source === "string" && check.source.trim()) return check.source.trim();
+  if (check.name && check.name !== check.type) return check.name;
+  return check.type;
+}
+
+function deriveCheckBlocking(check: {
+  type: VerificationCheck["type"];
+  status: VerificationStatus;
+  passed: boolean;
+  errors: VerificationError[];
+  blocking?: boolean;
+}): boolean {
+  if (typeof check.blocking === "boolean") return check.blocking;
+  if (check.status === "skipped") return false;
+  if (check.status === "passed" && check.passed) return false;
+  if (check.type === "semantic_diff") {
+    // semantic_diff 仅在存在 error 级问题时阻断；warning/info 为建议性。
+    return check.errors.some((error) => error.severity === "error");
+  }
+  return check.status === "failed" || check.passed === false;
 }
 
 /** 将旧的 passed-only 结果规范化，避免 status 与 passed 相互矛盾。 */
 export function normalizeVerificationResult(result: VerificationResult): VerificationResult {
-  const checks = result.checks.map((check) => ({
-    ...check,
-    passed: check.status === "passed" && check.passed,
-    status: check.status ?? (check.passed ? "passed" : "failed"),
-  }));
-  const passed = checks.length > 0 && checks.every((check) => check.status === "passed" && check.passed);
+  const checks = result.checks.map((check) => {
+    // 旧快照没有 status：先依据旧 passed 字段推导，再按统一规则计算 passed。
+    const status = check.status ?? (check.passed === true ? "passed" : check.skipped === true ? "skipped" : "failed");
+    const skipped = status === "skipped" || check.skipped === true;
+    const normalizedErrors = Array.isArray(check.errors) ? check.errors : [];
+    const checkPassed = skipped ? false : status === "passed" && check.passed === true;
+    const blocking = deriveCheckBlocking({
+      type: check.type,
+      status: skipped ? "skipped" : status,
+      passed: checkPassed,
+      errors: normalizedErrors,
+      blocking: check.blocking,
+    });
+    return {
+      ...check,
+      status: skipped ? ("skipped" as const) : status,
+      passed: checkPassed,
+      skipped,
+      blocking,
+      source: defaultCheckSource(check),
+      errors: normalizedErrors,
+    };
+  });
+  const active = checks.filter((check) => !check.skipped);
+  // 只有 blocking 失败才让整体失败；纯建议性检查（blocking=false）不挡成功。
+  const hasBlockingFailure = active.some(
+    (check) => check.blocking && !(check.status === "passed" && check.passed),
+  );
+  const passed = active.length > 0 && !hasBlockingFailure;
   return { ...result, checks, passed, status: verificationStatus(passed, checks) };
 }
 

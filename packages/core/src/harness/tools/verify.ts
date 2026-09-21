@@ -31,7 +31,8 @@ export async function toolTypeCheck(ctx: ToolContext): Promise<ToolResult> {
     }
 
     if (!command) {
-      return ok("No type checker configured for this project.");
+      // 无统一 type checker 时静默成功，不向验证/汇报输出「未配置」提示
+      return ok("");
     }
 
     // Increase timeout for larger projects

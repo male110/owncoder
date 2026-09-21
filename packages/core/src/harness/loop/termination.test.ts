@@ -4,6 +4,7 @@ import {
   createLoopState,
   updateStateAfterResponse,
   updateStateAfterTools,
+  resetOutputTrackingForNewTask,
   createTerminationConfig,
   DEFAULT_TERMINATION_CONFIG,
   type TerminationConfig,
@@ -740,6 +741,11 @@ describe("Termination Logic", () => {
         const result = checkTermination(state, DEFAULT_TERMINATION_CONFIG);
         assertTerminated(result);
         expect(result.reason).toMatch(/consecutive similar outputs/);
+        // Similar outputs = model converged on a final answer → normal completion,
+        // must not surface as aborted / "Task may be incomplete".
+        expect(result.aborted).toBe(false);
+        expect(result.metadata?.normalCompletion).toBe(true);
+        expect(result.reason).not.toContain("Task may be incomplete");
       });
 
       it("should detect paraphrased Chinese reports as similar", () => {
@@ -786,6 +792,64 @@ describe("Termination Logic", () => {
         });
 
         expect(state.consecutiveSimilarOutputs).toBe(0);
+      });
+    });
+
+    describe("resetOutputTrackingForNewTask", () => {
+      it("clears similarity and stop signals so the next task is not treated as finished", () => {
+        const state = createLoopState({
+          id: "task_a",
+          description: "First task",
+          status: "completed",
+          dependsOn: [],
+          informationNeeds: [],
+          stopReadingWhen: [],
+          evidence: [],
+          retryCount: 0,
+          maxRetries: 0,
+        });
+
+        updateStateAfterResponse(state, {
+          content: "已完成对循环终止逻辑的修复，中文近重复输出会被第二层抓住。",
+          toolCalls: [],
+          finishReason: "stop",
+          tokens: 40,
+          cost: 0.004,
+        });
+        updateStateAfterResponse(state, {
+          content: "已完成对循环终止逻辑的修复，中文近重复输出会被第二层抓住。",
+          toolCalls: [],
+          finishReason: "stop",
+          tokens: 40,
+          cost: 0.004,
+        });
+        expect(state.consecutiveSimilarOutputs).toBe(1);
+        expect(checkTermination(state, DEFAULT_TERMINATION_CONFIG).shouldTerminate).toBe(true);
+
+        state.currentTask = {
+          id: "task_b",
+          description: "Second task that should continue",
+          status: "in_progress",
+          dependsOn: [],
+          informationNeeds: [],
+          stopReadingWhen: [],
+          evidence: [],
+          retryCount: 0,
+          maxRetries: 0,
+        };
+        resetOutputTrackingForNewTask(state);
+
+        expect(state.consecutiveSimilarOutputs).toBe(0);
+        expect(state.consecutiveTextOnlyTurns).toBe(0);
+        expect(state.lastContent).toBe("");
+        expect(state.previousContent).toBe("");
+        expect(state.lastFinishReason).toBeNull();
+        expect(state.lastToolCalls).toEqual([]);
+        expect(state.explorationSkipCount).toBe(0);
+        expect(state.lastIterationHadExplorationSkip).toBe(false);
+
+        const result = checkTermination(state, DEFAULT_TERMINATION_CONFIG);
+        expect(result.shouldTerminate).toBe(false);
       });
     });
 

@@ -165,7 +165,6 @@ export const SystemWorkflowConfigSchema = z.object({
       }
     }),
     mapTokens: z.number().int().min(0).default(2000),
-    injectRepoMap: z.boolean().default(false),
   }),
   /** 思考强度控制 */
   thinking: z.object({
@@ -301,7 +300,6 @@ export const BUILTIN_WORKFLOW: SystemWorkflowConfig = SystemWorkflowConfigSchema
       techStackRatio: 0.05,
     },
     mapTokens: 2000,
-    injectRepoMap: false,
   },
   thinking: { defaultEffort: "high" },
   index: { enabled: true, extraIgnore: [] },

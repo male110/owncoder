@@ -20,8 +20,8 @@ import type { ChatMessage } from "@owncoder/llm";
 /** File-modifying tool names that should trigger verification */
 export const FILE_MODIFYING_TOOLS = new Set([
   "write_file",
+  "append_file",
   "apply_patch",
-  "semantic_diff",
   "replace_in_file",
 ]);
 
@@ -47,8 +47,6 @@ export interface AutoFixConfig {
   maxAttempts?: number;
   /** Whether to auto-run type check after file writes */
   autoTypeCheck?: boolean;
-  /** Whether to auto-run lint after file writes */
-  autoLint?: boolean;
   /** Maximum time (ms) for each verification run */
   verificationTimeout?: number;
   /** Callback for emitting status events */
@@ -58,7 +56,6 @@ export interface AutoFixConfig {
 const DEFAULT_CONFIG: Required<AutoFixConfig> = {
   maxAttempts: 3,
   autoTypeCheck: true,
-  autoLint: false,
   verificationTimeout: 120_000,
   onEvent: () => {},
 };
@@ -83,6 +80,21 @@ export function createAutoFixState(): AutoFixState {
     hasUnresolvedErrors: false,
     lastErrors: "",
   };
+}
+
+/** semantic_diff / 仅 warning：不阻断任务、不弹窗。 */
+export function isAdvisoryVerificationResult(result: VerificationResult | null | undefined): boolean {
+  if (!result || result.checks.length === 0) return false;
+  // 收窄：必须全部是非阻断的 semantic_diff，且没有任何 error 级问题。
+  // 硬检查（typecheck/lint/execution）即使被误标 severity 也不能降级。
+  return result.checks.every((check) => {
+    if (check.skipped) return true;
+    if (check.type !== "semantic_diff") return false;
+    if (check.blocking === true) return false;
+    if (check.errors.some((error) => error.severity === "error")) return false;
+    // 无错误的纯通过结果不算 advisory（走正常 passed 路径即可）
+    return check.errors.length > 0 && check.errors.every((error) => error.severity !== "error");
+  }) && result.checks.some((check) => !check.skipped && check.type === "semantic_diff" && check.errors.length > 0);
 }
 
 // ── Main Auto-Fix Loop ─────────────────────────────────────
@@ -148,14 +160,14 @@ export async function autoFixAfterTools(
 
     const result = await engine.verify(state.dirtyFiles);
 
-    if (result.passed) {
-      // ✅ All checks passed — reset state, but preserve this run's attempt count.
+    if (result.passed || isAdvisoryVerificationResult(result)) {
+      // ✅ 硬检查通过，或只剩 semantic_diff 等建议性警告 — 不阻断、不耗尽修复预算。
       const attempts = state.fixAttempts;
       state.dirtyFiles = [];
       state.fixAttempts = 0;
       state.hasUnresolvedErrors = false;
       state.lastErrors = "";
-      cfg.onEvent?.({ type: "fix_end", message: "✅ 验证通过" });
+      cfg.onEvent?.({ type: "fix_end", message: result.passed ? "✅ 验证通过" : "✅ 验证通过（含建议性警告）" });
 
       return {
         resolved: true,
@@ -193,7 +205,8 @@ export async function autoFixAfterTools(
       };
     }
 
-    // 🚫 Max attempts reached — give up and report
+    // 🚫 Max attempts reached — terminate via blockedReason; do not inject
+    // messages the caller will never consume after exhausted=true.
     const errorSummary = buildErrorSummary(result);
     cfg.onEvent?.({ type: "fix_error", message: `❌ 达到最大修复次数 (${cfg.maxAttempts})，报告错误` });
 
@@ -201,27 +214,53 @@ export async function autoFixAfterTools(
       resolved: false,
       attempts: state.fixAttempts,
       finalVerification: result,
-      injectedMessages: [
-        {
-          role: "system",
-          content:
-            `🛑 自动修复失败 (${cfg.maxAttempts} 次尝试)。以下是未解决的错误，请告知用户：\n\n${errorSummary}`,
-        },
-      ],
+      injectedMessages: [],
       summary: errorSummary,
       exhausted: true,
       skipped: false,
     };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
+    const summary = `验证执行失败: ${msg}`;
     cfg.onEvent?.({ type: "fix_error", message: `验证异常: ${msg}` });
+
+    // Verification infrastructure failures are retryable — do not burn the
+    // whole repair budget as "exhausted" on a transient engine/tool error.
+    if (state.fixAttempts < cfg.maxAttempts) {
+      state.hasUnresolvedErrors = true;
+      state.lastErrors = summary;
+      return {
+        resolved: false,
+        attempts: state.fixAttempts,
+        finalVerification: null,
+        injectedMessages: [
+          {
+            role: "system",
+            content: [
+              `## ⚠️ 自动验证异常 (第 ${state.fixAttempts}/${cfg.maxAttempts} 次)`,
+              ``,
+              `验证引擎执行失败，尚未确认代码是否有问题：`,
+              summary,
+              ``,
+              `请检查刚才的修改是否引入了语法/配置错误；必要时用 read_file 核对改动后再继续。`,
+              state.fixAttempts >= cfg.maxAttempts - 1
+                ? `⚠️ 这是最后一次修复机会。如果这次仍失败，任务将终止并报告给用户。`
+                : `你还有 ${cfg.maxAttempts - state.fixAttempts} 次修复尝试。`,
+            ].join("\n"),
+          },
+        ],
+        summary,
+        exhausted: false,
+        skipped: false,
+      };
+    }
 
     return {
       resolved: false,
       attempts: state.fixAttempts,
       finalVerification: null,
       injectedMessages: [],
-      summary: `验证执行失败: ${msg}`,
+      summary,
       exhausted: true,
       skipped: false,
     };

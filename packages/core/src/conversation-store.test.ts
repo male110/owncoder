@@ -12,6 +12,7 @@ import {
   loadRecentTurns,
   loadTurn,
   migrateLegacyHistory,
+  projectConversationTurns,
 } from "./conversation-store.ts";
 
 const roots: string[] = [];
@@ -112,6 +113,84 @@ describe("conversation store", () => {
     expect(page.turns[1]!.events.map((e) => e.payload)).toEqual([assistant("reply")]);
     await migrateLegacyHistory(r, "legacy", [user("ignored")]);
     expect((await loadRecentTurns(r, "legacy", 10)).turns).toHaveLength(2);
+  });
+
+  it("projectConversationTurns drops in-turn duplicate user/assistant copies", () => {
+    const turns = [
+      {
+        turnId: "live-1",
+        turnSeq: 1,
+        status: "completed" as const,
+        startedAt: "t0",
+        completedAt: "t1",
+        user: user("hello"),
+        taskDecomposition: null,
+        report: null,
+        events: [
+          { seq: 1, eventType: "legacy_message", payload: user("hello"), at: "t0" },
+          { seq: 2, eventType: "legacy_message", payload: assistant("world"), at: "t1" },
+        ],
+        final: { history: [user("hello"), assistant("world")] },
+      },
+    ];
+    expect(projectConversationTurns(turns)).toEqual([
+      user("hello"),
+      assistant("world"),
+    ]);
+  });
+
+  it("projectConversationTurns keeps identical user text across different turns", () => {
+    const turns = [
+      {
+        turnId: "t1",
+        turnSeq: 1,
+        status: "completed" as const,
+        startedAt: "t0",
+        completedAt: "t1",
+        user: user("hello"),
+        taskDecomposition: null,
+        report: null,
+        events: [],
+        final: assistant("one"),
+      },
+      {
+        turnId: "t2",
+        turnSeq: 2,
+        status: "completed" as const,
+        startedAt: "t2",
+        completedAt: "t3",
+        user: user("hello"),
+        taskDecomposition: null,
+        report: null,
+        events: [],
+        final: assistant("two"),
+      },
+    ];
+    expect(projectConversationTurns(turns)).toEqual([
+      user("hello"),
+      assistant("one"),
+      user("hello"),
+      assistant("two"),
+    ]);
+  });
+
+  it("does not migrate an in-flight user that only exists on disk after beginTurn claimed the store", async () => {
+    // Mirrors the fixed sendMessage order: beginTurn first (store non-empty),
+    // then persist session JSON that already contains the new user message.
+    // A concurrent loadHistoryPage must NOT create a second legacy user turn.
+    const r = await root();
+    await beginTurn(r, "s", user("hello"), "live-1");
+    await migrateLegacyHistory(r, "s", [user("hello")]);
+    const page = await loadRecentTurns(r, "s", 10);
+    // beginTurn row is still running, so loadRecentTurns excludes it; migrate
+    // must have no-op'd because the store already had a row.
+    expect(page.turns).toHaveLength(0);
+    await completeTurn(r, "s", "live-1", assistant("world"));
+    const done = await loadRecentTurns(r, "s", 10);
+    expect(projectConversationTurns(done.turns)).toEqual([
+      user("hello"),
+      assistant("world"),
+    ]);
   });
 
   it("serializes writes per session while allowing concurrent sessions", async () => {

@@ -27,7 +27,7 @@ const scenarios = [
   { reason: "Tool Loop detected (grep_search repeated 3 times)", aborted: true, iterations: 8, toolCalls: 18 },
   
   // 输出相似（10%）
-  { reason: "Detected 2 consecutive similar outputs (>80% Jaccard)", aborted: true, iterations: 7, toolCalls: 14 },
+  { reason: "Detected 2 consecutive similar outputs (>80% Jaccard)", aborted: false, iterations: 7, toolCalls: 14 },
   
   // 达到上限（10%）
   { reason: "Reached maximum iterations (30)", aborted: true, iterations: 30, toolCalls: 95 },

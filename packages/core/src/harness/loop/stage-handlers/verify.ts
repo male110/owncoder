@@ -13,7 +13,56 @@ import { VerificationEngine } from "../../verification.ts";
 import type { MemoryManager } from "../../memory.ts";
 import { emitStage } from "../stages.ts";
 import type { AgentLoopOpts } from "../types.ts";
-import type { StageHandler } from "./types.ts";
+import {
+  applyTaskEvent,
+  formatVerificationFailureNotice,
+  normalizeVerificationResult,
+  type TaskRunState,
+  type VerificationResult,
+} from "../../../task-run.ts";
+import type { SchedulerState, StageHandler } from "./types.ts";
+
+type PostVerifySchedulerState = Pick<
+  SchedulerState,
+  "taskRunState" | "postVerifyFailed" | "successRejected" | "blocked" | "blockedReason" | "lastAssistant"
+>;
+
+/** post_verify 硬失败：统一收口为 failed + successRejected/blocked，禁止成功返回。 */
+export function sealPostVerifyFailure(
+  schedulerState: PostVerifySchedulerState,
+  result: VerificationResult,
+  reason?: string,
+): void {
+  const normalized = normalizeVerificationResult(result);
+  schedulerState.postVerifyFailed = true;
+  schedulerState.successRejected = true;
+  schedulerState.blocked = true;
+  const terminalReason =
+    reason?.trim() ||
+    normalized.summary?.trim() ||
+    "post_verify 验证未通过";
+  schedulerState.blockedReason = terminalReason;
+
+  if (schedulerState.taskRunState) {
+    let next: TaskRunState = applyTaskEvent(schedulerState.taskRunState, {
+      type: "verification_completed",
+      taskId: schedulerState.taskRunState.taskId,
+      result: normalized,
+    });
+    next = applyTaskEvent(next, {
+      type: "phase_changed",
+      taskId: next.taskId,
+      phase: "failed",
+      reason: terminalReason,
+    });
+    schedulerState.taskRunState = next;
+    const notice = formatVerificationFailureNotice(next);
+    if (notice && schedulerState.lastAssistant !== undefined) {
+      const current = schedulerState.lastAssistant?.trim() ?? "";
+      schedulerState.lastAssistant = current ? `${current}\n\n${notice}` : notice;
+    }
+  }
+}
 
 // ── Post Verify Implementation ─────────────────────────────────────
 
@@ -23,50 +72,65 @@ export async function runPostVerify(
   messages: ChatMessage[],
   memory: MemoryManager,
   tracer: Tracer,
+  schedulerState?: PostVerifySchedulerState,
 ): Promise<void> {
   if (opts.enableVerification === false || opts.mode !== "agent" || !toolCtx.touchedPaths?.length) return;
 
   const verifSpanId = tracer.startSpan("post_verification", "verification");
   try {
     const verifier = new VerificationEngine(opts.workspaceRoot);
-    const verifResult = await verifier.verify(toolCtx.touchedPaths ?? []);
-    tracer.endSpan(verifSpanId, verifResult.passed ? "ok" : "error");
+    const verifResult = normalizeVerificationResult(
+      await verifier.verify(toolCtx.touchedPaths ?? []),
+    );
+    if (verifResult.passed) {
+      if (schedulerState?.taskRunState) {
+        schedulerState.taskRunState = applyTaskEvent(schedulerState.taskRunState, {
+          type: "verification_completed",
+          taskId: schedulerState.taskRunState.taskId,
+          result: verifResult,
+        });
+      }
+      tracer.endSpan(verifSpanId, "ok");
+      opts.onEvent?.({
+        type: "verification_result",
+        passed: true,
+        summary: verifResult.summary,
+      });
+      return;
+    }
+
+    if (schedulerState) {
+      sealPostVerifyFailure(schedulerState, verifResult);
+    }
+    tracer.endSpan(verifSpanId, "error");
     opts.onEvent?.({
       type: "verification_result",
-      passed: verifResult.passed,
+      passed: false,
       summary: verifResult.summary,
     });
-    if (!verifResult.passed) {
-      const failedChecks = verifResult.checks
-        .filter((c) => !c.passed)
-        .map((c) => `- ${c.name} (${c.errors.length} errors)`)
-        .join("\n");
-      const errorDetail = verifResult.checks
-        .filter((c) => !c.passed)
-        .flatMap((c) => c.errors.slice(0, 3))
-        .map((e) => `- \`${e.file}:${e.line ?? "?"}\` ${e.message}`)
-        .join("\n");
-      messages.push({
-        role: "system",
-        content:
-          `## 📋 Final Verification Report\n` +
-          `${
-            verifResult.passed
-              ? "✅ All checks passed"
-              : `❌ ${verifResult.checks.filter((c) => !c.passed).length} checks failed\n\n` +
-                `### Failed checks\n${failedChecks}\n\n` +
-                `### Error details\n${errorDetail}\n\n` +
-                `### Suggestions\n${verifResult.suggestions.slice(0, 5).join("\n")}`
-          }`,
-      });
-      if (!verifResult.passed) {
-        memory.addError(
-          "post_verification_failed",
-          verifResult.summary,
-          verifResult.suggestions.join("; "),
-        );
-      }
-    }
+    const failedChecks = verifResult.checks
+      .filter((c) => c.blocking !== false && !c.passed && !c.skipped)
+      .map((c) => `- ${c.name} (${c.errors.length} errors)`)
+      .join("\n");
+    const errorDetail = verifResult.checks
+      .filter((c) => c.blocking !== false && !c.passed && !c.skipped)
+      .flatMap((c) => c.errors.slice(0, 3))
+      .map((e) => `- \`${e.file ?? "?"}:${e.line ?? "?"}\` ${e.message}`)
+      .join("\n");
+    messages.push({
+      role: "system",
+      content:
+        `## 📋 Final Verification Report\n` +
+        `❌ ${verifResult.checks.filter((c) => c.blocking !== false && !c.passed && !c.skipped).length} checks failed\n\n` +
+        `### Failed checks\n${failedChecks}\n\n` +
+        `### Error details\n${errorDetail}\n\n` +
+        `### Suggestions\n${verifResult.suggestions.slice(0, 5).join("\n")}`,
+    });
+    memory.addError(
+      "post_verification_failed",
+      verifResult.summary,
+      verifResult.suggestions.join("; "),
+    );
   } catch (e) {
     tracer.endSpan(verifSpanId, "error");
     const msg = e instanceof Error ? e.message : String(e);
@@ -79,6 +143,27 @@ export async function runPostVerify(
         stack: e instanceof Error ? e.stack : undefined,
       },
     });
+    const result: VerificationResult = {
+      status: "failed",
+      passed: false,
+      checks: [{
+        name: "post_verify",
+        type: "execution",
+        status: "failed",
+        passed: false,
+        output: msg,
+        duration: 0,
+        errors: [{ message: msg, severity: "error" }],
+        blocking: true,
+        skipped: false,
+        source: "post_verify",
+      }],
+      summary: `post_verify 执行异常: ${msg}`,
+      suggestions: [],
+    };
+    if (schedulerState) {
+      sealPostVerifyFailure(schedulerState, result, `post_verify 执行异常: ${msg}`);
+    }
     memory.addError("verification_error", msg, "");
   }
 }
@@ -108,7 +193,7 @@ export const postVerifyHandler: StageHandler = {
   async run(ctx) {
     const { opts, toolCtx, messages, memory, tracer, node } = ctx;
     emitStage(opts.onEvent, "start", node);
-    await runPostVerify(opts, toolCtx, messages, memory, tracer);
+    await runPostVerify(opts, toolCtx, messages, memory, tracer, ctx.state);
     emitStage(opts.onEvent, "done", node);
   },
 };

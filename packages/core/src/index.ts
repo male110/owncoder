@@ -82,6 +82,7 @@ import {
   migrateLegacyHistory,
   loadRecentTurns,
   loadOlderTurns,
+  projectConversationTurns,
 } from "./conversation-store.ts";
 
 import type { TerminalEntry } from "./harness/terminal.ts";
@@ -133,6 +134,7 @@ export type {
   AgentLoopOpts,
   HistoryChunk,
   HistoryChunkInput,
+  HistorySearchHit,
   EmbeddingService,
   HistoryVectorStore,
 } from "./harness/loop.ts";
@@ -776,29 +778,8 @@ export class SessionOrchestrator {
   }
 
   private projectTurns(turns: import("./conversation-store.ts").ConversationTurn[]): ChatTurn[] {
-    const projected: ChatTurn[] = [];
-    for (const turn of turns) {
-      if (turn.user) projected.push({ ...turn.user });
-      for (const event of turn.events) {
-        const payload = event.payload as Partial<ChatTurn> | undefined;
-        if (payload && typeof payload === "object" &&
-            (payload.role === "user" || payload.role === "assistant" || payload.role === "tool" || payload.role === "system") &&
-            typeof payload.content === "string") {
-          projected.push({ ...payload } as ChatTurn);
-        }
-      }
-      const final = turn.final as Partial<ChatTurn> | { history?: ChatTurn[] } | undefined;
-      const candidate = final && typeof final === "object" && "role" in final
-        ? final as ChatTurn
-        : final && "history" in final && Array.isArray(final.history)
-          ? [...final.history].reverse().find((h) => h.role === "assistant")
-          : undefined;
-      if (candidate?.role === "assistant" && typeof candidate.content === "string" &&
-          !projected.some((h) => h.role === "assistant" && h.content === candidate.content)) {
-        projected.push({ ...candidate });
-      }
-    }
-    return projected;
+    // Shared with conversation-store so UI reload path and unit tests stay aligned.
+    return projectConversationTurns(turns);
   }
 
   getTerminalLog(sessionId?: string): TerminalEntry[] {
@@ -1973,24 +1954,29 @@ export class SessionOrchestrator {
       pendingCount: this.coordinator.getPendingCount(sid),
     });
 
-    // 消息先落盘，再进入后续处理，避免进程在 loop 中途崩溃/退出导致用户输入丢失。
-    // 用户消息在 loop 内由 stage-handlers 注入 history，这里提前追加并持久化，
-    // 落盘失败时抛错并中止，不进入协调器队列（fail-fast，不丢消息）。
+    // 用户消息必须先进入 conversation store（beginTurn），再写入 session JSON。
+    // 若先 persist 再 beginTurn，并发的 getChatHistoryPage 会在 store 仍为空时
+    // 把「仅有新 user、尚无 turn 行」的磁盘历史 migrate 成一条已完成 legacy turn，
+    // 随后 beginTurn 再插入同一条 user → 切回会话加载时出现两条用户消息。
     const r = this.rt(sid);
     const workspaceRoot = this.sessionWorkspaceRoot(sid);
     // Seed the conversation store from the longest known transcript before
     // admitting this turn. Prefer disk over the runtime tail so a truncated
     // in-memory history cannot lock the store into an incomplete migration.
+    // migrate 必须使用「追加本轮 user 之前」的历史，避免把 in-flight user 写成 legacy。
     const savedForMigrate = await loadSessionById(workspaceRoot, sid);
     const diskHistory = Array.isArray(savedForMigrate?.history) ? savedForMigrate.history : [];
     const migrateSource = diskHistory.length >= r.history.length ? diskHistory : r.history;
     await migrateLegacyHistory(workspaceRoot, sid, migrateSource);
-    r.history = [...r.history, { role: "user" as const, content: trimmed }];
-    await this.persist(sid);
 
-    // Generate the durable turn id only after the user message is safely persisted.
+    // Generate the durable turn id and claim the conversation-store row first.
     const turnId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
     await beginTurn(workspaceRoot, sid, { role: "user", content: trimmed }, turnId);
+
+    // beginTurn 成功后再写入 runtime + session JSON，保证并发 loadHistoryPage
+    // 看到 store 已有行时会跳过 migrate，不会再复制一条 user。
+    r.history = [...r.history, { role: "user" as const, content: trimmed }];
+    await this.persist(sid);
 
     // 通过协调器提交输入，传递 onEvent 上下文
     // 协调器会自动处理队列、串行化和 drain loop

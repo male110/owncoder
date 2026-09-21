@@ -57,7 +57,7 @@ test("always retains mandatory context while selecting an explicit indexed path 
     config: resolveMinimumContextConfig({ tokenBudget: 90, maxCandidates: 3 }, 400),
     candidates: [
       candidate("rules", "memory", 30, { mandatory: true }),
-      candidate("auth-retrieval", "retrieval", 40, {
+      candidate("auth-knowledge", "knowledge", 40, {
         path: "src/auth.ts",
         freshness: "indexed",
       }),
@@ -65,7 +65,7 @@ test("always retains mandatory context while selecting an explicit indexed path 
     ],
   });
 
-  assert.deepEqual(plan.selected.map((item) => item.id), ["rules", "auth-retrieval"]);
+  assert.deepEqual(plan.selected.map((item) => item.id), ["rules", "auth-knowledge"]);
   assert.deepEqual(plan.requiresFreshRead, ["src/auth.ts"]);
   assert.equal(plan.omitted.find((item) => item.id === "dependency-list")?.reason, "budget");
 });
@@ -75,11 +75,11 @@ test("drops a lower-value duplicate by content rather than only by path", () => 
     task: task(),
     config: resolveMinimumContextConfig({ tokenBudget: 200, maxCandidates: 4 }, 400),
     candidates: [
-      candidate("map", "repo-map", 30, {
+      candidate("map", "knowledge", 30, {
         path: "src/map.ts",
         content: "alpha beta gamma delta epsilon",
       }),
-      candidate("search", "retrieval", 30, {
+      candidate("search", "short-term", 30, {
         path: "src/other.ts",
         content: "alpha beta gamma delta epsilon",
       }),
@@ -93,7 +93,7 @@ test("drops a lower-value duplicate by content rather than only by path", () => 
 test("is deterministic and keeps the baseline intact in off mode", () => {
   const candidates = [
     candidate("a", "knowledge", 40),
-    candidate("b", "retrieval", 30),
+    candidate("b", "short-term", 30),
     candidate("c", "deps", 20),
   ];
   const input = {

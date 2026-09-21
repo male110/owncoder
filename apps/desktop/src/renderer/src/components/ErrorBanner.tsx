@@ -52,7 +52,7 @@ export function ErrorBanner({ error, onDismiss, onOpenSettings }: Props) {
 
 // ── Helpers consumed by App.tsx / hooks ──────────────────────────────────────
 
-/** 验证门禁失败：只在 LLM 正文区提示，不走顶部 ErrorBanner。 */
+/** 验证门禁 / 自动修复达上限 / 导出移除类警告：只在 LLM 正文区提示，不走顶部 ErrorBanner。 */
 export function isVerificationGateError(raw: unknown): boolean {
   if (raw == null) return false;
   const texts: string[] = [];
@@ -76,7 +76,9 @@ export function isVerificationGateError(raw: unknown): boolean {
     (text) =>
       text.includes("验证门禁未通过") ||
       text.includes("无法报告成功") ||
-      text.includes("成功门禁未通过"),
+      text.includes("成功门禁未通过") ||
+      text.includes("自动修复达到上限") ||
+      text.includes("移除了导出"),
   );
 }
 

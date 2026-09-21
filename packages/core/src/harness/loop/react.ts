@@ -12,6 +12,7 @@ import {
   checkTermination,
   updateStateAfterResponse,
   updateStateAfterTools,
+  resetOutputTrackingForNewTask,
   createTerminationConfig,
   type LoopState,
   type TerminationConfig,
@@ -58,10 +59,11 @@ import {
 } from "../agent-reasoning.ts";
 import { withRetry } from "../model-coordinator.ts";
 import { emitStage, resolveStageModel } from "./stages.ts";
-import type { AgentLoopOpts, ChatTurn, DocumentWorkflowState, ReActLoopArgs } from "./types.ts";
+import type { AgentLoopOpts, ChatTurn, DocumentWorkflowState, ReActLoopArgs, ReactDecisionSummary } from "./types.ts";
+import { classifyRecoveryError } from "../recovery.ts";
 import { documentStageFromArtifact, inferDocumentType } from "./document-workflow.ts";
 import { type FreshnessFollowUp } from "./context-control.ts";
-import { autoFixAfterTools, createAutoFixState, getDirtyFiles, FILE_MODIFYING_TOOLS } from "../auto-fix.ts";
+import { autoFixAfterTools, createAutoFixState, getDirtyFiles, FILE_MODIFYING_TOOLS, isAdvisoryVerificationResult } from "../auto-fix.ts";
 import { gitAutoSnapshot } from "../checkpoint.ts";
 import { PARALLEL_SAFE_TOOLS } from "../enhanced-tools.ts";
 import { formatBlockerReport } from "../tools/misc.ts";
@@ -128,56 +130,21 @@ function levenshtein(a: string, b: string): number {
 
 // ── ReAct Loop (Enhanced Tool-Calling Stage) ───────────────
 
-/** Max consecutive iterations with identical tool-call signatures before forcing stop.
- *  Excludes commonly re-used tools like list_dir and read_file — those are checked separately
- *  by MAX_SAME_FILE_READS and MAX_CONSECUTIVE_READONLY_ITERS. */
+/** Max consecutive iterations with identical tool-call signatures (fed to termination). */
 const MAX_REPEAT_TOOL_CALLS = 3;
-/** Hard cap on total tool invocations across the entire loop.
- *  Set to 200 to accommodate multi-file pagination tasks: 10 files × 10 pages
- *  each = 100 read calls, plus writes, bash, and lsp calls on top. The earlier
- *  guards (MAX_SAME_FILE_READS, redundant-range detection, MAX_CONSECUTIVE_READONLY_ITERS,
- *  fingerprint-repeat detection) should catch stuck loops well before this cap fires. */
+/** Hard cap on total tool invocations across the entire loop (fed to termination). */
 const MAX_TOTAL_TOOL_CALLS = 100;
 const MAX_TOOL_HISTORY_CHARS = 4 * 1024;
-/** Max times the same file can be read before we consider the loop stuck.
- *  Set to 3 to allow: initial read → understand, re-read → reference during edit, re-read → verify. */
-const MAX_SAME_FILE_READS = 3;
-/** Max distinct pages (different offsets) per file before stuck detection fires.
- *  This is the base cap; for large files the effective cap scales with file size
- *  (see pageLimitForFile) so legitimate exploration of a big module isn't cut off. */
-const MAX_PAGES_PER_FILE = 12;
-/** Assumed lines covered by one read page; used to scale the page cap with file size. */
-const PAGE_LINES_GRANULARITY = 60;
-/** Extra pages granted on top of whole-file coverage to absorb re-reads and overlaps. */
-const PAGE_LIMIT_MARGIN = 4;
-/** Absolute ceiling for the size-scaled page cap. */
-const MAX_SCALED_PAGES_PER_FILE = 60;
-
-/** Effective pages-per-file cap: the configured base cap, scaled up for large
- * files (full-file coverage at ~PAGE_LINES_GRANULARITY lines per page plus a
- * re-read margin), bounded by MAX_SCALED_PAGES_PER_FILE. Small files keep the
- * base cap unchanged. */
-function pageLimitForFile(totalLines: number | undefined, base: number): number {
-  if (!totalLines || totalLines <= 0) return base;
-  return Math.min(
-    Math.max(base, Math.ceil(totalLines / PAGE_LINES_GRANULARITY) + PAGE_LIMIT_MARGIN),
-    MAX_SCALED_PAGES_PER_FILE,
-  );
-}
 /** Max consecutive iterations where the model produces ONLY read-only tool calls (no text content).
  *  This catches infinite exploration/browsing loops where the model calls list_dir/read_file
  *  with different paths each time, evading the fingerprint-based repeat detection. */
 const MAX_CONSECUTIVE_READONLY_ITERS = 6;
 /** Soft transition threshold: when consecutive read-only iterations reach this
  *  count, inject a nudge pushing the model from exploration to implementation.
- *  Set to half the hard cap — gives the model a warning before force-stop.
+ *  Set to half the hard cap — gives the model a warning before checkTermination.
  *  This directly addresses the "总中断" bug where the agent keeps exploring
  *  without transitioning to implementation. */
 const READONLY_TRANSITION_THRESHOLD = 3;
-/** Max redundant reads of ranges that are already fully covered for one file.
- *  Progressive pagination is intentionally unlimited here and remains bounded by
- *  the loop's total-tool and read-only-iteration caps. */
-const MAX_REDUNDANT_RANGES_PER_FILE = 10;
 const CASE_INSENSITIVE_PATHS = platform() === "win32";
 
 /** Read-only tool names that indicate exploration/browsing (not productive output). */
@@ -191,7 +158,6 @@ const READONLY_TOOLS = new Set([
 /** File-modifying tool names (used to push user-visible action summaries to the conversation stream, solving the silent-execution problem). */
 const USER_FACING_WRITE_TOOLS = new Set(["save_plan", "write_file", "apply_patch"]);
 const READ_INVALIDATING_TOOLS = new Set(["write_file", "apply_patch", "append_file", "replace_in_file"]);
-const GENERATED_PATH_WRITE_TOOLS = new Set(["save_plan", "save_spec", "save_design", "save_experience"]);
 
 /**
  * Synthesize a one-line user-visible summary from a file-modifying tool's result.
@@ -743,32 +709,6 @@ function lastAssistantSummaryFromHistory(history: ChatTurn[]): string | null {
   return null;
 }
 
-/**
- * Build a fingerprint for a set of tool calls to detect repetition.
- * Excludes list_dir and read_file from fingerprinting — those have dedicated
- * stuck-detection via MAX_SAME_FILE_READS and MAX_CONSECUTIVE_READONLY_ITERS.
- */
-function toolCallFingerprint(calls: Array<{ name: string; arguments?: Record<string, unknown> }>): string {
-  return calls
-    .filter((c) => c.name !== "list_dir" && c.name !== "read_file")
-    .map((c) => `${c.name}:${JSON.stringify(c.arguments ?? {})}`)
-    .sort()
-    .join("|");
-}
-
-interface ReadRange {
-  startLine: number;
-  endLine: number;
-}
-
-interface ReadRequest {
-  canonicalPath: string;
-  displayPath: string;
-  startLine: number;
-  endLine: number;
-  requestKey: string;
-}
-
 function canonicalReadPath(workspaceRoot: string, inputPath: string): string {
   const rel = upath.normalize(relative(workspaceRoot, resolve(workspaceRoot, inputPath || ".")))
     .replace(/^\.\//, "");
@@ -786,85 +726,6 @@ async function sourceVersion(workspaceRoot: string, canonicalPath: string): Prom
   } catch {
     return null;
   }
-}
-
-/** Normalize read requests so offset aliases, path spelling and out-of-range
- * offsets cannot manufacture distinct pages for the same physical range. */
-function getReadFileRequests(
-  calls: Array<{ name: string; arguments?: Record<string, unknown> }>,
-  workspaceRoot: string,
-  knownTotals: ReadonlyMap<string, number>,
-): ReadRequest[] {
-  return calls
-    .filter((c) => c.name === "read_file")
-    .map((c) => {
-      const displayPath = String(c.arguments?.path ?? "");
-      const canonicalPath = canonicalReadPath(workspaceRoot, displayPath);
-      const totalLines = knownTotals.get(canonicalPath);
-      const rawOffset = typeof c.arguments?.offset === "number" && Number.isInteger(c.arguments.offset) && c.arguments.offset > 0
-        ? c.arguments.offset
-        : 1;
-      const startLine = rawOffset;
-      const endLine = totalLines ?? startLine;
-      return {
-        canonicalPath,
-        displayPath,
-        startLine,
-        endLine,
-        requestKey: `${canonicalPath}::${startLine}`,
-      };
-    })
-    .filter((request) => request.displayPath.length > 0);
-}
-
-function rangeIsCovered(ranges: readonly ReadRange[], startLine: number, endLine: number): boolean {
-  return ranges.some((range) => range.startLine <= startLine && range.endLine >= endLine);
-}
-
-function addCoveredRange(ranges: ReadRange[], incoming: ReadRange): void {
-  let startLine = incoming.startLine;
-  let endLine = incoming.endLine;
-  for (let i = ranges.length - 1; i >= 0; i--) {
-    const range = ranges[i]!;
-    if (range.endLine + 1 < startLine || endLine + 1 < range.startLine) continue;
-    startLine = Math.min(startLine, range.startLine);
-    endLine = Math.max(endLine, range.endLine);
-    ranges.splice(i, 1);
-  }
-  ranges.push({ startLine, endLine });
-  ranges.sort((a, b) => a.startLine - b.startLine);
-}
-
-/** Build a human-readable description of why the loop is stuck, including thresholds. */
-function buildStuckReason(
-  calls: Array<{ name: string; arguments?: Record<string, unknown> }>,
-  maxReadFile: string,
-  maxReadCount: number,
-  maxSameFileReads: number,
-  maxRedundantFile: string,
-  maxRedundantCount: number,
-  maxRedundantReads: number,
-  maxPageFile: string,
-  maxPageCount: number,
-  maxPagesPerFile: number,
-  repeatCount: number,
-  maxRepeatToolCalls: number,
-  consecutiveReadonlyIters: number,
-  maxConsecutiveReadonlyIters: number,
-): string {
-  if (maxReadCount > maxSameFileReads) {
-    return `repeatedly requested the same file line range "${maxReadFile}" ${maxReadCount} times (limit ${maxSameFileReads})`;
-  }
-  if (maxRedundantCount > maxRedundantReads) {
-    return `requested already-fully-read line ranges of file "${maxRedundantFile}" ${maxRedundantCount} times (limit ${maxRedundantReads})`;
-  }
-  if (maxPageCount > maxPagesPerFile) {
-    return `read ${maxPageCount} distinct pages of file "${maxPageFile}" (limit ${maxPagesPerFile} pages per file)`;
-  }
-  if (repeatCount > maxRepeatToolCalls) {
-    return `repeatedly called [${calls.map((c) => c.name).join(", ")}] with identical arguments ${repeatCount} times (limit ${maxRepeatToolCalls})`;
-  }
-  return `used only browse/search tools (${calls.map((c) => c.name).join(", ")}) for ${consecutiveReadonlyIters} consecutive iterations without producing content (limit ${maxConsecutiveReadonlyIters})`;
 }
 
 export async function runReActLoop(args: ReActLoopArgs): Promise<{
@@ -888,18 +749,24 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
   taskRunState?: TaskRunState | null;
   /** 成功门禁拒绝时为 true。 */
   successRejected?: boolean;
+  decisionSummaries?: ReactDecisionSummary[];
 }> {
   const {
     opts, model, messages, history, toolsFinal, toolCtx, maxIter, stageId,
     reasoningTrace, memory, tracer, plan, transientInformationTask, contextControl,
     maxRepeatToolCalls: _mrt,
     maxTotalToolCalls: _mttc,
-    maxSameFileReads: _msfr,
     maxConsecutiveReadonlyIters: _mcri,
+    // Legacy stuck-detect knobs kept on ReActLoopArgs for API compatibility;
+    // hard force-stop now lives in checkTermination, so they are unused here.
+    maxSameFileReads: _msfr,
     maxPagesPerFile: _mpf,
-    maxRedundantRangesPerFile: maxRedundantReads = MAX_REDUNDANT_RANGES_PER_FILE,
+    maxRedundantRangesPerFile: _mrr,
 
   } = args;
+  void _msfr;
+  void _mpf;
+  void _mrr;
 
   // ── Resolve reactSteps config from node params ──────────────────────────────
   const reactSteps: ReactStepConfig[] = args.reactSteps ?? defaultReactSteps();
@@ -907,17 +774,12 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
   // ── Derive loop thresholds from reactSteps (override with legacy args if present) ──
   const maxRepeatToolCalls =
     _mrt ?? stepNum(reactSteps, "stuck_detect", "maxRepeat", MAX_REPEAT_TOOL_CALLS);
-  const maxSameFileReads =
-    _msfr ?? stepNum(reactSteps, "stuck_detect", "maxReadCount", MAX_SAME_FILE_READS);
   const maxConsecutiveReadonlyIters =
     _mcri ?? stepNum(reactSteps, "stuck_detect", "maxReadonlyIters", MAX_CONSECUTIVE_READONLY_ITERS);
   const maxTotalToolCalls =
     _mttc ?? stepNum(reactSteps, "tool_cap", "maxTotal", MAX_TOTAL_TOOL_CALLS);
-  const maxPagesPerFile =
-    _mpf ?? stepNum(reactSteps, "stuck_detect", "maxPagesPerFile", MAX_PAGES_PER_FILE);
   const llmMaxRetries = stepNum(reactSteps, "llm_call", "maxRetries", 2);
   const stuckDetectEnabled = stepEnabled(reactSteps, "stuck_detect");
-  const toolCapEnabled = stepEnabled(reactSteps, "tool_cap");
   const gitSnapshotEnabled = stepEnabled(reactSteps, "git_snapshot");
   let gitSnapshotWarned = false; // warn at most once per turn
   const toolExecParallel = stepBool(reactSteps, "tool_exec", "parallel", true);
@@ -927,18 +789,17 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
   let lastAssistant = "";
   let correctionCount = args.correctionCount;
   let currentStep: PlanStep | null = plan ? selectNextStep(plan) : null;
+  const decisionSummaries: ReactDecisionSummary[] = [];
+  const recordDecision = (summary: ReactDecisionSummary): void => {
+    decisionSummaries.push(summary);
+    opts.onEvent?.({ type: "decision_summary", summary });
+  };
 
-  // 上一轮是否因"信息需求未满足"而注入了探索引导。引导后若模型仍只输出纯文本报告而未调用
-  // 任何探索工具，视为模型已无探索意图（引导未产生探索动作），此时尊重其结束意图，不再
-  // 强制 continue 触发死循环。模型本轮一旦调用了工具即重置本标志（说明有真实探索动作）。
-  let pendingExplorationNudge = false;
   // ── 弱模型容错：工具执行后模型返回纯文本（无新工具调用）时的 nudge 计数 ──
   // 某些模型（如 Gemini Flash 2.5）在工具调用后会输出一段文本总结而不继续调用工具，
   // 导致循环提前终止。此计数器在工具执行后注入一次 nudge 引导继续，超过上限才退出。
   let postToolTextNudgeCount = 0;
   const maxPostToolTextNudges = 2;
-  let unmetTextOnlyCount = 0;
-  const maxUnmetTextOnlyBeforeBlocked = 3;
   // 上一轮是否执行了工具调用（用于判断本轮是否为"工具执行后的纯文本响应"）
   let prevIterHadToolCalls = false;
 
@@ -989,11 +850,13 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
     correctionCount: number;
     taskRunState?: TaskRunState | null;
     successRejected?: boolean;
+    decisionSummaries?: ReactDecisionSummary[];
   };
 
   const withRunState = (result: Omit<ReActReturn, "taskRunState">): ReActReturn => ({
     ...result,
     taskRunState,
+    decisionSummaries,
   });
 
   /** 最终成功路径：必须通过 canReportSuccess / sealTaskRunSuccess 门禁。 */
@@ -1075,41 +938,12 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
 
   const loopState: LoopState = createLoopState(currentTask || undefined);
 
-  // ── Old Stuck-detection state (将被逐步废弃) ──
-  let prevFingerprint = "";
-  let repeatCount = 0;          // consecutive identical tool-call sets
-  let totalToolCalls = 0;       // total tool invocations across the loop
-  let stuckDetected = false;    // whether we detected a stuck pattern and injected a stop
-  let consecutiveReadonlyIters = 0; // consecutive iterations with ONLY read-only tools + no text
-  const readFileRequestCounts = new Map<string, number>(); // canonical path + normalized start/limit
-  const readFileRequestLabels = new Map<string, string>();
-  const readFilePageCounts = new Map<string, number>(); // distinct pages (offsets) read per canonical file
-  const readFileSeenPages = new Map<string, Set<number>>(); // offsets already counted into readFilePageCounts
-  const readFileRedundantCounts = new Map<string, number>(); // fully-covered range requests per canonical file
-  const readFilePathLabels = new Map<string, string>();
-  const readFileCoverage = new Map<string, ReadRange[]>(); // successful, actual ranges returned
-  /** Successful read ranges are task-scoped so one task cannot prove another task's needs. */
-  const taskReadCoverage = new Map<string, Map<string, ReadRange[]>>();
-  /** Filesystem versions captured with the task-scoped successful reads. */
-  const taskReadVersions = new Map<string, Map<string, string>>();
-  const readFileTotals = new Map<string, number>();
+  // Soft exploration→implementation nudge only. Hard stuck/tool-cap stops live
+  // in checkTermination; tool errors never force-block the loop here.
+  let totalToolCalls = 0;       // total tool invocations across the loop (logging)
+  let consecutiveReadonlyIters = 0; // consecutive iterations with ONLY read-only tools
   /** Raw read messages are used for same-turn excerpt extraction only. */
   const rawReadToolMessages: ChatMessage[] = [];
-
-  const invalidateReadTracking = (inputPath: string): void => {
-    const canonicalPath = canonicalReadPath(toolCtx.workspaceRoot, inputPath);
-    readFileCoverage.delete(canonicalPath);
-    readFileTotals.delete(canonicalPath);
-    readFileRedundantCounts.delete(canonicalPath);
-    readFilePageCounts.delete(canonicalPath);
-    readFileSeenPages.delete(canonicalPath);
-    readFilePathLabels.delete(canonicalPath);
-    for (const key of [...readFileRequestCounts.keys()]) {
-      if (!key.startsWith(`${canonicalPath}\0`)) continue;
-      readFileRequestCounts.delete(key);
-      readFileRequestLabels.delete(key);
-    }
-  };
 
   const emitFreshnessFollowUp = (update: FreshnessFollowUp | null): void => {
     if (!update || !contextControl?.telemetryEnabled) return;
@@ -1131,6 +965,7 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
   // 去用别的手段达成同一个已被拦下的目标。
   let handoffRequested = false;
   let handoffReport = "";
+  // 工具错误（含权限/用户决策类）一律写入 tool result 交回 LLM，不再强制 blocked。
 
   // ── Hard step-driver state (approved plan tasks in agent mode) ──
   // taskDriven, tasks, currentTask 已在上面定义
@@ -1192,14 +1027,13 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
     if (i > 0) {
       const terminationResult = checkTermination(loopState, terminationConfig);
       if (terminationResult.shouldTerminate) {
-        // Exploration-skip threshold is normal convergence: redundant
-        // read-only calls after exploration is done must never surface as
-        // "出错了 / Task may be incomplete".
-        const explorationConverged =
+        // Normal convergence (exploration-skip / consecutive similar outputs):
+        // must never surface as "出错了 / Task may be incomplete".
+        const normalConverged =
           terminationResult.metadata != null &&
           typeof terminationResult.metadata === "object" &&
           terminationResult.metadata.normalCompletion === true;
-        const aborted = Boolean(terminationResult.aborted) && !explorationConverged;
+        const aborted = Boolean(terminationResult.aborted) && !normalConverged;
 
         writeEventLog({
           category: "react_loop",
@@ -1329,6 +1163,16 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
     if (currentTask && await invalidateStaleEvidence(currentTask)) {
       await persistTaskUpdate(currentTask.id);
     }
+
+    // ── Public decision summary (bounded; no private chain-of-thought) ──
+    recordDecision({
+      iteration: i,
+      goal: currentTask?.description ?? currentStep?.description ?? opts.userMessage.slice(0, 200),
+      action: "llm_decide",
+      reasonSummary: currentTask ? "依据当前任务和已收集证据决定下一步" : "依据当前上下文决定下一步",
+      expectedObservation: "获得工具结果或可验证的下一步响应",
+      timestamp: Date.now(),
+    });
 
     // ── LLM Call (with retry) ──
     const llmSpanId = tracer.startSpan(`llm_call_${i}`, "llm_call", {
@@ -1476,9 +1320,8 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
   // - 工具执行分支置 true（下一轮若为纯文本响应，nudge 才有依据）；
   // - 纯文本分支开头保留旧值用于判断，随即置 false（"只给一次额外机会"，
   //   模型连续两轮纯文本则尊重其结束意图，避免 nudge→文本→nudge 死循环）。
-  // pendingExplorationNudge 与 postToolTextNudgeCount 保持单调策略：一旦 nudge 消耗，
-  // 无论模型是否响应调用了工具都不回退。pendingExplorationNudge 仅在新任务开始时
-  // 重置；postToolTextNudgeCount 在整个循环生命周期内只增不减，达到上限后不再注入 nudge。
+  // postToolTextNudgeCount 保持单调策略：一旦 nudge 消耗就不回退，
+  // 在整个循环生命周期内只增不减，达到上限后不再注入 nudge。
   // ── 文档交付后若模型仍试图调用工具，强制停止等待用户确认 ──
   if (documentDelivered && calls.length > 0) {
     logReasoningStep(reasoningTrace, {
@@ -1574,9 +1417,9 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
         continue;
       }
 
-      // Information needs are a hard gate: do not treat a text-only reply as
-      // completion while they are unmet. Keep exploring until they are filled
-      // or a hard limit (max iterations / tool cap) fires.
+      // Information needs: do not treat a text-only reply as completion while
+      // unmet. Keep nudging exploration until needs are filled or a hard limit
+      // (max iterations / tool cap via checkTermination) fires — never force-block here.
       const unmetInfoTask = activeInformationTask();
       if (
         unmetInfoTask &&
@@ -1595,19 +1438,6 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
         });
         history.push({ role: "assistant", content });
         const missingNeeds = pendingInformationNeeds(unmetInfoTask);
-        unmetTextOnlyCount += 1;
-        if (unmetTextOnlyCount >= maxUnmetTextOnlyBeforeBlocked) {
-          const reason = `Required exploration is blocked: ${missingNeeds.join(", ") || "stop-exploration criteria unmet"}`;
-          opts.onEvent?.({ type: "warning", message: reason });
-          return finalizeTerminal({
-            lastAssistant: content,
-            aborted: false,
-            blocked: true,
-            blockedReason: reason,
-            correctionCount,
-            documentWorkflow: documentWorkflowUpdate,
-          }, "blocked");
-        }
         messages.push({
           role: "system",
           content:
@@ -1615,7 +1445,6 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
             "Call exploration tools that can fill these needs before giving a final answer. " +
             "Successful reads stay in this turn's context. Do not conclude while these needs are unmet.",
         });
-        pendingExplorationNudge = true;
         logReasoningStep(reasoningTrace, {
           type: "observation",
           content: `Information needs still unmet (${missingNeeds.join(", ") || "stop-exploration criteria unmet"}); continuing exploration instead of ending on a text-only reply.`,
@@ -1648,13 +1477,15 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
         syncLoopTask();
 
         if (next) {
+          // Previous task's similar-output / stop / text-only counters must not
+          // terminate the next task on the following iteration's checkTermination.
+          resetOutputTrackingForNewTask(loopState);
           next.status = "in_progress";
           await persistTaskUpdate(next.id);
           messages.push({
             role: "system",
             content: `Task ${justDone.id} ${justDone.status === "completed" ? "completed" : "failed"}. Now starting task ${next.id}: ${next.description}`,
           });
-          pendingExplorationNudge = false;
           continue;
         }
         await persistTaskUpdate(null);
@@ -1732,7 +1563,6 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
           contentPreview: content.slice(0, 200),
           toolsRanPreviousIter: toolsRanLastIter,
           postToolTextNudgeCount,
-          pendingExplorationNudge,
           taskDriven,
           currentTaskId: currentTask?.id ?? null,
           explorationComplete: (() => {
@@ -1807,28 +1637,12 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
     // ── Execute tools ──
     // 本轮执行了工具：若下一轮模型只输出纯文本，nudge 才有依据。
     prevIterHadToolCalls = true;
-    unmetTextOnlyCount = 0;
     const openaiCalls: ToolCall[] = calls.map((c, idx) => ({
       id: c.id || `call_${stageId}_${i}_${idx}`,
       type: "function" as const,
       function: { name: c.name, arguments: JSON.stringify(c.arguments ?? {}) },
     }));
 
-    // ── Stuck detection: check for repeated tool-call patterns ──
-    const fp = toolCallFingerprint(calls);
-    if (fp === "") {
-      // All calls are read-only tools excluded from fingerprinting (list_dir/read_file/etc.).
-      // Skip repeat-count detection — these are handled by MAX_SAME_FILE_READS (same path
-      // re-read) and MAX_CONSECUTIVE_READONLY_ITERS (exploration loop). Without this guard,
-      // a pure read_file sequence fingerprints to "" every time and falsely triggers
-      // MAX_REPEAT_TOOL_CALLS, prematurely aborting legitimate multi-path exploration.
-      repeatCount = 0;
-    } else if (fp === prevFingerprint) {
-      repeatCount++;
-    } else {
-      repeatCount = 1;
-      prevFingerprint = fp;
-    }
     totalToolCalls += calls.length;
     applyRunEvent({
       type: "tool_completed",
@@ -1837,89 +1651,6 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
       ok: true,
       count: calls.length,
     });
-
-    // Normalize request identity before checking repetition. Successful tool
-    // results update actual coverage later, so progressive pagination is never
-    // mistaken for a stuck loop.
-    // A batch containing a write and a read is productive: the read may observe
-    // a new file version. Do not judge it using stale coverage before ordered
-    // writes have executed. Generated-path writers are conservatively exempted
-    // for the whole batch because their canonical targets are known only from
-    // the successful tool result metadata.
-    const mutatedPathsInBatch = new Set(
-      calls
-        .filter((call) => READ_INVALIDATING_TOOLS.has(call.name))
-        .map((call) => String(call.arguments?.path ?? ""))
-        .filter(Boolean)
-        .map((path) => canonicalReadPath(toolCtx.workspaceRoot, path)),
-    );
-    const hasGeneratedPathWrite = calls.some((call) => GENERATED_PATH_WRITE_TOOLS.has(call.name));
-    const readRequests = hasGeneratedPathWrite
-      ? []
-      : getReadFileRequests(calls, toolCtx.workspaceRoot, readFileTotals)
-          .filter((request) => !mutatedPathsInBatch.has(request.canonicalPath));
-    for (const request of readRequests) {
-      const requestCount = (readFileRequestCounts.get(request.requestKey) ?? 0) + 1;
-      readFileRequestCounts.set(request.requestKey, requestCount);
-      readFileRequestLabels.set(
-        request.requestKey,
-        `${request.displayPath} [lines ${request.startLine}-${request.endLine}]`,
-      );
-      readFilePathLabels.set(request.canonicalPath, request.displayPath);
-
-      // Track distinct pages per file to cap infinite pagination: only count
-      // offsets not yet seen, so re-reading the same region does not inflate
-      // the page count (same-region repeats are caught by maxSameFileReads).
-      let seenPages = readFileSeenPages.get(request.canonicalPath);
-      if (!seenPages) {
-        seenPages = new Set();
-        readFileSeenPages.set(request.canonicalPath, seenPages);
-      }
-      if (!seenPages.has(request.startLine)) {
-        seenPages.add(request.startLine);
-        readFilePageCounts.set(
-          request.canonicalPath,
-          (readFilePageCounts.get(request.canonicalPath) ?? 0) + 1,
-        );
-      }
-
-      const covered = readFileCoverage.get(request.canonicalPath) ?? [];
-      if (rangeIsCovered(covered, request.startLine, request.endLine)) {
-        readFileRedundantCounts.set(
-          request.canonicalPath,
-          (readFileRedundantCounts.get(request.canonicalPath) ?? 0) + 1,
-        );
-      }
-    }
-
-    let maxReadFile = "";
-    let maxReadCount = 0;
-    for (const [key, count] of readFileRequestCounts) {
-      if (count > maxReadCount) {
-        maxReadCount = count;
-        maxReadFile = readFileRequestLabels.get(key) ?? key;
-      }
-    }
-
-    let maxRedundantFile = "";
-    let maxRedundantCount = 0;
-    for (const [path, count] of readFileRedundantCounts) {
-      if (count > maxRedundantCount) {
-        maxRedundantCount = count;
-        maxRedundantFile = readFilePathLabels.get(path) ?? path;
-      }
-    }
-
-    let maxPageFile = "";
-    let maxPageCount = 0;
-    let maxPageLimit = maxPagesPerFile;
-    for (const [path, count] of readFilePageCounts) {
-      if (count > maxPageCount) {
-        maxPageCount = count;
-        maxPageFile = readFilePathLabels.get(path) ?? path;
-        maxPageLimit = pageLimitForFile(readFileTotals.get(path), maxPagesPerFile);
-      }
-    }
 
     // ── Consecutive read-only iterations check ──
     // When the model produces no text and only calls read-only tools (list_dir, read_file, etc.),
@@ -1936,7 +1667,7 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
     }
 
     // ── Soft transition nudge: push exploration → implementation ──
-    // Before the hard stuck-detection cap fires, inject a gentle nudge when
+    // Before checkTermination's hard caps fire, inject a gentle nudge when
     // the model has spent several consecutive iterations on read-only tools.
     // This directly addresses the "总中断" bug: the agent keeps exploring
     // without transitioning to implementation. The nudge is injected AFTER
@@ -1945,8 +1676,7 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
     if (
       allReadonly &&
       consecutiveReadonlyIters >= READONLY_TRANSITION_THRESHOLD &&
-      consecutiveReadonlyIters < maxConsecutiveReadonlyIters &&
-      !stuckDetected
+      consecutiveReadonlyIters < maxConsecutiveReadonlyIters
     ) {
       messages.push({
         role: "system",
@@ -1962,17 +1692,10 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
       });
     }
 
-    // ── Stuck check: repeated range, already-covered ranges, pagination cap, identical calls, or read-only loop ──
-    const isStuck = stuckDetectEnabled && (
-      maxReadCount > maxSameFileReads ||
-      maxRedundantCount > maxRedundantReads ||
-      maxPageCount > maxPageLimit ||
-      repeatCount > maxRepeatToolCalls ||
-      consecutiveReadonlyIters > maxConsecutiveReadonlyIters
-    );
-
     // ═══════════════════════════════════════════════════════════════════════════
-    // New Termination: Update state after model response (在工具执行前)
+    // Termination state: update after model response (before tool execution)
+    // Stuck / tool-cap hard stops live in checkTermination — tool errors never
+    // force-block here; results (including failures) always return to the model.
     // ═══════════════════════════════════════════════════════════════════════════
     const openaiCallsForTermination: ToolCall[] = calls.map((c, idx) => ({
       id: c.id || `call_${stageId}_${i}_${idx}`,
@@ -1990,142 +1713,6 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
       tokens: responseUsage.totalTokens,
       cost: (responseUsage.promptTokens / 1000) * 0.002 + (responseUsage.completionTokens / 1000) * 0.01,
     });
-
-    // ═══════════════════════════════════════════════════════════════════════════
-    // Old Stuck Detection - First Detection - 已被新终止系统取代
-    // ═══════════════════════════════════════════════════════════════════════════
-    if (false && isStuck && !stuckDetected) {
-      // First detection: skip tool execution, inject fake results + stop message,
-      // then let the loop continue so the model can produce a text response.
-      stuckDetected = true;
-      const reason = `You have ${buildStuckReason(
-        calls, maxReadFile, maxReadCount, maxSameFileReads,
-        maxRedundantFile, maxRedundantCount, maxRedundantReads,
-        maxPageFile, maxPageCount, maxPageLimit,
-        repeatCount, maxRepeatToolCalls, consecutiveReadonlyIters, maxConsecutiveReadonlyIters,
-      )} without making progress`;
-      console.log("[react] stuck detected, skipping tool execution and injecting stop prompt");
-      writeEventLog({
-        category: "react_loop",
-        message: `ReAct loop 检测到 stuck pattern，跳过本轮工具执行并注入 stop prompt`,
-        details: {
-          stageId,
-          iteration: i,
-          reason,
-          calls: calls.map((c) => ({ name: c.name, args: c.arguments })),
-          stats: {
-            maxReadCount,
-            maxSameFileReads,
-            maxRedundantCount,
-            maxRedundantReads,
-            maxPageCount,
-            pagesPerFileLimit: maxPageLimit,
-            repeatCount,
-            maxRepeatToolCalls,
-            consecutiveReadonlyIters,
-            maxConsecutiveReadonlyIters,
-          },
-        },
-      });
-      logReasoningStep(reasoningTrace, {
-        type: "observation",
-        content: `Stuck pattern detected, skipping tool execution and injecting stop prompt`,
-        timestamp: Date.now(),
-      });
-
-      // Push the assistant message with tool_calls (protocol requires matching tool results)
-      messages.push({ role: "assistant", content: content || null, tool_calls: openaiCalls });
-      history.push({ role: "assistant", content: content || calls.map((c) => `→ ${c.name}`).join("\n") });
-
-      // Push FAKE tool results so the protocol stays valid
-      for (const call of calls) {
-        const id = call.id || `call_skipped_${Date.now()}`;
-        const skipMsg = "(skipped — you already have this information from a previous call)";
-        messages.push({ role: "tool", tool_call_id: id, name: call.name, content: skipMsg });
-        history.push({ role: "tool", id, content: skipMsg, toolName: call.name });
-      }
-
-      // Inject a strong stop prompt
-      const readHint = maxReadCount > maxSameFileReads
-        ? `Range "${maxReadFile}" has already been read — use the existing content directly, or read only lines not yet covered. `
-        : maxRedundantCount > maxRedundantReads
-          ? `File "${maxRedundantFile}" has already been fully returned for these lines — do not re-read overlapping content by changing the offset. `
-          : "";
-      messages.push({
-        role: "system",
-        content:
-          `${reason}. ${readHint}Stop calling exploration tools. Based on the information already gathered, transition to implementation immediately: ` +
-          `use apply_patch / write_file to edit files, run type_check / bash to verify, or give a final conclusion. ` +
-          `Do not call read_file / grep / search_symbols or other exploration tools — but you may and should call implementation tools.`,
-      });
-      continue; // skip tool execution, go to next LLM iteration
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════════
-    // Old Stuck Detection - 已被新终止系统取代，保留代码但禁用
-    // ═══════════════════════════════════════════════════════════════════════════
-    const OLD_STUCK_DETECTION_DISABLED = true; // 新终止系统已接管
-
-    if (!OLD_STUCK_DETECTION_DISABLED && isStuck && stuckDetected) {
-      // Model ignored the stop prompt and called tools again — force-stop NOW.
-      console.log("[react] model ignored stop prompt, force-stopping");
-      writeEventLog({
-        category: "react_loop",
-        message: `ReAct loop force-stop：模型忽略 stop prompt 后再次尝试工具调用`,
-        details: {
-          stageId,
-          iteration: i,
-          totalToolCalls,
-          calls: calls.map((c) => ({ name: c.name, args: c.arguments })),
-          stats: {
-            maxReadCount,
-            maxSameFileReads,
-            maxRedundantCount,
-            maxPageCount,
-            repeatCount,
-            consecutiveReadonlyIters,
-          },
-        },
-      });
-      logReasoningStep(reasoningTrace, {
-        type: "observation",
-        content: "Model ignored stop prompt, force-exiting loop",
-        timestamp: Date.now(),
-      });
-      const stopReason = buildStuckReason(
-        calls, maxReadFile, maxReadCount, maxSameFileReads,
-        maxRedundantFile, maxRedundantCount, maxRedundantReads,
-        maxPageFile, maxPageCount, maxPageLimit,
-        repeatCount, maxRepeatToolCalls, consecutiveReadonlyIters, maxConsecutiveReadonlyIters,
-      );
-      opts.onEvent?.({ type: "error", message: `The model ${stopReason} and was auto-terminated. Try describing the request more specifically, or increase the corresponding limit in the pipeline settings.` });
-      return finalizeTerminal({ lastAssistant: lastAssistant || "(stopped: stuck in tool loop)", aborted: false, blocked: true, blockedReason: stopReason, correctionCount }, "blocked");
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════════
-    // Hard cap: too many tool invocations overall - 已被新终止系统取代
-    // ═══════════════════════════════════════════════════════════════════════════
-    if (false && toolCapEnabled && totalToolCalls > maxTotalToolCalls) {
-      console.log("[react] total tool calls exceeded cap (%d), force-stopping", maxTotalToolCalls);
-      writeEventLog({
-        category: "react_loop",
-        message: `ReAct loop force-stop：工具调用总数超过上限 (${totalToolCalls}/${maxTotalToolCalls})`,
-        details: {
-          stageId,
-          iteration: i,
-          totalToolCalls,
-          maxTotalToolCalls,
-          calls: calls.map((c) => ({ name: c.name, args: c.arguments })),
-        },
-      });
-      logReasoningStep(reasoningTrace, {
-        type: "observation",
-        content: `Total tool calls exceeded cap (${totalToolCalls}/${maxTotalToolCalls}), force-exiting loop`,
-        timestamp: Date.now(),
-      });
-      opts.onEvent?.({ type: "error", message: `Tool call limit reached (${totalToolCalls}/${maxTotalToolCalls} calls); the task may be incomplete. Increase "Max total tool calls" in the pipeline settings and retry.` });
-      return finalizeTerminal({ lastAssistant: lastAssistant || "(stopped: too many tool calls)", aborted: false, blocked: true, blockedReason: `tool call limit ${totalToolCalls}/${maxTotalToolCalls}`, correctionCount }, "blocked");
-    }
 
     messages.push({
       role: "assistant",
@@ -2161,6 +1748,9 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
     // run concurrently; writes / bash / memory mutations / unknown tools run
     // sequentially. Results are always recorded in the original call order so
     // the OpenAI tool-call protocol and history stay deterministic.
+    // ask_user is never parallel-safe; still allow at most one real prompt per
+    // model tool batch so the UI is not asked twice in the same React iteration.
+    let askUserExecutedInBatch = false;
     const runOne = async (ti: number) => {
       const call = calls[ti]!;
       const id = openaiCalls[ti]!.id;
@@ -2169,7 +1759,43 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
         iteration: i,
       });
       opts.onEvent?.({ type: "tool_start", id, name: call.name, args: call.arguments });
-      const result = await executeTool(toolCtx, { ...call, id });
+      let result: Awaited<ReturnType<typeof executeTool>>;
+      if (call.name === "ask_user") {
+        if (askUserExecutedInBatch) {
+          result = {
+            ok: true,
+            output:
+              "Skipped: only one ask_user is allowed per tool batch; reuse the first answer in this batch and do not re-ask.",
+          };
+        } else {
+          askUserExecutedInBatch = true;
+          result = await executeTool(toolCtx, { ...call, id });
+        }
+      } else {
+        result = await executeTool(toolCtx, { ...call, id });
+      }
+      if (!result.ok) {
+        const recovery = classifyRecoveryError(result.output);
+        opts.onEvent?.({
+          type: "recovery",
+          errorType: recovery.type,
+          action: recovery.action,
+          retryable: recovery.retryable,
+          summary: recovery.summary,
+        });
+        recordDecision({
+          iteration: i,
+          goal: currentTask?.description ?? currentStep?.description ?? opts.userMessage.slice(0, 200),
+          action: recovery.action,
+          reasonSummary: recovery.summary,
+          expectedObservation: "修复后获得成功结果或模型改换策略",
+          actualObservationSummary: result.output.slice(0, 300),
+          nextDecision: "retry",
+          timestamp: Date.now(),
+        });
+        // 工具失败（含权限/用户决策类、整文件超限等）已写入 tool result，
+        // 一律交回 LLM 自行纠错或改路径，不得因此打断 react 循环。
+      }
       tracer.endSpan(toolSpanId, result.ok ? "ok" : "error");
       opts.onEvent?.({
         type: "tool_end",
@@ -2184,8 +1810,6 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
 
     const invalidateEvidenceForPath = async (inputPath: string): Promise<void> => {
       const canonicalPath = canonicalReadPath(toolCtx.workspaceRoot, inputPath);
-      for (const coverage of taskReadCoverage.values()) coverage.delete(canonicalPath);
-      for (const versions of taskReadVersions.values()) versions.delete(canonicalPath);
       let changed = false;
       for (const task of informationTasks()) {
         const retained = task.evidence.filter((evidence) => evidence.path !== canonicalPath);
@@ -2201,8 +1825,6 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
     };
 
     const invalidateAllTaskEvidence = async (): Promise<void> => {
-      taskReadCoverage.clear();
-      taskReadVersions.clear();
       let changed = false;
       for (const task of informationTasks()) {
         if (task.evidence.length > 0) {
@@ -2247,7 +1869,6 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
       if (r.result.ok && READ_INVALIDATING_TOOLS.has(r.call.name)) {
         const modifiedPath = String(r.call.arguments?.path ?? "");
         if (modifiedPath) {
-          invalidateReadTracking(modifiedPath);
           emitFreshnessFollowUp(contextControl?.invalidatePath(modifiedPath) ?? null);
           await invalidateEvidenceForPath(modifiedPath);
         }
@@ -2270,7 +1891,6 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
       });
       if (r.result.ok && resultMetadata?.kind === "file_mutation") {
         for (const modifiedPath of resultMetadata.paths) {
-          invalidateReadTracking(modifiedPath);
           emitFreshnessFollowUp(contextControl?.invalidatePath(modifiedPath) ?? null);
           await invalidateEvidenceForPath(modifiedPath);
         }
@@ -2283,15 +1903,6 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
         const isBoundedSourceRead = resultMetadata.kind === "read_file";
         if (isBoundedSourceRead) {
           emitFreshnessFollowUp(contextControl?.recordFreshRead(resultMetadata) ?? null);
-          const canonicalPath = canonicalReadPath(toolCtx.workspaceRoot, resultMetadata.path);
-          readFileTotals.set(canonicalPath, resultMetadata.totalLines);
-          readFilePathLabels.set(canonicalPath, resultMetadata.path);
-          const ranges = readFileCoverage.get(canonicalPath) ?? [];
-          addCoveredRange(ranges, {
-            startLine: resultMetadata.startLine,
-            endLine: resultMetadata.endLine,
-          });
-          readFileCoverage.set(canonicalPath, ranges);
         }
 
         const evidenceTask = activeInformationTask();
@@ -2612,10 +2223,10 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
           resolved: fixResult.resolved,
         });
       }
-      // 达到修复上限后统一终止，不再让模型绕过失败门禁继续生成。
-      if (fixResult.exhausted) {
+      // semantic_diff「移除了导出」等建议性警告：不弹窗、不中断。
+      // 硬错误达修复上限：不发 warning（避免顶部弹窗），正文写入原因后终止。
+      if (fixResult.exhausted && !isAdvisoryVerificationResult(fixResult.finalVerification)) {
         const blockedReason = `自动修复达到上限（${autoFixMaxAttempts} 次）：${fixResult.summary}`;
-        opts.onEvent?.({ type: "warning", message: blockedReason });
         return finalizeTerminal({
           lastAssistant: blockedReason,
           aborted: false,

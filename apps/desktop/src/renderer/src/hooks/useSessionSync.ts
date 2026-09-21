@@ -413,7 +413,7 @@ export function useSessionSync() {
     if (ws) await applyOpened();
   }, [applyOpened]);
 
-  const onSelectProject = useCallback((root: string) => enqueueNavigation(async (navigationVersion) => {
+  const onSelectProject = useCallback((root: string, focusSessionId?: string) => enqueueNavigation(async (navigationVersion) => {
     const projects = useSessionStore.getState().projects;
 
     // In pending-new mode, just record the user's project choice without
@@ -448,8 +448,9 @@ export function useSessionSync() {
 
     const workspace = workspaceRef.current;
 
-    // 点击的是当前项目 → 仅切换展开/折叠，不重新加载
-    if (workspace?.root === root) {
+    // 点击的是当前项目 → 仅切换展开/折叠，不重新加载。
+    // 若调用方同时指定了 focusSessionId（跨项目点会话的原子路径），则继续切会话。
+    if (workspace?.root === root && !focusSessionId) {
       session.setExpanded((e) => ({ ...e, [root]: !(e[root] !== false) }));
       return;
     }
@@ -468,17 +469,23 @@ export function useSessionSync() {
       const state = useSessionStore.getState();
       const cached = state.sessionsByProject[root] ?? [];
       const cachedActiveId = state.activeSessionIdByProject[root];
-      const targetSessionId = cachedActiveId && cached.some((item) => item.id === cachedActiveId)
-        ? cachedActiveId
-        : cached[0]?.id ?? null;
+      // 侧栏跨项目点具体会话时，优先聚焦用户点击的会话，避免先切到缓存活跃会话
+      // 再被后续 onSwitchSession 二次入队抬高 navigationVersion，把历史写入取消掉。
+      const targetSessionId = focusSessionId && cached.some((item) => item.id === focusSessionId)
+        ? focusSessionId
+        : cachedActiveId && cached.some((item) => item.id === cachedActiveId)
+          ? cachedActiveId
+          : cached[0]?.id ?? null;
 
       session.setWorkspace(targetWs);
       session.setSessions(cached);
       session.setExpanded((e) => ({ ...e, [root]: true }));
       workspaceRef.current = targetWs;
       // 使用轻量级 switchWorkspacePath，不清理正在运行的会话
-      await window.owncoder.switchWorkspacePath(root);
-      if (!isNavigationCurrent(navigationVersion)) return;
+      if (workspace?.root !== root) {
+        await window.owncoder.switchWorkspacePath(root);
+        if (!isNavigationCurrent(navigationVersion)) return;
+      }
 
       // 必须走完整会话切换：仅 syncFocusSession 只会更新左侧选中态，
       // 若 bySession 尚无该会话历史，右侧仍会显示空/新会话界面。
@@ -489,7 +496,9 @@ export function useSessionSync() {
         syncFocusSession(null);
       }
       // 工作区已变，git 状态需按新项目刷新（onSwitchSession 不负责这项）。
-      await refreshGit(root);
+      if (workspace?.root !== root) {
+        await refreshGit(root);
+      }
       return;
     }
 
@@ -499,6 +508,9 @@ export function useSessionSync() {
     const ws = await window.owncoder.openWorkspacePath(root);
     if (ws && isNavigationCurrent(navigationVersion)) {
       await applyOpenedInternal(targetWs, { navigationVersion });
+      if (focusSessionId && isNavigationCurrent(navigationVersion)) {
+        await switchSessionInternalRef.current(focusSessionId, navigationVersion, null);
+      }
     }
   }), [applyOpenedInternal, enqueueNavigation, isNavigationCurrent, refreshGit]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -709,6 +721,20 @@ export function useSessionSync() {
         // runtime. Skipping this on cache hits was the multi-session OOM path:
         // renderer kept bySession forever and main never called unloadIdleRuntime.
         const backendData = await window.owncoder.switchChatSession(id);
+        // 即使后续导航版本已过期，也先把后端快照写入 bySession[id]。
+        // 跨项目首次点历史会话时，乐观 syncFocusSession 会先露出空 runtime；
+        // 若这里因为 navigationVersion 过期直接 return，就会一直只剩上方输入框。
+        if (isFirstVisit || !existing?.history?.length) {
+          if (backendData.history?.length) {
+            applyHistory(backendData.history, id);
+          }
+        }
+        if (!existing?.terminal?.length) {
+          chat.setTerminal(backendData.terminal, id);
+        }
+        if (!(existing?.queuedMessages?.length)) {
+          hydrateQueue(id, backendData.state.queuedMessages ?? []);
+        }
         if (!isNavigationCurrent(navigationVersion)) return;
         // await 期间 applySessionState 可能读到后端尚未切换完的 A1；再次锁定 B1。
         syncFocusSession(id);
@@ -721,21 +747,20 @@ export function useSessionSync() {
         
         // 4. Apply backend snapshot. On cache hits prefer in-memory history
         // (may include newer sealed liveEvents) but still sync mode/title/plan.
+        // getChatHistoryPage 负责分页游标；若 conversation store 暂空，保留上面
+        // 已写入的 runtime history，避免空页把首屏消息盖掉。
         if (isFirstVisit || !existing?.history?.length) {
           const page = await window.owncoder.getChatHistoryPage(id, undefined, 10);
           if (!isNavigationCurrent(navigationVersion)) return;
-          applyHistory(page.turns, id);
+          const currentHistory = useChatStore.getState().bySession[id]?.history ?? [];
+          if (page.turns.length > 0 || currentHistory.length === 0) {
+            applyHistory(page.turns, id);
+          }
           chat.setHistoryPageState({ historyBeforeSeq: page.beforeSeq, historyHasMore: page.hasMore, historyLoading: false }, id);
-        }
-        if (!existing?.terminal?.length) {
-          chat.setTerminal(backendData.terminal, id);
         }
         session.setMode(backendData.state.mode);
         session.setSessionTitle(backendData.state.sessionTitle);
         session.setActivePlanPath(backendData.state.activePlanPath, id);
-        if (!(existing?.queuedMessages?.length)) {
-          hydrateQueue(id, backendData.state.queuedMessages ?? []);
-        }
         if (useSessionStore.getState().llmConfigured && workspaceRef.current) {
           resumeQueue(id);
         }

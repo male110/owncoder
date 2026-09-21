@@ -5,9 +5,11 @@
   --panel: #12141a;
   --rail: #0e1013;
   --border: #262a32;
-  --text: #e8eaee;
+  /* Softened from near-white; nudged +2 steps for readability */
+  --text: #f3f7ff;
   --muted: #848b96;
   --fg-muted: #848b96;
+  --fg: var(--text);
   --accent: #6b9cc4;
   --accent-dim: #17202a;
   --chip: #171a20;
@@ -38,8 +40,9 @@
   --user-bubble-border: #2a3d52;
   --code-inline-bg: #1a1e28;
   --table-head-bg: #141820;
-  --session-active: #1a2a3a;
-  --session-active-hover: #213448;
+  /* Quieter active session highlight (less blue punch) */
+  --session-active: #161c24;
+  --session-active-hover: #1a222c;
   --danger-btn-bg: #2a1818;
   --danger-btn-border: #5a3030;
   --surface-tint: #11151b;
@@ -466,12 +469,13 @@ body,
 }
 
 .nav-item.primary {
-  color: var(--text);
-  font-weight: 600;
+  color: var(--muted);
+  font-weight: 400;
 }
 
 .nav-item.primary:hover {
-  background: var(--accent-dim);
+  background: var(--hover);
+  color: var(--text);
 }
 
 .nav-item kbd {
@@ -804,10 +808,10 @@ body,
   border-radius: 8px;
 }
 
-/* 高亮整块 session-wrap，使状态图标落在边框/背景内 */
+/* 高亮整块 session-wrap，使状态图标落在边框/背景内（暗色下去掉刺眼加粗/粗竖条） */
 .session-wrap.active {
   background: var(--session-active);
-  box-shadow: inset 3px 0 0 var(--accent);
+  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--accent) 55%, transparent);
 }
 
 .session-wrap.active:hover {
@@ -820,7 +824,7 @@ body,
 }
 
 .session-wrap.active .session-title {
-  font-weight: 600;
+  font-weight: 400;
 }
 
 /* ── Session status icons (leftmost in sidebar) ── */
@@ -1325,12 +1329,12 @@ button.ghost.accent {
   font-size: 13px;
 }
 
-/* 内联双栏：平台 | 模型，全部在菜单内，不被父级 overflow 裁切 */
+/* 内联双栏：平台 | 模型；两列高度各自独立，互不 stretch 等高 */
 .model-menu-body {
-  display: grid;
-  grid-template-columns: minmax(120px, 0.9fr) minmax(180px, 1.4fr);
+  display: flex;
+  align-items: flex-start;
   min-height: 0;
-  flex: 1;
+  flex: 1 1 auto;
   overflow: hidden;
 }
 
@@ -1341,7 +1345,12 @@ button.ghost.accent {
   padding: 4px;
   overflow-y: auto;
   border-right: 1px solid var(--overlay-04);
-  min-height: 0;
+  box-sizing: border-box;
+  /* 高度只跟平台数量；不与模型列 stretch 对齐 */
+  width: 140px;
+  flex-shrink: 0;
+  align-self: flex-start;
+  max-height: min(320px, calc(50vh - 56px));
 }
 
 .model-menu-provider-item {
@@ -1394,9 +1403,14 @@ button.ghost.accent {
   list-style: none;
   margin: 0;
   padding: 4px;
-  overflow-y: auto;
-  min-height: 0;
+  /* 独立高度：按模型数量增高，超出限高后自行滚动；不拉高平台列 */
+  flex: 1 1 auto;
   min-width: 0;
+  align-self: flex-start;
+  max-height: min(320px, calc(50vh - 56px));
+  overflow-x: hidden;
+  overflow-y: auto;
+  box-sizing: border-box;
 }
 
 .model-menu-models::-webkit-scrollbar,

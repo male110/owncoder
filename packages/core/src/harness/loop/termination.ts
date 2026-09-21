@@ -240,15 +240,18 @@ export function checkTermination(
   // 2.2 Output similarity detection (model keeps saying the same thing)
   //     → Catches stuck patterns like: "I need X" → "I need X" → "I need X"
   //     → consecutiveSimilarOutputs >= 1 means 2 similar outputs detected
+  //     → Treat as normal completion: the model has converged on a final answer,
+  //       so do NOT surface "Task may be incomplete" / error events.
   if (config.enableOutputSimilarityCheck && !unmetNeeds && state.consecutiveSimilarOutputs >= 1) {
     return {
       shouldTerminate: true,
       reason: `Detected ${state.consecutiveSimilarOutputs + 1} consecutive similar outputs (threshold: 80%)`,
       lastAssistant: state.lastContent || synthesizeFallbackResponse(state),
-      aborted: true,
-      metadata: { 
+      aborted: false,
+      metadata: {
         consecutiveSimilarOutputs: state.consecutiveSimilarOutputs + 1,
         threshold: OUTPUT_SIMILARITY_THRESHOLD,
+        normalCompletion: true,
       },
     };
   }
@@ -712,6 +715,22 @@ export function createLoopState(currentTask?: TaskItem): LoopState {
     explorationSkipCount: 0,           // 🔥 NEW
     lastIterationHadExplorationSkip: false, // 🔥 NEW
   };
+}
+
+/**
+ * Clear per-task convergence signals when advancing to the next task.
+ * Similarity / text-only / natural-stop / exploration-skip state must not
+ * carry across tasks, or the next task would be treated as already finished.
+ */
+export function resetOutputTrackingForNewTask(state: LoopState): void {
+  state.consecutiveSimilarOutputs = 0;
+  state.consecutiveTextOnlyTurns = 0;
+  state.previousContent = "";
+  state.lastContent = "";
+  state.lastFinishReason = null;
+  state.lastToolCalls = [];
+  state.explorationSkipCount = 0;
+  state.lastIterationHadExplorationSkip = false;
 }
 
 /**

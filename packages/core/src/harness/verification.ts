@@ -17,7 +17,7 @@
 import { spawn } from "node:child_process";
 import { promises as fs } from "node:fs";
 import { join, extname } from "node:path";
-import { verificationStatus, type VerificationCheck, type VerificationError, type VerificationResult } from "../task-run.ts";
+import { normalizeVerificationResult, type VerificationCheck, type VerificationError, type VerificationResult } from "../task-run.ts";
 export type { VerificationCheck, VerificationError, VerificationResult } from "../task-run.ts";
 
 // ── Types ──────────────────────────────────────────────────
@@ -225,12 +225,15 @@ export class VerificationEngine {
       checks.push(diffCheck);
     }
 
-    // 未实际执行检查不能被当作验证通过，避免任务在无门禁时错误报告成功。
-    const passed = checks.length > 0 && checks.every((c) => c.status === "passed" && c.passed);
-    const status = verificationStatus(passed, checks);
-    const summary = this.buildSummary(checks, passed, size);
-
-    return { passed, status, checks, summary, suggestions };
+    // 统一走 normalize：补齐 blocking/skipped/source，并按阻断性判定整体结果。
+    const summary = this.buildSummary(checks, checks.every((c) => c.status === "passed" || c.status === "skipped"), size);
+    return normalizeVerificationResult({
+      passed: false,
+      status: "failed",
+      checks,
+      summary,
+      suggestions,
+    });
   }
 
   /**
@@ -355,14 +358,18 @@ export class VerificationEngine {
     try {
       const command = this.getTypeCheckCommand(pt, size);
       if (!command) {
+        // 无可用命令时静默跳过，不输出「未配置」文案，也不记为失败
         return {
           name: "typecheck",
           type: "typecheck",
           status: "skipped",
           passed: false,
-          output: "No type checker configured",
+          output: "",
           duration: 0,
           errors: [],
+          blocking: false,
+          skipped: true,
+          source: pt.typeChecker ?? "typecheck",
         };
       }
 
@@ -370,15 +377,19 @@ export class VerificationEngine {
 
       // Parse errors from output
       const parsed = this.parseTypeErrors(result.stdout + result.stderr, pt.typeChecker!);
+      const passed = result.exitCode === 0;
 
       return {
         name: "typecheck",
         type: "typecheck",
-        status: result.exitCode === 0 ? "passed" : "failed",
-        passed: result.exitCode === 0,
+        status: passed ? "passed" : "failed",
+        passed,
         output: (result.stdout + "\n" + result.stderr).trim(),
         duration: Date.now() - start,
         errors: parsed,
+        blocking: !passed,
+        skipped: false,
+        source: pt.typeChecker ?? "typecheck",
       };
     } catch (e) {
       return {
@@ -389,6 +400,9 @@ export class VerificationEngine {
         output: String(e),
         duration: Date.now() - start,
         errors,
+        blocking: true,
+        skipped: false,
+        source: pt.typeChecker ?? "typecheck",
       };
     }
   }
@@ -473,20 +487,27 @@ export class VerificationEngine {
           output: "No linter configured",
           duration: 0,
           errors: [],
+          blocking: false,
+          skipped: true,
+          source: pt.linter ?? "lint",
         };
       }
 
       const result = await this.sandboxExec(command);
       const parsed = this.parseLintOutput(result.stdout + result.stderr, pt.linter!);
+      const passed = parsed.filter((e) => e.severity === "error").length === 0;
 
       return {
         name: "lint",
         type: "lint",
-        status: parsed.filter((e) => e.severity === "error").length === 0 ? "passed" : "failed",
-        passed: parsed.filter((e) => e.severity === "error").length === 0,
+        status: passed ? "passed" : "failed",
+        passed,
         output: (result.stdout + "\n" + result.stderr).trim(),
         duration: Date.now() - start,
         errors: parsed,
+        blocking: !passed,
+        skipped: false,
+        source: pt.linter ?? "lint",
       };
     } catch (e) {
       return {
@@ -497,6 +518,9 @@ export class VerificationEngine {
         output: String(e),
         duration: Date.now() - start,
         errors,
+        blocking: true,
+        skipped: false,
+        source: pt.linter ?? "lint",
       };
     }
   }
@@ -573,19 +597,23 @@ export class VerificationEngine {
       breakingChanges.push(...diff.breakingChanges);
     }
 
+    // 「移除了导出」等是启发式提示，不能当验证失败：否则会耗尽自动修复并弹窗中断。
     return {
       name: "semantic_diff",
       type: "semantic_diff",
-      status: breakingChanges.length === 0 ? "passed" : "failed",
-      passed: breakingChanges.length === 0,
+      status: "passed",
+      passed: true,
       output: diffs.map((d) =>
         `${d.path}: +${d.additions} -${d.deletions} (${d.hunks.length} hunks)`
       ).join("\n"),
       duration: Date.now() - start,
       errors: breakingChanges.map((msg) => ({
         message: msg,
-        severity: "warning",
+        severity: "warning" as const,
       })),
+      blocking: false,
+      skipped: false,
+      source: "semantic_diff",
     };
   }
 
@@ -672,8 +700,9 @@ export class VerificationEngine {
     lines.push("");
 
     for (const check of checks) {
-      const icon = check.passed ? "✅" : "❌";
-      lines.push(`${icon} ${check.name}: ${check.passed ? "通过" : "失败"} (${check.duration}ms)`);
+      const icon = check.skipped || check.status === "skipped" ? "⏭️" : check.passed ? "✅" : "❌";
+      const label = check.skipped || check.status === "skipped" ? "跳过" : check.passed ? "通过" : "失败";
+      lines.push(`${icon} ${check.name}: ${label} (${check.duration}ms)`);
       if (check.errors.length > 0) {
         for (const err of check.errors.slice(0, 5)) {
           const loc = err.file ? `${err.file}:${err.line ?? ""}` : "";

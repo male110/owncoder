@@ -136,6 +136,58 @@ describe("task-run success gate", () => {
     expect(sealed.state.phase).toBe("failed");
   });
 
+  it("恢复旧版缺失 status 的 check 时依据 passed 推导状态", () => {
+    const normalized = normalizeVerificationResult({
+      status: "failed",
+      passed: false,
+      checks: [{ ...passedCheck("legacy"), status: undefined as never }],
+      summary: "legacy",
+      suggestions: [],
+    });
+    expect(normalized.checks[0].status).toBe("passed");
+    expect(normalized.checks[0].passed).toBe(true);
+    expect(normalized.checks[0].blocking).toBe(false);
+    expect(normalized.checks[0].skipped).toBe(false);
+    expect(normalized.checks[0].source).toBe("legacy");
+    expect(normalized.status).toBe("passed");
+    expect(normalized.passed).toBe(true);
+  });
+
+  it("normalize 会补齐 blocking/skipped/source，且仅 blocking 失败才整体失败", () => {
+    const normalized = normalizeVerificationResult({
+      status: "failed",
+      passed: false,
+      checks: [
+        {
+          name: "typecheck",
+          type: "typecheck",
+          status: "skipped",
+          passed: false,
+          output: "",
+          duration: 0,
+          errors: [],
+        },
+        {
+          name: "semantic_diff",
+          type: "semantic_diff",
+          status: "failed",
+          passed: false,
+          output: "",
+          duration: 1,
+          errors: [{ message: "移除了导出: foo", severity: "warning" }],
+        },
+      ],
+      summary: "advisory only",
+      suggestions: [],
+    });
+    expect(normalized.checks[0]?.skipped).toBe(true);
+    expect(normalized.checks[0]?.blocking).toBe(false);
+    expect(normalized.checks[1]?.blocking).toBe(false);
+    expect(normalized.checks[1]?.source).toBe("semantic_diff");
+    expect(normalized.passed).toBe(true);
+    expect(normalized.status).toBe("passed");
+  });
+
   it("空 checks 的 verificationStatus 为 not_run，且 normalize 保持一致", () => {
     expect(verificationStatus(true, [])).toBe("not_run");
     const normalized = normalizeVerificationResult({

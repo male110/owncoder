@@ -149,6 +149,20 @@ describe("applyChatEvent streaming / turn_complete", () => {
     });
     expect(useChatStore.getState().errorAlert).toBeNull();
 
+    apply({
+      type: "warning",
+      sessionId: "s1",
+      message: "自动修复达到上限（3 次）：### semantic_diff (semantic_diff) ⚠️ packages/core/src/harness/loop/context.ts: 移除了导出: export function isMeaningfulRepoMap",
+    });
+    expect(useChatStore.getState().errorAlert).toBeNull();
+
+    apply({
+      type: "warning",
+      sessionId: "s1",
+      message: "自动修复达到上限（3 次）：### semantic_diff (semantic_diff) ⚠️ packages/core/src/harness/loop/context.ts: 移除了导出: export function isMeaningfulRepoMap",
+    });
+    expect(useChatStore.getState().errorAlert).toBeNull();
+
     apply({ type: "warning", sessionId: "s1", text: "其他警告" } as ChatEventDto);
     apply({ type: "warning", sessionId: "s1", message: "其他警告" });
     expect(useChatStore.getState().errorAlert?.message).toBe("其他警告");

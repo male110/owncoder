@@ -56,6 +56,8 @@ import {
 import { AdaptivePromptOptimizer } from "./prompt-optimizer.ts";
 
 import { persistExperiences } from "./experience.ts";
+export { classifyRecoveryError } from "./recovery.ts";
+import { applyTaskEvent } from "../task-run.ts";
 import { persistRoundReport, persistRoundEvidence, persistRoundFileChanges, collectReadEvidenceFromTurns, type PersistedEvidence, type PersistedFileChange } from "../turn-rounds.ts";
 
 // Loop submodules (responsibility split: types / prompts / stages / scheduler)
@@ -65,11 +67,12 @@ import { resolveMidStages, resolveStageModel } from "./loop/stages.ts";
 import { runPipelineScheduler, type SchedulerContext, type SchedulerState } from "./loop/pipeline-scheduler.ts";
 import { runVerifyReport, mergeVerificationIntoAssistant } from "./loop/react.ts";
 
-export type { TurnEvent, TurnEventInput, ChatTurn, DocumentWorkflowState, AgentLoopOpts, AgentLoopResult } from "./loop/types.ts";
+export type { TurnEvent, TurnEventInput, ChatTurn, DocumentWorkflowState, AgentLoopOpts, AgentLoopResult, ReactDecisionSummary } from "./loop/types.ts";
 export { stampTurnEvent } from "./loop/types.ts";
 export type {
   HistoryChunk,
   HistoryChunkInput,
+  HistorySearchHit,
   EmbeddingService,
   HistoryVectorStore,
 } from "./loop/history-vector.ts";
@@ -233,6 +236,7 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
     touchedPaths: opts.touchedPaths,
     confirmDangerousBash: opts.confirmDangerousBash,
     askUser: opts.askUser,
+    askUserTurnCache: new Map(),
     onTerminal: (entry) => opts.onEvent?.({ type: "terminal", entry }),
     onEvent: (ev) => opts.onEvent?.(ev as TurnEvent),
 
@@ -296,6 +300,29 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
       }
     }
 
+    // post_verify 硬失败必须与 successRejected 对齐，避免只挡报告却仍像成功返回。
+    if (state.postVerifyFailed) {
+      state.successRejected = true;
+      state.blocked = true;
+      if (!state.blockedReason) {
+        state.blockedReason =
+          state.taskRunState?.metrics.terminalReason ?? "post_verify 验证未通过";
+      }
+      if (
+        state.taskRunState &&
+        state.taskRunState.phase !== "failed" &&
+        state.taskRunState.phase !== "blocked" &&
+        state.taskRunState.phase !== "interrupted"
+      ) {
+        state.taskRunState = applyTaskEvent(state.taskRunState, {
+          type: "phase_changed",
+          taskId: state.taskRunState.taskId,
+          phase: "failed",
+          reason: state.blockedReason,
+        });
+      }
+    }
+
     return {
       history,
       assistantText,
@@ -306,7 +333,7 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
       reasoningTrace,
       traceSummary,
       taskRunState: state.taskRunState ?? opts.taskRunState ?? null,
-      successRejected: state.successRejected === true,
+      successRejected: state.successRejected === true || state.postVerifyFailed === true,
     };
   };
 
@@ -460,6 +487,7 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
   // rule that a handoff / abort ends the autonomous part of the turn.
   if (
     state.verifyNodeForReport !== null &&
+    !state.postVerifyFailed &&
     !state.aborted &&
     !state.blocked &&
     !state.awaitingUserConfirmation &&
@@ -497,10 +525,14 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
   // the collected report/evidence, but do not run verification or auto-fix.
   // 验证门禁拒绝成功时，只在 LLM 正文区提示失败文件，不再弹顶部错误条。
   if (state.blocked && !state.successRejected) {
-    opts.onEvent?.({
-      type: "warning",
-      message: state.blockedReason ?? "Exploration is blocked; additional user guidance is required.",
-    });
+    const blockedMessage = state.blockedReason ?? "Exploration is blocked; additional user guidance is required.";
+    // 自动修复达上限 / 导出移除类警告只进正文，不弹顶部错误条。
+    if (!blockedMessage.includes("自动修复达到上限") && !blockedMessage.includes("移除了导出")) {
+      opts.onEvent?.({
+        type: "warning",
+        message: blockedMessage,
+      });
+    }
   }
 
   // ── Aborted: return early (skip experience harvest) ──

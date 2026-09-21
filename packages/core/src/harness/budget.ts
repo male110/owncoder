@@ -43,7 +43,6 @@ export interface SegmentActualSizes {
   history: number;
   toolResults: number;
   techStack: number;
-  retrieval: number;
 }
 
 /** Dynamic segment budgets allocated from the remaining input budget. */
@@ -51,7 +50,6 @@ export interface SegmentBudgets {
   history: number;
   toolResults: number;
   techStack: number;
-  retrieval: number;
 }
 
 /** Full context budget breakdown. */
@@ -143,7 +141,6 @@ export function redistributeBudgets(
     history: capped.history,
     toolResults: capped.toolResults,
     techStack: capped.techStack,
-    retrieval: segments.retrieval,
   };
 }
 
@@ -181,7 +178,6 @@ export function computeContextBudget(
     history: Math.floor(remaining * (seg.historyRatio / segSum)),
     toolResults: Math.floor(remaining * (seg.toolResultRatio / segSum)),
     techStack: Math.floor(remaining * (seg.techStackRatio / segSum)),
-    retrieval: 0,
   };
 
   // Dynamic redistribution: if actual sizes are known, redistribute unused budget.

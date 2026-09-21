@@ -30,7 +30,7 @@ interface Props {
   onSelectModel: (modelId: string) => void;
   onOpenSettings: () => void;
   onSelectThinkingEffort: (effort: ThinkingEffort) => void;
-  onSelectProject: (root: string) => Promise<void>;
+  onSelectProject: (root: string, focusSessionId?: string) => Promise<void>;
   onAddProject: () => void;
   onRemoveQueueMessage: (index: number) => void;
 }

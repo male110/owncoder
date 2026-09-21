@@ -29,6 +29,9 @@ import {
   formatRecalledHistoryChunks,
   recallHistoryByUserInput,
   buildDecomposeContext,
+  rankAndFilterByRelevance,
+  estimateTextRelevance,
+  RELEVANT_HISTORY_SCORE_THRESHOLD,
 } from "../task-decompose.ts";
 import { BUILTIN_WORKFLOW } from "@owncoder/settings";
 import { contextBudgets } from "../../../budget.ts";
@@ -865,6 +868,7 @@ describe("relevantHistory 为可承载全部相关历史的字符串", () => {
       "   1|export class AuthService {}",
     ].join("\n");
     const packed = packFallbackRelevantHistory({
+      userMessage: "登录页太慢，给 login 加 Redis 缓存",
       history: [
         { role: "user", content: "登录页太慢，加 Redis 缓存" },
         {
@@ -884,6 +888,66 @@ describe("relevantHistory 为可承载全部相关历史的字符串", () => {
     expect(packed).toContain("## 近期对话要点");
     expect(packed).toContain("登录页太慢，加 Redis 缓存");
     expect(packed).toContain("已确认 login 每次打 DB");
+  });
+
+  it("fallback 按相关度排序并丢弃 <60% 的块", () => {
+    const packed = packFallbackRelevantHistory({
+      userMessage: "修复 auth login Redis 缓存",
+      history: [
+        { role: "user", content: "给 auth login 加 Redis 缓存" },
+        {
+          role: "tool",
+          toolName: "read_file",
+          content: [
+            "Read src/auth/login.ts (lines 1-2 of 2)",
+            "[lines 1-2 of 2]",
+            "   1|export class AuthService {}",
+            "   2|// redis cache",
+          ].join("\n"),
+        },
+        { role: "assistant", content: "auth login 将使用 Redis 缓存。" },
+        { role: "user", content: "顺便看看天气 UI 配色" },
+        {
+          role: "tool",
+          toolName: "read_file",
+          content: [
+            "Read src/ui/weather-theme.css (lines 1-2 of 2)",
+            "[lines 1-2 of 2]",
+            "   1|body { color: blue }",
+            "   2|/* theme only */",
+          ].join("\n"),
+        },
+        { role: "assistant", content: "天气主题配色已调整为蓝色。" },
+        { role: "user", content: "继续修 login 缓存" },
+      ],
+    });
+
+    expect(packed).toBeDefined();
+    expect(packed).toContain("src/auth/login.ts");
+    expect(packed).toContain("Redis");
+    // 与 login/redis 无关的天气主题应被 <0.6 过滤掉
+    expect(packed).not.toContain("weather-theme.css");
+    expect(packed).not.toContain("天气主题配色");
+  });
+});
+
+describe("相关度排序与阈值", () => {
+  it("rankAndFilterByRelevance 降序并丢弃 < threshold", () => {
+    const ranked = rankAndFilterByRelevance(
+      [
+        { id: "a", score: 0.55 },
+        { id: "b", score: 0.9 },
+        { id: "c", score: 0.6 },
+        { id: "d", score: 0.2 },
+      ],
+      RELEVANT_HISTORY_SCORE_THRESHOLD,
+    );
+    expect(ranked.map((x) => x.id)).toEqual(["b", "c"]);
+  });
+
+  it("estimateTextRelevance 对高重叠文本给出高分", () => {
+    expect(estimateTextRelevance("auth login redis", "auth login redis cache")).toBeGreaterThanOrEqual(0.6);
+    expect(estimateTextRelevance("auth login redis", "weather theme color blue")).toBeLessThan(0.6);
   });
 });
 
@@ -979,13 +1043,14 @@ describe("分解历史：最近5轮 + 按用户输入向量召回（同容器不
     expect(recalled).toEqual([]);
   });
 
-  it("有 historyVector 时按当前用户输入 embed + search", async () => {
+  it("有 historyVector 时按当前用户输入 embed + search，并按相关度排序过滤", async () => {
     const query = "按用户输入做向量召回";
     const embedCalls: string[] = [];
     const searchCalls: Array<{ topK: number; sessionId: string | null | undefined }> = [];
     const recalledChunks = [
-      makeChunk({ turnIndex: 9, role: "user", content: "更早相关：向量召回接线讨论" }),
-      makeChunk({ turnIndex: 2, role: "assistant", content: "更早相关：已确认同容器不截断" }),
+      { ...makeChunk({ turnIndex: 9, role: "user", content: "更早相关：向量召回接线讨论" }), score: 0.82 },
+      { ...makeChunk({ turnIndex: 2, role: "assistant", content: "更早相关：已确认同容器不截断" }), score: 0.91 },
+      { ...makeChunk({ turnIndex: 1, role: "user", content: "无关闲聊" }), score: 0.3 },
     ];
 
     const recalled = await recallHistoryByUserInput({
@@ -1017,9 +1082,10 @@ describe("分解历史：最近5轮 + 按用户输入向量召回（同容器不
 
     expect(embedCalls).toEqual([query]);
     expect(searchCalls).toEqual([{ topK: 5, sessionId: SESSION_ID }]);
+    // score 降序，且 <0.6 丢弃
     expect(recalled).toEqual([
-      { turnIndex: 9, role: "user", content: "更早相关：向量召回接线讨论" },
-      { turnIndex: 2, role: "assistant", content: "更早相关：已确认同容器不截断" },
+      { turnIndex: 2, role: "assistant", content: "更早相关：已确认同容器不截断", score: 0.91 },
+      { turnIndex: 9, role: "user", content: "更早相关：向量召回接线讨论", score: 0.82 },
     ]);
   });
 
@@ -1064,11 +1130,14 @@ describe("分解历史：最近5轮 + 按用户输入向量召回（同容器不
             },
             search() {
               return [
-                makeChunk({
-                  turnIndex: 4,
-                  role: "user",
-                  content: longRecalled,
-                }),
+                {
+                  ...makeChunk({
+                    turnIndex: 4,
+                    role: "user",
+                    content: longRecalled,
+                  }),
+                  score: 0.88,
+                },
               ];
             },
             countBySession() {

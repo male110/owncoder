@@ -25,6 +25,7 @@ import type {
   EmbeddingService,
   HistoryChunk,
   HistoryChunkInput,
+  HistorySearchHit,
   HistoryVectorStore,
 } from "@owncoder/core";
 
@@ -266,7 +267,7 @@ class SqliteVecHistoryStore implements HistoryVectorStore {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     this.searchStmt = this.db.prepare(`
-      SELECT m.id, m.turn_id, m.session_id, m.role, m.content, m.content_hash, m.created_at, m.turn_index
+      SELECT m.id, m.turn_id, m.session_id, m.role, m.content, m.content_hash, m.created_at, m.turn_index, k.distance
       FROM (
         SELECT rowid, distance
         FROM history_chunks_vec
@@ -344,7 +345,7 @@ class SqliteVecHistoryStore implements HistoryVectorStore {
     insert();
   }
 
-  search(queryVector: Float32Array, topK: number, sessionId?: string | null): HistoryChunk[] {
+  search(queryVector: Float32Array, topK: number, sessionId?: string | null): HistorySearchHit[] {
     const rows = this.searchStmt.all(queryVector, topK, sessionId ?? null, sessionId ?? null) as Array<{
       id: string;
       turn_id: string;
@@ -354,17 +355,25 @@ class SqliteVecHistoryStore implements HistoryVectorStore {
       content_hash: string;
       created_at: string;
       turn_index: number;
+      distance: number;
     }>;
-    return rows.map((r) => ({
-      id: r.id,
-      turnId: r.turn_id,
-      sessionId: r.session_id,
-      role: r.role,
-      content: r.content,
-      contentHash: r.content_hash,
-      createdAt: r.created_at,
-      turnIndex: r.turn_index,
-    }));
+    return rows.map((r) => {
+      // sqlite-vec cosine distance: 0 = identical, larger = less similar.
+      // Convert to [0,1] relevance so callers can threshold (e.g. drop < 0.6).
+      const distance = typeof r.distance === "number" && Number.isFinite(r.distance) ? r.distance : 1;
+      const score = Math.max(0, Math.min(1, 1 - distance));
+      return {
+        id: r.id,
+        turnId: r.turn_id,
+        sessionId: r.session_id,
+        role: r.role,
+        content: r.content,
+        contentHash: r.content_hash,
+        createdAt: r.created_at,
+        turnIndex: r.turn_index,
+        score,
+      };
+    });
   }
 
   countBySession(sessionId: string): number {

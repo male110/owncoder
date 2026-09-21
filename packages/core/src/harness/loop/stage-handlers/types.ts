@@ -56,6 +56,8 @@ export interface SchedulerState {
   taskRunState?: import("../../../task-run.ts").TaskRunState | null;
   /** 成功门禁拒绝。 */
   successRejected?: boolean;
+  /** post_verify 发生硬失败；禁止随后生成成功型验证报告。 */
+  postVerifyFailed?: boolean;
   /** Fixed segment sizes measured during context_gather. */
   fixedSegments?: FixedSegments;
   /** Token-based context budget from context_gather (taskDecomposition=0). */
