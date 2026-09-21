@@ -12,7 +12,7 @@
     "pack:win": "pnpm build && electron-builder --win",
     "pack:mac": "pnpm build && electron-builder --mac",
     "pack:linux": "pnpm build && electron-builder --linux",
-    "publish:oss": "node ./scripts/publish-release.mjs",
+    "publish": "node ./scripts/publish-release.mjs",
     "typecheck": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.web.json --noEmit"
   },
   "dependencies": {
