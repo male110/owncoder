@@ -87,6 +87,10 @@ function modelOutputLimit(ctx: ToolContext, toolName: string): number {
   if (toolName === "read_file" || toolName === "read_symbol") {
     return Math.max(ctx.maxOutputChars, READ_FILE_OUTPUT_BUDGET);
   }
+  // 历史召回必须返回索引中的完整原文（尤其是 LLM 报告），不能再被工具出口 cap 裁短。
+  if (toolName === "recall_history") {
+    return Number.MAX_SAFE_INTEGER;
+  }
   return ctx.maxOutputChars;
 }
 

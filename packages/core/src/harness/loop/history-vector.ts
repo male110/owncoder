@@ -122,3 +122,126 @@ export function archiveTurn(
     createdAt: new Date().toISOString(),
   };
 }
+
+/** 向量召回相关度下限：低于此值的历史片段丢弃（60%）。 */
+export const HISTORY_MIN_RELEVANCE_SCORE = 0.6;
+
+/**
+ * 召回结果两两去重阈值：达到该 Jaccard 相似度视为近重复，只保留更新的一轮。
+ * 与 minimum-context 的冗余判定同量级，避免误删「相关但内容不同」的轮次。
+ */
+export const HISTORY_NEAR_DUPLICATE_THRESHOLD = 0.88;
+
+/** 召回条目上用于判断「是否同一轮 / 哪一轮更新」的字段。 */
+export interface HistoryRecencyFields {
+  content: string;
+  turnIndex: number;
+  createdAt?: string;
+  turnId?: string;
+  id?: string;
+}
+
+/**
+ * 从归档正文抽出用于近重复比较的文本。
+ * 优先用 userInput + 报告 + 分解（忽略 JSON 键名膨胀）；旧版纯文本归档则用原文。
+ */
+export function comparableHistoryText(content: string): string {
+  try {
+    const parsed: unknown = JSON.parse(content);
+    if (parsed && typeof parsed === "object") {
+      const round = parsed as Record<string, unknown>;
+      const parts = [round.userInput, round.llmReport, round.taskDecomposition]
+        .map((value) => {
+          if (typeof value === "string") return value;
+          if (value == null) return "";
+          return JSON.stringify(value);
+        })
+        .filter((value) => value.trim().length > 0);
+      if (parts.length > 0) return parts.join("\n");
+    }
+  } catch {
+    // Older archived chunks are plain text.
+  }
+  return content;
+}
+
+/** 词袋 Jaccard 相似度，范围 [0, 1]。空文本视为不相似，避免误伤。 */
+export function historyTextSimilarity(left: string, right: string): number {
+  const a = historyTokenSet(left);
+  const b = historyTokenSet(right);
+  if (a.size === 0 || b.size === 0) return 0;
+  let shared = 0;
+  for (const token of a) {
+    if (b.has(token)) shared += 1;
+  }
+  return shared / (a.size + b.size - shared);
+}
+
+/**
+ * 召回结果近重复去重：两条历史文本相似度 ≥ 阈值时只留最近一轮，正文不裁剪。
+ * 保留项维持输入顺序（通常是查询相关度降序），不回填被丢弃名次之后的命中。
+ */
+export function dedupeSimilarHistoryHits<T extends HistoryRecencyFields>(
+  hits: readonly T[],
+  threshold = HISTORY_NEAR_DUPLICATE_THRESHOLD,
+): T[] {
+  if (hits.length <= 1) return hits.slice();
+
+  const newestFirst = hits
+    .map((hit, index) => ({ hit, index }))
+    .sort((a, b) => {
+      const recency = compareHistoryRecency(b.hit, a.hit);
+      if (recency !== 0) return recency;
+      return a.index - b.index;
+    });
+
+  const kept = new Set<T>();
+  const keptTexts: string[] = [];
+  for (const { hit } of newestFirst) {
+    const text = comparableHistoryText(hit.content);
+    const duplicate = keptTexts.some((existing) => historyTextSimilarity(text, existing) >= threshold);
+    if (duplicate) continue;
+    kept.add(hit);
+    keptTexts.push(text);
+  }
+
+  return hits.filter((hit) => kept.has(hit));
+}
+
+/**
+ * 召回后处理（recall_history 与任务分解共用）：
+ * 先丢掉相关性 < 60% 的条目，再对剩余结果做近重复去重（高相似只留最近一轮）。
+ * 保留项维持相关度降序，正文不裁剪。
+ */
+export function finalizeRecalledHistoryHits<T extends HistoryRecencyFields & { score?: number }>(
+  hits: readonly T[],
+  minScore = HISTORY_MIN_RELEVANCE_SCORE,
+): T[] {
+  const relevant = hits
+    .filter((item) => typeof item.score === "number" && Number.isFinite(item.score) && item.score >= minScore)
+    .slice()
+    .sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+  return dedupeSimilarHistoryHits(relevant);
+}
+
+function historyTokenSet(text: string, maxTokens = 512): Set<string> {
+  const tokens = text.toLocaleLowerCase().match(/[\p{L}\p{N}_./:-]+/gu) ?? [];
+  const set = new Set<string>();
+  for (const token of tokens) {
+    if (token.length < 2) continue;
+    set.add(token);
+    if (set.size >= maxTokens) break;
+  }
+  return set;
+}
+
+/** 越大越新：优先 turnIndex（归档单调序号），其次 createdAt，再次 turnId/id。 */
+function compareHistoryRecency(left: HistoryRecencyFields, right: HistoryRecencyFields): number {
+  if (left.turnIndex !== right.turnIndex) return left.turnIndex - right.turnIndex;
+  const leftAt = Date.parse(left.createdAt ?? "") || 0;
+  const rightAt = Date.parse(right.createdAt ?? "") || 0;
+  if (leftAt !== rightAt) return leftAt - rightAt;
+  const leftId = left.turnId || left.id || "";
+  const rightId = right.turnId || right.id || "";
+  return leftId < rightId ? -1 : leftId > rightId ? 1 : 0;
+}

@@ -426,6 +426,10 @@ function summarizeToolResultForHistory(
     const path = String(call.arguments?.path ?? "").trim();
     return path ? `${call.name} ${path}\n${output}` : output;
   }
+  // 历史召回保留完整原文，避免后续轮次只能看到被压到 4KB 的片段。
+  if (result.ok && call.name === "recall_history") {
+    return `${call.name} completed: ${output}`;
+  }
   if (!result.ok) return `${call.name} failed: ${output.slice(0, MAX_TOOL_HISTORY_CHARS)}`;
   if (READONLY_TOOLS.has(call.name)) {
     return `${call.name} completed: ${output.slice(0, MAX_TOOL_HISTORY_CHARS)}${output.length > MAX_TOOL_HISTORY_CHARS ? " …[truncated]" : ""}`;

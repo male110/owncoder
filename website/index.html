@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="OwnCoder — 安全优先的 AI 编程工具。密码密钥自动脱敏，代码与索引全部留在本地，不上传云端。" />
+  <meta name="theme-color" content="#0b1220" />
+  <title>OwnCoder — 安全优先的 AI 编程工具</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="bg-glow" aria-hidden="true"></div>
+
+  <header class="site-header">
+    <div class="container nav">
+      <a class="brand" href="#top" aria-label="OwnCoder 首页">
+        <span class="brand-name">OwnCoder</span>
+      </a>
+      <nav class="nav-links" aria-label="主导航">
+        <a href="#security">安全</a>
+        <a href="#features">能力</a>
+        <a href="#local">本地优先</a>
+        <a href="#download" class="nav-cta">下载</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="top">
+    <section class="hero container">
+      <p class="eyebrow">安全优先 · 本地运行 · 零遥测</p>
+      <h1>你的代码，始终属于你。</h1>
+      <p class="hero-lead">
+        OwnCoder 是面向开发者的 AI 编程桌面工具。发送给大模型前自动脱敏密码与密钥，
+        代码分析与索引全部在本地完成——不上传源码，没有云端索引。
+      </p>
+      <div class="hero-actions">
+        <a class="btn btn-primary" href="https://gitee.com/f6688/owncoder/releases" target="_blank" rel="noopener noreferrer">
+          免费下载 Windows 版
+        </a>
+        <a class="btn btn-ghost" href="https://gitee.com/f6688/owncoder" target="_blank" rel="noopener noreferrer">
+          查看源码
+        </a>
+      </div>
+      <ul class="trust-row" aria-label="核心承诺">
+        <li>密码 / 密钥自动脱敏</li>
+        <li>不上传代码</li>
+        <li>索引仅存本地</li>
+        <li>零遥测</li>
+      </ul>
+    </section>
+
+    <section id="security" class="section container">
+      <div class="section-head">
+        <p class="eyebrow">安全第一</p>
+        <h2>敏感信息，发往模型前就被挡住</h2>
+        <p class="section-desc">
+          数据库口令、API Key、SSH 私钥不会因为一次 Agent 读文件就离开你的机器。
+          OwnCoder 在请求发出前自动检测并替换为 <code>[REDACTED]</code>。
+        </p>
+      </div>
+
+      <div class="grid-3">
+        <article class="card">
+          <div class="card-icon" aria-hidden="true">01</div>
+          <h3>文件匹配</h3>
+          <p>60+ 内置 glob，覆盖 <code>.env</code>、<code>*.pem</code>、<code>*.key</code>、kubeconfig、terraform 变量等敏感文件。</p>
+        </article>
+        <article class="card">
+          <div class="card-icon" aria-hidden="true">02</div>
+          <h3>格式识别</h3>
+          <p>25+ 种密钥格式正则：OpenAI、AWS、GCP、GitHub Token、数据库连接串、JWT、PEM 私钥块等。</p>
+        </article>
+        <article class="card">
+          <div class="card-icon" aria-hidden="true">03</div>
+          <h3>关键词兜底</h3>
+          <p>识别 <code>password</code>、<code>secret</code>、<code>token</code> 以及 <code>*_PASSWORD</code> 等环境变量后缀，减少漏网。</p>
+        </article>
+      </div>
+
+      <div class="split demo-panel">
+        <div>
+          <h3>两种脱敏粒度</h3>
+          <ul class="check-list">
+            <li><strong>值级脱敏</strong>：仅掩码敏感字段，其余结构仍可读，Agent 能理解配置形态。</li>
+            <li><strong>全文件脱敏</strong>：私钥、证书等整文件掩码，Agent 只知道“这是敏感文件”。</li>
+            <li><strong>可自定义规则</strong>：在设置中追加 glob 与正则，并支持本地预览验证。</li>
+          </ul>
+        </div>
+        <div class="code-window" role="img" aria-label="脱敏前后对比示意">
+          <div class="code-window-bar">
+            <span></span><span></span><span></span>
+            <em>.env → 发送前</em>
+          </div>
+<pre><code><span class="tok-key">DB_HOST</span>=localhost
+<span class="tok-key">DB_USER</span>=app
+<span class="tok-key">DB_PASSWORD</span>=<span class="tok-redacted">[REDACTED]</span>
+<span class="tok-key">OPENAI_API_KEY</span>=<span class="tok-redacted">[REDACTED]</span>
+<span class="tok-key">SSH_PRIVATE_KEY</span>=<span class="tok-redacted">[REDACTED]</span></code></pre>
+        </div>
+      </div>
+    </section>
+
+    <section id="local" class="section section-alt">
+      <div class="container">
+        <div class="section-head">
+          <p class="eyebrow">本地优先 · 无云端索引</p>
+          <h2>代码不上传，索引也不上云</h2>
+          <p class="section-desc">
+            分析、检索、嵌入与经验记忆都在你的电脑上完成。没有把仓库同步到第三方服务器的“云端知识库”。
+          </p>
+        </div>
+
+        <div class="grid-2">
+          <article class="card card-lg">
+            <h3>完全本地的索引体系</h3>
+            <p>基于 SQLite + FTS5 的统一索引：符号搜索、全文检索、经验索引，增量扫描并遵循 <code>.gitignore</code>。</p>
+            <ul class="check-list compact">
+              <li>35+ 语言符号索引（tree-sitter）</li>
+              <li>本地 RAG 嵌入，可离线使用</li>
+              <li>数据只落在本机，不经过 OwnCoder 云</li>
+            </ul>
+          </article>
+          <article class="card card-lg">
+            <h3>隐私承诺写进产品默认值</h3>
+            <ul class="check-list compact">
+              <li><strong>不上传代码</strong>：源码不会被同步到 OwnCoder 服务器</li>
+              <li><strong>无云端索引</strong>：没有远程向量库 / 远程代码仓镜像</li>
+              <li><strong>零遥测</strong>：不搜集使用数据，不上报崩溃，不埋分析点</li>
+              <li><strong>自主可控</strong>：密钥与工作区数据始终在你的机器上</li>
+            </ul>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="features" class="section container">
+      <div class="section-head">
+        <p class="eyebrow">核心能力</p>
+        <h2>安全之外，同样好用</h2>
+        <p class="section-desc">Plan 与 Agent 双模式、执行级验证、内联变更审查——把 AI 编程做成可审查、可回退的工程流程。</p>
+      </div>
+
+      <div class="grid-3">
+        <article class="card">
+          <h3>Plan + Agent</h3>
+          <p>Plan 只读分析与方案；Agent 可编辑文件、执行命令、跑测试。先想清楚，再动手改。</p>
+        </article>
+        <article class="card">
+          <h3>执行级验证</h3>
+          <p>改完自动跑类型检查、Lint 与关联测试；失败则进入自动修复循环，而不是“看起来能跑”。</p>
+        </article>
+        <article class="card">
+          <h3>内联变更审查</h3>
+          <p>每次操作后展示逐文件 diff，支持单文件保留 / 撤销，以及全部保留 / 全部撤销。</p>
+        </article>
+        <article class="card">
+          <h3>写入与命令防护</h3>
+          <p>三层写入策略阻止误改关键路径；危险命令需二次确认，超时默认拒绝（fail-closed）。</p>
+        </article>
+        <article class="card">
+          <h3>高缓存命中</h3>
+          <p>面向真实账单优化上下文，缓存命中率可观，让日常迭代更省 token。</p>
+        </article>
+        <article class="card">
+          <h3>开放模型接入</h3>
+          <p>兼容任意 OpenAI Chat Completions 接口：DeepSeek、通义、智谱、Moonshot 等均可自配。</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="download" class="section cta-section">
+      <div class="container cta-box">
+        <p class="eyebrow">开始使用</p>
+        <h2>把安全默认值，装进你的工作流</h2>
+        <p>
+          当前主要支持 Windows。从 Gitee Releases 获取安装包，
+          在设置中接入你自己的模型 API 即可开始。
+        </p>
+        <div class="hero-actions">
+          <a class="btn btn-primary" href="https://gitee.com/f6688/owncoder/releases" target="_blank" rel="noopener noreferrer">
+            前往下载
+          </a>
+          <a class="btn btn-ghost" href="https://gitee.com/f6688/owncoder" target="_blank" rel="noopener noreferrer">
+            Gitee 仓库
+          </a>
+        </div>
+        <p class="fineprint">许可：PolyForm Noncommercial 1.0.0（非商业用途可自由使用；商业使用需单独授权）</p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container footer-inner">
+      <div class="brand brand-footer">
+        <span class="brand-name">OwnCoder</span>
+      </div>
+      <p>安全优先的 AI 编程工具 — 你的代码，始终属于你。</p>
+      <p class="footer-meta">© <span id="year"></span> OwnCoder</p>
+    </div>
+  </footer>
+
+  <script>
+    document.getElementById("year").textContent = String(new Date().getFullYear());
+  </script>
+  <script async src="https://01a0aa89-d212-7984-96e9-45fa2ee539c2.spst2.com/ustat.js"></script>
+</body>
+</html>

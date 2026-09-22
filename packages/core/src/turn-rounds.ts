@@ -17,7 +17,6 @@ const SESSIONS_DIR = ".owncoder/sessions";
 const FILE_VERSION = 1 as const;
 const MAX_ROUNDS = 50;
 const MAX_USER_INPUT_CHARS = 8_000;
-const MAX_REPORT_CHARS = 16_000;
 const MAX_UNDERSTANDING_CHARS = 4_000;
 const MAX_STEP_DESCRIPTION_CHARS = 500;
 const MAX_NEED_QUESTION_CHARS = 400;
@@ -403,7 +402,7 @@ function sanitizeRound(raw: unknown, fallbackIndex: number): TurnRoundRecord | n
     taskDecompose: sanitizeDecompose(obj.taskDecompose),
     assistantReport:
       typeof obj.assistantReport === "string" && obj.assistantReport.trim()
-        ? clip(obj.assistantReport.trim(), MAX_REPORT_CHARS)
+        ? obj.assistantReport.trim()
         : undefined,
     evidence: evidence.length > 0 ? evidence : undefined,
     fileChanges: fileChanges.length > 0 ? fileChanges : undefined,
@@ -773,7 +772,6 @@ export async function persistRoundReport(
   return withSessionLock(queueKey(workspaceRoot, sessionId), async () => {
     const file = await readFile(workspaceRoot, sessionId);
     const now = new Date().toISOString();
-    const clippedReport = clip(report, MAX_REPORT_CHARS);
     const clippedInput = clip(input, MAX_USER_INPUT_CHARS);
 
     const byIndex =
@@ -784,7 +782,7 @@ export async function persistRoundReport(
     const target = byIndex ?? (last && last.userInput === clippedInput ? last : undefined);
 
     if (target) {
-      target.assistantReport = clippedReport;
+      target.assistantReport = report;
       target.updatedAt = now;
       await writeFile(workspaceRoot, file);
       return target;
@@ -795,7 +793,7 @@ export async function persistRoundReport(
       createdAt: now,
       updatedAt: now,
       userInput: clippedInput,
-      assistantReport: clippedReport,
+      assistantReport: report,
     };
     file.rounds.push(record);
     await writeFile(workspaceRoot, file);

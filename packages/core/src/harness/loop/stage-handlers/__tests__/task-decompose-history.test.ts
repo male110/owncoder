@@ -436,6 +436,19 @@ describe("decompose→report/evidence 同轮持久化", () => {
     expect(block).not.toContain("very large tool result");
     expect(block).not.toContain("userService.getByPhone");
   });
+  it("落盘 assistantReport 不再按 16000 字截断", async () => {
+    const longReport = `${"x".repeat(20_000)}UNIQUE_TAIL_MARKER`;
+    expect(longReport.length).toBeGreaterThan(16_000);
+
+    await persistRoundReport(tmpDir, SESSION_ID, USER_INPUT, longReport);
+
+    const rounds = await loadRecentRounds(tmpDir, SESSION_ID, 10);
+    expect(rounds).toHaveLength(1);
+    expect(rounds[0].assistantReport).toBe(longReport.trim());
+    expect(rounds[0].assistantReport).toContain("UNIQUE_TAIL_MARKER");
+    expect(rounds[0].assistantReport?.endsWith("…")).toBe(false);
+  });
+
   it("无 decompose 直接写 report 不会伪造 decompose", async () => {
     await persistRoundReport(tmpDir, SESSION_ID, USER_INPUT, "只有报告");
 
@@ -1113,6 +1126,245 @@ describe("分解历史：最近5轮 + 按用户输入向量召回（同容器不
       { turnIndex: 2, role: "assistant", content: "更早相关：已确认同容器不截断", score: 0.91 },
       { turnIndex: 9, role: "user", content: "更早相关：向量召回接线讨论", score: 0.82 },
     ]);
+  });
+
+  it("向量召回返回索引中的完整 llmReport，不二次截断", async () => {
+    const longReport = `${"分析结果。".repeat(900)}UNIQUE_TAIL_MARKER`;
+    expect(longReport.length).toBeGreaterThan(4_000);
+    const archived = JSON.stringify({
+      userInput: "请分析 src/",
+      taskDecomposition: { goal: "分析模块结构" },
+      llmReport: longReport,
+      evidence: [],
+      toolCalls: [],
+    });
+
+    const recalled = await recallHistoryByUserInput({
+      userMessage: "召回完整报告",
+      sessionId: SESSION_ID,
+      historyVector: {
+        embedding: {
+          async embed() {
+            return new Float32Array([0.1]);
+          },
+        },
+        store: {
+          archive() {},
+          hasContentHash() {
+            return false;
+          },
+          search() {
+            return [{
+              ...makeChunk({ turnIndex: 4, role: "assistant", content: archived }),
+              score: 0.88,
+            }];
+          },
+          countBySession() {
+            return 1;
+          },
+        },
+      },
+    });
+
+    expect(recalled).toHaveLength(1);
+    expect(recalled[0].content).toBe(archived);
+    expect(recalled[0].content).toContain(longReport);
+    expect(recalled[0].content).toContain("UNIQUE_TAIL_MARKER");
+    expect(formatRecalledHistoryChunks(recalled)).toContain(longReport);
+  });
+
+  it("向量召回先丢 <0.6，再对剩余高相似只留最近一轮", async () => {
+    const longReport = `${"分析结果。".repeat(80)}UNIQUE_FULL_REPORT_TAIL`;
+    const otherReport = "路径修复完成 PATH_FIX_UNIQUE_TAIL";
+    const older = JSON.stringify({
+      userInput: "请分析 src/ 模块结构",
+      taskDecomposition: { goal: "分析模块结构" },
+      llmReport: longReport,
+      evidence: [{ summary: "OLDER_ROUND_MARKER" }],
+      toolCalls: [],
+    });
+    const newerLowScore = JSON.stringify({
+      userInput: "请分析 src/ 模块结构",
+      taskDecomposition: { goal: "分析模块结构" },
+      llmReport: longReport,
+      evidence: [{ summary: "LOW_SCORE_NEAR_DUP_MARKER" }],
+      toolCalls: [],
+    });
+    const newer = JSON.stringify({
+      userInput: "请分析 src/ 模块结构",
+      taskDecomposition: { goal: "分析模块结构" },
+      llmReport: longReport,
+      evidence: [{ summary: "NEWER_ROUND_MARKER" }],
+      toolCalls: [],
+    });
+    const other = JSON.stringify({
+      userInput: "改 Windows 路径分隔符",
+      taskDecomposition: { goal: "修路径" },
+      llmReport: otherReport,
+      evidence: [],
+      toolCalls: [],
+    });
+    const noise = JSON.stringify({
+      userInput: "今天天气怎么样",
+      taskDecomposition: { goal: "闲聊" },
+      llmReport: "无关闲聊",
+      evidence: [{ summary: "NOISE_MARKER" }],
+      toolCalls: [],
+    });
+
+    const recalled = await recallHistoryByUserInput({
+      userMessage: "召回分析模块",
+      sessionId: SESSION_ID,
+      historyVector: {
+        embedding: {
+          async embed() {
+            return new Float32Array([0.1]);
+          },
+        },
+        store: {
+          archive() {},
+          hasContentHash() {
+            return false;
+          },
+          search() {
+            return [
+              { ...makeChunk({ turnIndex: 2, role: "assistant", content: older }), score: 0.95 },
+              { ...makeChunk({ turnIndex: 3, role: "assistant", content: noise }), score: 0.41 },
+              { ...makeChunk({ turnIndex: 4, role: "assistant", content: other }), score: 0.88 },
+              { ...makeChunk({ turnIndex: 8, role: "assistant", content: newerLowScore }), score: 0.4 },
+              { ...makeChunk({ turnIndex: 9, role: "assistant", content: newer }), score: 0.81 },
+            ];
+          },
+          countBySession() {
+            return 5;
+          },
+        },
+      },
+    });
+
+    expect(recalled.map((item) => item.turnIndex)).toEqual([4, 9]);
+    expect(recalled[1].content).toBe(newer);
+    expect(recalled[1].content).toContain(longReport);
+    expect(recalled[1].content).toContain("NEWER_ROUND_MARKER");
+    expect(recalled[0].content).toContain(otherReport);
+    expect(recalled.some((item) => item.content.includes("OLDER_ROUND_MARKER"))).toBe(false);
+    expect(recalled.some((item) => item.content.includes("LOW_SCORE_NEAR_DUP_MARKER"))).toBe(false);
+    expect(recalled.some((item) => item.content.includes("NOISE_MARKER"))).toBe(false);
+    expect(formatRecalledHistoryChunks(recalled)).toContain(longReport);
+  });
+
+  it("向量召回低分近重复先丢掉，不能挤掉高分旧轮", async () => {
+    const longReport = `${"分析结果。".repeat(40)}UNIQUE_KEEP_OLD`;
+    const older = JSON.stringify({
+      userInput: "请分析 src/ 模块结构",
+      taskDecomposition: { goal: "分析模块结构" },
+      llmReport: longReport,
+      evidence: [{ summary: "KEEP_OLD_MARKER" }],
+      toolCalls: [],
+    });
+    const newerLowScore = JSON.stringify({
+      userInput: "请分析 src/ 模块结构",
+      taskDecomposition: { goal: "分析模块结构" },
+      llmReport: longReport,
+      evidence: [{ summary: "DROP_LOW_SCORE_MARKER" }],
+      toolCalls: [],
+    });
+
+    const recalled = await recallHistoryByUserInput({
+      userMessage: "召回分析模块",
+      sessionId: SESSION_ID,
+      historyVector: {
+        embedding: {
+          async embed() {
+            return new Float32Array([0.1]);
+          },
+        },
+        store: {
+          archive() {},
+          hasContentHash() {
+            return false;
+          },
+          search() {
+            return [
+              { ...makeChunk({ turnIndex: 2, role: "assistant", content: older }), score: 0.95 },
+              { ...makeChunk({ turnIndex: 9, role: "assistant", content: newerLowScore }), score: 0.4 },
+            ];
+          },
+          countBySession() {
+            return 2;
+          },
+        },
+      },
+    });
+
+    expect(recalled).toHaveLength(1);
+    expect(recalled[0].turnIndex).toBe(2);
+    expect(recalled[0].content).toContain("KEEP_OLD_MARKER");
+    expect(recalled[0].content).toContain(longReport);
+    expect(recalled[0].content).not.toContain("DROP_LOW_SCORE_MARKER");
+  });
+
+  it("向量召回高相似只留最近一轮，低相似都保留且正文不裁", async () => {
+    const longReport = `${"分析结果。".repeat(80)}UNIQUE_FULL_REPORT_TAIL`;
+    const otherReport = "路径修复完成 PATH_FIX_UNIQUE_TAIL";
+    const older = JSON.stringify({
+      userInput: "请分析 src/ 模块结构",
+      taskDecomposition: { goal: "分析模块结构" },
+      llmReport: longReport,
+      evidence: [{ summary: "OLDER_ROUND_MARKER" }],
+      toolCalls: [],
+    });
+    const newer = JSON.stringify({
+      userInput: "请分析 src/ 模块结构",
+      taskDecomposition: { goal: "分析模块结构" },
+      llmReport: longReport,
+      evidence: [{ summary: "NEWER_ROUND_MARKER" }],
+      toolCalls: [],
+    });
+    const other = JSON.stringify({
+      userInput: "改 Windows 路径分隔符",
+      taskDecomposition: { goal: "修路径" },
+      llmReport: otherReport,
+      evidence: [],
+      toolCalls: [],
+    });
+
+    const recalled = await recallHistoryByUserInput({
+      userMessage: "召回分析模块",
+      sessionId: SESSION_ID,
+      historyVector: {
+        embedding: {
+          async embed() {
+            return new Float32Array([0.1]);
+          },
+        },
+        store: {
+          archive() {},
+          hasContentHash() {
+            return false;
+          },
+          search() {
+            return [
+              { ...makeChunk({ turnIndex: 2, role: "assistant", content: older }), score: 0.95 },
+              { ...makeChunk({ turnIndex: 4, role: "assistant", content: other }), score: 0.88 },
+              { ...makeChunk({ turnIndex: 9, role: "assistant", content: newer }), score: 0.81 },
+            ];
+          },
+          countBySession() {
+            return 3;
+          },
+        },
+      },
+    });
+
+    expect(recalled.map((item) => item.turnIndex)).toEqual([4, 9]);
+    expect(recalled[1].content).toBe(newer);
+    expect(recalled[1].content).toContain(longReport);
+    expect(recalled[1].content).toContain("NEWER_ROUND_MARKER");
+    expect(recalled[0].content).toContain(otherReport);
+    expect(recalled.some((item) => item.content.includes("OLDER_ROUND_MARKER"))).toBe(false);
+    expect(formatRecalledHistoryChunks(recalled)).toContain(longReport);
+    expect(formatRecalledHistoryChunks(recalled)).not.toContain("OLDER_ROUND_MARKER");
   });
 
   it("buildDecomposeContext：无注入时仅最近轮，不含召回段", async () => {

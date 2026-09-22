@@ -59,7 +59,9 @@ export function TitleBar({ title, gitSummary, gitDirty }: Props) {
   return (
     <div className="app-titlebar">
       <div className="app-titlebar-left">
-        <span className="app-titlebar-mark">A</span>
+        <span className="app-titlebar-mark" aria-hidden="true">
+          OC
+        </span>
         <span className="app-titlebar-name">OwnCoder</span>
         {version ? (
           <>

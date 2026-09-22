@@ -1,6 +1,6 @@
 {
   "name": "@owncoder/desktop",
-  "version": "0.1.16",
+  "version": "0.1.17",
   "private": true,
   "description": "OwnCoder desktop shell",
   "main": "./out/main/index.js",
@@ -19,6 +19,7 @@
     "@huggingface/tokenizers": "^0.2.0",
     "@monaco-editor/react": "^4.7.0",
     "@owncoder/core": "workspace:*",
+    "@owncoder/index": "workspace:*",
     "@owncoder/llm": "workspace:*",
     "@owncoder/settings": "workspace:*",
     "@owncoder/shared": "workspace:*",

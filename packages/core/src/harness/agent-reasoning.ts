@@ -157,25 +157,17 @@ function heuristicDecompose(request: string, _context: string): PlanStep[] {
   steps.push(
     {
       id: "step_1",
-      description: "理解需求并分析上下文",
-      status: "pending",
-      dependsOn: [],
-      retryCount: 0,
-      maxRetries: 1,
-    },
-    {
-      id: "step_2",
       description: "实施变更",
       status: "pending",
-      dependsOn: ["step_1"],
+      dependsOn: [],
       retryCount: 0,
       maxRetries: 2,
     },
     {
-      id: "step_3",
+      id: "step_2",
       description: "验证结果",
       status: "pending",
-      dependsOn: ["step_2"],
+      dependsOn: ["step_1"],
       retryCount: 0,
       maxRetries: 1,
     },

@@ -139,7 +139,16 @@ export type {
   HistoryVectorStore,
   HistoryRoundInput,
 } from "./harness/loop.ts";
-export { archiveTurn, computeContentHash } from "./harness/loop.ts";
+export {
+  archiveTurn,
+  computeContentHash,
+  comparableHistoryText,
+  historyTextSimilarity,
+  dedupeSimilarHistoryHits,
+  finalizeRecalledHistoryHits,
+  HISTORY_MIN_RELEVANCE_SCORE,
+  HISTORY_NEAR_DUPLICATE_THRESHOLD,
+} from "./harness/loop.ts";
 export { isRedactionEnabled, isSensitiveFile, redactSecrets } from "./harness/redact.ts";
 
 export interface SessionState {

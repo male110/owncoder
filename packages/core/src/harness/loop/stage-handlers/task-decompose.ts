@@ -36,6 +36,7 @@ import { documentIntentContext } from "../document-workflow.ts";
 import { agentIntentContext } from "../agent-intent.ts";
 import type { StageHandler } from "./types.ts";
 import { clipBlock } from "./constants.ts";
+import { finalizeRecalledHistoryHits, HISTORY_MIN_RELEVANCE_SCORE } from "../history-vector.ts";
 import {
   collectReadEvidenceFromTurns,
   collectToolCallsFromTurns,
@@ -214,7 +215,7 @@ export function extractStructuredHistory(
 }
 
 /** 向量召回相关度下限：低于此值的历史片段丢弃（60%）。 */
-export const RELEVANT_HISTORY_SCORE_THRESHOLD = 0.6;
+export const RELEVANT_HISTORY_SCORE_THRESHOLD = HISTORY_MIN_RELEVANCE_SCORE;
 
 /** 召回历史片段（含相关度，已按 score 降序且过滤阈值）。 */
 export interface RecalledHistoryChunk {
@@ -255,7 +256,7 @@ export function rankAndFilterByRelevance<T extends { score?: number }>(
 
 /**
  * 按当前用户输入做向量召回；失败时返回空数组，不阻断分解。
- * 结果按相关度降序，并丢弃 score < 0.6 的片段；与最近 5 轮一并放入同一历史容器，整轮/整段不截断。
+ * 结果先丢掉 score < 0.6 的片段，再对剩余结果做近重复去重；与最近 5 轮一并放入同一历史容器，整轮/整段不截断。
  */
 export async function recallHistoryByUserInput(
   opts: Pick<AgentLoopOpts, "userMessage" | "sessionId" | "historyVector">,
@@ -271,7 +272,7 @@ export async function recallHistoryByUserInput(
       content: chunk.content,
       score: typeof chunk.score === "number" && Number.isFinite(chunk.score) ? chunk.score : 0,
     }));
-    return rankAndFilterByRelevance(hits, RELEVANT_HISTORY_SCORE_THRESHOLD);
+    return finalizeRecalledHistoryHits(hits, RELEVANT_HISTORY_SCORE_THRESHOLD);
   } catch (err) {
     writeEventLog({
       category: "other",

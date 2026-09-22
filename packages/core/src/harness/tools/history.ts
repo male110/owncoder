@@ -1,16 +1,13 @@
+import { finalizeRecalledHistoryHits } from "../loop/history-vector.ts";
 import type { ToolContext, ToolResult } from "./types.ts";
 import { fail, ok, str } from "./shared.ts";
 
 const HISTORY_TOP_K = 5;
-const HISTORY_MIN_SCORE = 0.6;
-const HISTORY_FIELD_MAX_CHARS = 4_000;
 
-function compactField(value: unknown): string {
-  const text = typeof value === "string"
-    ? value
-    : JSON.stringify(value ?? "(none)", null, 2);
-  if (text.length <= HISTORY_FIELD_MAX_CHARS) return text;
-  return `${text.slice(0, HISTORY_FIELD_MAX_CHARS)}\n…[truncated]`;
+/** 将归档字段格式化为召回正文：保留完整原文，供 LLM 按需取回。 */
+function formatField(value: unknown): string {
+  if (typeof value === "string") return value;
+  return JSON.stringify(value ?? "(none)", null, 2);
 }
 
 /** Retrieve the most relevant archived history for the current session. */
@@ -22,11 +19,13 @@ export async function toolRecallHistory(ctx: ToolContext, query: string): Promis
   }
 
   const queryVector = await ctx.historyVector.embedding.embed(text);
-  const hits = ctx.historyVector.store
-    .search(queryVector, 1000, ctx.sessionId)
-    .filter((hit) => hit.turnId.startsWith(`round:${ctx.sessionId}:`))
-    .slice(0, HISTORY_TOP_K)
-    .filter((hit) => hit.score >= HISTORY_MIN_SCORE);
+  // 先取历史 → 丢掉相关性 < 60% → 再对剩余结果做相似性判断（高相似只留最近一轮）。
+  const hits = finalizeRecalledHistoryHits(
+    ctx.historyVector.store
+      .search(queryVector, 1000, ctx.sessionId)
+      .filter((hit) => hit.turnId.startsWith(`round:${ctx.sessionId}:`))
+      .slice(0, HISTORY_TOP_K),
+  );
 
   if (hits.length === 0) {
     return ok("No relevant history found (minimum relevance: 60%).");
@@ -49,11 +48,11 @@ export async function toolRecallHistory(ctx: ToolContext, query: string): Promis
     }
     return [
     `## Match ${index + 1}`,
-    `User input:\n${compactField(round?.userInput ?? hit.content)}`,
-    `Task decomposition:\n${compactField(round?.taskDecomposition)}`,
-    `LLM report:\n${compactField(round?.llmReport)}`,
-    `Evidence:\n${compactField(round?.evidence)}`,
-    `Tool calls:\n${compactField(round?.toolCalls)}`,
+    `User input:\n${formatField(round?.userInput ?? hit.content)}`,
+    `Task decomposition:\n${formatField(round?.taskDecomposition)}`,
+    `LLM report:\n${formatField(round?.llmReport)}`,
+    `Evidence:\n${formatField(round?.evidence)}`,
+    `Tool calls:\n${formatField(round?.toolCalls)}`,
   ].join("\n");
   }).join("\n\n");
 

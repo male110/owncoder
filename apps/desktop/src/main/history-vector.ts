@@ -35,9 +35,7 @@ const DIM = 512;
 const MAX_SEQ_LEN = 512;
 /** 防止单个长会话让 sqlite-vec 和 native embedding 内存无界增长。 */
 const MAX_CHUNKS_PER_SESSION = 1000;
-/** 单条归档内容上限（UTF-8 字节）。 */
-const MAX_CONTENT_BYTES = 256 * 1024;
-/** 单会话归档内容总量上限（UTF-8 字节）。 */
+/** 单会话归档内容总量上限（UTF-8 字节）。超限时淘汰最旧 chunk，不截断当前正文。 */
 const MAX_SESSION_CONTENT_BYTES = 16 * 1024 * 1024;
 const MAX_PENDING_ARCHIVES = 8;
 
@@ -324,7 +322,6 @@ class SqliteVecHistoryStore implements HistoryVectorStore {
 
   archive(chunk: HistoryChunkInput, vector: Float32Array): void {
     if (this.hasContentHash(chunk.contentHash)) return;
-    if (Buffer.byteLength(chunk.content, "utf8") > MAX_CONTENT_BYTES) return;
     const insert = this.db.transaction(() => {
       // 序号分配 + 写入同事务：MAX+1 的 read-modify-write 原子完成，保证不重复。
       // 单调递增由调用方（createHistoryVector 的串行队列）保证按调用顺序串行归档；
