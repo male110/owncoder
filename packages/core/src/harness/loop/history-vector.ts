@@ -76,6 +76,20 @@ export interface HistoryRoundInput {
   userInput: string;
   taskDecompose?: unknown;
   assistantReport?: string;
+  /**
+   * 凭证信息（精简）：只保留定位元数据，不写入 excerpt / fileEvidence 全文，
+   * 避免向量归档体积膨胀。
+   */
+  evidence?: ReadonlyArray<{
+    needId?: string;
+    summary: string;
+    kind?: "source" | "navigation";
+    path?: string;
+    symbol?: string;
+    startLine?: number;
+    endLine?: number;
+  }>;
+  /** 工具调用信息：只记名称与参数，不记返回结果。 */
   toolCalls?: ReadonlyArray<{
     toolName: string;
     arguments: Record<string, unknown>;

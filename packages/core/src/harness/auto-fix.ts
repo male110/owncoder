@@ -169,8 +169,7 @@ export async function autoFixAfterTools(
       state.fixAttempts = 0;
       state.hasUnresolvedErrors = false;
       state.lastErrors = "";
-      const advisorySummary = buildAdvisorySummary(result);
-      const hasAdvisory = Boolean(advisorySummary);
+      const hasAdvisory = isAdvisoryVerificationResult(result);
       cfg.onEvent?.({
         type: "fix_end",
         message: hasAdvisory ? "✅ 验证通过（含建议性诊断，不阻断）" : "✅ 验证通过",
@@ -180,10 +179,8 @@ export async function autoFixAfterTools(
         resolved: true,
         attempts,
         finalVerification: result,
-        // 软汇报：让模型看见 semantic_diff / lsp warning，但不进入修复预算/阻断。
-        injectedMessages: advisorySummary
-          ? [{ role: "system", content: advisorySummary }]
-          : [],
+        // 建议性诊断只留在验证报告（summary / checks.errors），不再注入对话气泡。
+        injectedMessages: [],
         summary: result.summary,
         exhausted: false,
         skipped: false,
@@ -292,42 +289,6 @@ export function getDirtyFiles(
     if (path) dirty.push(path);
   }
   return [...new Set(dirty)];
-}
-
-/** Soft report for advisory checks (lsp warning / semantic_diff) — visible but non-blocking. */
-function buildAdvisorySummary(result: VerificationResult): string {
-  const advisory = result.checks.filter(
-    (c) =>
-      !c.skipped &&
-      ADVISORY_CHECK_TYPES.has(c.type) &&
-      c.blocking !== true &&
-      c.errors.length > 0 &&
-      c.errors.every((e) => e.severity !== "error"),
-  );
-  if (advisory.length === 0) return "";
-
-  const lines: string[] = [
-    `## ℹ️ 建议性诊断（不阻断任务）`,
-    ``,
-    `自动验证已通过硬检查；以下为 LSP warning / semantic_diff 发现的问题，建议尽快修复以免错误累积：`,
-    ``,
-  ];
-  for (const check of advisory) {
-    lines.push(`### ${check.name} (${check.type})`);
-    for (const err of check.errors.slice(0, 12)) {
-      const loc = err.file
-        ? `\`${err.file}${err.line ? `:${err.line}` : ""}${err.column ? `:${err.column}` : ""}\``
-        : "";
-      const prefix = err.severity === "error" ? "🔴" : err.severity === "warning" ? "⚠️" : "ℹ️";
-      lines.push(`${prefix} ${err.message} ${loc}`);
-    }
-    if (check.errors.length > 12) {
-      lines.push(`... 还有 ${check.errors.length - 12} 个问题`);
-    }
-    lines.push("");
-  }
-  lines.push(`这些诊断不会阻断任务，也不会消耗自动修复次数；请在后续步骤中优先处理。`);
-  return lines.join("\n");
 }
 
 /**

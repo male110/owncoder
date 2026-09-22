@@ -19,6 +19,7 @@ import { spawn } from "node:child_process";
 import { promises as fs } from "node:fs";
 import { join, extname } from "node:path";
 import { normalizeVerificationResult, type VerificationCheck, type VerificationError, type VerificationResult } from "../task-run.ts";
+import { unmatchedExportChanges } from "./diff-heuristics.ts";
 import { getLspManager } from "./tools/lsp.ts";
 import type { LspDiagnostic } from "./lsp-client.ts";
 export type { VerificationCheck, VerificationError, VerificationResult } from "../task-run.ts";
@@ -786,11 +787,6 @@ export class VerificationEngine {
       } else if (line.startsWith("-") && !line.startsWith("---")) {
         deletions++;
         hunkContent += line + "\n";
-
-        const code = line.slice(1).trim();
-        if (/^export\s+(default\s+)?(interface|type|class|function|const)\s+\w+/.test(code)) {
-          breakingChanges.push(`${path}: 移除了导出: ${code.slice(0, 80)}`);
-        }
       } else if (!line.startsWith("diff") && !line.startsWith("index") && !line.startsWith("---")) {
         hunkContent += line + "\n";
       }
@@ -799,6 +795,11 @@ export class VerificationEngine {
     if (currentHunk) {
       currentHunk.content = hunkContent.trim();
       hunks.push(currentHunk);
+    }
+
+    // 同名导出在 +/- 两侧都出现 = 内容修改，不能报「移除了导出」。
+    for (const code of unmatchedExportChanges(diffText).removed) {
+      breakingChanges.push(`${path}: 移除了导出: ${code.slice(0, 80)}`);
     }
 
     return { path, additions, deletions, hunks, breakingChanges };
@@ -825,10 +826,17 @@ export class VerificationEngine {
 
     lines.push("");
 
+    const advisoryNotes: string[] = [];
     for (const check of checks) {
       const icon = check.skipped || check.status === "skipped" ? "⏭️" : check.passed ? "✅" : "❌";
       const label = check.skipped || check.status === "skipped" ? "跳过" : check.passed ? "通过" : "失败";
       lines.push(`${icon} ${check.name}: ${label} (${check.duration}ms)`);
+      const isAdvisory =
+        !check.skipped &&
+        (check.type === "semantic_diff" || check.type === "lsp") &&
+        check.blocking !== true &&
+        check.errors.length > 0 &&
+        check.errors.every((e) => e.severity !== "error");
       if (check.errors.length > 0) {
         for (const err of check.errors.slice(0, 5)) {
           const loc = err.file ? `${err.file}:${err.line ?? ""}` : "";
@@ -837,6 +845,19 @@ export class VerificationEngine {
         if (check.errors.length > 5) {
           lines.push(`   ... 还有 ${check.errors.length - 5} 个问题`);
         }
+        if (isAdvisory) {
+          advisoryNotes.push(
+            ...check.errors.slice(0, 3).map((err) => `${check.name}: ${err.message}`),
+          );
+        }
+      }
+    }
+
+    if (advisoryNotes.length > 0) {
+      lines.push("");
+      lines.push("ℹ️ 建议性诊断（不阻断任务，仅供参考）：");
+      for (const note of advisoryNotes) {
+        lines.push(`   - ${note}`);
       }
     }
 

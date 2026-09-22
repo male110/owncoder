@@ -48,6 +48,28 @@ describe("buildChatItems", () => {
     expect(items[0]?.key).toContain("u1");
   });
 
+  it("omits collapsed tools/process summary blocks from the list", () => {
+    const items = buildChatItems([
+      { kind: "user", turn: userTurn("修 bug") },
+      {
+        kind: "process",
+        items: [
+          { id: "t1", role: "tool", toolName: "read_file", content: "ok" },
+          { id: "t2", role: "tool", toolName: "grep", content: "ok" },
+        ],
+      },
+      { kind: "assistant", turn: { id: "a1", role: "assistant", content: "已修好" } },
+      {
+        kind: "tools",
+        items: [{ id: "t3", role: "tool", toolName: "bash", content: "ok" }],
+      },
+    ]);
+    expect(items.map((it) => (it.kind === "block" ? it.block.kind : it.kind))).toEqual([
+      "user",
+      "assistant",
+    ]);
+  });
+
   it("does not inject status/current rows into the virtual list", () => {
     const items = buildChatItems([]);
     expect(items).toEqual([]);

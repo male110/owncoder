@@ -141,6 +141,39 @@ describe("applyChatEvent streaming / turn_complete", () => {
     expect(next.liveEvents).toEqual([]);
   });
 
+  it("pushes decompose snapshot in DEV after task_decomposition", () => {
+    // vitest/vite 默认 MODE=test 时 import.meta.env.DEV 为 true
+    expect(import.meta.env.DEV).toBe(true);
+    apply({
+      type: "task_decomposition",
+      sessionId: "s1",
+      understanding: "理解任务",
+      userConstraints: ["仅开发模式显示"],
+      steps: [
+        {
+          id: "s1",
+          description: "定位",
+          dependsOn: [],
+          informationNeeds: [],
+          stopReadingWhen: [],
+        },
+      ],
+      fallback: false,
+    });
+
+    const next = useChatStore.getState();
+    expect(next.liveStatus).toBe("");
+    expect(next.liveEvents).toHaveLength(1);
+    expect(next.liveEvents[0]).toMatchObject({
+      kind: "decompose",
+      decomposition: {
+        understanding: "理解任务",
+        userConstraints: ["仅开发模式显示"],
+        fallback: false,
+      },
+    });
+  });
+
   it("suppresses verification-gate warnings from the top error banner", () => {
     apply({
       type: "warning",
@@ -203,7 +236,7 @@ describe("applyChatEvent streaming / turn_complete", () => {
     ]);
   });
 
-  it("turn_complete keeps structured/decompose and clears sending", () => {
+  it("turn_complete keeps structured events and clears sending", () => {
     apply({ type: "thinking_delta", sessionId: "s1", text: "t" });
     apply({ type: "assistant_delta", sessionId: "s1", text: "a" });
     useChatStore.getState().setSending(true, "s1");
@@ -217,7 +250,7 @@ describe("applyChatEvent streaming / turn_complete", () => {
 
     const next = useChatStore.getState();
     expect(next.sending).toBe(false);
-    expect(next.liveEvents.every((e) => e.kind === "structured" || e.kind === "decompose")).toBe(true);
+    expect(next.liveEvents.every((e) => e.kind === "structured")).toBe(true);
     expect(next.liveEvents.some((e) => e.kind === "structured")).toBe(true);
   });
 });

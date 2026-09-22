@@ -789,7 +789,7 @@ export function allEnhancedTools(opts?: {
           "Retrieve the most relevant archived history for the current session. " +
           "Use a concise keyword or focused question describing the information needed. " +
           "Returns up to five matches with relevance of at least 60%. " +
-          "Each match contains only the user input, task decomposition, LLM report, and tool-call arguments. " +
+          "Each match contains only the user input, task decomposition, LLM report, evidence metadata, and tool-call arguments (no tool results). " +
           "Use this when the current context is insufficient and earlier conversation, findings, or decisions may help.",
         parameters: {
           type: "object",

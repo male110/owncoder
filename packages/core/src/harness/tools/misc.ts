@@ -1,4 +1,5 @@
 import type { ToolContext, ToolResult, AskUserOption } from "./types.ts";
+import { unmatchedExportChanges } from "../diff-heuristics.ts";
 import { assertInside, cap, fail, ok, runCommand, toAbs } from "./shared.ts";
 
 // ── NEW: Semantic Diff Tool ────────────────────────────────
@@ -37,21 +38,22 @@ function analyzeDiff(diffText: string, filePath: string): string {
     if (line.startsWith("+") && !line.startsWith("+++")) {
       additions++;
       const code = line.slice(1).trim();
-      if (/^export\s+(default\s+)?(interface|type|class|function|const)\s+\w+/.test(code)) {
-        warnings.push(`新增导出: ${code.slice(0, 80)}`);
-      }
       if (/\bany\b/.test(code) && /:\s*any/.test(code)) {
         warnings.push(`使用了 any 类型: ${code.slice(0, 80)}`);
       }
     }
     if (line.startsWith("-") && !line.startsWith("---")) {
       deletions++;
-      const code = line.slice(1).trim();
-      if (/^export\s+(default\s+)?(interface|type|class|function|const)\s+\w+/.test(code)) {
-        warnings.push(`⚠ 移除了导出: ${code.slice(0, 80)} — 可能破坏依赖方`);
-      }
     }
     if (line.startsWith("@@")) hunks++;
+  }
+
+  const { removed, added } = unmatchedExportChanges(diffText);
+  for (const code of added) {
+    warnings.push(`新增导出: ${code.slice(0, 80)}`);
+  }
+  for (const code of removed) {
+    warnings.push(`⚠ 移除了导出: ${code.slice(0, 80)} — 可能破坏依赖方`);
   }
 
   const parts: string[] = [];

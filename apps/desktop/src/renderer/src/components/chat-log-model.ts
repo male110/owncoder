@@ -227,22 +227,18 @@ export function lastAssistantBlockIndex(blocks: LogBlock[]): number {
 
 /** Compose Virtuoso items from committed history blocks only.
  * Live status + thinking/text/tools render outside Virtuoso (shared scroller)
- * so streaming height changes refresh in place (no remount / no stale row). */
+ * so streaming height changes refresh in place (no remount / no stale row).
+ * tools/process 折叠摘要不进入列表（产品不展示工具调用链摘要）。 */
 export function buildChatItems(blocks: LogBlock[]): ChatItem[] {
-  return blocks.map((b, i) => {
-    if (b.kind === "user" || b.kind === "assistant") {
-      return {
-        kind: "block",
-        block: b,
-        key: b.turn.id ?? `b-${b.kind}-${i}-${b.turn.content.slice(0, 24)}`,
-      };
-    }
-    const first = b.items[0];
-    const last = b.items[b.items.length - 1];
-    const stable =
-      first?.id && last?.id
-        ? `${b.kind}-${first.id}-${last.id}-${b.items.length}`
-        : `${b.kind}-${i}-${b.items.map((t) => t.toolName ?? t.role).join("|")}`;
-    return { kind: "block", block: b, key: stable };
-  });
+  const items: ChatItem[] = [];
+  for (let i = 0; i < blocks.length; i++) {
+    const b = blocks[i]!;
+    if (b.kind === "tools" || b.kind === "process") continue;
+    items.push({
+      kind: "block",
+      block: b,
+      key: b.turn.id ?? `b-${b.kind}-${i}-${b.turn.content.slice(0, 24)}`,
+    });
+  }
+  return items;
 }

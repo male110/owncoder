@@ -96,6 +96,51 @@ describe("autoFixAfterTools", () => {
     expect(result.summary).toContain("typecheck");
   });
 
+  it("does not inject a chat bubble for advisory semantic_diff warnings", async () => {
+    verifyMock.mockResolvedValue({
+      passed: true,
+      status: "passed",
+      summary: "✅ 所有验证通过\n\n✅ semantic_diff: 通过 (1ms)\n   warning: foo.ts: 移除了导出: export function foo",
+      suggestions: [],
+      checks: [
+        {
+          name: "semantic_diff",
+          type: "semantic_diff",
+          status: "passed",
+          passed: true,
+          output: "",
+          duration: 1,
+          blocking: false,
+          errors: [{ message: "foo.ts: 移除了导出: export function foo", severity: "warning" }],
+        },
+      ],
+    } satisfies VerificationResult);
+    const state = createAutoFixState();
+
+    const result = await autoFixAfterTools("/tmp/ws", ["src/a.ts"], state, {
+      maxAttempts: 3,
+    });
+
+    expect(result.resolved).toBe(true);
+    expect(result.exhausted).toBe(false);
+    expect(result.injectedMessages).toEqual([]);
+    expect(result.summary).toContain("移除了导出");
+  });
+
+  it("still injects hard typecheck failures for the model to fix", async () => {
+    verifyMock.mockResolvedValue(failedResult("typecheck failed"));
+    const state = createAutoFixState();
+
+    const result = await autoFixAfterTools("/tmp/ws", ["src/a.ts"], state, {
+      maxAttempts: 3,
+    });
+
+    expect(result.resolved).toBe(false);
+    expect(result.exhausted).toBe(false);
+    expect(result.injectedMessages).toHaveLength(1);
+    expect(result.injectedMessages[0]?.content).toContain("验证失败");
+  });
+
   it("exhausts on repeated verification exceptions at the attempt limit", async () => {
     verifyMock.mockRejectedValue(new Error("timeout"));
     const state = createAutoFixState();

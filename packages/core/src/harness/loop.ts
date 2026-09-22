@@ -394,6 +394,17 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
               }
             : undefined,
           assistantReport: assistantText,
+          // 凭证只归档定位元数据，不写入 excerpt / fileEvidence 全文。
+          evidence: roundEvidence.map((item) => ({
+            needId: item.needId || undefined,
+            summary: item.summary,
+            kind: item.kind,
+            path: item.path,
+            symbol: item.symbol,
+            startLine: item.startLine,
+            endLine: item.endLine,
+          })),
+          // 工具调用只记名称与参数，不记返回结果。
           toolCalls: roundToolCalls.map((call) => ({
             toolName: call.toolName,
             arguments: call.arguments,

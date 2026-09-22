@@ -37,6 +37,7 @@ export async function toolRecallHistory(ctx: ToolContext, query: string): Promis
       userInput?: unknown;
       taskDecomposition?: unknown;
       llmReport?: unknown;
+      evidence?: unknown;
       toolCalls?: unknown;
     };
     let round: ArchivedRound | null = null;
@@ -51,6 +52,7 @@ export async function toolRecallHistory(ctx: ToolContext, query: string): Promis
     `User input:\n${compactField(round?.userInput ?? hit.content)}`,
     `Task decomposition:\n${compactField(round?.taskDecomposition)}`,
     `LLM report:\n${compactField(round?.llmReport)}`,
+    `Evidence:\n${compactField(round?.evidence)}`,
     `Tool calls:\n${compactField(round?.toolCalls)}`,
   ].join("\n");
   }).join("\n\n");
