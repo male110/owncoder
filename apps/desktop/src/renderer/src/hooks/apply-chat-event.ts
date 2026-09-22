@@ -106,9 +106,21 @@ export function applyChatEvent(
   }
 
   // ── task_decomposition ────────────────────────────────────────────────
+  // 仅 pnpm dev（Vite DEV）推入 liveEvents 供调试卡片展示；生产包不展示。
   if (ev.type === "task_decomposition") {
     chat.sealThinking(sid ?? undefined);
     chat.setLiveStatus("", sid ?? undefined);
+    if (import.meta.env.DEV) {
+      chat.pushDecompose(
+        {
+          understanding: ev.understanding,
+          userConstraints: ev.userConstraints,
+          steps: ev.steps,
+          fallback: ev.fallback,
+        },
+        sid,
+      );
+    }
     return;
   }
 
@@ -200,7 +212,7 @@ export function applyChatEvent(
   if (ev.type === "turn_complete") {
     chat.pushStructuredMessage(ev.parts, ev.metadata, sid);
     chat.setLiveEvents(
-      (events) => events.filter((event) => event.kind === "structured" || event.kind === "decompose"),
+      (events) => events.filter((event) => event.kind === "structured"),
       sid,
     );
     chat.markSessionCompleted(sid);

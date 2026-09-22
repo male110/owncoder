@@ -188,6 +188,54 @@ describe("task-run success gate", () => {
     expect(normalized.status).toBe("passed");
   });
 
+  it("lsp error 级诊断阻断整体验证并进入 auto-fix", () => {
+    const normalized = normalizeVerificationResult({
+      status: "failed",
+      passed: false,
+      checks: [
+        {
+          name: "lsp",
+          type: "lsp",
+          status: "failed",
+          passed: false,
+          output: "a.ts:1:1 error: Cannot find name 'foo'",
+          duration: 5,
+          errors: [{ file: "a.ts", line: 1, message: "Cannot find name 'foo'", severity: "error" }],
+        },
+      ],
+      summary: "lsp error blocks",
+      suggestions: [],
+    });
+    expect(normalized.checks[0]?.blocking).toBe(true);
+    expect(normalized.checks[0]?.source).toBe("lsp");
+    expect(normalized.passed).toBe(false);
+    expect(normalized.status).toBe("failed");
+  });
+
+  it("lsp warning 不阻断整体验证（仅建议性汇报）", () => {
+    const normalized = normalizeVerificationResult({
+      status: "passed",
+      passed: true,
+      checks: [
+        {
+          name: "lsp",
+          type: "lsp",
+          status: "passed",
+          passed: true,
+          output: "a.ts:1:1 warning: unused variable",
+          duration: 5,
+          errors: [{ file: "a.ts", line: 1, message: "unused variable", severity: "warning" }],
+        },
+      ],
+      summary: "lsp warning advisory",
+      suggestions: [],
+    });
+    expect(normalized.checks[0]?.blocking).toBe(false);
+    expect(normalized.checks[0]?.source).toBe("lsp");
+    expect(normalized.passed).toBe(true);
+    expect(normalized.status).toBe("passed");
+  });
+
   it("空 checks 的 verificationStatus 为 not_run，且 normalize 保持一致", () => {
     expect(verificationStatus(true, [])).toBe("not_run");
     const normalized = normalizeVerificationResult({

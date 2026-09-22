@@ -6,23 +6,29 @@ import { LspClientManager, createDefaultLspManager, type LspPosition } from "../
 
 // ── LSP Client Singleton ─────────────────────────────────────
 
-let lspManager: LspClientManager | null = null;
-let lspManagerInitPromise: Promise<LspClientManager> | null = null;
+const lspManagers = new Map<string, LspClientManager>();
+const lspManagerInitPromises = new Map<string, Promise<LspClientManager>>();
 
-async function getLspManager(workspaceRoot: string): Promise<LspClientManager> {
-  if (lspManager) return lspManager;
-  if (lspManagerInitPromise) return lspManagerInitPromise;
+/** Shared LSP manager for tools and automatic verification. */
+export async function getLspManager(workspaceRoot: string): Promise<LspClientManager> {
+  const root = toAbs(workspaceRoot, ".");
+  const existing = lspManagers.get(root);
+  if (existing) return existing;
+  const pending = lspManagerInitPromises.get(root);
+  if (pending) return pending;
 
-  lspManagerInitPromise = (async () => {
-    const manager = createDefaultLspManager(workspaceRoot);
-    await manager.startAll().catch(() => {
-      // Some servers may not be available; that's fine, fall back to regex
-    });
-    lspManager = manager;
+  const initPromise = (async () => {
+    // Discover the project's languages, then install missing servers on demand.
+    const manager = await createDefaultLspManager(workspaceRoot);
+    await manager.startAll();
+    lspManagers.set(root, manager);
     return manager;
-  })();
+  })().finally(() => {
+    lspManagerInitPromises.delete(root);
+  });
 
-  return lspManagerInitPromise;
+  lspManagerInitPromises.set(root, initPromise);
+  return initPromise;
 }
 
 function hasActiveLspClient(manager: LspClientManager | null, filePath: string): boolean {

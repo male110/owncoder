@@ -8,6 +8,7 @@ import type { McpManager } from "../../mcp/client.ts";
 import type { TerminalEntry } from "../terminal.ts";
 import type { MemoryManager } from "../memory.ts";
 import type { UserMemoryStore } from "../../user-memories.ts";
+import type { HistoryVectorStore, EmbeddingService } from "../loop/history-vector.ts";
 
 /** Session pending-change surface shared with the UI Changes bar. */
 export interface SessionChangesApi {
@@ -36,6 +37,23 @@ export interface AskUserRequest {
   /** Placeholder hint shown in the free-text input when allowFreeText is true. */
   placeholder?: string;
 }
+
+/** Result of a host-side browser render used by web_fetch CSR fallback. */
+export interface RenderPageResult {
+  /** Full document HTML after JS execution (preferred when available). */
+  html?: string;
+  /** Visible innerText after JS execution. */
+  text?: string;
+}
+
+/**
+ * Host-supplied page renderer (Electron BrowserWindow / Chromium).
+ * Used by web_fetch when static HTML looks like a CSR shell.
+ */
+export type RenderPageFn = (
+  url: string,
+  opts?: { timeoutMs?: number; signal?: AbortSignal },
+) => Promise<RenderPageResult | null | undefined>;
 
 /** Narrow event sink — avoids importing loop (prevents circular dependencies). */
 export type ToolEventSink = (ev: {
@@ -80,6 +98,11 @@ export interface ToolContext {
    * Prevents re-prompting the UI for an identical question within one userMsg / React loop.
    */
   askUserTurnCache?: Map<string, string>;
+  /**
+   * Optional host browser renderer (Electron). When static HTML looks like a
+   * CSR shell, web_fetch calls this to obtain post-JS DOM text/HTML.
+   */
+  renderPage?: RenderPageFn;
   onTerminal?: (entry: TerminalEntry) => void;
   onEvent?: ToolEventSink;
 
@@ -93,6 +116,11 @@ export interface ToolContext {
   memoryStore?: UserMemoryStore;
   /** Project-scoped user memory store (current workspace only). */
   projectMemoryStore?: UserMemoryStore;
+  /** Session history retrieval services, when configured by the host. */
+  historyVector?: {
+    embedding: EmbeddingService;
+    store: HistoryVectorStore;
+  };
   /**
    * Pending session file changes (checkpoint-backed), same source as the UI
    * Changes bar. Injected by SessionOrchestrator so tools can list/undo.

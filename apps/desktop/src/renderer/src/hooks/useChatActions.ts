@@ -161,12 +161,8 @@ export function useChatActions(deps: {
     
     // The durable history returned by sendChat is authoritative. Clear the
     // streamed turn before applying it; otherwise a late turn_complete event
-    // can leave the old assistant text beside the committed reply. Keep the
-    // decomposition card as a completed-turn summary.
-    chat.setLiveEvents(
-      (events) => events.filter((event) => event.kind === "decompose"),
-      sid,
-    );
+    // can leave the old assistant text beside the committed reply.
+    chat.setLiveEvents(() => [], sid);
     // History-protection: never let `applyChatResult` wipe a non-empty
     // conversation. The backend is expected to return the full session
     // history in `res.history`, but if it returns a shorter list (backend

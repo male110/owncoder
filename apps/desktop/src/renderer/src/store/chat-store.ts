@@ -268,6 +268,7 @@ function boundLiveEvents(events: LiveEvent[]): LiveEvent[] {
   const normalized = events.map(boundLiveEvent);
   if (normalized.length <= MAX_LIVE_EVENTS) return normalized;
   const keep = normalized.slice(-MAX_LIVE_EVENTS);
+  // Keep the decomposition card even when the stream is truncated.
   const decomposition = normalized.find((event) => event.kind === "decompose");
   if (decomposition && !keep.some((event) => event.kind === "decompose")) {
     keep[0] = decomposition;
@@ -630,14 +631,14 @@ export const useChatStore = create<ChatState & ChatActions>()((set, get) => ({
 
   // ── Lifecycle ──
 
-resetTurnState: (sid) =>
-	    set((s) => {
-	      const rt = readRuntime(s, sid);
-	      // Preserve decomposition cards so they survive session resets.
-	      // They'll be replaced when a new task_decomposition event fires.
-	      const decompositions = rt.liveEvents.filter((e) => e.kind === "decompose");
-       return applyRuntime(s, sid, { liveEvents: decompositions, liveStatus: "", errorAlert: null, taskRun: null });
-	    }),
+  resetTurnState: (sid) =>
+    set((s) => {
+      const rt = readRuntime(s, sid);
+      // Preserve decomposition cards so they survive session resets.
+      // They'll be replaced when a new task_decomposition event fires.
+      const decompositions = rt.liveEvents.filter((e) => e.kind === "decompose");
+      return applyRuntime(s, sid, { liveEvents: decompositions, liveStatus: "", errorAlert: null, taskRun: null });
+    }),
 
   sealAllStreaming: (sid) =>
     set((s) => applyRuntime(s, sid, { liveEvents: sealAllStreamingFn(readRuntime(s, sid).liveEvents), liveStatus: "" })),

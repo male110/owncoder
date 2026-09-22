@@ -25,6 +25,8 @@ export type ChatTurnDto = {
   parts?: MessagePartDto[];
   metadata?: MessageMetadataDto;
   toolName?: string;
+  /** 工具调用参数（历史工具结果通过对应 tool_use 部件恢复） */
+  toolArgs?: Record<string, unknown>;
   // 压缩相关字段
   isCompressed?: boolean;
   originalLength?: number;

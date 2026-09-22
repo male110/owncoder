@@ -25,11 +25,14 @@ import type {
   EmbeddingService,
   HistoryChunk,
   HistoryChunkInput,
+  HistoryRoundInput,
   HistorySearchHit,
   HistoryVectorStore,
 } from "@owncoder/core";
 
 const DIM = 512;
+/** bge-small-zh-v1.5 / BERT 位置编码上限；超长序列必须截断，否则 ONNX Add 广播失败（如 512 by 577）。 */
+const MAX_SEQ_LEN = 512;
 /** 防止单个长会话让 sqlite-vec 和 native embedding 内存无界增长。 */
 const MAX_CHUNKS_PER_SESSION = 1000;
 /** 单条归档内容上限（UTF-8 字节）。 */
@@ -151,9 +154,17 @@ class BgeEmbeddingService implements EmbeddingService {
     await this.ensureInit();
 
     // 1. Tokenize（add_special_tokens=true 添加 [CLS]/[SEP]）
+    // @huggingface/tokenizers 的 encode 不支持 truncation；超长时需手动截断到模型上限。
     const encoding = this.tokenizer!.encode(text, { add_special_tokens: true });
-    const inputIds: number[] = encoding.ids;
-    const attentionMask: number[] = encoding.attention_mask;
+    let inputIds: number[] = encoding.ids;
+    let attentionMask: number[] = encoding.attention_mask;
+
+    // BERT 位置编码表长度为 MAX_SEQ_LEN；保留 [CLS] + 正文 + [SEP]，截断中间正文。
+    if (inputIds.length > MAX_SEQ_LEN) {
+      const keep = MAX_SEQ_LEN - 1; // 预留末尾 [SEP]
+      inputIds = inputIds.slice(0, keep).concat(inputIds[inputIds.length - 1]!);
+      attentionMask = attentionMask.slice(0, keep).concat(attentionMask[attentionMask.length - 1]!);
+    }
     const seqLen = inputIds.length;
 
     // 2. 创建 int64 张量（ONNX 模型期望 int64 输入）
@@ -162,8 +173,8 @@ class BgeEmbeddingService implements EmbeddingService {
     const tokenTypeIdsBigInt = new BigInt64Array(seqLen);
 
     for (let i = 0; i < seqLen; i++) {
-      inputIdsBigInt[i] = BigInt(inputIds[i]);
-      attentionMaskBigInt[i] = BigInt(attentionMask[i]);
+      inputIdsBigInt[i] = BigInt(inputIds[i]!);
+      attentionMaskBigInt[i] = BigInt(attentionMask[i]!);
       tokenTypeIdsBigInt[i] = 0n; // 单句输入，token_type_ids 全为 0
     }
 
@@ -440,6 +451,37 @@ export function createHistoryVector(dbPath: string): AgentLoopOpts["historyVecto
         return;
       }
       pending.push({ turn, sessionId });
+      void drain();
+    },
+    archiveRound: (round: HistoryRoundInput) => {
+      // 只归档：用户输入、任务分解、最终报告、凭证信息、工具调用参数（不含返回结果）。
+      const content = JSON.stringify({
+        userInput: round.userInput,
+        taskDecomposition: round.taskDecompose ?? null,
+        llmReport: round.assistantReport?.trim() || null,
+        evidence: round.evidence?.map((item) => ({
+          needId: item.needId,
+          summary: item.summary,
+          kind: item.kind,
+          path: item.path,
+          symbol: item.symbol,
+          startLine: item.startLine,
+          endLine: item.endLine,
+        })) ?? [],
+        toolCalls: round.toolCalls?.map((call) => ({
+          toolName: call.toolName,
+          arguments: call.arguments,
+        })) ?? [],
+      });
+      if (closed || !content.trim() || pending.length >= MAX_PENDING_ARCHIVES) return;
+      pending.push({
+        sessionId: round.sessionId,
+        turn: {
+          id: `round:${round.sessionId}:${round.roundIndex ?? Date.now().toString(36)}`,
+          role: "assistant",
+          content,
+        },
+      });
       void drain();
     },
     close: () => {

@@ -5,6 +5,7 @@ import { resolveApiFormat } from "@owncoder/llm/browser";
 import {
   BUILTIN_AGENT_PROMPT,
   BUILTIN_PLAN_PROMPT,
+  ensureWebSearchGuidance,
   looksLikeChinese,
 } from "./builtin-prompts.js";
 
@@ -407,6 +408,10 @@ export function mergeWorkflow(
   if (!merged.prompts.agentZh?.trim()) {
     merged.prompts.agentZh = "";
   }
+  merged.prompts.plan = ensureWebSearchGuidance(merged.prompts.plan);
+  merged.prompts.agent = ensureWebSearchGuidance(merged.prompts.agent);
+  merged.prompts.planZh = ensureWebSearchGuidance(merged.prompts.planZh, "zh");
+  merged.prompts.agentZh = ensureWebSearchGuidance(merged.prompts.agentZh, "zh");
   // Product path is the builtin graph only; saved pipeline overlays are ignored.
   hydratePipelinesFromLegacy(merged);
   syncLegacyPromptsFromPipelines(merged);

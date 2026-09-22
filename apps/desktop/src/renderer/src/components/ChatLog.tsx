@@ -83,166 +83,6 @@ function parseDiffStat(output: string): { added: number; removed: number } | nul
   return added + removed > 0 ? { added, removed } : null;
 }
 
-// ── ToolCard (history) ────────────────────────────────────────────────────────
-
-function parseBashOutput(content: string): { cmd?: string; body: string; exitCode?: number } {
-  const exitMatch   = content.match(/^exit\s+(-?\d+)/m);
-  // Strip optional "stdout:" / "stderr:" labels so the displayed body is the raw content.
-  const labeledBody = content
-    .replace(/^stdout:\s*\n?/m, "")
-    .replace(/^stderr:\s*\n?/gm, "");
-  const cmdFromContent = content.match(/^([^\n]+)/)?.[1];
-  return {
-    cmd: cmdFromContent && !cmdFromContent.startsWith("exit") ? cmdFromContent : undefined,
-    body: labeledBody.trim(),
-    exitCode: exitMatch ? Number(exitMatch[1]) : undefined,
-  };
-}
-
-function ToolCardImpl({ turn }: { turn: ChatTurnDto }) {
-  const [open, setOpen] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const isBash    = turn.toolName === "bash";
-  const bash      = isBash ? parseBashOutput(turn.content) : null;
-  const isError   = turn.content.trim().startsWith("Error:");
-  const bashFailed = isBash && bash?.exitCode !== undefined && bash.exitCode !== 0;
-  const failed    = isError || bashFailed;
-  const bashOk    = isBash && bash?.exitCode === 0;
-  const preview   = turn.content.length > 60 ? `${turn.content.slice(0, 60)}…` : turn.content;
-  const bodyRef   = useRef<HTMLPreElement>(null);
-  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const scrollFrameRef = useRef<number | null>(null);
-
-  // 压缩相关信息
-  const isCompressed = turn.isCompressed === true;
-  const compressionRatio = turn.originalLength && turn.content.length
-    ? Math.round((turn.content.length / turn.originalLength) * 100)
-    : null;
-  const hasImportantSnippets = turn.importantSnippets && turn.importantSnippets.length > 0;
-
-  const onCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(turn.content);
-      setCopied(true);
-      if (copyTimerRef.current !== null) {
-        clearTimeout(copyTimerRef.current);
-      }
-      copyTimerRef.current = setTimeout(() => {
-        setCopied(false);
-        copyTimerRef.current = null;
-      }, 1500);
-    } catch { /* ignore */ }
-  };
-
-  useEffect(() => {
-    if (open && bodyRef.current) {
-      scrollFrameRef.current = requestAnimationFrame(() => {
-        scrollFrameRef.current = null;
-        bodyRef.current?.scrollTo(0, bodyRef.current.scrollHeight);
-      });
-    }
-
-    return () => {
-      if (scrollFrameRef.current !== null) {
-        cancelAnimationFrame(scrollFrameRef.current);
-        scrollFrameRef.current = null;
-      }
-    };
-  }, [open, turn.content]);
-
-  useEffect(() => () => {
-    if (copyTimerRef.current !== null) {
-      clearTimeout(copyTimerRef.current);
-    }
-  }, []);
-
-  return (
-    <div className={`tool-card ${failed ? "err" : bashOk ? "ok" : ""} ${isCompressed ? "compressed" : ""}`}>
-      <button type="button" className="tool-card-head" onClick={() => setOpen((v) => !v)}>
-        <span className={`tool-card-icon ${failed ? "err" : bashOk ? "ok" : ""} ${isCompressed ? "compressed" : ""}`}>
-          {isCompressed ? "🗜️" : isBash ? "▶" : failed ? "✕" : "⚙"}
-        </span>
-        <span className="tool-card-label">
-          {toolLabel(turn.toolName)}
-          {isCompressed && (
-            <span className="compression-badge" title="已压缩内容">
-              🗜️
-            </span>
-          )}
-        </span>
-        {isBash && bash?.exitCode !== undefined ? (
-          <span className={`tool-exit ${bash.exitCode === 0 ? "ok" : "err"}`}>exit {bash.exitCode}</span>
-        ) : (
-          <span className={`tool-status ${failed ? "error" : "done"}`}>
-            {failed ? "失败" : isCompressed ? `压缩${compressionRatio ? ` ${compressionRatio}%` : ''}` : "完成"}
-          </span>
-        )}
-        <span className="tool-card-preview">
-          {bash?.cmd ?? preview}
-          {isCompressed && turn.originalLength && (
-            <span className="compression-info">
-              ({turn.content.length}/{turn.originalLength}字符)
-            </span>
-          )}
-        </span>
-        <span className="activity-chev">{open ? "▾" : "▸"}</span>
-      </button>
-      {open && (
-        <div className="tool-card-body">
-          {isCompressed && (
-            <div className="compression-header">
-              <div className="compression-stats">
-                <strong>压缩信息：</strong>
-                {turn.compressionReason && (
-                  <span className="reason">原因：{
-                    turn.compressionReason === 'context_limit' ? '上下文限制' :
-                    turn.compressionReason === 'manual' ? '手动压缩' :
-                    turn.compressionReason === 'auto' ? '自动压缩' :
-                    turn.compressionReason === 'disk_save' ? '磁盘保存' :
-                    turn.compressionReason === 'retained' ? '完整保留' : turn.compressionReason
-                  }</span>
-                )}
-                {turn.originalLength && (
-                  <span className="ratio">压缩率：{compressionRatio}% ({turn.content.length}/{turn.originalLength}字符)</span>
-                )}
-                {turn.compressedAt && (
-                  <span className="time">时间：{new Date(turn.compressedAt).toLocaleString()}</span>
-                )}
-              </div>
-              {hasImportantSnippets && (
-                <div className="important-snippets">
-                  <strong>保留的重要片段：</strong>
-                  <ul>
-                    {turn.importantSnippets!.map((snippet, i) => (
-                      <li key={`${snippet}-${i}`} title={snippet}>{snippet}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-            </div>
-          )}
-          <div className="tool-card-content-wrap">
-            <pre ref={bodyRef}>{turn.content}</pre>
-            <button
-              type="button"
-              className="tool-card-copy-btn"
-              onClick={() => void onCopy()}
-              title="复制内容"
-            >
-              {copied ? "已复制" : "复制"}
-            </button>
-          </div>
-          {isCompressed && turn.originalLength && turn.originalLength > turn.content.length && (
-            <div className="compression-footer">
-              <em>提示：此内容已压缩。原始内容为{turn.originalLength}字符，压缩后为{turn.content.length}字符。</em>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
 // ── LiveToolCard (current turn) ───────────────────────────────────────────────
 
 function LiveToolCardImpl({ tool }: { tool: PendingTool }) {
@@ -416,6 +256,7 @@ function LiveEventStreamImpl({ events }: { events: LiveEvent[] }) {
 }
 
 // ── DecomposeCard: task_decompose result (understanding + steps) ─────────────
+// 仅在 pnpm dev（import.meta.env.DEV）时由 ChatLog footer 渲染。
 
 function DecomposeCard({ decomposition }: { decomposition: DecompositionSnapshot }) {
   const [open, setOpen] = useState(true);
@@ -497,71 +338,6 @@ function DecomposeCard({ decomposition }: { decomposition: DecompositionSnapshot
               分解调用失败，以上为本地启发式回退结果，仅供粗略参考。
             </div>
           ) : null}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-
-
-// ── History: ActivityGroup ────────────────────────────────────────────────────
-
-function ActivityGroup({ items }: { items: ChatTurnDto[] }) {
-  const [open, setOpen] = useState(false);
-  const failCount = items.filter((t) => t.content.trim().startsWith("Error:")).length;
-  const summary   = items.map((t) => toolLabel(t.toolName)).join(" · ");
-
-
-  if (items.length === 1) return <ToolCard turn={items[0]!} />;
-
-  return (
-    <div className="activity-group">
-      <button type="button" className="activity-group-head" onClick={() => setOpen((v) => !v)}>
-        <span className={`activity-dot ${failCount > 0 ? "err" : ""}`} />
-        <span className="activity-group-title">
-          {open
-            ? "隐藏步骤"
-            : `已执行 ${items.length} 个步骤${failCount > 0 ? `（${failCount} 失败）` : ""}`}
-        </span>
-        <span className="activity-chev">{open ? "▾" : "▸"}</span>
-      </button>
-      {!open ? <p className="activity-group-summary">{summary}</p> : null}
-      {open ? (
-        <div className="activity-group-body">
-          {items.map((t, j) => (
-            <ToolCard key={t.id ?? `${t.toolName ?? "tool"}-${j}`} turn={t} />
-          ))}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-// ── Completed-round process trace (collapsed by default) ─────────────────────
-
-function RoundProcess({ items }: { items: ChatTurnDto[] }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <div className="activity-group">
-      <button type="button" className="activity-group-head" onClick={() => setOpen((v) => !v)}>
-        <span className="activity-dot" />
-        <span className="activity-group-title">
-          {open ? "收起执行过程" : `执行过程 · ${items.length} 步`}
-        </span>
-        <span className="activity-chev">{open ? "▾" : "▸"}</span>
-      </button>
-      {open ? (
-        <div className="activity-group-body">
-          {items.map((t, j) =>
-            t.role === "tool" ? (
-              <ToolCard key={t.id ?? `pt-${t.toolName ?? "tool"}-${j}`} turn={t} />
-            ) : (
-              <div key={t.id ?? `pn-${j}-${t.content.slice(0, 24)}`} className="process-note">
-                <Markdown content={t.content} />
-              </div>
-            ),
-          )}
         </div>
       ) : null}
     </div>
@@ -733,15 +509,6 @@ function AssistantBubbleImpl({
 }
 
 
-const ToolCard = memo(ToolCardImpl, (prev, next) =>
-  prev.turn === next.turn ||
-  (prev.turn.id === next.turn.id &&
-    prev.turn.content === next.turn.content &&
-    prev.turn.toolName === next.turn.toolName &&
-    prev.turn.isCompressed === next.turn.isCompressed &&
-    prev.turn.originalLength === next.turn.originalLength)
-);
-
 const LiveToolCard = memo(LiveToolCardImpl, (prev, next) =>
   prev.tool === next.tool ||
   (prev.tool.id === next.tool.id &&
@@ -857,11 +624,14 @@ export function ChatLog({
     [sending, liveStatus, liveEvents],
   );
 
-  // Decomposition cards belong to the current turn. They must render BEFORE
-  // the in-progress assistant reply (the live event stream) so the user sees
-  // the decomposition plan ahead of the LLM's response, not after it.
+  // Decomposition cards belong to the current turn and only show in pnpm dev.
+  // They must render BEFORE the in-progress assistant reply so the plan is
+  // visible ahead of the LLM response.
   const decompositionCards = useMemo(
-    () => liveEvents.filter((e): e is Extract<LiveEvent, { kind: "decompose" }> => e.kind === "decompose"),
+    () =>
+      import.meta.env.DEV
+        ? liveEvents.filter((e): e is Extract<LiveEvent, { kind: "decompose" }> => e.kind === "decompose")
+        : [],
     [liveEvents],
   );
   const nonDecomposeLiveEvents = useMemo(
@@ -886,9 +656,9 @@ export function ChatLog({
         />
       );
     }
-    return b.kind === "tools"
-      ? <ActivityGroup items={b.items} />
-      : <RoundProcess items={b.items} />;
+    // 不展示折叠的工具执行摘要（「执行过程 · N 步」/「已执行 N 个步骤」及工具链）。
+    // 进行中的工具仍由 LiveToolCard / liveStatus 展示；完成后只保留最终回复。
+    return null;
   }, [lastAssistantIdx, sending, liveEvents.length, onRegenerate, onOpenFile]);
 
   // History rows only — live status/stream render after Virtuoso inside the
@@ -925,7 +695,30 @@ export function ChatLog({
     let settledFrames = 0;
     let lastHeight = 0;
     let frame = 0;
-    const MAX_FRAMES = 48;
+    // Virtuoso + customScrollParent 首屏量高常超过 800ms；超时后若仍未贴底，
+    // 不能把 flag 置 true，否则 ResizeObserver 无法继续纠正，切换会话会停在顶部。
+    const MAX_FRAMES = 90;
+
+    const readBottomState = (el: HTMLElement) => {
+      const overflow = el.scrollHeight > el.clientHeight + AT_BOTTOM_THRESHOLD;
+      const atBottom =
+        el.scrollHeight - el.scrollTop - el.clientHeight <= AT_BOTTOM_THRESHOLD;
+      return { overflow, atBottom };
+    };
+
+    const markSettledIfReady = (el: HTMLElement, heightStable: boolean) => {
+      const { overflow, atBottom } = readBottomState(el);
+      // 量高完成前 scrollHeight≈clientHeight，不能当成已经在底部。
+      // 短会话始终无 overflow：等若干帧高度稳定后再允许 settle。
+      const readyToSettle =
+        atBottom && heightStable && (overflow || attempts >= 12);
+      settledFrames = readyToSettle ? settledFrames + 1 : 0;
+      if (settledFrames >= 3) {
+        initialBottomAppliedRef.current = true;
+        return true;
+      }
+      return false;
+    };
 
     const pin = () => {
       if (cancelled) return;
@@ -937,15 +730,13 @@ export function ChatLog({
         frame = requestAnimationFrame(pin);
         return;
       }
-      const overflow = el.scrollHeight > el.clientHeight + AT_BOTTOM_THRESHOLD;
-      const atBottom =
-        el.scrollHeight - el.scrollTop - el.clientHeight <= AT_BOTTOM_THRESHOLD;
       const heightStable = el.scrollHeight === lastHeight;
       lastHeight = el.scrollHeight;
-      // 量高完成前 scrollHeight≈clientHeight，不能当成已经在底部
-      settledFrames = overflow && atBottom && heightStable ? settledFrames + 1 : 0;
-      if (settledFrames >= 3 || attempts >= MAX_FRAMES) {
-        initialBottomAppliedRef.current = true;
+      if (markSettledIfReady(el, heightStable)) return;
+      if (attempts >= MAX_FRAMES) {
+        // 停止 rAF 空转；只有确实贴底才锁定，否则留给 ResizeObserver 继续钉。
+        const { atBottom } = readBottomState(el);
+        if (atBottom && heightStable) initialBottomAppliedRef.current = true;
         return;
       }
       frame = requestAnimationFrame(pin);
@@ -956,6 +747,11 @@ export function ChatLog({
       if (cancelled || initialBottomAppliedRef.current) return;
       scrollToTrueBottom();
       atBottomRef.current = true;
+      const el = scrollerElRef.current;
+      if (!el) return;
+      // 布局抖动结束后补一次 settle，避免 MAX_FRAMES 放弃后永远停在顶部
+      lastHeight = el.scrollHeight;
+      markSettledIfReady(el, true);
     });
     ro.observe(scrollParent);
     const inner = scrollParent.firstElementChild;

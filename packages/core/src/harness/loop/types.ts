@@ -335,6 +335,11 @@ export interface AgentLoopOpts {
   confirmDangerousBash?: (command: string) => Promise<boolean>;
   /** Ask the user a question (options or free text) and block until answered. */
   askUser?: (request: AskUserRequest) => Promise<string>;
+  /**
+   * Optional host browser renderer (Electron). Injected so web_fetch can fall
+   * back to post-JS DOM content for CSR pages.
+   */
+  renderPage?: ToolContext["renderPage"];
   llmApiKey?: string | null;
   mcp?: McpManager;
   /** Memory manager for layered memory */
@@ -379,6 +384,7 @@ export interface AgentLoopOpts {
      * turnIndex 由 store 内部单调分配，调用方无需（也不能）传入。
      */
     archive?: (turn: ChatTurn, sessionId: string) => void | Promise<void>;
+    archiveRound?: (round: import("./history-vector.ts").HistoryRoundInput) => void | Promise<void>;
     /** 释放归档存储及其 native 资源。 */
     close?: () => void;
   };

@@ -5,8 +5,8 @@
   --panel: #12141a;
   --rail: #0e1013;
   --border: #262a32;
-  /* Softened from near-white; nudged +2 steps for readability */
-  --text: #f3f7ff;
+  /* Mainstream dark fg (GitHub Dark / VS Code-adjacent); dialed back for eye comfort */
+  --text: #e6edf3;
   --muted: #848b96;
   --fg-muted: #848b96;
   --fg: var(--text);
@@ -1622,6 +1622,7 @@ button.ghost.accent {
   overflow: auto;
 }
 
+.agent-body.with-editor .editor-shell,
 .agent-body.with-editor .editor-pane {
   flex: 1;
   min-width: 0;
@@ -1677,6 +1678,119 @@ button.ghost.accent {
   overflow: hidden;
 }
 
+.editor-shell {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--editor-bg);
+}
+
+.editor-tabs-row {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  padding: 4px 8px 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--editor-head);
+  flex-shrink: 0;
+  min-width: 0;
+}
+
+.editor-tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.editor-tab-actions-host {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  padding: 0 0 4px;
+}
+
+.editor-tab-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.editor-tab {
+  display: inline-flex;
+  align-items: center;
+  max-width: 220px;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 8px 8px 0 0;
+  color: var(--muted);
+  background: transparent;
+}
+
+.editor-tab.active {
+  color: var(--text);
+  background: var(--editor-bg);
+  border-color: var(--border);
+}
+
+.editor-tab-main {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  padding: 7px 4px 7px 10px;
+  cursor: pointer;
+}
+
+.editor-tab-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.editor-tab-badge {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 600;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+  color: var(--accent);
+}
+
+.editor-tab-close {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1;
+  padding: 2px 8px 2px 4px;
+  cursor: pointer;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.editor-tab-close:hover {
+  background: var(--chip);
+  color: var(--text);
+}
+
+.editor-tab-pane {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 .editor-pane {
   flex: 1;
   min-height: 0;
@@ -1704,6 +1818,11 @@ button.ghost.accent {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
+.editor-path-spacer {
+  flex: 1;
+  min-width: 0;
+}
+
 .editor-dirty {
   margin-left: 6px;
   color: #e6b450;
@@ -1725,6 +1844,15 @@ button.ghost.accent {
   gap: 6px;
   flex-shrink: 0;
   align-items: center;
+}
+
+.editor-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
 }
 
 .editor-md-toggle {
@@ -2893,13 +3021,6 @@ button.ghost.accent {
 
 .activity-group-title {
   flex: 1;
-}
-
-.activity-group-summary {
-  margin: 0 0 0 24px;
-  font-size: 11px;
-  color: var(--muted);
-  line-height: 1.4;
 }
 
 .activity-group-body {

@@ -136,6 +136,8 @@ export function SessionChatPanel({
     schedule(50);
     schedule(150);
     schedule(300);
+    schedule(600);
+    schedule(1000);
 
     return () => {
       cancelled = true;

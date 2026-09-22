@@ -144,8 +144,10 @@ const WEB_SEARCH_TOOL_DEF: ToolDef = {
   function: {
     name: "web_search",
     description:
-      "Search the web for current information. Use this to find latest documentation, " +
-      "API references, error solutions, or version-specific details that may not be in the codebase.",
+      "Search the web. Use this proactively when you do not know something or are stuck: " +
+      "unfamiliar errors, missing API/docs, library behavior, version-specific details, " +
+      "or after one local retry still fails. Do not guess — search first, then web_fetch " +
+      "the best official/source URL. Also use for latest documentation and current facts.",
     parameters: {
       type: "object",
       properties: {
@@ -173,9 +175,10 @@ const WEB_FETCH_TOOL_DEF: ToolDef = {
     name: "web_fetch",
     description:
       "Fetch a URL and return its main readable text (article/body only). Strips navigation, " +
-      "headers, footers, ads, sidebars, scripts and other chrome. Use when the user provides a " +
-      "specific webpage URL and you need to read the page (docs, articles, API references, GitHub " +
-      "pages, etc.). Prefer this over web_search when you already have the exact URL.",
+      "headers, footers, ads, sidebars, scripts and other chrome. For CSR/SPA pages the host " +
+      "Electron renderer may be used as a fallback to obtain post-JS content. Use when the user " +
+      "provides a specific webpage URL and you need to read the page (docs, articles, API " +
+      "references, GitHub pages, etc.). Prefer this over web_search when you already have the exact URL.",
     parameters: {
       type: "object",
       properties: {
@@ -309,32 +312,25 @@ export const REPORT_BLOCKER_TOOL_DEF: ToolDef = {
 // ── User Memory Tools ─────────────────────────────────────
 
 /**
- * ask_user — present a question to the user and block the turn until they answer.
+ * ask_user — ask the user a question and wait for an answer.
  *
- * Use it whenever you need a decision only the user can make: a conflict between
- * their instruction and what the code shows, a tradeoff between approaches, an
- * ambiguous requirement, or approval to proceed on a risky path. Provide concrete
- * options when the choice is bounded; set allowFreeText when the answer is open.
- * The turn pauses until the user responds — do not call any other tool meanwhile.
+ * The question may include selectable choices or allow a free-text response.
+ * The turn pauses until the user responds.
  */
 export const ASK_USER_TOOL_DEF: ToolDef = {
   type: "function",
   function: {
     name: "ask_user",
     description:
-      "Ask the user a question and wait for their answer. Use this when a decision only the user can make " +
-      "is blocking progress — for example their explicit instruction conflicts with code you found, you must " +
-      "choose between approaches, a requirement is ambiguous, or you need approval for a risky/irreversible " +
-      "step. Prefer concrete options when the choice is bounded; set allowFreeText=true for open-ended answers. " +
-      "The turn pauses until the user responds, so do not call other tools in the same batch.",
+      "Ask the user one question and wait for their response. " +
+      "Use options for selectable choices or allowFreeText=true for an open-ended response. " +
+      "Execution pauses until the user responds.",
     parameters: {
       type: "object",
       properties: {
         question: {
           type: "string",
-          description:
-            "The question to ask, stated concretely. Include the conflict or tradeoff and what you need decided. " +
-            "Do not ask for facts you could find yourself by reading code.",
+          description: "The question to present to the user.",
         },
         options: {
           type: "array",
@@ -348,7 +344,7 @@ export const ASK_USER_TOOL_DEF: ToolDef = {
             required: ["label", "value"],
           },
           description:
-            "Selectable choices. Provide at least one unless allowFreeText is true. The chosen value is returned to you.",
+            "Optional selectable choices. The selected value is returned to you.",
         },
         allowFreeText: {
           type: "boolean",
@@ -697,7 +693,7 @@ export function allEnhancedTools(opts?: {
       function: {
         name: "grep",
         description:
-          "Search file contents with a regex or plain string. Skips dot-directories (.git, .next, .owncoder, …), generated directories (node_modules, dist, out, build, coverage, …), lockfiles, binaries, and files larger than 2MB. For symbol names prefer search_symbols.",
+          "Search file contents with a regex or plain string. Prefer the most specific available text as the pattern and preserve known names, expressions, and signatures instead of inventing alternatives. Skips dot-directories (.git, .next, .owncoder, …), generated directories (node_modules, dist, out, build, coverage, …), lockfiles, binaries, and files larger than 2MB. For symbol names prefer search_symbols.",
         parameters: {
           type: "object",
           properties: {
@@ -782,6 +778,28 @@ export function allEnhancedTools(opts?: {
           properties: {
             hint: { type: "string", description: "Optional focus hint" },
           },
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "recall_history",
+        description:
+          "Retrieve the most relevant archived history for the current session. " +
+          "Use a concise keyword or focused question describing the information needed. " +
+          "Returns up to five matches with relevance of at least 60%. " +
+          "Each match contains only the user input, task decomposition, LLM report, evidence metadata, and tool-call arguments (no tool results). " +
+          "Use this when the current context is insufficient and earlier conversation, findings, or decisions may help.",
+        parameters: {
+          type: "object",
+          properties: {
+            query: {
+              type: "string",
+              description: "Keyword or focused question describing the history to retrieve",
+            },
+          },
+          required: ["query"],
         },
       },
     },

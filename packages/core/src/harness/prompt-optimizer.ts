@@ -280,7 +280,7 @@ function getGuidanceForPattern(category: FailurePattern["category"]): string {
     wrong_approach:
       "收到 '错误方法' 反馈时，仔细阅读用户消息找到被指出的问题，采用不同的解决思路。",
     stuck_loop:
-      "如果同一工具连续调用超过3次无变化，改用其他方法或先暂停分析问题。",
+      "如果同一工具连续调用超过3次无变化，停止重复本地尝试，改用 web_search 查报错/文档后再换方法。",
   };
   return map[category] ?? "请检查错误并调整方法。";
 }

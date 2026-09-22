@@ -8,6 +8,7 @@ import {
   persistRoundReport,
   persistRoundEvidence,
   persistRoundFileChanges,
+  persistRoundToolCalls,
   formatRoundBlock,
   formatRoundsForDecomposeHistory,
   collectReadEvidenceFromTurns,
@@ -409,6 +410,31 @@ describe("decompose→report/evidence 同轮持久化", () => {
     expect(block).toContain("[file changes]");
     expect(block).toContain("write_file src/app.ts");
     expect(block).toContain("apply_patch src/index.ts");
+  });
+  it("任务分解历史保留工具参数，但不注入工具执行结果", async () => {
+    const record = await persistDecomposeRound(tmpDir, SESSION_ID, USER_INPUT, decompose);
+    await persistRoundToolCalls(tmpDir, SESSION_ID, USER_INPUT, record!.index, [
+      {
+        toolName: "read_file",
+        arguments: { path: "src/very-large-file.ts", offset: 400, limit: 100 },
+        result: "a very large tool result that must not enter the decomposition context",
+      },
+      {
+        toolName: "grep",
+        arguments: { pattern: "userService.getByPhone(query.getPhone())" },
+        result: "many matching lines",
+      },
+    ]);
+
+    const rounds = await loadRecentRounds(tmpDir, SESSION_ID, 10);
+    const block = formatRoundBlock(rounds[0], 1);
+    expect(block).toContain("- read_file");
+    expect(block).toContain("- grep");
+    expect(block).toContain("very-large-file.ts");
+    expect(block).toContain('"offset":400');
+    expect(block).toContain('"pattern":"userService.getByPhone(query.getPhone())"');
+    expect(block).not.toContain("very large tool result");
+    expect(block).not.toContain("userService.getByPhone");
   });
   it("无 decompose 直接写 report 不会伪造 decompose", async () => {
     await persistRoundReport(tmpDir, SESSION_ID, USER_INPUT, "只有报告");

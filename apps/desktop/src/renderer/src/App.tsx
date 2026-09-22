@@ -10,13 +10,14 @@
  * No useState, no IPC calls, no business logic lives here.
  * State lives in store/; logic lives in hooks/.
  */
-import { lazy, Suspense, useCallback, useEffect, useRef } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 
 // ── Stores ────────────────────────────────────────────────────────────────────
 import { useSessionStore } from "./store/session-store";
 import type { ActivePlanMetaDto } from "../../preload/index";
 import { useChatStore } from "./store/chat-store";
 import { getComposerDraftKey, useUiStore } from "./store/ui-store";
+import { customConfirm } from "./utils/customConfirm";
 
 // ── Hooks ─────────────────────────────────────────────────────────────────────
 import { useSessionSync } from "./hooks/useSessionSync";
@@ -79,10 +80,10 @@ export function App() {
   const bySession = useChatStore((s) => s.bySession);
 
   const {
-    editorPath, chatWidth, isDragging, sidebarWidth, isSidebarDragging,
+    editorTabs, editorPath, chatWidth, isDragging, sidebarWidth, isSidebarDragging,
     sidebarCollapsed, settingsOpen, settingsTab,
     searchOpen, modeMenuOpen, drafts, busy, keepAllBusy,
-    setEditorPath, setChatWidth, setIsDragging, setSidebarWidth, setIsSidebarDragging,
+    setEditorPath, setActiveEditorTab, closeEditorTab, setChatWidth, setIsDragging, setSidebarWidth, setIsSidebarDragging,
     setSidebarCollapsed, setSettingsOpen, setSettingsTab, setSearchOpen, setModeMenuOpen,
     setDraft, openSettings,
   } = useUiStore();
@@ -91,11 +92,16 @@ export function App() {
 
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const shellRef = useRef<HTMLDivElement | null>(null);
-  const diffDataRef = useRef<{ before: string; after: string } | null>(null);
   const resizeFrameRef = useRef<number | null>(null);
   const pendingChatWidthRef = useRef<number | null>(null);
   const sidebarResizeFrameRef = useRef<number | null>(null);
   const pendingSidebarWidthRef = useRef<number | null>(null);
+  /** 页签行右侧操作区宿主，供 EditorPane 通过 portal 挂载保存/重新加载。 */
+  const [editorTabActionsHost, setEditorTabActionsHost] = useState<HTMLDivElement | null>(null);
+  /** 各打开文件的 dirty 状态，供 tab 关闭确认与脏点标记。 */
+  const [editorDirtyByPath, setEditorDirtyByPath] = useState<Record<string, boolean>>({});
+  /** 当前以 diff 模式打开的文件内容（按 path 绑定，切换/重开时需触发重渲染）。 */
+  const [diffData, setDiffData] = useState<{ path: string; before: string; after: string } | null>(null);
 
   // ── Hooks ────────────────────────────────────────────────────────────────────
   const {
@@ -157,8 +163,49 @@ export function App() {
 
   // Collapse sidebar when editor opens; restore when it closes.
   useEffect(() => {
-    setSidebarCollapsed(Boolean(editorPath));
-  }, [editorPath, setSidebarCollapsed]);
+    setSidebarCollapsed(editorTabs.length > 0);
+  }, [editorTabs.length, setSidebarCollapsed]);
+
+  const handleEditorDirtyChange = useCallback((path: string, dirty: boolean) => {
+    setEditorDirtyByPath((prev) => {
+      if (Boolean(prev[path]) === dirty) return prev;
+      if (!dirty && !(path in prev)) return prev;
+      const next = { ...prev };
+      if (dirty) next[path] = true;
+      else delete next[path];
+      return next;
+    });
+  }, []);
+
+  const handleCloseEditorTab = useCallback((path: string) => {
+    setDiffData((prev) => (prev?.path === path ? null : prev));
+    setEditorDirtyByPath((prev) => {
+      if (!(path in prev)) return prev;
+      const next = { ...prev };
+      delete next[path];
+      return next;
+    });
+    closeEditorTab(path);
+  }, [closeEditorTab]);
+
+  const requestCloseEditorTab = useCallback(async (path: string) => {
+    if (editorDirtyByPath[path]) {
+      const ok = await customConfirm("文件尚未保存，确定关闭？未保存的修改将丢失。");
+      if (!ok) return;
+    }
+    handleCloseEditorTab(path);
+  }, [editorDirtyByPath, handleCloseEditorTab]);
+
+  /** 普通打开文件：激活/追加 tab，并取消该路径上的 diff 模式。 */
+  const openEditorFile = useCallback((path: string) => {
+    setDiffData((prev) => (prev?.path === path ? null : prev));
+    setEditorPath(path);
+  }, [setEditorPath]);
+
+  const fileNameOf = useCallback((path: string) => {
+    const parts = path.replace(/\\/g, "/").split("/");
+    return parts[parts.length - 1] || path;
+  }, []);
 
   // Drag-resize handler for chat panel (right side).
   useEffect(() => {
@@ -330,7 +377,7 @@ export function App() {
           isActive={sid === activeSessionId}
           llmConfigured={llmConfigured}
           onRegenerate={() => void onRegenerate()}
-          onOpenFile={setEditorPath}
+          onOpenFile={openEditorFile}
           onOpenSettings={openSettings}
           onSendQueuedMessage={(index) => sendQueued(sid, index)}
         />
@@ -347,13 +394,10 @@ export function App() {
             onKeepFile={(p) => void onKeepFile(p)}
             onUndoFile={(p) => void onUndoFile(p)}
             onViewDiff={(path, before, after) => {
-              diffDataRef.current = { before, after };
+              setDiffData({ path, before, after });
               setEditorPath(path);
             }}
-            onOpenFile={(path) => {
-              diffDataRef.current = null;
-              setEditorPath(path);
-            }}
+            onOpenFile={openEditorFile}
           />
           <PlansBar
             plans={sessionPlans}
@@ -361,7 +405,7 @@ export function App() {
             busy={busy || sending}
             onApprovePlan={(p) => void onApprovePlan(p)}
             onReadPlan={(p) => window.owncoder.readPlan(p)}
-            onOpenFile={setEditorPath}
+            onOpenFile={openEditorFile}
           />
           {sessionActivePlanMeta && sessionActivePlanMeta.tasks.length > 0 && sessionActivePlanMeta.path ? (
             <TaskListBar
@@ -465,7 +509,7 @@ export function App() {
           onRemoveProject={(root) => onRemoveProject(root)}
           onSwitchSession={(id) => onSwitchSession(id)}
           onDeleteSession={(id, projectRoot) => void onDeleteSession(id, projectRoot)}
-          onOpenFile={setEditorPath}
+          onOpenFile={openEditorFile}
         />
 
         {!sidebarCollapsed ? (
@@ -478,34 +522,91 @@ export function App() {
 
         <main className="agent-main">
 
-          <div ref={bodyRef} className={`agent-body${editorPath ? " with-editor" : ""}`}>
-            {editorPath ? (
+          <div ref={bodyRef} className={`agent-body${editorTabs.length > 0 ? " with-editor" : ""}`}>
+            {editorTabs.length > 0 && editorPath ? (
               <>
-                <EditorPane
-                  path={editorPath}
-                  {...(diffDataRef.current
-                    ? {
-                        diffMode: true as const,
-                        content: diffDataRef.current.after,
-                        originalContent: diffDataRef.current.before,
-                      }
-                    : {
-                        diffMode: false as const,
-                        content: undefined,
+                <div className="editor-shell">
+                  <div className="editor-tabs-row">
+                    <div className="editor-tabs" role="tablist" aria-label="已打开文件">
+                      {editorTabs.map((tabPath) => {
+                        const active = tabPath === editorPath;
+                        const dirty = Boolean(editorDirtyByPath[tabPath]);
+                        const isDiff = diffData?.path === tabPath;
+                        return (
+                          <div
+                            key={tabPath}
+                            className={`editor-tab${active ? " active" : ""}`}
+                            role="presentation"
+                          >
+                            <button
+                              type="button"
+                              role="tab"
+                              aria-selected={active}
+                              className="editor-tab-main"
+                              title={tabPath}
+                              onClick={() => setActiveEditorTab(tabPath)}
+                            >
+                              <span className="editor-tab-name">{fileNameOf(tabPath)}</span>
+                              {isDiff ? <span className="editor-tab-badge">对比</span> : null}
+                              {dirty ? <span className="editor-dirty">●</span> : null}
+                            </button>
+                            <button
+                              type="button"
+                              className="editor-tab-close"
+                              title="关闭"
+                              aria-label={`关闭 ${fileNameOf(tabPath)}`}
+                              onClick={() => void requestCloseEditorTab(tabPath)}
+                            >
+                              ×
+                            </button>
+                          </div>
+                        );
                       })}
-                  onClose={() => {
-                    diffDataRef.current = null;
-                    setEditorPath(null);
-                  }}
-                  onSaved={() => void refreshChanges()}
-                />
+                    </div>
+                    <div
+                      ref={setEditorTabActionsHost}
+                      className="editor-tab-actions-host"
+                      aria-label="编辑器操作"
+                    />
+                  </div>
+                  {editorTabs.map((tabPath) => {
+                    const active = tabPath === editorPath;
+                    const diff = diffData?.path === tabPath ? diffData : null;
+                    return (
+                      <div
+                        key={tabPath}
+                        className="editor-tab-pane"
+                        style={{ display: active ? "flex" : "none" }}
+                        aria-hidden={!active}
+                      >
+                        <EditorPane
+                          path={tabPath}
+                          hidePathTitle
+                          actionsHost={active ? editorTabActionsHost : null}
+                          {...(diff
+                            ? {
+                                diffMode: true as const,
+                                content: diff.after,
+                                originalContent: diff.before,
+                              }
+                            : {
+                                diffMode: false as const,
+                                content: undefined,
+                              })}
+                          onSaved={() => void refreshChanges()}
+                          onDirtyChange={(dirty) => handleEditorDirtyChange(tabPath, dirty)}
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
                 <div
                   className="editor-resize-handle"
                   onMouseDown={() => setIsDragging(true)}
                 />
               </>
             ) : null}
-            <div className="agent-chat" style={editorPath ? { width: `${chatWidth}%` } : undefined}>
+            <div className="agent-chat" style={editorTabs.length > 0 ? { width: `${chatWidth}%` } : undefined}>
               {chatPanel}
             </div>
           </div>
@@ -522,7 +623,7 @@ export function App() {
             await onSwitchSession(id);
           }}
           onSelectFile={(path) => {
-            setEditorPath(path);
+            openEditorFile(path);
             setDraft(
               draft.trim() ? `${draft} @${path} ` : `@${path} `,
               getComposerDraftKey(activeSessionId, pendingNewSession),

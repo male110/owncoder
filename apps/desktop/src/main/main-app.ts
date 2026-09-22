@@ -11,6 +11,7 @@ import { disposeAllPty } from "./pty";
 import { registerAllHandlers, type IpcContext } from "./ipc/index";
 import { checkForUpdates } from "./updates";
 import { indexHost } from "./index-host";
+import { disposeWebFetchRenderer, renderPage } from "./web-fetch-render";
 
 /**
  * electron-vite 产物布局：
@@ -493,6 +494,7 @@ app.whenReady().then(async () => {
   // Responses are request-id based and fail closed on timeout, close, or reload.
   session.setDangerousBashConfirmer((command, sessionId) => requestDangerousConfirmation(command, sessionId));
   session.setAskUserHandler((req, sessionId) => requestAskUser(req, sessionId));
+  session.setRenderPageHandler((url, opts) => renderPage(url, opts));
 
   // Build the shared context bag and register all IPC domains.
   const ipcCtx: IpcContext = {
@@ -627,6 +629,7 @@ app.on("before-quit", async (event) => {
   if (quitting) return;
   quitting = true;
   event.preventDefault();
+  disposeWebFetchRenderer();
   try {
     await session.drainPersists();
   } catch {

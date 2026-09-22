@@ -82,19 +82,21 @@ export function createAutoFixState(): AutoFixState {
   };
 }
 
-/** semantic_diff / 仅 warning：不阻断任务、不弹窗。 */
+const ADVISORY_CHECK_TYPES = new Set(["semantic_diff", "lsp"]);
+
+/** semantic_diff / lsp warning 等建议性检查：不阻断任务、不弹窗。 */
 export function isAdvisoryVerificationResult(result: VerificationResult | null | undefined): boolean {
   if (!result || result.checks.length === 0) return false;
-  // 收窄：必须全部是非阻断的 semantic_diff，且没有任何 error 级问题。
-  // 硬检查（typecheck/lint/execution）即使被误标 severity 也不能降级。
+  // 收窄：必须全部是非阻断的建议性检查（semantic_diff / lsp warning），且没有任何 error 级问题。
+  // 硬检查（typecheck/lint/execution）与 lsp error 即使被误标也不能降级为 advisory。
   return result.checks.every((check) => {
     if (check.skipped) return true;
-    if (check.type !== "semantic_diff") return false;
+    if (!ADVISORY_CHECK_TYPES.has(check.type)) return false;
     if (check.blocking === true) return false;
     if (check.errors.some((error) => error.severity === "error")) return false;
     // 无错误的纯通过结果不算 advisory（走正常 passed 路径即可）
     return check.errors.length > 0 && check.errors.every((error) => error.severity !== "error");
-  }) && result.checks.some((check) => !check.skipped && check.type === "semantic_diff" && check.errors.length > 0);
+  }) && result.checks.some((check) => !check.skipped && ADVISORY_CHECK_TYPES.has(check.type) && check.errors.length > 0);
 }
 
 // ── Main Auto-Fix Loop ─────────────────────────────────────
@@ -161,18 +163,23 @@ export async function autoFixAfterTools(
     const result = await engine.verify(state.dirtyFiles);
 
     if (result.passed || isAdvisoryVerificationResult(result)) {
-      // ✅ 硬检查通过，或只剩 semantic_diff 等建议性警告 — 不阻断、不耗尽修复预算。
+      // ✅ 硬检查通过，或只剩 semantic_diff / lsp warning 等建议性诊断 — 不阻断、不耗尽修复预算。
       const attempts = state.fixAttempts;
       state.dirtyFiles = [];
       state.fixAttempts = 0;
       state.hasUnresolvedErrors = false;
       state.lastErrors = "";
-      cfg.onEvent?.({ type: "fix_end", message: result.passed ? "✅ 验证通过" : "✅ 验证通过（含建议性警告）" });
+      const hasAdvisory = isAdvisoryVerificationResult(result);
+      cfg.onEvent?.({
+        type: "fix_end",
+        message: hasAdvisory ? "✅ 验证通过（含建议性诊断，不阻断）" : "✅ 验证通过",
+      });
 
       return {
         resolved: true,
         attempts,
         finalVerification: result,
+        // 建议性诊断只留在验证报告（summary / checks.errors），不再注入对话气泡。
         injectedMessages: [],
         summary: result.summary,
         exhausted: false,
@@ -289,12 +296,16 @@ export function getDirtyFiles(
  */
 function buildErrorSummary(result: VerificationResult): string {
   const lines: string[] = [];
-  const failedChecks = result.checks.filter((c) => !c.passed);
+  // Include hard failures, plus advisory checks that still have diagnostics to report.
+  const relevantChecks = result.checks.filter(
+    (c) => (!c.skipped && !c.passed) || (!c.skipped && ADVISORY_CHECK_TYPES.has(c.type) && c.errors.length > 0),
+  );
 
-  if (failedChecks.length === 0) return "未发现检查失败";
+  if (relevantChecks.length === 0) return "未发现检查失败";
 
-  for (const check of failedChecks) {
-    lines.push(`### ${check.name} (${check.type})`);
+  for (const check of relevantChecks) {
+    const advisoryTag = ADVISORY_CHECK_TYPES.has(check.type) && check.blocking === false ? " · 建议性" : "";
+    lines.push(`### ${check.name} (${check.type}${advisoryTag})`);
     for (const err of check.errors.slice(0, 8)) {
       const loc = err.file
         ? `\`${err.file}${err.line ? `:${err.line}` : ""}${err.column ? `:${err.column}` : ""}\``
@@ -326,6 +337,7 @@ function buildAutoFixPrompt(state: AutoFixState, errorSummary: string, maxAttemp
     `2. 只修复你引入的错误，不要修改不相关的代码，也不要用删除功能或绕过检查的方式“修复”`,
     `3. 用 apply_patch 修复已有文件（仅新文件才用 write_file）`,
     `4. 修复完成后停止调用工具，我会重新验证`,
+    `5. 如果报错含义不清楚、仓库里没有对应文档，或这是第 2 次及以上修复尝试，先用 web_search 搜索完整报错再改，不要靠猜测连改`,
     ``,
     state.fixAttempts >= maxAttempts - 1
       ? `⚠️ 这是最后一次修复机会。如果这次失败，错误将被报告给用户。`

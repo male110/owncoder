@@ -95,9 +95,20 @@ export function AgentSidebar({
   const [visibleCountByProject, setVisibleCountByProject] = useState<Record<string, number>>({});
   /** Per-project sidebar view; default is sessions. */
   const [viewModeByProject, setViewModeByProject] = useState<Record<string, ProjectViewMode>>({});
+  /** Per-project file-tree expanded dirs; survives sidebar collapse / view switches. */
+  const [expandedDirsByProject, setExpandedDirsByProject] = useState<
+    Record<string, Record<string, boolean>>
+  >({});
   const getViewMode = (root: string): ProjectViewMode => viewModeByProject[root] ?? "sessions";
   const setViewMode = (root: string, mode: ProjectViewMode) => {
     setViewModeByProject((prev) => (prev[root] === mode ? prev : { ...prev, [root]: mode }));
+  };
+  const toggleExpandedDir = (projectRoot: string, dirPath: string) => {
+    setExpandedDirsByProject((prev) => {
+      const current = prev[projectRoot] ?? {};
+      const nextForProject = { ...current, [dirPath]: !current[dirPath] };
+      return { ...prev, [projectRoot]: nextForProject };
+    });
   };
   return (
     <aside className={`nav-rail${collapsed ? " collapsed" : ""}`}>
@@ -263,10 +274,18 @@ export function AgentSidebar({
                       <div className="file-tree-wrap">
                         <ProjectFileTree
                           root={p.root}
+                          expandedDirs={expandedDirsByProject[p.root] ?? {}}
+                          onToggleDir={(dirPath) => toggleExpandedDir(p.root, dirPath)}
                           onOpenFile={(path) => {
-                            void onSelectProject(p.root).then(() => {
-                              onOpenFile?.(path);
-                            });
+                            // Opening a file must not toggle the current project's expand state.
+                            // onSelectProject(currentRoot) intentionally collapses/expands; skip it
+                            // when already on this project and only switch when needed.
+                            const openFile = () => onOpenFile?.(path);
+                            if (workspace?.root === p.root) {
+                              openFile();
+                              return;
+                            }
+                            void onSelectProject(p.root).then(openFile);
                           }}
                         />
                       </div>

@@ -1,4 +1,5 @@
 import type { ToolContext, ToolResult, AskUserOption } from "./types.ts";
+import { unmatchedExportChanges } from "../diff-heuristics.ts";
 import { assertInside, cap, fail, ok, runCommand, toAbs } from "./shared.ts";
 
 // ── NEW: Semantic Diff Tool ────────────────────────────────
@@ -37,21 +38,22 @@ function analyzeDiff(diffText: string, filePath: string): string {
     if (line.startsWith("+") && !line.startsWith("+++")) {
       additions++;
       const code = line.slice(1).trim();
-      if (/^export\s+(default\s+)?(interface|type|class|function|const)\s+\w+/.test(code)) {
-        warnings.push(`新增导出: ${code.slice(0, 80)}`);
-      }
       if (/\bany\b/.test(code) && /:\s*any/.test(code)) {
         warnings.push(`使用了 any 类型: ${code.slice(0, 80)}`);
       }
     }
     if (line.startsWith("-") && !line.startsWith("---")) {
       deletions++;
-      const code = line.slice(1).trim();
-      if (/^export\s+(default\s+)?(interface|type|class|function|const)\s+\w+/.test(code)) {
-        warnings.push(`⚠ 移除了导出: ${code.slice(0, 80)} — 可能破坏依赖方`);
-      }
     }
     if (line.startsWith("@@")) hunks++;
+  }
+
+  const { removed, added } = unmatchedExportChanges(diffText);
+  for (const code of added) {
+    warnings.push(`新增导出: ${code.slice(0, 80)}`);
+  }
+  for (const code of removed) {
+    warnings.push(`⚠ 移除了导出: ${code.slice(0, 80)} — 可能破坏依赖方`);
   }
 
   const parts: string[] = [];
@@ -177,6 +179,8 @@ export async function toolWebSearch(
 const FETCH_UA = BING_UA;
 const DEFAULT_FETCH_MAX_CHARS = 50_000;
 const HARD_FETCH_MAX_CHARS = 100_000;
+/** Below this, static HTML text is treated as a likely CSR/empty shell. */
+const CSR_SHELL_TEXT_THRESHOLD = 200;
 
 /** Tags that never contribute readable article body. */
 const NOISE_TAGS =
@@ -266,6 +270,35 @@ function htmlToReadableText(html: string): string {
   return text;
 }
 
+/**
+ * Heuristic: static HTML that is mostly a JS mount point / empty shell.
+ * Used to decide whether to ask the host Electron renderer for post-JS DOM.
+ */
+export function looksLikeCsrShell(html: string, readableText: string): boolean {
+  const text = readableText.replace(/\s+/g, " ").trim();
+  if (text.length >= CSR_SHELL_TEXT_THRESHOLD) return false;
+  const lower = html.toLowerCase();
+  if (
+    /id\s*=\s*["'](?:app|root|__next|nuxt|__nuxt|svelte|main-app|page-content)["']/i.test(html) ||
+    /data-reactroot|data-server-rendered\s*=\s*["']false["']|ng-version\s*=/i.test(html)
+  ) {
+    return true;
+  }
+  // Very little readable text + lots of script tags is a strong CSR signal.
+  const scriptCount = (lower.match(/<script\b/g) ?? []).length;
+  if (text.length < 80 && scriptCount >= 3) return true;
+  if (text.length === 0 && /<body\b/i.test(html)) return true;
+  return text.length < 80;
+}
+
+function pickBestText(parts: Array<string | undefined | null>): string {
+  for (const p of parts) {
+    const t = (p ?? "").trim();
+    if (t) return t;
+  }
+  return "";
+}
+
 export async function toolWebFetch(
   ctx: ToolContext,
   urlStr: string,
@@ -329,15 +362,57 @@ export async function toolWebFetch(
     }
 
     const isHtml = /html|xml/i.test(contentType) || /^\s*</.test(body);
-    const text = isHtml ? htmlToReadableText(body) : body.trim();
+    let extractedText = isHtml ? htmlToReadableText(body) : body.trim();
+    // Keep a useful response when the readability heuristic rejects the page,
+    // but never hand script/style source back as if it were article text.
+    let visibleText = isHtml ? normalizeReadableText(stripNoiseElements(body)) : body.trim();
+    let fallbackHtml = isHtml ? stripNoiseElements(body).trim() : "";
+    let text = pickBestText([extractedText, visibleText, fallbackHtml, body]);
+    let viaRender = false;
+
+    // CSR / empty-shell pages: ask Electron host to render and re-extract.
+    if (
+      isHtml &&
+      ctx.renderPage &&
+      looksLikeCsrShell(body, pickBestText([extractedText, visibleText]))
+    ) {
+      try {
+        const rendered = await ctx.renderPage(parsed.toString(), {
+          timeoutMs: 25_000,
+          signal: ctx.signal,
+        });
+        const renderedHtml = rendered?.html?.trim() ?? "";
+        const renderedInner = rendered?.text?.trim() ?? "";
+        if (renderedHtml) {
+          const rExtracted = htmlToReadableText(renderedHtml);
+          const rVisible = normalizeReadableText(stripNoiseElements(renderedHtml));
+          const rFallback = stripNoiseElements(renderedHtml).trim();
+          const candidate = pickBestText([rExtracted, rVisible, renderedInner, rFallback]);
+          if (candidate.length > text.length) {
+            extractedText = rExtracted;
+            visibleText = rVisible;
+            fallbackHtml = rFallback;
+            text = candidate;
+            viaRender = true;
+          }
+        } else if (renderedInner && renderedInner.length > text.length) {
+          text = renderedInner;
+          viaRender = true;
+        }
+      } catch {
+        // Keep static fallback; render failures must not fail the whole fetch.
+      }
+    }
+
     if (!text) {
-      return ok(cap(`Fetched ${parsed.toString()} (HTTP ${status}) but extracted no readable text.`, ctx.maxOutputChars));
+      return ok(cap(`Fetched ${parsed.toString()} (HTTP ${status}) but response contained no content.`, ctx.maxOutputChars));
     }
 
     const header =
       `URL content: ${parsed.toString()}\n` +
       `HTTP ${status}` +
       (contentType ? ` | ${contentType.split(";")[0]!.trim()}` : "") +
+      (viaRender ? " | rendered" : "") +
       `\n\n`;
     return ok(cap(header + text, Math.min(limit, ctx.maxOutputChars)));
   } catch (e) {

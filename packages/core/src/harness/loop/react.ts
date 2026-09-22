@@ -353,8 +353,8 @@ function formatConfirmedEvidence(task: TaskItem): string {
 function explorationStatusGuidance(task: TaskItem, whenNoNeeds: string): string {
   if (!task.informationNeeds.length) return whenNoNeeds;
   return isExplorationComplete(task)
-    ? "All information needs and stop-exploration criteria are satisfied. Do not call read_file, grep, search_symbols, or other exploration tools; only edit, verify, report a blocker, or give the final result."
-    : "Call exploration tools only to fill the unmet information needs or stop-exploration criteria above. Whole-file reads are only for files under 10KB. Files 10KB or larger: use read_outline first, then read_symbol or a bounded read_file(offset+limit); never request the complete file. Successful reads stay in this turn's context; continue with an edit, verification, blocker, or final result when the needs are met.";
+    ? "All information needs and stop-exploration criteria are satisfied. Do not call read_file, grep, search_symbols, web_search, or other exploration tools; only edit, verify, report a blocker, or give the final result."
+    : "Call exploration tools only to fill the unmet information needs or stop-exploration criteria above. For needs that are not in this repository (errors, APIs, docs, library behavior), use web_search (then web_fetch) instead of guessing. Whole-file reads are only for files under 10KB. Files 10KB or larger: use read_outline first, then read_symbol or a bounded read_file(offset+limit); never request the complete file. Successful reads stay in this turn's context; continue with an edit, verification, blocker, or final result when the needs are met.";
 }
 
 function formatCurrentTaskContext(task: TaskItem): string {
@@ -363,14 +363,15 @@ function formatCurrentTaskContext(task: TaskItem): string {
     "### Execution flow",
     "1. Read the <task> block above. Note ID / Description / Information needs / Stop-exploration criteria / Confirmed refined evidence.",
     "2. Call tools as needed:",
-    "   - Exploration tools (read_file / grep / search_symbols / lsp_* / repo_map / read_symbol / read_outline, etc.) — use them only to fill unmet needs. Whole-file read_file is only for files under 10KB. Files 10KB or larger MUST call read_outline first; then use read_symbol only for one unique symbol, or read_file with both offset and limit from the outline's line range. Never retry a rejected large-file read without a range or fall back to reading the whole file. Successful read_file/read_symbol results stay in this turn's context automatically.",
+    "   - Exploration tools (read_file / grep / search_symbols / lsp_* / repo_map / read_symbol / read_outline, etc.) — use them only to fill unmet needs. Use the most specific available search anchor before broader exploration; preserve concrete text and avoid replacing known names, expressions, or signatures with guesses. Locate the relevant code before reading it, then inspect the smallest surrounding range that establishes the behavior and its conditions. Whole-file read_file is only for files under 10KB. Files 10KB or larger MUST call read_outline first; then use read_symbol only for one unique symbol, or read_file with both offset and limit from the outline's line range. Never retry a rejected large-file read without a range or fall back to reading the whole file. Successful read_file/read_symbol results stay in this turn's context automatically.",
+    "   - External knowledge (web_search / web_fetch) — required when a need cannot be answered from this repository: unknown APIs, docs, error messages, library behavior, version-specific details. Search before guessing. After web_search, web_fetch the best official/source URL. If the same local error or unknown remains after one retry, search instead of repeating the same edit.",
     "   - Implementation tools (apply_patch / write_file / append_file / type_check / bash) — use them only after every informationNeed and every stopReadingWhen.requiredEvidenceId is met.",
     "3. Termination — stop calling tools and produce the final answer only when ALL of the following hold:",
     "   a. The goal is achieved;",
     "   b. Every Information need is met (Confirmed refined evidence covers every need-id);",
     "   c. Every Stop-exploration criteria requiredEvidenceId is met.",
     "   Local hard-validation enforces this (isExplorationComplete) — no second LLM evaluation is required.",
-    "4. Tool failure: read the error and correct it first; if the same action fails twice, switch path or switch tool.",
+    "4. Tool failure: read the error and correct it first; if the same action fails twice, switch path or switch tool. If the failure is an unexplained error or missing external knowledge, call web_search before more local retries.",
     `ID: ${task.id}`,
     `Description: ${task.description}`,
     task.acceptance ? `Acceptance criteria: ${task.acceptance}` : "",
@@ -1443,6 +1444,7 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
           content:
             `Information needs are not yet met: ${missingNeeds.join(", ") || "stop-exploration criteria unmet"}. ` +
             "Call exploration tools that can fill these needs before giving a final answer. " +
+            "If a need is not in this repository, use web_search (then web_fetch) rather than guessing. " +
             "Successful reads stay in this turn's context. Do not conclude while these needs are unmet.",
         });
         logReasoningStep(reasoningTrace, {
@@ -1683,7 +1685,7 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
         content:
           `You have used only exploration tools (read/search/browse) for ${consecutiveReadonlyIters} consecutive iterations without entering the implementation phase. ` +
           `Based on the information already gathered, transition to implementation now: use apply_patch / write_file to edit files, run type_check / bash to verify, or give a final conclusion. ` +
-          `If you genuinely lack necessary information, state what is missing and do exactly one targeted read; otherwise stop exploring and start implementing immediately.`,
+          `If you lack a codebase fact, do exactly one targeted local read. If you lack external knowledge (error/docs/API/library) and have not searched yet, call web_search once, then implement. Otherwise stop exploring and start implementing immediately.`,
       });
       logReasoningStep(reasoningTrace, {
         type: "observation",

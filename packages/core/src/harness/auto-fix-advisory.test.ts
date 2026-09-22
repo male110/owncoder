@@ -130,4 +130,146 @@ describe("isAdvisoryVerificationResult", () => {
       ),
     ).toBe(false);
   });
+
+  it("does not treat lsp error-level diagnostics as advisory", () => {
+    expect(
+      isAdvisoryVerificationResult(
+        result({
+          passed: false,
+          status: "failed",
+          checks: [
+            {
+              name: "lsp",
+              type: "lsp",
+              status: "failed",
+              passed: false,
+              output: "",
+              duration: 1,
+              blocking: true,
+              errors: [
+                {
+                  file: "src/a.ts",
+                  line: 10,
+                  message: "Cannot find name 'foo'",
+                  severity: "error",
+                },
+              ],
+            },
+          ],
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  it("treats lsp warning-only diagnostics as advisory", () => {
+    expect(
+      isAdvisoryVerificationResult(
+        result({
+          passed: true,
+          status: "passed",
+          checks: [
+            {
+              name: "lsp",
+              type: "lsp",
+              status: "passed",
+              passed: true,
+              output: "",
+              duration: 1,
+              blocking: false,
+              errors: [
+                {
+                  file: "src/a.ts",
+                  line: 10,
+                  message: "unused variable",
+                  severity: "warning",
+                },
+              ],
+            },
+          ],
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it("treats mixed lsp warning + semantic_diff warnings as advisory", () => {
+    expect(
+      isAdvisoryVerificationResult(
+        result({
+          checks: [
+            {
+              name: "lsp",
+              type: "lsp",
+              status: "passed",
+              passed: true,
+              output: "",
+              duration: 1,
+              blocking: false,
+              errors: [{ message: "unused", severity: "warning" }],
+            },
+            {
+              name: "semantic_diff",
+              type: "semantic_diff",
+              status: "passed",
+              passed: true,
+              output: "",
+              duration: 1,
+              blocking: false,
+              errors: [{ message: "移除了导出: foo", severity: "warning" }],
+            },
+          ],
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it("does not treat mixed lsp error + typecheck as advisory", () => {
+    expect(
+      isAdvisoryVerificationResult(
+        result({
+          checks: [
+            {
+              name: "lsp",
+              type: "lsp",
+              status: "failed",
+              passed: false,
+              output: "",
+              duration: 1,
+              blocking: true,
+              errors: [{ message: "Cannot find name", severity: "error" }],
+            },
+            {
+              name: "tsc",
+              type: "typecheck",
+              status: "failed",
+              passed: false,
+              output: "",
+              duration: 1,
+              errors: [{ message: "TS2322", severity: "error" }],
+            },
+          ],
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  it("does not treat lsp error alone as advisory", () => {
+    expect(
+      isAdvisoryVerificationResult(
+        result({
+          checks: [
+            {
+              name: "lsp",
+              type: "lsp",
+              status: "failed",
+              passed: false,
+              output: "",
+              duration: 1,
+              blocking: true,
+              errors: [{ message: "Type error", severity: "error" }],
+            },
+          ],
+        }),
+      ),
+    ).toBe(false);
+  });
 });

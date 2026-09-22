@@ -87,6 +87,7 @@ export interface PersistedEvidence {
 
 export interface PersistedDecompose {
   understanding: string;
+  relevantHistory?: string;
   /** 原任务目标和范围必须显式保留，不能只依赖 understanding。 */
   goal?: string;
   scope?: string[];
@@ -131,6 +132,7 @@ export interface PersistedToolCall {
   id?: string;
   toolName: string;
   arguments: Record<string, unknown>;
+  result?: string;
 }
 
 export interface TurnRoundRecord {
@@ -213,6 +215,10 @@ function sanitizeDecompose(raw: unknown): PersistedDecompose | undefined {
     const s = step as Record<string, unknown>;
     const description = typeof s.description === "string" ? clip(s.description.trim(), MAX_STEP_DESCRIPTION_CHARS) : "";
     if (!description) return [];
+    const relevantHistory =
+      typeof s.relevantHistory === "string" && s.relevantHistory.trim()
+        ? clip(s.relevantHistory.trim(), MAX_UNDERSTANDING_CHARS)
+        : undefined;
     const informationNeeds: PersistedDecompose["steps"][number]["informationNeeds"] = Array.isArray(s.informationNeeds)
       ? s.informationNeeds
           .slice(0, MAX_NEEDS_PER_STEP)
@@ -274,6 +280,7 @@ function sanitizeDecompose(raw: unknown): PersistedDecompose | undefined {
         estimatedComplexity: s.estimatedComplexity === "low" || s.estimatedComplexity === "medium" || s.estimatedComplexity === "high"
           ? s.estimatedComplexity
           : undefined,
+        relevantHistory,
       },
     ];
   });
@@ -283,7 +290,12 @@ function sanitizeDecompose(raw: unknown): PersistedDecompose | undefined {
       ? clip(obj.progressStatus.trim(), 500)
       : undefined;
   return {
-    understanding, userConstraints, steps, progressStatus,
+    understanding,
+    relevantHistory:
+      typeof obj.relevantHistory === "string" && obj.relevantHistory.trim()
+        ? clip(obj.relevantHistory.trim(), MAX_UNDERSTANDING_CHARS)
+        : undefined,
+    userConstraints, steps, progressStatus,
     goal: typeof obj.goal === "string" ? clip(obj.goal.trim(), MAX_UNDERSTANDING_CHARS) : undefined,
     scope: Array.isArray(obj.scope) ? obj.scope.filter((x): x is string => typeof x === "string").map((x) => x.trim()).filter(Boolean).slice(0, 50) : undefined,
     relation: obj.relation === "continue" ? "continue" : obj.relation === "new" ? "new" : undefined,
@@ -367,6 +379,7 @@ function sanitizeToolCalls(raw: unknown): PersistedToolCall[] {
       id: typeof value.id === "string" && value.id.trim() ? value.id.trim() : undefined,
       toolName,
       arguments: value.arguments as Record<string, unknown>,
+      result: typeof value.result === "string" && value.result.trim() ? clip(value.result.trim(), MAX_SUMMARY_CHARS) : undefined,
     }];
   });
 }
@@ -469,6 +482,9 @@ export function formatRoundBlock(
     parts.push(`[file changes]\n${lines.join("\n")}`);
   }
   if (includeProcessInfo && round.toolCalls && round.toolCalls.length > 0) {
+    // Tool calls are included as a compact activity summary. Keep arguments so
+    // the next decomposition can understand the operation and its target, but
+    // omit results because read/search output can be very large.
     parts.push(`[tool calls]\n${round.toolCalls.map((call) =>
       `- ${call.toolName} ${JSON.stringify(call.arguments)}`,
     ).join("\n")}`);
@@ -581,6 +597,71 @@ export function collectToolCallsFromTurns(
     }
   }
   return calls.slice(-MAX_TOOL_CALLS_PER_ROUND);
+}
+
+export function collectToolCallsFromMessages(
+  messages: ReadonlyArray<{
+    role?: string;
+    tool_call_id?: string;
+    tool_calls?: ReadonlyArray<{
+      id?: string;
+      function?: { name?: string; arguments?: string };
+    }>;
+    content?: unknown;
+  }>,
+): PersistedToolCall[] {
+  const calls: PersistedToolCall[] = [];
+  const byId = new Map<string, PersistedToolCall>();
+  for (const message of messages) {
+    if (message.role === "assistant" && Array.isArray(message.tool_calls)) {
+      for (const raw of message.tool_calls) {
+        const toolName = raw.function?.name?.trim();
+        if (!toolName) continue;
+        let arguments_: Record<string, unknown> = {};
+        try {
+          const parsed = JSON.parse(raw.function?.arguments ?? "{}");
+          if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+            arguments_ = parsed as Record<string, unknown>;
+          }
+        } catch {
+          // Preserve the call even if a provider returned malformed arguments.
+        }
+        const call: PersistedToolCall = {
+          id: raw.id?.trim() || undefined,
+          toolName,
+          arguments: arguments_,
+        };
+        calls.push(call);
+        if (call.id) byId.set(call.id, call);
+      }
+    } else if (message.role === "tool" && message.tool_call_id) {
+      const call = byId.get(message.tool_call_id);
+      const result = typeof message.content === "string" ? message.content.trim() : "";
+      if (call && result) call.result = result;
+    }
+  }
+  return calls.slice(-MAX_TOOL_CALLS_PER_ROUND);
+}
+
+export async function persistRoundToolCalls(
+  workspaceRoot: string,
+  sessionId: string,
+  userInput: string,
+  roundIndex: number | undefined,
+  toolCalls: PersistedToolCall[],
+): Promise<void> {
+  if (!isSafeSessionId(sessionId) || toolCalls.length === 0) return;
+  await withSessionLock(queueKey(workspaceRoot, sessionId), async () => {
+    const file = await readFile(workspaceRoot, sessionId);
+    const clippedInput = clip(userInput.trim(), MAX_USER_INPUT_CHARS);
+    const target =
+      (typeof roundIndex === "number" ? file.rounds.find((r) => r.index === roundIndex) : undefined) ??
+      (file.rounds.at(-1)?.userInput === clippedInput ? file.rounds.at(-1) : undefined);
+    if (!target) return;
+    target.toolCalls = sanitizeToolCalls(toolCalls);
+    target.updatedAt = new Date().toISOString();
+    await writeFile(workspaceRoot, file);
+  });
 }
 
 export function collectReadEvidenceFromTurns(

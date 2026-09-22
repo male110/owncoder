@@ -13,7 +13,8 @@ import {
 } from "../theme";
 
 export interface UiState {
-  // Editor pane
+  // Editor pane（多 tab：editorTabs 为已打开文件，editorPath 为当前激活）
+  editorTabs: string[];
   editorPath: string | null;
   chatWidth: number;
   isDragging: boolean;
@@ -41,7 +42,12 @@ export interface UiState {
 }
 
 export interface UiActions {
+  /** 打开文件：已存在则激活，否则追加到 tabs 并激活；传 null 清空全部。 */
   setEditorPath: (path: string | null) => void;
+  /** 仅切换当前激活 tab（不增删）。 */
+  setActiveEditorTab: (path: string) => void;
+  /** 关闭指定 tab；若关闭的是当前激活，则激活相邻 tab。 */
+  closeEditorTab: (path: string) => void;
   setChatWidth: (width: number) => void;
   setIsDragging: (v: boolean) => void;
   setSidebarWidth: (width: number) => void;
@@ -147,6 +153,7 @@ function omitDraft(drafts: Record<string, string>, sessionId: string): Record<st
 }
 
 export const useUiStore = create<UiState & UiActions>()((set) => ({
+  editorTabs: [],
   editorPath: null,
   chatWidth: 20,
   isDragging: false,
@@ -162,7 +169,24 @@ export const useUiStore = create<UiState & UiActions>()((set) => ({
   busy: false,
   keepAllBusy: false,
 
-  setEditorPath: (editorPath) => set({ editorPath }),
+  setEditorPath: (path) =>
+    set((s) => {
+      if (path === null) return { editorTabs: [], editorPath: null };
+      if (s.editorTabs.includes(path)) return { editorPath: path };
+      return { editorTabs: [...s.editorTabs, path], editorPath: path };
+    }),
+  setActiveEditorTab: (path) =>
+    set((s) => (s.editorTabs.includes(path) ? { editorPath: path } : s)),
+  closeEditorTab: (path) =>
+    set((s) => {
+      const idx = s.editorTabs.indexOf(path);
+      if (idx < 0) return s;
+      const editorTabs = s.editorTabs.filter((p) => p !== path);
+      if (s.editorPath !== path) return { editorTabs };
+      const next =
+        editorTabs[Math.min(idx, editorTabs.length - 1)] ?? null;
+      return { editorTabs, editorPath: next };
+    }),
   setChatWidth: (chatWidth) => set({ chatWidth }),
   setIsDragging: (isDragging) => set({ isDragging }),
   setSidebarWidth: (sidebarWidth) => set({ sidebarWidth }),

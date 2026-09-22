@@ -6,7 +6,7 @@ export type VerificationStatus = "passed" | "failed" | "blocked" | "skipped" | "
 export interface VerificationError { file?: string; line?: number; column?: number; message: string; severity: "error" | "warning" | "info"; code?: string; }
 export interface VerificationCheck {
   name: string;
-  type: "typecheck" | "lint" | "execution" | "semantic_diff";
+  type: "typecheck" | "lint" | "execution" | "semantic_diff" | "lsp";
   status: VerificationStatus;
   passed: boolean;
   output: string;
@@ -14,13 +14,13 @@ export interface VerificationCheck {
   errors: VerificationError[];
   /**
    * 是否阻断成功门禁。
-   * - skipped / passed / 纯建议性 semantic_diff → false
-   * - 硬失败（typecheck/lint/execution error）→ true
+   * - skipped / passed / 纯建议性 semantic_diff（warning）→ false
+   * - 硬失败（typecheck/lint/execution / lsp error）→ true
    */
   blocking?: boolean;
   /** 与 status==="skipped" 对齐，便于旧消费者不读 status。 */
   skipped?: boolean;
-  /** 检查来源，如 tsc / eslint / semantic_diff / post_verify。 */
+  /** 检查来源，如 tsc / eslint / semantic_diff / lsp / post_verify。 */
   source?: string;
 }
 export interface VerificationResult {
@@ -230,7 +230,12 @@ export function verificationStatus(passed: boolean, checks: readonly Verificatio
     const blocking =
       typeof check.blocking === "boolean"
         ? check.blocking
-        : check.type !== "semantic_diff";
+        : deriveCheckBlocking({
+            type: check.type,
+            status: check.status,
+            passed: check.passed,
+            errors: check.errors ?? [],
+          });
     return blocking && !(check.status === "passed" && check.passed);
   });
   if (hasBlockingFailure) return "failed";
@@ -258,6 +263,10 @@ function deriveCheckBlocking(check: {
   if (check.status === "passed" && check.passed) return false;
   if (check.type === "semantic_diff") {
     // semantic_diff 仅在存在 error 级问题时阻断；warning/info 为建议性。
+    return check.errors.some((error) => error.severity === "error");
+  }
+  if (check.type === "lsp") {
+    // LSP：仅 error 级诊断阻断并进入 auto-fix；warning/info 仍为建议性。
     return check.errors.some((error) => error.severity === "error");
   }
   return check.status === "failed" || check.passed === false;
