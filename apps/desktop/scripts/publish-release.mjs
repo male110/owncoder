@@ -1,31 +1,39 @@
 #!/usr/bin/env node
 /**
- * 发布脚本：生成 electron-builder 产出的发布文件。
+ * 发布脚本：把 electron-builder (nsis-web) 产物整理成 electron-updater 可下载的目录。
  *
  * 用法：
- *   # 1. 先打包（必须先 pack:win，生成本脚本需要的文件）
+ *   # 1. 先打包
  *   pnpm --filter @owncoder/desktop pack:win
  *
- *   # 2. 跑发布脚本（生成 latest.yml，列出发布文件）
+ *   # 2. 生成本地发布目录（不上传 OSS）
  *   pnpm --filter @owncoder/desktop publish
  *
- * 本脚本只负责：
- *   - 检测 release 产物目录中的安装包、blockmap、delta 等文件
- *   - 生成带版本路径前缀的 latest.yml（供 electron-updater 使用）
- *   - 打印发布文件清单
+ * 客户端 feed（app-update.yml / package.json build.publish）：
+ *   https://zy-1310897501.cos.ap-nanjing.myqcloud.com/owncoder/
+ *   → 请求 {base}/latest.yml
+ *   → 再按 yml 内 path/url 相对 base 下载 Web Setup.exe 与 packages.*.path（.nsis.7z）
+ *
+ * 本脚本产出（手动上传到上述 base）：
+ *   release/publish/
+ *     latest.yml                         # 路径已带 {version}/ 前缀
+ *     {version}/
+ *       OwnCoder Web Setup {version}.exe
+ *       @{name}-{version}-x64.nsis.7z    # nsis-web 真正的大包，缺了会「文件下载失败」
+ *       （如有）*.blockmap / *.nsis.delta
  */
 
-import { statSync } from "node:fs";
-import { writeFile } from "node:fs/promises";
+import { cpSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = resolve(fileURLToPath(import.meta.url), "..");
 const RELEASE_ROOT = resolve(__dirname, "..", "release");
-// The configured nsis-web target writes artifacts into release/nsis-web.
-// Keep the publisher aligned with electron-builder's actual output directory.
+// nsis-web 目标写入 release/nsis-web
 const RELEASE_DIR = join(RELEASE_ROOT, "nsis-web");
+// 整理后的上传目录
+const PUBLISH_DIR = join(RELEASE_ROOT, "publish");
 
 async function listReleaseFiles() {
   try {
@@ -37,18 +45,87 @@ async function listReleaseFiles() {
 
 function pickArtifacts(files, version) {
   const tag = `Setup ${version}`;
-  const full = files.find((f) => new RegExp(`OwnCoder[ _]${tag}\\.exe$`, "i").test(f));
-  const web = files.find((f) => new RegExp(`OwnCoder[ _]${tag}-web\\.exe$`, "i").test(f));
-  const blockmap = files.find((f) => new RegExp(`OwnCoder[ _]${tag}\\.exe\\.blockmap$`, "i").test(f));
-  const deltas = files.filter((f) =>
-    new RegExp(`OwnCoder[ _]\\d+\\.\\d+\\.\\d+-\\d+\\.\\d+\\.\\d+\\.exe\\.nsis\\.delta$`, "i").test(f),
-  );
+  // nsis-web: "OwnCoder Web Setup X.Y.Z.exe"；nsis: "OwnCoder Setup X.Y.Z.exe"
+  const full = files.find((f) => new RegExp(`^OwnCoder[ _]${tag}\\.exe$`, "i").test(f));
+  const webInstaller = files.find((f) => new RegExp(`^OwnCoder[ _]Web[ _]${tag}\\.exe$`, "i").test(f));
+  const webLegacy = files.find((f) => new RegExp(`^OwnCoder[ _]${tag}-web\\.exe$`, "i").test(f));
+  const web = webInstaller || webLegacy;
+  const primary = full || web;
+
+  // nsis-web 核心包：@scope-name-version-arch.nsis.7z（文件名可含 @）
+  const nsisPackage = files.find((f) => /\.nsis\.7z$/i.test(f));
+  const blockmaps = files.filter((f) => /\.blockmap$/i.test(f));
+  const deltas = files.filter((f) => /\.nsis\.delta$/i.test(f));
+
   return {
     full: full ? join(RELEASE_DIR, full) : null,
     web: web ? join(RELEASE_DIR, web) : null,
-    blockmap: blockmap ? join(RELEASE_DIR, blockmap) : null,
-    deltas: deltas.map((d) => join(RELEASE_DIR, d)),
+    primary: primary ? join(RELEASE_DIR, primary) : null,
+    nsisPackage: nsisPackage ? join(RELEASE_DIR, nsisPackage) : null,
+    blockmaps: blockmaps.map((f) => join(RELEASE_DIR, f)),
+    deltas: deltas.map((f) => join(RELEASE_DIR, f)),
   };
+}
+
+/**
+ * 给 latest.yml 里相对路径加上 `{version}/` 前缀。
+ * 必须覆盖：
+ *   - 顶层 path:
+ *   - files 列表项 "  - url: ..."
+ *   - packages.*.path / packages.*.file
+ * 并正确处理 YAML 引号（@ 开头的 .nsis.7z 会被 builder 写成 '@xxx'）。
+ */
+function rewriteLatestYml(yml, version) {
+  return yml
+    .split(/\r?\n/)
+    .map((line) => {
+      // 允许 "path:" / "url:" / "file:"，以及列表项 "- url:"
+      const match = line.match(/^(\s*(?:-\s+)?(?:url|path|file):\s*)(.+)$/);
+      if (!match) return line;
+
+      const prefix = match[1];
+      let value = match[2].trim();
+      if (!value || /^https?:\/\//i.test(value)) return line;
+
+      // 去掉一层 YAML 引号
+      const single = value.startsWith("'") && value.endsWith("'") && value.length >= 2;
+      const double = value.startsWith('"') && value.endsWith('"') && value.length >= 2;
+      if (single || double) value = value.slice(1, -1);
+
+      // 已带目录前缀则不重复写
+      if (value.includes("/")) {
+        return `${prefix}${yamlQuote(value)}`;
+      }
+
+      return `${prefix}${yamlQuote(`${version}/${value}`)}`;
+    })
+    .join("\n");
+}
+
+/** 路径含空格、@、或 YAML 特殊字符时加单引号。 */
+function yamlQuote(value) {
+  if (/[@:#\[\]{},&*?|>!%`\s]/.test(value) || value.startsWith("'") || value === "") {
+    return `'${value.replace(/'/g, "''")}'`;
+  }
+  return value;
+}
+
+function ensureEmptyDir(dir) {
+  rmSync(dir, { recursive: true, force: true });
+  mkdirSync(dir, { recursive: true });
+}
+
+function copyInto(dir, filePath) {
+  if (!filePath) return null;
+  const name = basename(filePath);
+  const dest = join(dir, name);
+  cpSync(filePath, dest);
+  return dest;
+}
+
+function formatSize(filePath) {
+  const stat = statSync(filePath);
+  return `${(stat.size / 1024 / 1024).toFixed(2)}M`;
 }
 
 async function main() {
@@ -57,6 +134,8 @@ async function main() {
   );
   const version = pkg.version;
   console.log(`[publish] 发布版本 ${version}`);
+  console.log(`[publish] 源目录 ${RELEASE_DIR}`);
+  console.log(`[publish] 输出目录 ${PUBLISH_DIR}`);
 
   const files = await listReleaseFiles();
   if (files.length === 0) {
@@ -66,66 +145,113 @@ async function main() {
   }
 
   const artifacts = pickArtifacts(files, version);
-  if (!artifacts.full) {
-    console.error(`[publish] 未找到全量安装包 (OwnCoder Setup ${version}.exe)`);
+  if (!artifacts.primary) {
+    console.error(
+      `[publish] 未找到安装包 (OwnCoder Setup ${version}.exe 或 OwnCoder Web Setup ${version}.exe)`,
+    );
+    console.error("[publish] 请先跑 `pnpm --filter @owncoder/desktop pack:win`");
     process.exit(1);
   }
-  if (!artifacts.web) {
-    console.warn(`[publish] 未找到 web installer (OwnCoder Setup ${version}-web.exe)`);
-    console.warn("[publish] 检查 apps/desktop/package.json 的 build.nsis.webInstaller");
+
+  // nsis-web 更新时会再下 packages.x64.path 指向的 .nsis.7z；缺了必现「文件下载失败」
+  if (!artifacts.nsisPackage) {
+    console.error("[publish] 未找到 nsis-web 包 (*.nsis.7z)，自动更新会下载失败");
+    console.error(`[publish] 请确认 pack:win 的 target 为 nsis-web，并检查 ${RELEASE_DIR}`);
+    process.exit(1);
   }
 
-  // ─── 1. 生成带版本路径的 latest.yml ───────────────────────────
   const ymlName = "latest.yml";
   const ymlPath = join(RELEASE_DIR, ymlName);
-  const versionedYmlPath = join(RELEASE_DIR, `latest-${version}.yml`);
-
-  if (await fileExists(ymlPath)) {
-    // Artifacts are stored under <prefix>/<version>/, while latest.yml is
-    // served from <prefix>/. Rewrite artifact references so electron-updater
-    // follows the same versioned directory.
-    const yml = await readFile(ymlPath, "utf8");
-    const versionedYml = yml
-      .split(/\r?\n/)
-      .map((line) => {
-        const match = line.match(/^(\s*(?:url|path|file):\s*)(?!https?:\/\/)(.+)$/);
-        if (!match) return line;
-        const value = match[2].trim();
-        if (!value || value.includes("/")) return line;
-        return `${match[1]}${version}/${value}`;
-      })
-      .join("\n");
-    await writeFile(versionedYmlPath, versionedYml, "utf8");
-    console.log(`[publish] 已生成版本化 latest.yml → ${versionedYmlPath}`);
-  } else {
-    console.warn(`[publish] 未找到 ${ymlName}，electron-updater 升级可能失败`);
-    console.warn(`[publish] 建议在 pack 时加 --publish always 让 electron-builder 顺带生成`);
+  if (!(await fileExists(ymlPath))) {
+    console.error(`[publish] 未找到 ${ymlPath}`);
+    console.error("[publish] electron-builder 应在 nsis-web 目录生成 latest.yml；请重新 pack:win");
+    process.exit(1);
   }
 
-  // ─── 2. 汇总文件信息 ──────────────────────────────────────────
-  console.log("\n[publish] 生成的发布文件：");
+  const rawYml = await readFile(ymlPath, "utf8");
+  const versionedYml = rewriteLatestYml(rawYml, version);
 
-  for (const [label, path] of [
-    ["全量安装包", artifacts.full],
-    ["blockmap", artifacts.blockmap],
-    ...artifacts.deltas.map((p) => [`差量补丁`, p]),
+  // ─── 整理上传目录 ─────────────────────────────────────────────
+  // owncoder/latest.yml
+  // owncoder/{version}/Web Setup.exe + .nsis.7z + ...
+  ensureEmptyDir(PUBLISH_DIR);
+  const versionDir = join(PUBLISH_DIR, version);
+  mkdirSync(versionDir, { recursive: true });
+
+  const publishLatestPath = join(PUBLISH_DIR, ymlName);
+  writeFileSync(publishLatestPath, versionedYml, "utf8");
+
+  // 同步一份到 nsis-web，方便对照；以及 latest-{version}.yml 备份
+  writeFileSync(join(RELEASE_DIR, ymlName), versionedYml, "utf8");
+  writeFileSync(join(RELEASE_DIR, `latest-${version}.yml`), versionedYml, "utf8");
+
+  const copied = [];
+  for (const p of [
+    artifacts.primary,
+    artifacts.nsisPackage,
+    ...artifacts.blockmaps,
+    ...artifacts.deltas,
   ]) {
-    if (!path) continue;
-    const stat = statSync(path);
-    const size = (stat.size / 1024 / 1024).toFixed(2);
-    console.log(`  ${label}: ${basename(path)} (${size}M)`);
-  }
-  if (artifacts.web) {
-    const stat = statSync(artifacts.web);
-    const size = (stat.size / 1024 / 1024).toFixed(2);
-    console.log(`  Web Installer: ${basename(artifacts.web)} (${size}M)`);
+    const dest = copyInto(versionDir, p);
+    if (dest) copied.push(dest);
   }
 
-  if (await fileExists(versionedYmlPath)) {
-    console.log(`\n[publish] 版本化 latest.yml 内容预览：`);
-    const content = await readFile(versionedYmlPath, "utf8");
-    console.log(content.split("\n").map((l) => `  ${l}`).join("\n"));
+  // ─── 打印清单 ────────────────────────────────────────────────
+  console.log("\n[publish] 请将以下目录内容上传到 feed base（保持相对路径）：");
+  console.log("  https://zy-1310897501.cos.ap-nanjing.myqcloud.com/owncoder/");
+  console.log(`\n[publish] ${PUBLISH_DIR}`);
+  console.log(`  ${ymlName}`);
+  console.log(`  ${version}/`);
+  for (const p of copied) {
+    console.log(`    ${basename(p)} (${formatSize(p)})`);
   }
+
+  console.log("\n[publish] latest.yml 内容：");
+  console.log(versionedYml.split("\n").map((l) => `  ${l}`).join("\n"));
+
+  // 快速自检：yml 里引用的文件必须都在 versionDir
+  const missing = findMissingArtifacts(versionedYml, version, versionDir);
+  if (missing.length > 0) {
+    console.error("\n[publish] yml 引用了但目录中不存在的文件：");
+    for (const m of missing) console.error(`  - ${m}`);
+    process.exit(1);
+  }
+
+  console.log("\n[publish] 自检通过：yml 引用文件均已就位");
+  console.log("[publish] 上传示例（腾讯云 COS CLI，按需改）：");
+  console.log(
+    `  coscli cp -r "${PUBLISH_DIR}/." cos://<bucket>/owncoder/ --recursive`,
+  );
+}
+
+function findMissingArtifacts(yml, version, versionDir) {
+  const missing = [];
+  const re = /^\s*(?:-\s+)?(?:url|path|file):\s*(.+)$/gm;
+  let m;
+  while ((m = re.exec(yml)) !== null) {
+    let value = m[1].trim();
+    if (!value || /^https?:\/\//i.test(value)) continue;
+    if (
+      (value.startsWith("'") && value.endsWith("'")) ||
+      (value.startsWith('"') && value.endsWith('"'))
+    ) {
+      value = value.slice(1, -1);
+    }
+    // 期望 "0.1.16/filename"
+    const prefix = `${version}/`;
+    if (!value.startsWith(prefix)) {
+      missing.push(`${value} (缺少 ${prefix} 前缀)`);
+      continue;
+    }
+    const name = value.slice(prefix.length);
+    const full = join(versionDir, name);
+    try {
+      statSync(full);
+    } catch {
+      missing.push(value);
+    }
+  }
+  return missing;
 }
 
 async function fileExists(p) {
