@@ -33,15 +33,16 @@ export async function toolRecallHistory(ctx: ToolContext, query: string): Promis
   }
 
   const output = hits.map((hit, index) => {
-    let round: {
+    type ArchivedRound = {
       userInput?: unknown;
       taskDecomposition?: unknown;
       llmReport?: unknown;
       toolCalls?: unknown;
-    } | null = null;
+    };
+    let round: ArchivedRound | null = null;
     try {
-      const parsed = JSON.parse(hit.content) as typeof round;
-      if (parsed && typeof parsed === "object" && "userInput" in parsed) round = parsed;
+      const parsed: unknown = JSON.parse(hit.content);
+      if (parsed && typeof parsed === "object") round = parsed as ArchivedRound;
     } catch {
       // Older archived chunks are plain text; keep them as the user-input field.
     }

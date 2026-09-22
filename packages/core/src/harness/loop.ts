@@ -58,7 +58,7 @@ import { AdaptivePromptOptimizer } from "./prompt-optimizer.ts";
 import { persistExperiences } from "./experience.ts";
 export { classifyRecoveryError } from "./recovery.ts";
 import { applyTaskEvent } from "../task-run.ts";
-import { persistRoundReport, persistRoundEvidence, persistRoundFileChanges, persistRoundToolCalls, collectReadEvidenceFromTurns, collectToolCallsFromMessages, type PersistedEvidence, type PersistedFileChange } from "../turn-rounds.ts";
+import { persistRoundReport, persistRoundEvidence, persistRoundFileChanges, persistRoundToolCalls, collectReadEvidenceFromTurns, collectToolCallsFromTurns, type PersistedEvidence, type PersistedFileChange } from "../turn-rounds.ts";
 
 // Loop submodules (responsibility split: types / prompts / stages / scheduler)
 import { stampTurnEvent, type AgentLoopOpts, type AgentLoopResult, type TurnEvent } from "./loop/types.ts";
