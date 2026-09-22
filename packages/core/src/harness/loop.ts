@@ -58,7 +58,7 @@ import { AdaptivePromptOptimizer } from "./prompt-optimizer.ts";
 import { persistExperiences } from "./experience.ts";
 export { classifyRecoveryError } from "./recovery.ts";
 import { applyTaskEvent } from "../task-run.ts";
-import { persistRoundReport, persistRoundEvidence, persistRoundFileChanges, collectReadEvidenceFromTurns, type PersistedEvidence, type PersistedFileChange } from "../turn-rounds.ts";
+import { persistRoundReport, persistRoundEvidence, persistRoundFileChanges, persistRoundToolCalls, collectReadEvidenceFromTurns, collectToolCallsFromMessages, type PersistedEvidence, type PersistedFileChange } from "../turn-rounds.ts";
 
 // Loop submodules (responsibility split: types / prompts / stages / scheduler)
 import { stampTurnEvent, type AgentLoopOpts, type AgentLoopResult, type TurnEvent } from "./loop/types.ts";
@@ -73,6 +73,7 @@ export type {
   HistoryChunk,
   HistoryChunkInput,
   HistorySearchHit,
+  HistoryRoundInput,
   EmbeddingService,
   HistoryVectorStore,
 } from "./loop/history-vector.ts";
@@ -199,6 +200,14 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
     content: `## Language\nAlways reply in ${OS_LOCALE}. Use this language for all explanations, comments, and output regardless of what language the user writes in.`,
   });
 
+  messages.push({
+    role: "system",
+    content:
+      "## External knowledge\n" +
+      "When you do not know a fact, or one local retry failed to fix the same error, call `web_search` before guessing. " +
+      "Then `web_fetch` the best official/source URL. Do not keep editing the same failing approach instead of searching.",
+  });
+
   const history = [...opts.history];
 
   // ── Adaptive Prompt Optimizer: track success/failure for self-improvement ──
@@ -237,6 +246,7 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
     confirmDangerousBash: opts.confirmDangerousBash,
     askUser: opts.askUser,
     askUserTurnCache: new Map(),
+    renderPage: opts.renderPage,
     onTerminal: (entry) => opts.onEvent?.({ type: "terminal", entry }),
     onEvent: (ev) => opts.onEvent?.(ev as TurnEvent),
 
@@ -244,6 +254,7 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
     projectRules: opts.projectRules,
     llmApiKey: opts.llmApiKey,
     signal: opts.signal,
+    historyVector: opts.historyVector,
     memory, // Pass memory manager so tools can update knowledge graph
     memoryStore: opts.memoryStore,
     projectMemoryStore: opts.projectMemoryStore,
@@ -285,7 +296,7 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
     // 而 `opts.history` 保持进入本轮前的快照，因此「本轮新增」= 下标 >= opts.history.length 的部分。
     // turnIndex 由 store 内部按 `MAX(turn_index)+1` 单调分配，与数组下标无关，
     // 彻底避免历史压缩/截断（如 regenerateLastReply 的 slice）导致的下标回退/漂移。
-    if (opts.historyVector?.archive && opts.sessionId) {
+    if (!opts.historyVector?.archiveRound && opts.historyVector?.archive && opts.sessionId) {
       const sid = opts.sessionId;
       const baseIndex = opts.history.length;
       for (let i = baseIndex; i < history.length; i++) {
@@ -364,6 +375,41 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
         : Promise.resolve(null);
 
       const roundEvidence: PersistedEvidence[] = collectReadEvidenceFromTurns(newTurns);
+      const roundToolCalls = collectToolCallsFromTurns(newTurns);
+      if (opts.historyVector?.archiveRound) {
+        void opts.historyVector.archiveRound({
+          sessionId: sid,
+          roundIndex: state.roundIndex,
+          userInput: opts.userMessage,
+          taskDecompose: state.rawDecompose
+            ? {
+                understanding: state.rawDecompose.understanding,
+                userConstraints: state.rawDecompose.userConstraints ?? [],
+                steps: state.rawDecompose.steps.map((step) => ({
+                  id: step.id,
+                  description: step.description,
+                  dependsOn: step.dependsOn,
+                  informationNeeds: step.informationNeeds,
+                })),
+              }
+            : undefined,
+          assistantReport: assistantText,
+          toolCalls: roundToolCalls.map((call) => ({
+            toolName: call.toolName,
+            arguments: call.arguments,
+          })),
+        });
+      }
+      const toolCallsPromise =
+        roundToolCalls.length > 0
+          ? persistRoundToolCalls(
+              opts.workspaceRoot,
+              sid,
+              opts.userMessage,
+              state.roundIndex,
+              roundToolCalls,
+            )
+          : Promise.resolve();
 
       const evidencePromise =
         roundEvidence.length > 0
@@ -380,7 +426,7 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
         ? persistRoundFileChanges(opts.workspaceRoot, sid, opts.userMessage, state.roundIndex, fileChanges)
         : Promise.resolve();
 
-      Promise.all([reportPromise, evidencePromise, fileChangesPromise])
+      Promise.all([reportPromise, evidencePromise, fileChangesPromise, toolCallsPromise])
         .then(([reportRecord]) => {
           writeEventLog({
             category: "other",

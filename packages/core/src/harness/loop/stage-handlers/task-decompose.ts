@@ -187,9 +187,14 @@ export function extractStructuredHistory(
     if (!current || !content || turn.role === "system") continue;
 
     const label = turn.role === "tool" ? `tool${turn.toolName ? `:${turn.toolName}` : ""}` : turn.role;
-    const clean = stripConversationHistoryTags(content);
+    // Tool output is execution detail, not task context. Keep only the tool
+    // activity marker in the fallback history path so large read/search results
+    // do not get copied into the decomposition prompt.
+    const clean = turn.role === "tool"
+      ? `[${label}]`
+      : stripConversationHistoryTags(content);
     if (!clean) continue;
-    const line = `[${label}] ${clean}`;
+    const line = turn.role === "tool" ? clean : `[${label}] ${clean}`;
     current.transcript = current.transcript ? `${current.transcript}\n${line}` : line;
 
     if (turn.role === "assistant") {
@@ -454,6 +459,25 @@ function buildInspectCurrentCodeSteps(userMessage: string): DecomposeAnswer["ste
       requiredEvidenceIds: ["need_1"],
     }],
   }];
+}
+
+function buildFallbackRawDecompose(userMessage: string) {
+  const plan = generatePlan(userMessage, "");
+  return {
+    intent: userMessage,
+    understanding: userMessage,
+    userConstraints: [] as string[],
+    progressStatus: "The decomposition model was unavailable; using a local fallback plan.",
+    steps: plan.steps.map((step, index) => ({
+      id: step.id || `step_${index + 1}`,
+      description: step.description,
+      dependsOn: [],
+      informationNeeds: [],
+      stopReadingWhen: [],
+      relevantHistory: undefined,
+    })),
+    relevantHistory: "",
+  };
 }
 
 /**
@@ -1065,6 +1089,7 @@ export async function runTaskDecompose(
     relevantHistory?: TaskRelevantHistory;
     sharedEvidence?: import("../../../turn-rounds.ts").FileEvidence[];
   };
+  fallback?: boolean;
 }> {
   assertLlmAuth(model, opts.llmApiKey);
   // Track how many tokens the decomposition pushes into messages so the
@@ -1218,7 +1243,12 @@ export async function runTaskDecompose(
         currentStep: 0,
         progress: "Starting execution (fallback plan)",
       });
-      return { task: null, decomposeTokens: 0 };
+      return {
+        task: null,
+        decomposeTokens: 0,
+        fallback: true,
+        rawDecompose: buildFallbackRawDecompose(opts.userMessage),
+      };
     }
 
     // 保证每个子任务都带上可复用历史（LLM 缺省时从近期历史本地打包，含文件及其它相关内容）
@@ -1299,11 +1329,16 @@ export async function runTaskDecompose(
       decomposeTokens = Math.ceil(decomposeBlock.length / 4);
     }
 
-    return { task, decomposeTokens, rawDecompose };
+    return { task, decomposeTokens, rawDecompose, fallback: false };
   } catch (e) {
     if (opts.signal?.aborted) {
       tracer.endSpan(planSpanId, "error", { reason: "aborted" });
-      return { task: null, decomposeTokens: 0 };
+      return {
+        task: null,
+        decomposeTokens: 0,
+        fallback: true,
+        rawDecompose: buildFallbackRawDecompose(opts.userMessage),
+      };
     }
     const msg = e instanceof Error ? e.message : String(e);
     tracer.endSpan(planSpanId, "error", { reason: msg });
@@ -1330,7 +1365,12 @@ export async function runTaskDecompose(
       currentStep: 0,
       progress: "Starting execution (error fallback)",
     });
-    return { task: null, decomposeTokens: 0 };
+    return {
+      task: null,
+      decomposeTokens: 0,
+      fallback: true,
+      rawDecompose: buildFallbackRawDecompose(opts.userMessage),
+    };
   }
 }
 
@@ -1354,9 +1394,38 @@ export const taskDecomposeHandler: StageHandler = {
     ctx.state.turnInformationTask = result.task;
     ctx.state.decomposeTokens = result.decomposeTokens;
     ctx.state.rawDecompose = result.rawDecompose;
+    if (result.rawDecompose) {
+      opts.onEvent?.({
+        type: "task_decomposition",
+        understanding: result.rawDecompose.understanding,
+        userConstraints: result.rawDecompose.userConstraints ?? [],
+        steps: result.rawDecompose.steps.map((step) => ({
+          id: step.id,
+          description: step.description,
+          dependsOn: step.dependsOn,
+          informationNeeds: step.informationNeeds.map((need) => ({
+            id: need.id,
+            question: need.question,
+          })),
+          stopReadingWhen: step.stopReadingWhen,
+        })),
+        fallback: result.fallback === true,
+      });
+      writeEventLog({
+        category: "other",
+        message: result.fallback ? "Task decomposition fallback generated" : "Task decomposition completed",
+        details: {
+          sessionId: opts.sessionId,
+          fallback: result.fallback === true,
+          understanding: result.rawDecompose.understanding,
+          steps: result.rawDecompose.steps,
+        },
+      });
+    }
     if (opts.sessionId && result.rawDecompose) {
       const persisted: PersistedDecompose = {
         understanding: result.rawDecompose.understanding,
+        relevantHistory: result.rawDecompose.relevantHistory,
         goal: result.rawDecompose.goal,
         scope: result.rawDecompose.scope,
         relation: result.rawDecompose.relation,
@@ -1376,6 +1445,7 @@ export const taskDecomposeHandler: StageHandler = {
           verificationCriteria: step.verificationCriteria,
           rollbackStrategy: step.rollbackStrategy,
           estimatedComplexity: step.estimatedComplexity,
+          relevantHistory: step.relevantHistory,
         })),
       };
       try {

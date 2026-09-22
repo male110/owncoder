@@ -107,6 +107,12 @@ export function applyChatEvent(
 
   // ── task_decomposition ────────────────────────────────────────────────
   if (ev.type === "task_decomposition") {
+    chat.pushDecompose({
+      understanding: ev.understanding,
+      userConstraints: ev.userConstraints,
+      steps: ev.steps,
+      fallback: ev.fallback,
+    }, sid);
     chat.sealThinking(sid ?? undefined);
     chat.setLiveStatus("", sid ?? undefined);
     return;

@@ -4,6 +4,7 @@
  * Replaces naive LLM self-review with actual execution verification:
  * - Type checking (TypeScript, Python/mypy, Rust/cargo check)
  * - Lint checking
+ * - LSP diagnostics on changed files (error-level diagnostics block + auto-fix)
  * - Semantic diff analysis
  * - Sandboxed code execution
  *
@@ -11,13 +12,15 @@
  *
  * **Adaptive verification**: For large projects, full type checking is
  * automatically skipped to avoid long waits. Only lightweight checks
- * (lint on changed files, semantic diff) are performed.
+ * (lint / LSP on changed files, semantic diff) are performed.
  */
 
 import { spawn } from "node:child_process";
 import { promises as fs } from "node:fs";
 import { join, extname } from "node:path";
 import { normalizeVerificationResult, type VerificationCheck, type VerificationError, type VerificationResult } from "../task-run.ts";
+import { getLspManager } from "./tools/lsp.ts";
+import type { LspDiagnostic } from "./lsp-client.ts";
 export type { VerificationCheck, VerificationError, VerificationResult } from "../task-run.ts";
 
 // ── Types ──────────────────────────────────────────────────
@@ -216,10 +219,21 @@ export class VerificationEngine {
       }
     }
 
+    // 3. LSP diagnostics on changed files (error-level → hard fail + auto-fix)
+    if (changedFiles.length > 0) {
+      const lspCheck = await this.runLspDiagnostics(changedFiles);
+      checks.push(lspCheck);
+      if (lspCheck.errors.some((e) => e.severity === "error")) {
+        suggestions.push("LSP 诊断发现了错误，请修复以避免错误累积");
+      } else if (lspCheck.errors.length > 0) {
+        suggestions.push("LSP 诊断发现了警告，建议尽快处理");
+      }
+    }
+
     // Tests are intentionally NOT part of automatic verify().
     // Agents can still run tests via bash when needed.
 
-    // 3. Semantic diff analysis (always run — it's lightweight)
+    // 4. Semantic diff analysis (always run — it's lightweight)
     if (changedFiles.length > 0) {
       const diffCheck = await this.analyzeSemanticDiff(changedFiles);
       checks.push(diffCheck);
@@ -570,6 +584,118 @@ export class VerificationEngine {
     return errors;
   }
 
+  // ── LSP Diagnostics ─────────────────────────────────────
+
+  /**
+   * Collect language-server diagnostics for changed files.
+   * Error-level diagnostics → failed + blocking (enter auto-fix).
+   * Warning/info only → passed + non-blocking (soft advisory report).
+   * Unavailable LSP / unsupported files → skipped silently (same spirit as type_check).
+   */
+  private async runLspDiagnostics(files: string[]): Promise<VerificationCheck> {
+    const start = Date.now();
+    // Do not maintain a second "supported extension" allow-list here. The
+    // catalog and manager are the source of truth, so newly added/common
+    // language servers automatically participate in post-edit validation.
+    const targetFiles = files.slice(0, 20);
+
+    if (targetFiles.length === 0) {
+      return {
+        name: "lsp",
+        type: "lsp",
+        status: "skipped",
+        passed: false,
+        output: "",
+        duration: 0,
+        errors: [],
+        blocking: false,
+        skipped: true,
+        source: "lsp",
+      };
+    }
+
+    try {
+      const manager = await getLspManager(this.workspaceRoot);
+      const errors: VerificationError[] = [];
+      const outputLines: string[] = [];
+      let anyClient = false;
+
+      for (const file of targetFiles) {
+        const client = manager.getClientForFile(file);
+        if (!client) continue;
+        anyClient = true;
+
+        try {
+          const abs = join(this.workspaceRoot, file);
+          const content = await fs.readFile(abs, "utf8");
+          await manager.openFile(file, content);
+          const uri = manager.pathToUri(file);
+          const diagnostics = await client.getDiagnostics(uri);
+          for (const d of diagnostics) {
+            const severity = mapLspSeverity(d.severity);
+            errors.push({
+              file,
+              line: (d.range?.start?.line ?? 0) + 1,
+              column: (d.range?.start?.character ?? 0) + 1,
+              message: d.message,
+              severity,
+              code: d.code != null ? String(d.code) : undefined,
+            });
+            outputLines.push(
+              `${file}:${(d.range?.start?.line ?? 0) + 1}:${(d.range?.start?.character ?? 0) + 1} ${severity}: ${d.message}`,
+            );
+          }
+        } catch {
+          // Per-file LSP failures should not abort the whole check.
+        }
+      }
+
+      if (!anyClient) {
+        return {
+          name: "lsp",
+          type: "lsp",
+          status: "skipped",
+          passed: false,
+          output: "",
+          duration: Date.now() - start,
+          errors: [],
+          blocking: false,
+          skipped: true,
+          source: "lsp",
+        };
+      }
+
+      const hasError = errors.some((e) => e.severity === "error");
+      const passed = !hasError;
+      return {
+        name: "lsp",
+        type: "lsp",
+        status: passed ? "passed" : "failed",
+        passed,
+        output: outputLines.join("\n"),
+        duration: Date.now() - start,
+        errors,
+        blocking: hasError,
+        skipped: false,
+        source: "lsp",
+      };
+    } catch {
+      // No language server available — silent skip (do not surface as failure).
+      return {
+        name: "lsp",
+        type: "lsp",
+        status: "skipped",
+        passed: false,
+        output: "",
+        duration: Date.now() - start,
+        errors: [],
+        blocking: false,
+        skipped: true,
+        source: "lsp",
+      };
+    }
+  }
+
   // ── Semantic Diff ───────────────────────────────────────
 
   private async analyzeSemanticDiff(files: string[]): Promise<VerificationCheck> {
@@ -719,6 +845,14 @@ export class VerificationEngine {
 }
 
 // ── Types ──────────────────────────────────────────────────
+
+function mapLspSeverity(severity: LspDiagnostic["severity"] | undefined): VerificationError["severity"] {
+  switch (severity) {
+    case 1: return "error";
+    case 2: return "warning";
+    default: return "info";
+  }
+}
 
 interface ProjectType {
   typeChecker?: "tsc" | "mypy" | "cargo-check" | "go-vet";

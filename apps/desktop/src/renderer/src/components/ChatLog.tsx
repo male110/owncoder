@@ -109,6 +109,8 @@ function ToolCardImpl({ turn }: { turn: ChatTurnDto }) {
   const failed    = isError || bashFailed;
   const bashOk    = isBash && bash?.exitCode === 0;
   const preview   = turn.content.length > 60 ? `${turn.content.slice(0, 60)}…` : turn.content;
+  const argSummary = turn.toolArgs ? summarizeArgs(turn.toolName ?? "", turn.toolArgs) : "";
+  const readParams = turn.toolName === "read_file" && turn.toolArgs ? readFileParams(turn.toolArgs) : "";
   const bodyRef   = useRef<HTMLPreElement>(null);
   const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scrollFrameRef = useRef<number | null>(null);
@@ -163,7 +165,9 @@ function ToolCardImpl({ turn }: { turn: ChatTurnDto }) {
           {isCompressed ? "🗜️" : isBash ? "▶" : failed ? "✕" : "⚙"}
         </span>
         <span className="tool-card-label">
-          {toolLabel(turn.toolName)}
+          {turn.toolName === "read_file" && argSummary
+            ? <><span className="tool-verb">Read</span>{" "}<span className="tool-path">{argSummary}</span>{readParams ? <span className="tool-read-params">{readParams}</span> : null}</>
+            : <>{toolLabel(turn.toolName)}{argSummary ? <span className="tool-path"> {argSummary}</span> : null}</>}
           {isCompressed && (
             <span className="compression-badge" title="已压缩内容">
               🗜️
@@ -178,7 +182,7 @@ function ToolCardImpl({ turn }: { turn: ChatTurnDto }) {
           </span>
         )}
         <span className="tool-card-preview">
-          {bash?.cmd ?? preview}
+          {turn.toolArgs ? "" : (bash?.cmd ?? preview)}
           {isCompressed && turn.originalLength && (
             <span className="compression-info">
               ({turn.content.length}/{turn.originalLength}字符)
@@ -510,8 +514,6 @@ function DecomposeCard({ decomposition }: { decomposition: DecompositionSnapshot
 function ActivityGroup({ items }: { items: ChatTurnDto[] }) {
   const [open, setOpen] = useState(false);
   const failCount = items.filter((t) => t.content.trim().startsWith("Error:")).length;
-  const summary   = items.map((t) => toolLabel(t.toolName)).join(" · ");
-
 
   if (items.length === 1) return <ToolCard turn={items[0]!} />;
 
@@ -526,7 +528,6 @@ function ActivityGroup({ items }: { items: ChatTurnDto[] }) {
         </span>
         <span className="activity-chev">{open ? "▾" : "▸"}</span>
       </button>
-      {!open ? <p className="activity-group-summary">{summary}</p> : null}
       {open ? (
         <div className="activity-group-body">
           {items.map((t, j) => (
@@ -542,6 +543,7 @@ function ActivityGroup({ items }: { items: ChatTurnDto[] }) {
 
 function RoundProcess({ items }: { items: ChatTurnDto[] }) {
   const [open, setOpen] = useState(false);
+
   return (
     <div className="activity-group">
       <button type="button" className="activity-group-head" onClick={() => setOpen((v) => !v)}>

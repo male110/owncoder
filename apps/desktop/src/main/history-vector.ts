@@ -25,6 +25,7 @@ import type {
   EmbeddingService,
   HistoryChunk,
   HistoryChunkInput,
+  HistoryRoundInput,
   HistorySearchHit,
   HistoryVectorStore,
 } from "@owncoder/core";
@@ -440,6 +441,27 @@ export function createHistoryVector(dbPath: string): AgentLoopOpts["historyVecto
         return;
       }
       pending.push({ turn, sessionId });
+      void drain();
+    },
+    archiveRound: (round: HistoryRoundInput) => {
+      const content = JSON.stringify({
+        userInput: round.userInput,
+        taskDecomposition: round.taskDecompose ?? null,
+        llmReport: round.assistantReport?.trim() || null,
+        toolCalls: round.toolCalls?.map((call) => ({
+          toolName: call.toolName,
+          arguments: call.arguments,
+        })) ?? [],
+      });
+      if (closed || !content.trim() || pending.length >= MAX_PENDING_ARCHIVES) return;
+      pending.push({
+        sessionId: round.sessionId,
+        turn: {
+          id: `round:${round.sessionId}:${round.roundIndex ?? Date.now().toString(36)}`,
+          role: "assistant",
+          content,
+        },
+      });
       void drain();
     },
     close: () => {

@@ -1,10 +1,39 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import Editor, { DiffEditor, loader } from "@monaco-editor/react";
 import * as monaco from "monaco-editor";
 import editorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker";
 import tsWorker from "monaco-editor/esm/vs/language/typescript/ts.worker?worker";
 import { useUiStore } from "../store/ui-store";
 import { Markdown } from "./Markdown";
+
+function IconReload({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path
+        d="M2.5 8a5.5 5.5 0 0 1 9.3-4.05M13.5 8a5.5 5.5 0 0 1-9.3 4.05"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
+      <path d="M12.2 2.2v3.2h-3.2M3.8 13.8v-3.2h3.2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function IconSave({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path
+        d="M3.5 2.5h7.2L13.5 5.3v8.2a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1v-10a1 1 0 0 1 1-1Z"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinejoin="round"
+      />
+      <path d="M5 2.5v3.5h5.5V2.5M5 13.5v-4h6v4" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+    </svg>
+  );
+}
 
 // 必须在 Monaco 加载前配置 worker 环境，否则 FileAccess 的 toUrl 未定义
 self.MonacoEnvironment = {
@@ -62,8 +91,15 @@ type MdViewMode = "source" | "preview";
 // 使用 discriminated union 确保类型安全
 type EditorPaneProps = {
   path: string;
-  onClose: () => void;
+  /** 单文件模式关闭回调；多 tab 模式下页签已有关闭，可不传。 */
+  onClose?: () => void;
   onSaved?: () => void;
+  /** 向父级同步 dirty，供 tab 关闭确认与脏标记使用。 */
+  onDirtyChange?: (dirty: boolean) => void;
+  /** 隐藏内置路径标题栏（由外层多 tab 栏展示路径时使用）。 */
+  hidePathTitle?: boolean;
+  /** 将保存/重新加载等操作渲染到外层页签行容器。 */
+  actionsHost?: HTMLElement | null;
 } & (
   | {
       /** 普通编辑模式 */
@@ -81,7 +117,17 @@ type EditorPaneProps = {
     }
 );
 
-export function EditorPane({ path, content, originalContent, diffMode, onClose, onSaved }: EditorPaneProps) {
+export function EditorPane({
+  path,
+  content,
+  originalContent,
+  diffMode,
+  onClose,
+  onSaved,
+  onDirtyChange,
+  hidePathTitle = false,
+  actionsHost = null,
+}: EditorPaneProps) {
   const [value, setValue] = useState("");
   const [original, setOriginal] = useState("");
   const [loading, setLoading] = useState(true);
@@ -94,6 +140,10 @@ export function EditorPane({ path, content, originalContent, diffMode, onClose, 
   const dirty = value !== original;
   const saveRef = useRef<() => Promise<void>>(async () => {});
   const loadRequestRef = useRef(0);
+
+  useEffect(() => {
+    onDirtyChange?.(dirty && !diffMode);
+  }, [dirty, diffMode, onDirtyChange]);
   // DiffEditor 的模型由 @monaco-editor/react 自动创建；组件卸载时它先释放模型、
   // 再销毁编辑器，会触发 Monaco 的 "TextModel got disposed before DiffEditorWidget
   // model got reset" 报错。因此用 keepCurrent* 让包装组件不释放模型，改由这里在
@@ -170,53 +220,97 @@ export function EditorPane({ path, content, originalContent, diffMode, onClose, 
     };
   }, [diffMode]);
 
+  const mdToggle =
+    !diffMode && isMarkdown ? (
+      <div className="editor-md-toggle" role="group" aria-label="Markdown 视图">
+        <button
+          type="button"
+          className={`ghost tiny${mdViewMode === "source" ? " active" : ""}`}
+          onClick={() => setMdViewMode("source")}
+        >
+          原码
+        </button>
+        <button
+          type="button"
+          className={`ghost tiny${mdViewMode === "preview" ? " active" : ""}`}
+          onClick={() => setMdViewMode("preview")}
+        >
+          预览
+        </button>
+      </div>
+    ) : null;
+
+  const fileActions: ReactNode = !diffMode ? (
+    <>
+      <button
+        type="button"
+        className="ghost tiny editor-icon-btn"
+        onClick={() => void load()}
+        disabled={loading}
+        title="重新加载"
+        aria-label="重新加载"
+      >
+        <IconReload />
+      </button>
+      <button
+        type="button"
+        className="ghost tiny accent editor-icon-btn"
+        disabled={!dirty || saving || loading}
+        onClick={() => void save()}
+        title={saving ? "保存中…" : "保存"}
+        aria-label={saving ? "保存中" : "保存"}
+      >
+        <IconSave />
+      </button>
+    </>
+  ) : null;
+
+  const hostActions =
+    actionsHost && (mdToggle || fileActions) ? (
+      <>
+        {mdToggle}
+        {fileActions}
+      </>
+    ) : null;
+  const showHead = !hidePathTitle || (!actionsHost && (Boolean(mdToggle) || Boolean(fileActions) || Boolean(onClose)));
+  const tabActions = hostActions
+    ? createPortal(
+        <div className="editor-actions editor-tab-actions">{hostActions}</div>,
+        actionsHost!,
+      )
+    : null;
+
   return (
     <div className="editor-pane">
-      <div className="editor-pane-head">
-        <div className="editor-path" title={path}>
-          {path}
-          {dirty && !diffMode ? <span className="editor-dirty">●</span> : null}
-          {diffMode ? <span className="editor-mode-badge">变更对比</span> : null}
-        </div>
-        <div className="editor-actions">
-          {!diffMode && isMarkdown ? (
-            <div className="editor-md-toggle" role="group" aria-label="Markdown 视图">
-              <button
-                type="button"
-                className={`ghost tiny${mdViewMode === "source" ? " active" : ""}`}
-                onClick={() => setMdViewMode("source")}
-              >
-                原码
-              </button>
-              <button
-                type="button"
-                className={`ghost tiny${mdViewMode === "preview" ? " active" : ""}`}
-                onClick={() => setMdViewMode("preview")}
-              >
-                预览
-              </button>
+      {showHead ? (
+        <div className="editor-pane-head">
+          {hidePathTitle ? (
+            <div className="editor-path editor-path-spacer" aria-hidden="true" />
+          ) : (
+            <div className="editor-path" title={path}>
+              {path}
+              {dirty && !diffMode ? <span className="editor-dirty">●</span> : null}
+              {diffMode ? <span className="editor-mode-badge">变更对比</span> : null}
             </div>
-          ) : null}
-          {!diffMode ? (
-            <>
-              <button type="button" className="ghost tiny" onClick={() => void load()} disabled={loading}>
-                重载
-              </button>
+          )}
+          <div className="editor-actions">
+            {actionsHost ? null : mdToggle}
+            {actionsHost ? null : fileActions}
+            {onClose ? (
               <button
                 type="button"
-                className="ghost tiny accent"
-                disabled={!dirty || saving || loading}
-                onClick={() => void save()}
+                className="ghost tiny editor-icon-btn"
+                onClick={onClose}
+                title="关闭"
+                aria-label="关闭"
               >
-                {saving ? "保存中…" : "保存"}
+                ×
               </button>
-            </>
-          ) : null}
-          <button type="button" className="ghost tiny" onClick={onClose}>
-            关闭
-          </button>
+            ) : null}
+          </div>
         </div>
-      </div>
+      ) : null}
+      {tabActions}
       {error ? <p className="editor-error">{error}</p> : null}
       <div className="editor-pane-body">
         {loading ? (

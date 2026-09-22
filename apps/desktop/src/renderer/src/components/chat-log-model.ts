@@ -15,19 +15,52 @@ export type LogBlock =
 export type ChatItem =
   | { kind: "block"; block: LogBlock; key: string };
 
+const TOOL_LABELS: Record<string, string> = {
+  read_file: "读取文件",
+  read_symbol: "读取符号",
+  read_outline: "读取大纲",
+  write_file: "写入文件",
+  append_file: "追加文件",
+  apply_patch: "应用补丁",
+  search_code: "搜索代码",
+  search_symbols: "搜索符号",
+  graph_search: "图搜索",
+  codemap_search: "代码地图搜索",
+  codemap_impact: "影响分析",
+  list_dir: "列出目录",
+  grep: "搜索文本",
+  bash: "运行命令",
+  save_plan: "保存计划",
+  repo_map: "仓库地图",
+  git_status: "Git 状态",
+  project_deps: "项目依赖",
+  type_check: "类型检查",
+  web_search: "网页搜索",
+  web_fetch: "获取网页",
+  semantic_diff: "语义差异",
+  ask_user: "询问用户",
+  save_memory: "保存记忆",
+  update_memory: "更新记忆",
+  forget_memory: "删除记忆",
+  list_memories: "列出记忆",
+  list_session_changes: "会话变更",
+  undo_session_change: "撤销变更",
+  lsp_go_to_definition: "跳转定义",
+  lsp_find_references: "查找引用",
+  lsp_hover: "悬停信息",
+  lsp_document_symbols: "文档符号",
+  lsp_workspace_symbols: "工作区符号",
+  lsp_diagnostics: "LSP 诊断",
+  lsp_code_actions: "代码操作",
+  save_experience: "保存经验",
+  save_spec: "保存规格",
+  save_design: "保存设计",
+  list_sdd: "列出 SDD",
+  analyze_issue: "分析问题",
+  report_blocker: "报告阻塞",
+};
+
 export function toolLabel(name?: string): string {
-  const TOOL_LABELS: Record<string, string> = {
-    read_file: "读取文件",
-    write_file: "写入文件",
-    apply_patch: "应用补丁",
-    search_code: "搜索代码",
-    search_symbols: "搜索符号",
-    list_dir: "列出目录",
-    grep: "搜索文本",
-    bash: "运行命令",
-    save_plan: "保存计划",
-    repo_map: "仓库地图",
-  };
   if (!name) return "工具";
   return TOOL_LABELS[name] ?? name;
 }
@@ -40,7 +73,10 @@ export function toolStatusLabel(
 ): string {
   const verb: Record<string, string> = {
     read_file: "读取文件",
+    read_symbol: "读取符号",
+    read_outline: "读取大纲",
     write_file: "写入文件",
+    append_file: "追加文件",
     apply_patch: "编辑文件",
     search_code: "搜索代码",
     search_symbols: "搜索符号",
@@ -51,6 +87,9 @@ export function toolStatusLabel(
     repo_map: "生成仓库地图",
     git_status: "查看 Git 状态",
     type_check: "类型检查",
+    ask_user: "询问用户",
+    save_memory: "保存记忆",
+    lsp_diagnostics: "检查 LSP 诊断",
   };
   const label = (name && verb[name]) || toolLabel(name);
   const pathHint =
@@ -121,13 +160,20 @@ export function buildLogBlocks(
     const userTurn = round.find((t) => t.role === "user");
     const process: ChatTurnDto[] = [];
     const planNotices: ChatTurnDto[] = [];
+    const toolArgsById = new Map<string, Record<string, unknown>>();
+    for (const t of round) {
+      for (const part of t.parts ?? []) {
+        if (part.type === "tool_use") toolArgsById.set(part.id, part.input);
+      }
+    }
     let finalTurn: ChatTurnDto | null = null;
 
     for (let i = 0; i < round.length; i++) {
       const t = round[i]!;
       if (t.role === "user") continue;
       if (t.role === "tool") {
-        process.push(t);
+        const toolArgs = t.id ? toolArgsById.get(t.id) : undefined;
+        process.push(toolArgs ? { ...t, toolArgs } : t);
         continue;
       }
       if (t.content.startsWith("Error:") || !t.content.trim()) continue;

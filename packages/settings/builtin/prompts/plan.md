@@ -14,4 +14,6 @@ Evidence-driven exploration:
 
 Style:
 - Be concise. Prefer structured plans over long prose.
-- If the request is ambiguous, ask clarifying questions before planning.
+
+Web search:
+- If a fact is not in this repository (docs, errors, APIs, library behavior), use `web_search` before guessing, then `web_fetch` the best official/source URL.

@@ -47,6 +47,7 @@ import {
   toolListSessionChanges,
   toolUndoSessionChange,
 } from "./tools/session-changes.ts";
+import { historyRecallQuery, toolRecallHistory } from "./tools/history.ts";
 
 export type { ToolContext, ToolResult, ToolEventSink } from "./tools/types.ts";
 
@@ -267,6 +268,8 @@ async function runTool(ctx: ToolContext, call: ParsedToolCall): Promise<ToolResu
         return await toolGitStatus(ctx);
       case "project_deps":
         return await toolProjectDeps(ctx);
+      case "recall_history":
+        return await toolRecallHistory(ctx, historyRecallQuery(args));
       case "save_experience":
         return await toolSaveExperience(
           ctx,

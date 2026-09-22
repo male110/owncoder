@@ -137,6 +137,7 @@ export type {
   HistorySearchHit,
   EmbeddingService,
   HistoryVectorStore,
+  HistoryRoundInput,
 } from "./harness/loop.ts";
 export { archiveTurn, computeContentHash } from "./harness/loop.ts";
 export { isRedactionEnabled, isSensitiveFile, redactSecrets } from "./harness/redact.ts";
@@ -594,6 +595,7 @@ export class SessionOrchestrator {
   private fileWatchTimers: Map<string, NodeJS.Timeout> = new Map();
   private confirmDangerousBash: ((command: string, sessionId?: string) => Promise<boolean>) | null = null;
   private askUserHandler: ((req: AskUserRequest, sessionId?: string) => Promise<string>) | null = null;
+  private renderPageHandler: AgentLoopOpts["renderPage"] | null = null;
   private llmApiKey: string | null = null;
   private projectRules = "";
 
@@ -614,6 +616,14 @@ export class SessionOrchestrator {
   /** Wire a host-supplied ask-user bridge (main process → renderer UI → answer). */
   setAskUserHandler(fn: ((req: AskUserRequest, sessionId?: string) => Promise<string>) | null): void {
     this.askUserHandler = fn;
+  }
+
+  /**
+   * Wire a host browser renderer (Electron BrowserWindow) so web_fetch can
+   * obtain post-JS content for CSR pages. Unset → static HTML only.
+   */
+  setRenderPageHandler(fn: AgentLoopOpts["renderPage"] | null): void {
+    this.renderPageHandler = fn;
   }
 
   setLlmApiKey(key: string | null): void {
@@ -2170,6 +2180,7 @@ export class SessionOrchestrator {
       askUser: this.askUserHandler
         ? (req: AskUserRequest) => this.askUserHandler!(req, sessionId)
         : undefined,
+      renderPage: this.renderPageHandler ?? undefined,
       llmApiKey: this.llmApiKey,
       mcp: this.mcp,
       memoryStore: this.memoryStore ?? undefined,
@@ -2196,21 +2207,23 @@ export class SessionOrchestrator {
       
       // ✅ 完成 projector，传入错误 metadata（保证不可变性）
       const { parts, metadata } = projector.finalize(errorMetadata);
-      
-      // ✅ 添加错误消息到 history
-      if (parts.length > 0) {
-        const errorSuffix = isAborted 
-          ? '\n\n[用户已中止]' 
-          : `\n\n[错误: ${metadata.error}]`;
-        r.history.push({
-          role: "assistant",
-          content: MessageProjector.partsToContent(parts) + errorSuffix,
-          parts,
-          metadata,
-        });
+
+      // Expand tool_use/tool_result into independent tool ChatTurns so the UI
+      // process panel still lists every step after an LLM/runtime failure.
+      // Previously partsToContent() collapsed them into one assistant blob,
+      // which made "执行过程 · N 步" look like only the last few tools survived.
+      const errorSuffix = isAborted
+        ? "\n\n[用户已中止]"
+        : `\n\n[错误: ${metadata.error}]`;
+      const expanded = MessageProjector.partsToChatTurns(parts, {
+        assistantSuffix: parts.length > 0 ? errorSuffix : undefined,
+        metadata,
+      });
+      if (expanded.length > 0) {
+        r.history.push(...expanded);
       } else {
-        const errorMsg = isAborted 
-          ? '[用户已中止]' 
+        const errorMsg = isAborted
+          ? "[用户已中止]"
           : `[执行失败: ${metadata.error}]`;
         r.history.push({
           role: "assistant",

@@ -250,3 +250,12 @@ OwnCoder 支持任意 OpenAI 兼容接口：
 - ⚠️ 分发时须保留许可证文件和版权声明
 
 > 如需商业使用授权，请联系作者获取单独的商业许可。
+# LSP 自动发现与安装
+
+LSP 不再只依赖系统预装的少数几个命令。核心会扫描当前项目中的文件类型，从内置的主流语言服务器目录中选择可用实现；当项目使用的语言服务器缺失且存在 npm 安装方式时，会自动安装到项目的 `.owncoder/lsp` 目录，不污染全局环境。
+
+- 中国大陆环境默认使用 `https://registry.npmmirror.com`；其他环境使用 npm 官方源。
+- 可用 `OWNCODER_NPM_REGISTRY` 指定镜像源。
+- 可用 `OWNCODER_DISABLE_LSP_AUTO_INSTALL=1` 关闭自动安装。
+- 默认会预下载目录中所有可通过 npm 安装的 LSP；已存在于项目 `node_modules/.bin` 或系统 PATH 的服务器优先使用。
+- 如果只希望下载当前项目实际使用的语言服务器，可设置 `OWNCODER_LSP_INSTALL_PROJECT_ONLY=1`。

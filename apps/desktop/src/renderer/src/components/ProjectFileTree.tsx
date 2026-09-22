@@ -4,6 +4,9 @@ import type { WorkspaceDirEntryDto } from "../../../preload/index";
 interface Props {
   root: string;
   onOpenFile: (path: string) => void;
+  /** Persisted open dirs for this project (survives tree unmount). */
+  expandedDirs: Record<string, boolean>;
+  onToggleDir: (path: string) => void;
 }
 
 interface TreeNodeProps {
@@ -11,10 +14,12 @@ interface TreeNodeProps {
   entry: WorkspaceDirEntryDto;
   depth: number;
   onOpenFile: (path: string) => void;
+  expandedDirs: Record<string, boolean>;
+  onToggleDir: (path: string) => void;
 }
 
-function TreeNode({ root, entry, depth, onOpenFile }: TreeNodeProps) {
-  const [open, setOpen] = useState(false);
+function TreeNode({ root, entry, depth, onOpenFile, expandedDirs, onToggleDir }: TreeNodeProps) {
+  const open = entry.kind === "dir" && expandedDirs[entry.path] === true;
   const [children, setChildren] = useState<WorkspaceDirEntryDto[] | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -31,10 +36,15 @@ function TreeNode({ root, entry, depth, onOpenFile }: TreeNodeProps) {
     }
   }, [entry.kind, entry.path, root]);
 
-  const toggleDir = async () => {
+  // Restore children when a previously-expanded dir remounts.
+  useEffect(() => {
+    if (!open || entry.kind !== "dir" || children !== null || loading) return;
+    void loadChildren();
+  }, [open, entry.kind, children, loading, loadChildren]);
+
+  const toggleDir = () => {
     if (entry.kind !== "dir") return;
-    if (!open && children === null) await loadChildren();
-    setOpen((v) => !v);
+    onToggleDir(entry.path);
   };
 
   if (entry.kind === "dir") {
@@ -45,7 +55,7 @@ function TreeNode({ root, entry, depth, onOpenFile }: TreeNodeProps) {
           className="file-tree-row dir"
           style={{ paddingLeft: 8 + depth * 12 }}
           title={entry.path}
-          onClick={() => void toggleDir()}
+          onClick={toggleDir}
         >
           <svg
             className="file-tree-chev"
@@ -80,6 +90,8 @@ function TreeNode({ root, entry, depth, onOpenFile }: TreeNodeProps) {
                   entry={child}
                   depth={depth + 1}
                   onOpenFile={onOpenFile}
+                  expandedDirs={expandedDirs}
+                  onToggleDir={onToggleDir}
                 />
               ))}
           </div>
@@ -103,7 +115,7 @@ function TreeNode({ root, entry, depth, onOpenFile }: TreeNodeProps) {
   );
 }
 
-export function ProjectFileTree({ root, onOpenFile }: Props) {
+export function ProjectFileTree({ root, onOpenFile, expandedDirs, onToggleDir }: Props) {
   const [entries, setEntries] = useState<WorkspaceDirEntryDto[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -131,7 +143,15 @@ export function ProjectFileTree({ root, onOpenFile }: Props) {
   return (
     <div className="file-tree">
       {entries.map((entry) => (
-        <TreeNode key={entry.path} root={root} entry={entry} depth={0} onOpenFile={onOpenFile} />
+        <TreeNode
+          key={entry.path}
+          root={root}
+          entry={entry}
+          depth={0}
+          onOpenFile={onOpenFile}
+          expandedDirs={expandedDirs}
+          onToggleDir={onToggleDir}
+        />
       ))}
     </div>
   );

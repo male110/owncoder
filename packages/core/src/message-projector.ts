@@ -12,7 +12,7 @@
  * - finalize() 被调用时，封闭未完成的内容
  */
 
-import type { TurnEvent, MessagePart, MessageMetadata } from "./harness/loop/types";
+import type { ChatTurn, TurnEvent, MessagePart, MessageMetadata } from "./harness/loop/types";
 
 /**
  * MessageProjector - 事件流到结构化消息的投影器
@@ -218,6 +218,74 @@ export class MessageProjector {
       parts: this.getParts(),
       metadata: this.getMetadata(),
     };
+  }
+
+  /**
+   * Expand structured parts into ChatTurn rows for persistence / UI history.
+   * Tool use+result pairs become `role: "tool"` rows so the process panel can
+   * render ToolCards after an aborted / failed turn (instead of one fat
+   * assistant blob with embedded XML).
+   */
+  static partsToChatTurns(
+    parts: MessagePart[],
+    options?: { assistantSuffix?: string; metadata?: MessageMetadata },
+  ): ChatTurn[] {
+    const turns: ChatTurn[] = [];
+    const toolNames = new Map<string, string>();
+    let textChunks: string[] = [];
+
+    const flushText = (suffix = "") => {
+      const base = textChunks.join("\n\n").trim();
+      textChunks = [];
+      const content = `${base}${suffix}`.trim();
+      if (!content) return;
+      turns.push({
+        role: "assistant",
+        content,
+        parts: [{ type: "text", text: content }],
+        metadata: options?.metadata,
+      });
+    };
+
+    for (const part of parts) {
+      if (part.type === "text") {
+        if (part.text.trim()) textChunks.push(part.text);
+        continue;
+      }
+      if (part.type === "thinking") {
+        // Thinking stays inside structured parts / live UI; skip transcript row.
+        continue;
+      }
+      if (part.type === "tool_use") {
+        flushText();
+        toolNames.set(part.id, part.name);
+        continue;
+      }
+      if (part.type === "tool_result") {
+        flushText();
+        const toolName = toolNames.get(part.tool_use_id) ?? "unknown";
+        turns.push({
+          role: "tool",
+          id: part.tool_use_id,
+          toolName,
+          content: part.is_error && !part.content.trim().startsWith("Error:")
+            ? `Error: ${part.content || "tool failed"}`
+            : part.content,
+        });
+      }
+    }
+
+    flushText(options?.assistantSuffix ?? "");
+    if (turns.length === 0 && options?.assistantSuffix?.trim()) {
+      const content = options.assistantSuffix.trim();
+      turns.push({
+        role: "assistant",
+        content,
+        parts: [{ type: "text", text: content }],
+        metadata: options?.metadata,
+      });
+    }
+    return turns;
   }
 
   /**

@@ -202,6 +202,11 @@ export async function loadTurn(root: string, sessionId: string, turnId: string):
  * Dedupes user/assistant copies *within one turn* that can appear both as
  * turn.user and as legacy_message / final.history payloads. Does not collapse
  * identical messages across different turns (user may send "hello" twice).
+ *
+ * Live tool calls are persisted as TurnEvent payloads (`tool_start` /
+ * `tool_end`), not as `{ role: "tool" }` rows. Reconstruct those into ChatTurn
+ * tool rows so session switch / history-page restore still shows the full
+ * execution process (not only the final assistant text).
  */
 export function projectConversationTurns(turns: ConversationTurn[]): ChatTurn[] {
   const projected: ChatTurn[] = [];
@@ -217,6 +222,10 @@ export function projectConversationTurns(turns: ConversationTurn[]): ChatTurn[] 
         );
         if (dup) return;
       }
+      if (item.role === "tool" && item.id) {
+        const dup = local.some((h) => h.role === "tool" && h.id === item.id);
+        if (dup) return;
+      }
       local.push(item);
     };
     if (
@@ -229,11 +238,49 @@ export function projectConversationTurns(turns: ConversationTurn[]): ChatTurn[] 
     ) {
       pushUnique({ ...turn.user });
     }
+
+    const pendingTools = new Map<string, { name: string }>();
     for (const event of turn.events) {
-      const payload = event.payload as Partial<ChatTurn> | undefined;
+      const payload = event.payload as
+        | (Partial<ChatTurn> & {
+            type?: string;
+            id?: string;
+            name?: string;
+            output?: string;
+            ok?: boolean;
+          })
+        | undefined;
+      if (!payload || typeof payload !== "object") continue;
+
+      if (payload.type === "tool_start" && typeof payload.id === "string") {
+        pendingTools.set(payload.id, {
+          name: typeof payload.name === "string" ? payload.name : "unknown",
+        });
+        continue;
+      }
+      if (payload.type === "tool_end" && typeof payload.id === "string") {
+        const start = pendingTools.get(payload.id);
+        const toolName =
+          (typeof payload.name === "string" && payload.name) ||
+          start?.name ||
+          "unknown";
+        const output =
+          typeof payload.output === "string"
+            ? payload.output
+            : payload.ok === false
+              ? "Error: tool failed"
+              : "";
+        pushUnique({
+          role: "tool",
+          id: payload.id,
+          toolName,
+          content: output,
+        });
+        pendingTools.delete(payload.id);
+        continue;
+      }
+
       if (
-        payload &&
-        typeof payload === "object" &&
         (payload.role === "user" ||
           payload.role === "assistant" ||
           payload.role === "tool" ||
@@ -243,15 +290,30 @@ export function projectConversationTurns(turns: ConversationTurn[]): ChatTurn[] 
         pushUnique({ ...payload } as ChatTurn);
       }
     }
-    const final = turn.final as Partial<ChatTurn> | { history?: ChatTurn[] } | undefined;
-    const candidate =
-      final && typeof final === "object" && "role" in final
-        ? (final as ChatTurn)
-        : final && "history" in final && Array.isArray(final.history)
-          ? [...final.history].reverse().find((h) => h.role === "assistant")
+
+    const final = turn.final as
+      | Partial<ChatTurn>
+      | { history?: ChatTurn[]; lastAssistant?: string }
+      | undefined;
+    // `completeTurn` stores AgentLoopResult (with `.history`) or a plain
+    // assistant ChatTurn. Merge tool / intermediate assistant rows from
+    // final.history via pushUnique so session restore keeps the full process
+    // panel even when only some tools were event-projected.
+    if (final && typeof final === "object" && "history" in final && Array.isArray(final.history)) {
+      for (const row of final.history) {
+        if (!row || typeof row !== "object" || typeof row.content !== "string") continue;
+        if (row.role === "tool" || row.role === "assistant" || row.role === "system") {
+          pushUnique({ ...row });
+        }
+      }
+    } else {
+      const candidate =
+        final && typeof final === "object" && "role" in final
+          ? (final as ChatTurn)
           : undefined;
-    if (candidate?.role === "assistant" && typeof candidate.content === "string") {
-      pushUnique({ ...candidate });
+      if (candidate?.role === "assistant" && typeof candidate.content === "string") {
+        pushUnique({ ...candidate });
+      }
     }
     projected.push(...local);
   }

@@ -10,10 +10,13 @@ Goals:
 
 Evidence-driven exploration:
 - Exploration is not a checklist or a default action. Before each additional read, search, listing, or reference lookup, identify the specific missing fact and continue only if it could change the answer, target, implementation, safety, or validation.
-- When the available evidence already identifies the target, required behavior, constraints, and validation path, implement or answer immediately.
+- When the available evidence already identifies the target, required behavior, constraints, and validation path, implement or answer.
 - Do not read files merely for broader confidence, to inspect adjacent architecture, to exhaust search results, or for hypothetical future work.
 - Reading the edit target does not imply reading all consumers, neighbors, or call sites; inspect them only when their behavior can affect this change.
 
 Style:
 - Keep tool output short. Prefer surgical changes.
 - Do not claim work is done without evidence from tools or tests.
+
+Web search:
+- If a fact is not in this repository, or one local retry cannot fix the same error, use `web_search` before guessing, then `web_fetch` the best official/source URL.

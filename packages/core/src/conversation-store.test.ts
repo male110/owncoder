@@ -139,6 +139,96 @@ describe("conversation store", () => {
     ]);
   });
 
+  it("projectConversationTurns rebuilds tool rows from tool_start/tool_end events", () => {
+    const turns = [
+      {
+        turnId: "live-tools",
+        turnSeq: 1,
+        status: "failed" as const,
+        startedAt: "t0",
+        completedAt: "t2",
+        user: user("run tools"),
+        taskDecomposition: null,
+        report: null,
+        events: [
+          {
+            seq: 1,
+            eventType: "tool_start",
+            payload: { type: "tool_start", id: "c1", name: "bash", args: { command: "ls" } },
+            at: "t0",
+          },
+          {
+            seq: 2,
+            eventType: "tool_end",
+            payload: { type: "tool_end", id: "c1", name: "bash", ok: true, output: "ok" },
+            at: "t1",
+          },
+          {
+            seq: 3,
+            eventType: "tool_start",
+            payload: { type: "tool_start", id: "c2", name: "web_fetch", args: { url: "https://x" } },
+            at: "t1",
+          },
+          {
+            seq: 4,
+            eventType: "tool_end",
+            payload: { type: "tool_end", id: "c2", name: "web_fetch", ok: true, output: "html" },
+            at: "t2",
+          },
+          {
+            seq: 5,
+            eventType: "tool_start",
+            payload: { type: "tool_start", id: "c3", name: "ask_user", args: {} },
+            at: "t2",
+          },
+          {
+            seq: 6,
+            eventType: "tool_end",
+            payload: { type: "tool_end", id: "c3", name: "ask_user", ok: true, output: "answered" },
+            at: "t2",
+          },
+        ],
+        final: { error: "LLM failed", aborted: false },
+      },
+    ];
+    expect(projectConversationTurns(turns)).toEqual([
+      user("run tools"),
+      { role: "tool", id: "c1", toolName: "bash", content: "ok" },
+      { role: "tool", id: "c2", toolName: "web_fetch", content: "html" },
+      { role: "tool", id: "c3", toolName: "ask_user", content: "answered" },
+    ]);
+  });
+
+  it("projectConversationTurns falls back to final.history tools when events lack tool rows", () => {
+    const turns = [
+      {
+        turnId: "legacy-final",
+        turnSeq: 1,
+        status: "completed" as const,
+        startedAt: "t0",
+        completedAt: "t1",
+        user: user("hello"),
+        taskDecomposition: null,
+        report: null,
+        events: [],
+        final: {
+          history: [
+            user("hello"),
+            { role: "tool" as const, id: "t1", toolName: "bash", content: "ok" },
+            { role: "tool" as const, id: "t2", toolName: "ask_user", content: "q" },
+            assistant("done"),
+          ],
+        },
+      },
+    ];
+    expect(projectConversationTurns(turns)).toEqual([
+      user("hello"),
+      { role: "tool", id: "t1", toolName: "bash", content: "ok" },
+      { role: "tool", id: "t2", toolName: "ask_user", content: "q" },
+      assistant("done"),
+    ]);
+  });
+
   it("projectConversationTurns keeps identical user text across different turns", () => {
     const turns = [
       {
