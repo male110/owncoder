@@ -40,6 +40,7 @@ import { RenderErrorBoundary } from "./components/RenderErrorBoundary";
 import { DangerousCommandBar } from "./components/DangerousCommandBar";
 import { AskUserCard } from "./components/AskUserCard";
 import { UpdateBanner } from "./components/UpdateBanner";
+import { useI18n } from "./i18n";
 
 const SettingsPanel = lazy(async () => {
   const module = await import("./SettingsPanel");
@@ -50,6 +51,7 @@ export function App() {
   useEffect(() => {
     document.getElementById("boot-status")?.remove();
   }, []);
+  const { t } = useI18n();
 
   // ── Store slices ────────────────────────────────────────────────────────────
   const {
@@ -190,7 +192,7 @@ export function App() {
 
   const requestCloseEditorTab = useCallback(async (path: string) => {
     if (editorDirtyByPath[path]) {
-      const ok = await customConfirm("文件尚未保存，确定关闭？未保存的修改将丢失。");
+      const ok = await customConfirm(t("文件尚未保存，确定关闭？未保存的修改将丢失。"));
       if (!ok) return;
     }
     handleCloseEditorTab(path);
@@ -347,13 +349,13 @@ export function App() {
     //    直到后端返回最终结果后再替换为历史记录。
     if (sid) {
       chatActions.sealAllStreaming(sid);
-      chatActions.setLiveStatus("正在停止…", sid);
+      chatActions.setLiveStatus(t("正在停止…"), sid);
       // 请求停止队列循环：runQueue 在当前消息结束后会检查停止标志并
       // break 出循环，但保留剩余的待执行消息，用户可继续手动发送。
       requestStop(sid);
     } else {
       chatActions.resetTurnState();
-      chatActions.setLiveStatus("正在停止…");
+      chatActions.setLiveStatus(t("正在停止…"));
     }
     // 2) 显式带 sid 调用；后端 cancelTurn 在 sid 缺失时会回退到 activeSessionId，
     //    但显式传值避免渲染/主进程活跃会话不一致时打错对象。
@@ -421,8 +423,8 @@ export function App() {
       {showBlank ? (
         <div className="hero-empty" style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center" }}>
           <div className="hero-watermark">✦</div>
-          <h1>新会话</h1>
-          <p className="hero-sub">选择项目目录，输入任务描述开始</p>
+          <h1>{t("新会话")}</h1>
+          <p className="hero-sub">{t("选择项目目录，输入任务描述开始")}</p>
         </div>
       ) : null}
       <Composer
@@ -462,7 +464,7 @@ export function App() {
   return (
     <div className="app-frame">
       <TitleBar
-        title={showBlank ? "新会话" : sessionTitle}
+        title={showBlank || sessionTitle === "新会话" ? t("新会话") : sessionTitle}
         gitSummary={gitStatus?.isRepo ? gitStatus.summary : null}
         gitDirty={gitStatus?.dirty}
       />
@@ -516,7 +518,7 @@ export function App() {
           <div
             className="sidebar-resize-handle"
             onMouseDown={() => setIsSidebarDragging(true)}
-            title="拖动调整左侧宽度"
+            title={t("拖动调整左侧宽度")}
           />
         ) : null}
 
@@ -527,7 +529,7 @@ export function App() {
               <>
                 <div className="editor-shell">
                   <div className="editor-tabs-row">
-                    <div className="editor-tabs" role="tablist" aria-label="已打开文件">
+                    <div className="editor-tabs" role="tablist" aria-label={t("已打开文件")}>
                       {editorTabs.map((tabPath) => {
                         const active = tabPath === editorPath;
                         const dirty = Boolean(editorDirtyByPath[tabPath]);
@@ -547,14 +549,14 @@ export function App() {
                               onClick={() => setActiveEditorTab(tabPath)}
                             >
                               <span className="editor-tab-name">{fileNameOf(tabPath)}</span>
-                              {isDiff ? <span className="editor-tab-badge">对比</span> : null}
+                              {isDiff ? <span className="editor-tab-badge">{t("对比")}</span> : null}
                               {dirty ? <span className="editor-dirty">●</span> : null}
                             </button>
                             <button
                               type="button"
                               className="editor-tab-close"
-                              title="关闭"
-                              aria-label={`关闭 ${fileNameOf(tabPath)}`}
+                              title={t("关闭")}
+                              aria-label={t("关闭 {{name}}", { name: fileNameOf(tabPath) })}
                               onClick={() => void requestCloseEditorTab(tabPath)}
                             >
                               ×
@@ -566,7 +568,7 @@ export function App() {
                     <div
                       ref={setEditorTabActionsHost}
                       className="editor-tab-actions-host"
-                      aria-label="编辑器操作"
+                      aria-label={t("编辑器操作")}
                     />
                   </div>
                   {editorTabs.map((tabPath) => {
@@ -638,7 +640,7 @@ export function App() {
             scope="settings-module"
             resetKey={`${settingsOpen}:${settingsTab}`}
             fallback={(error, reset) => (
-              <div className="settings-overlay" role="dialog" aria-modal="true" aria-label="设置加载失败">
+              <div className="settings-overlay" role="dialog" aria-modal="true" aria-label={t("设置加载失败")}>
                 <section
                   role="alert"
                   style={{
@@ -650,18 +652,18 @@ export function App() {
                     background: "#1a1012",
                   }}
                 >
-                  <h2>设置未能加载</h2>
-                  <p className="hint">主界面仍在运行。错误详情已记录到启动终端。</p>
+                  <h2>{t("设置未能加载")}</h2>
+                  <p className="hint">{t("主界面仍在运行。错误详情已记录到启动终端。")}</p>
                   <pre style={{ whiteSpace: "pre-wrap" }}>{error.message}</pre>
                   <div className="todo-actions">
-                    <button type="button" className="ghost" onClick={reset}>重试</button>
-                    <button type="button" className="ghost" onClick={() => setSettingsOpen(false)}>关闭设置</button>
+                    <button type="button" className="ghost" onClick={reset}>{t("重试")}</button>
+                    <button type="button" className="ghost" onClick={() => setSettingsOpen(false)}>{t("关闭设置")}</button>
                   </div>
                 </section>
               </div>
             )}
           >
-            <Suspense fallback={<div className="settings-overlay" aria-label="正在加载设置" />}>
+            <Suspense fallback={<div className="settings-overlay" aria-label={t("正在加载设置")} />}>
               <SettingsPanel
                 open={settingsOpen}
                 onClose={() => setSettingsOpen(false)}

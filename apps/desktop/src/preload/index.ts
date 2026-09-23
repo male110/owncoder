@@ -106,14 +106,18 @@ type ChatEventFields =
   | { type: "stage_done"; id: string; nodeType: string; label: string }
   | {
       type: "task_decomposition";
-      understanding: string;
+      intent: string;
       userConstraints: string[];
-      steps: Array<{
+      tasks: Array<{
         id: string;
         description: string;
-        dependsOn: string[];
-        informationNeeds: Array<{ id: string; question: string }>;
-        stopReadingWhen: Array<{ condition: string; requiredEvidenceIds: string[] }>;
+        steps: Array<{
+          id: string;
+          description: string;
+          dependsOn: string[];
+          informationNeeds: Array<{ id: string; question: string }>;
+          stopReadingWhen: Array<{ condition: string; requiredEvidenceIds: string[] }>;
+        }>;
       }>;
       fallback: boolean;
     }
@@ -536,6 +540,10 @@ export interface DesktopApi {
   setSettingsPanelOpen: (open: boolean) => void;
   /** Sync frameless window chrome (titleBarOverlay / background) with UI theme. */
   setChromeTheme: (theme: "dark" | "codex") => Promise<void>;
+  /** 界面语言信息：系统区域设置 + 用户偏好（"system" 跟随系统）。 */
+  getLocaleInfo: () => Promise<{ osLocale: string; pref: "system" | "zh" | "en" }>;
+  /** 设置界面语言偏好；主进程对话框文案同步生效。 */
+  setLocaleOverride: (pref: "system" | "zh" | "en") => Promise<void>;
   /** Ask the main process to focus and raise this window (restores OS focus). */
   focusWindow: () => void;
   /** Subscribe to a request from main to close the settings panel. */
@@ -644,6 +652,8 @@ const api: DesktopApi = {
     ipcRenderer.invoke("models:fetchList", baseUrl, apiKey, apiFormat),
   setSettingsPanelOpen: (open: boolean) => ipcRenderer.send("app:settingsPanelState", open),
   setChromeTheme: (theme) => ipcRenderer.invoke("app:setChromeTheme", theme),
+  getLocaleInfo: () => ipcRenderer.invoke("app:getLocaleInfo"),
+  setLocaleOverride: (pref) => ipcRenderer.invoke("app:setLocaleOverride", pref),
   focusWindow: () => ipcRenderer.send("app:focusWindow"),
   onCloseSettingsPanel: (callback: () => void) => {
     const handler = () => callback();

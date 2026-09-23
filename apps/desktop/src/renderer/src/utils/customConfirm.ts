@@ -2,6 +2,7 @@
  * 替代原生 window.confirm() 的自定义确认弹窗。
  * 原生 confirm 会阻塞主线程并导致输入框失焦，此实现基于 div 异步弹窗。
  */
+import { t } from "../../../shared/i18n/core";
 export function customConfirm(message: string): Promise<boolean> {
   return new Promise((resolve) => {
     // 创建遮罩层
@@ -23,11 +24,11 @@ export function customConfirm(message: string): Promise<boolean> {
 
     const btnOk = document.createElement("button");
     btnOk.className = "custom-confirm-btn custom-confirm-btn-ok";
-    btnOk.textContent = "确定";
+    btnOk.textContent = t("确定");
 
     const btnCancel = document.createElement("button");
     btnCancel.className = "custom-confirm-btn custom-confirm-btn-cancel";
-    btnCancel.textContent = "取消";
+    btnCancel.textContent = t("取消");
 
     btns.appendChild(btnCancel);
     btns.appendChild(btnOk);

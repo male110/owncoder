@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { deserializeError, ErrorCode, type AppError } from "@owncoder/shared";
+import { useI18n } from "../i18n";
 
 interface Props {
   error: AppError;
@@ -9,13 +10,14 @@ interface Props {
 
 export function ErrorBanner({ error, onDismiss, onOpenSettings }: Props) {
   const [showDetail, setShowDetail] = useState(false);
+  const { t } = useI18n();
 
   const needsSettings =
     error.code === ErrorCode.AUTH_MISSING_KEY ||
     error.code === ErrorCode.AUTH_INVALID_KEY ||
     error.code === ErrorCode.NET_UNREACHABLE;
 
-  const title = needsSettings ? "需要配置模型" : "出错了";
+  const title = needsSettings ? t("需要配置模型") : t("出错了");
 
   return (
     <div className="error-banner" role="alert">
@@ -32,18 +34,18 @@ export function ErrorBanner({ error, onDismiss, onOpenSettings }: Props) {
             className="error-detail-toggle"
             onClick={() => setShowDetail((v) => !v)}
           >
-            {showDetail ? "隐藏详情" : "查看技术详情"}
+            {showDetail ? t("隐藏详情") : t("查看技术详情")}
           </button>
         ) : null}
       </div>
       <div className="error-banner-actions">
         {needsSettings && onOpenSettings ? (
           <button type="button" className="ghost accent" onClick={onOpenSettings}>
-            打开设置
+            {t("打开设置")}
           </button>
         ) : null}
         <button type="button" className="ghost" onClick={onDismiss}>
-          关闭
+          {t("关闭")}
         </button>
       </div>
     </div>

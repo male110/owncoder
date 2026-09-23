@@ -10,6 +10,7 @@
 
 import type { ToolCall } from "@owncoder/llm";
 import type { TaskItem } from "../../plans.js";
+import { looksLikeContinuationIntent, looksLikeFinalReport } from "./continuation-intent.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -221,6 +222,10 @@ export function checkTermination(
   // ═══════════════════════════════════════════════════════════════════════════
   
   const unmetNeeds = hasUnmetInformationNeeds(state.currentTask);
+  // 报告式收尾优先于“信息需求未满足”否决：否则模型已经写出最终报告时，
+  // 相似输出 / 自然完成 / 连续纯文本收敛层全部被关掉，只能空转到硬上限
+  // （与 react.ts 的 unmetNeedsContinue 预算及 looksLikeFinalReport 出口对齐）。
+  const finalReport = looksLikeFinalReport(state.lastContent);
 
   // 2.1 Tool loop detection (same tool + args repeated)
   //     → Catches stuck patterns like: read → read → read
@@ -242,7 +247,7 @@ export function checkTermination(
   //     → consecutiveSimilarOutputs >= 1 means 2 similar outputs detected
   //     → Treat as normal completion: the model has converged on a final answer,
   //       so do NOT surface "Task may be incomplete" / error events.
-  if (config.enableOutputSimilarityCheck && !unmetNeeds && state.consecutiveSimilarOutputs >= 1) {
+  if (config.enableOutputSimilarityCheck && (!unmetNeeds || finalReport) && state.consecutiveSimilarOutputs >= 1) {
     return {
       shouldTerminate: true,
       reason: `Detected ${state.consecutiveSimilarOutputs + 1} consecutive similar outputs (threshold: 80%)`,
@@ -307,10 +312,20 @@ export function checkTermination(
     state.lastToolCalls.length === 0 &&
     state.lastContent.trim()
   ) {
-    if (hasUnmetInformationNeeds(state.currentTask)) {
+    // 3.1a 行动宣言不是最终报告（“现在跑测试……”）→ 继续循环。
+    // 否则 react.ts 注入的纯文本 nudge 会在下一次迭代开头被这里提前截杀，
+    // 模型永远看不到 nudge，任务停在“宣布了下一步”而不是“做完了”。
+    if (isActionAnnouncement(state.lastContent)) {
       return { shouldTerminate: false };
     }
-    if (config.enableTaskValidation && state.currentTask) {
+    // 簿记上的 unmet needs 不能否决已经写好的最终报告（证据被编辑失效、
+    // outline/web 证据无法 verified 时尤为常见）。
+    if (unmetNeeds && !finalReport) {
+      return { shouldTerminate: false };
+    }
+    // 最终报告同样跳过 task validation：它与 unmetNeeds 检查同一套 evidence 簿记，
+    // 否则报告出口会被 validation 再次否决，循环依旧停不下来。
+    if (config.enableTaskValidation && state.currentTask && !finalReport) {
       const validation = validateTaskCompletion(state.currentTask, state.lastContent);
       if (!validation.isComplete) {
         return { shouldTerminate: false };
@@ -332,7 +347,12 @@ export function checkTermination(
     state.lastContent.trim() &&
     state.consecutiveTextOnlyTurns >= config.maxConsecutiveTextOnly
   ) {
-    if (hasUnmetInformationNeeds(state.currentTask)) {
+    // 行动宣言不算“只说不做”的结束意图：继续给模型执行机会，
+    // 由 react.ts 的 nudge 预算（maxPostToolTextNudges）与 Layer 1/2 硬上限兜底。
+    if (isActionAnnouncement(state.lastContent)) {
+      return { shouldTerminate: false };
+    }
+    if (unmetNeeds && !finalReport) {
       return { shouldTerminate: false };
     }
     return {
@@ -389,6 +409,14 @@ function resolveExplorationSkipThreshold(
         : 1;
 
   return Math.max(1, Math.round(baseSkipThreshold * factor));
+}
+
+/**
+ * 行动宣言（“现在跑测试……”/“Let me verify…”）：表达了继续行动的意图且不是
+ * 报告式收尾。这种文本被当成最终报告落库就是“循环提前终止”bug。
+ */
+function isActionAnnouncement(text: string): boolean {
+  return looksLikeContinuationIntent(text) && !looksLikeFinalReport(text);
 }
 
 function hasUnmetInformationNeeds(task: LoopState["currentTask"]): boolean {

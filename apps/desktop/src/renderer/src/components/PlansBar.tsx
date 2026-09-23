@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { PlanInfoDto } from "../../../preload/index";
+import { useI18n } from "../i18n";
 
 interface Props {
   plans: PlanInfoDto[];
@@ -23,6 +24,7 @@ export function PlansBar({
 }: Props) {
   const [open, setOpen] = useState(false);
   const [planPreview, setPlanPreview] = useState<{ path: string; body: string; kind: "plan" | "document" } | null>(null);
+  const { t } = useI18n();
 
   if (activePlanPath) return null;
   if (plans.length === 0) return null;
@@ -38,7 +40,7 @@ export function PlansBar({
       <div className="review-bar-head">
         <button type="button" className="review-bar-toggle" onClick={() => setOpen((v) => !v)}>
           <span className="activity-chev">{open ? "▾" : "▸"}</span>
-          <span className="review-bar-title">计划</span>
+          <span className="review-bar-title">{t("计划")}</span>
           {plans.length ? <span className="review-bar-count">{plans.length}</span> : null}
         </button>
       </div>
@@ -57,13 +59,13 @@ export function PlansBar({
                     className="ghost tiny"
                     disabled={busy}
                     onClick={() => onOpenFile(p.path)}
-                    title="在编辑器中打开"
+                    title={t("在编辑器中打开")}
                   >
-                    打开
+                    {t("打开")}
                   </button>
                 ) : null}
                 {p.kind === "document" ? (
-                  <span className="plan-kind-tag" title="文档交付物，无需批准">文档</span>
+                  <span className="plan-kind-tag" title={t("文档交付物，无需批准")}>{t("文档")}</span>
                 ) : (
                   <button
                     type="button"
@@ -74,7 +76,7 @@ export function PlansBar({
                       if (planPreview?.path === p.path) setPlanPreview(null);
                     }}
                   >
-                    批准
+                    {t("批准")}
                   </button>
                 )}
               </div>
@@ -91,17 +93,17 @@ export function PlansBar({
                       className="ghost tiny"
                       onClick={() => onOpenFile(planPreview.path)}
                     >
-                      在编辑器中打开
+                      {t("在编辑器中打开")}
                     </button>
                   ) : null}
                   <button type="button" className="ghost tiny" onClick={() => setPlanPreview(null)}>
-                    关闭预览
+                    {t("关闭预览")}
                   </button>
                 </div>
               </div>
               <pre className="plan-preview-body">{planPreview.body}</pre>
               {planPreview.kind === "document" ? (
-                <span className="plan-kind-note">文档交付物 · 无需批准（如需执行请生成实施计划）</span>
+                <span className="plan-kind-note">{t("文档交付物 · 无需批准（如需执行请生成实施计划）")}</span>
               ) : (
                 <button
                   type="button"
@@ -112,7 +114,7 @@ export function PlansBar({
                     setPlanPreview(null);
                   }}
                 >
-                  批准此计划并自动执行
+                  {t("批准此计划并自动执行")}
                 </button>
               )}
             </div>

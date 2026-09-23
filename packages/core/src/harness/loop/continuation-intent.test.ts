@@ -42,6 +42,8 @@ test("detects report-style closings", () => {
   assert.equal(looksLikeFinalReport("以上是本次修改的总结。"), true);
   assert.equal(looksLikeFinalReport("报告如下：修改了 scanner.ts 并补充了测试。"), true);
   assert.equal(looksLikeFinalReport("现在运行类型检查："), false);
+  assert.equal(looksLikeFinalReport("修复完成：已为未满足分支增加报告出口。"), true);
+  assert.equal(looksLikeFinalReport("The fix is complete and the loop stops after the report."), true);
 });
 
 test("nudges after tool text when exploration is complete but the model announces more work", () => {

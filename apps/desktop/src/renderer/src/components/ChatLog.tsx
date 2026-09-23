@@ -4,6 +4,7 @@ import type { VirtuosoHandle } from "react-virtuoso";
 import type { ChatTurnDto } from "../../../preload/index";
 import { Markdown } from "./Markdown";
 import type { DecompositionSnapshot, LiveEvent, PendingTool } from "../store/chat-store";
+import { useI18n } from "../i18n";
 import {
   buildChatItems,
   buildLogBlocks,
@@ -90,6 +91,7 @@ function LiveToolCardImpl({ tool }: { tool: PendingTool }) {
   const [open, setOpen] = useState(false);  // collapsed by default; expand on click
   const bodyRef   = useRef<HTMLDivElement>(null);
   const wasRunning = useRef(running);
+  const { t } = useI18n();
 
   // Auto-expand while running so user sees progress
   useEffect(() => { if (running) setOpen(true); }, [running]);
@@ -149,7 +151,7 @@ function LiveToolCardImpl({ tool }: { tool: PendingTool }) {
 
         {/* Status badge */}
         <span className={`tool-status ${running ? "running" : tool.status}`}>
-          {running ? "运行中" : tool.status === "error" ? "失败" : tool.status === "skipped" ? "已跳过" : "完成"}
+          {running ? t("运行中") : tool.status === "error" ? t("失败") : tool.status === "skipped" ? t("已跳过") : t("完成")}
         </span>
 
         <span className="activity-chev">{open ? "▾" : "▸"}</span>
@@ -159,7 +161,7 @@ function LiveToolCardImpl({ tool }: { tool: PendingTool }) {
         <div className="tool-card-body" ref={bodyRef}>
           {tool.output ? (
             <div className="tool-card-content-wrap">
-              <div className="tool-card-result-label">结果</div>
+              <div className="tool-card-result-label">{t("结果")}</div>
               <pre>{tool.output}</pre>
               <button
                 type="button"
@@ -167,13 +169,13 @@ function LiveToolCardImpl({ tool }: { tool: PendingTool }) {
                 onClick={() => {
                   navigator.clipboard.writeText(tool.output || "");
                 }}
-                title="复制内容"
+                title={t("复制内容")}
               >
-                📋 复制
+                {t("📋 复制")}
               </button>
             </div>
           ) : null}
-          {running && !tool.output ? <div className="tool-progress">执行中...</div> : null}
+          {running && !tool.output ? <div className="tool-progress">{t("执行中...")}</div> : null}
         </div>
       ) : null}
     </div>
@@ -184,6 +186,7 @@ function LiveToolCardImpl({ tool }: { tool: PendingTool }) {
 
 function ThinkingBlockImpl({ content, streaming }: { content: string; streaming: boolean }) {
   const [open, setOpen] = useState(streaming);
+  const { t } = useI18n();
   const bodyRef = useRef<HTMLDivElement>(null);
   const wasStreaming = useRef(streaming);
 
@@ -206,7 +209,7 @@ function ThinkingBlockImpl({ content, streaming }: { content: string; streaming:
     <div className={`thinking-block ${streaming ? "streaming" : ""}`}>
       <button type="button" className="thinking-head" onClick={() => setOpen((v) => !v)}>
         <span className="thinking-icon">⊗</span>
-        <span className="thinking-label">{streaming ? "思考中…" : "思考过程"}</span>
+        <span className="thinking-label">{streaming ? t("思考中…") : t("思考过程")}</span>
         <span className="activity-chev">{open ? "▾" : "▸"}</span>
       </button>
       {open ? (
@@ -255,19 +258,20 @@ function LiveEventStreamImpl({ events }: { events: LiveEvent[] }) {
   );
 }
 
-// ── DecomposeCard: task_decompose result (understanding + steps) ─────────────
+// ── DecomposeCard: task_decompose result (intent + tasks) ────────────────────
 // 仅在 pnpm dev（import.meta.env.DEV）时由 ChatLog footer 渲染。
 
 function DecomposeCard({ decomposition }: { decomposition: DecompositionSnapshot }) {
   const [open, setOpen] = useState(true);
-  const { understanding, userConstraints, steps, fallback } = decomposition;
-  const stepCount = steps.length;
+  const { t } = useI18n();
+  const { intent, userConstraints, tasks, fallback } = decomposition;
+  const stepCount = tasks.reduce((n, task) => n + task.steps.length, 0);
 
   const title = fallback
-    ? "任务分解（本地回退）"
+    ? t("任务分解（本地回退）")
     : stepCount === 0
-      ? "任务分解：无需计划"
-      : `任务分解：${stepCount} 个步骤`;
+      ? t("任务分解：无需计划")
+      : t("任务分解：{{count}} 个步骤", { count: stepCount });
 
   return (
     <div className={`decompose-card${fallback ? " fallback" : ""}`}>
@@ -278,15 +282,15 @@ function DecomposeCard({ decomposition }: { decomposition: DecompositionSnapshot
       </button>
       {open ? (
         <div className="decompose-body">
-          {understanding ? (
+          {intent ? (
             <div className="decompose-section">
-              <div className="decompose-section-label">理解</div>
-              <div className="decompose-understanding">{understanding}</div>
+              <div className="decompose-section-label">{t("意图")}</div>
+              <div className="decompose-intent">{intent}</div>
             </div>
           ) : null}
           {userConstraints.length > 0 ? (
             <div className="decompose-section">
-              <div className="decompose-section-label">用户约束</div>
+              <div className="decompose-section-label">{t("用户约束")}</div>
               <ul className="decompose-constraints">
                 {userConstraints.map((c, i) => (
                   <li key={`${c}-${i}`}>{c}</li>
@@ -294,48 +298,58 @@ function DecomposeCard({ decomposition }: { decomposition: DecompositionSnapshot
               </ul>
             </div>
           ) : null}
-          {stepCount > 0 ? (
+          {tasks.length > 0 ? (
             <div className="decompose-section">
-              <div className="decompose-section-label">步骤</div>
-              <ol className="decompose-steps">
-                {steps.map((s) => (
-                  <li key={s.id} className="decompose-step">
-                    <div className="decompose-step-head">
-                      <span className="decompose-step-id">{s.id}</span>
-                      <span className="decompose-step-desc">{s.description}</span>
-                      {s.dependsOn.length > 0 ? (
-                        <span className="decompose-step-deps" title="依赖的前序步骤">
-                          ⇦ {s.dependsOn.join(", ")}
-                        </span>
-                      ) : null}
-                    </div>
-                    {s.informationNeeds.length > 0 ? (
-                      <ul className="decompose-needs">
-                        {s.informationNeeds.map((need) => (
-                          <li key={need.id}>
-                            <span className="decompose-need-id">{need.id}</span>
-                            {need.question}
-                          </li>
-                        ))}
-                      </ul>
+              <div className="decompose-section-label">{t("任务")}</div>
+              {tasks.map((task) => (
+                <div key={task.id} className="decompose-task">
+                  <div className="decompose-task-head">
+                    <span className="decompose-step-id">{task.id}</span>
+                    {task.description ? (
+                      <span className="decompose-step-desc">{task.description}</span>
                     ) : null}
-                    {s.stopReadingWhen.length > 0 ? (
-                      <div className="decompose-stop">
-                        停读条件：{s.stopReadingWhen.map((c) => c.condition).join("；")}
-                      </div>
-                    ) : null}
-                  </li>
-                ))}
-              </ol>
+                  </div>
+                  <ol className="decompose-steps">
+                    {task.steps.map((s) => (
+                      <li key={s.id} className="decompose-step">
+                        <div className="decompose-step-head">
+                          <span className="decompose-step-id">{s.id}</span>
+                          <span className="decompose-step-desc">{s.description}</span>
+                          {s.dependsOn.length > 0 ? (
+                            <span className="decompose-step-deps" title={t("依赖的前序步骤")}>
+                              ⇦ {s.dependsOn.join(", ")}
+                            </span>
+                          ) : null}
+                        </div>
+                        {s.informationNeeds.length > 0 ? (
+                          <ul className="decompose-needs">
+                            {s.informationNeeds.map((need) => (
+                              <li key={need.id}>
+                                <span className="decompose-need-id">{need.id}</span>
+                                {need.question}
+                              </li>
+                            ))}
+                          </ul>
+                        ) : null}
+                        {s.stopReadingWhen.length > 0 ? (
+                          <div className="decompose-stop">
+                            {t("停读条件：")}{s.stopReadingWhen.map((c) => c.condition).join("；")}
+                          </div>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              ))}
             </div>
           ) : (
             <div className="decompose-empty">
-              本次请求未产生计划步骤（琐碎任务 / 提问 / 交还用户）。
+              {t("本次请求未产生计划步骤（琐碎任务 / 提问 / 交还用户）。")}
             </div>
           )}
           {fallback ? (
             <div className="decompose-fallback-note">
-              分解调用失败，以上为本地启发式回退结果，仅供粗略参考。
+              {t("分解调用失败，以上为本地启发式回退结果，仅供粗略参考。")}
             </div>
           ) : null}
         </div>
@@ -348,6 +362,7 @@ function DecomposeCard({ decomposition }: { decomposition: DecompositionSnapshot
 
 function UserBubbleImpl({ turn }: { turn: ChatTurnDto }) {
   const [copied, setCopied] = useState(false);
+  const { t } = useI18n();
 
   const isCompressed = turn.isCompressed === true;
   const compressionRatio = turn.originalLength && turn.content.length
@@ -370,13 +385,13 @@ function UserBubbleImpl({ turn }: { turn: ChatTurnDto }) {
           <Markdown content={turn.content} />
           {isCompressed && (
             <div className="compression-indicator">
-              <span className="compression-icon" title="已压缩内容">🗜️</span>
+              <span className="compression-icon" title={t("已压缩内容")}>🗜️</span>
               {compressionRatio && (
-                <span className="compression-ratio">压缩{compressionRatio}%</span>
+                <span className="compression-ratio">{t("压缩{{percent}}%", { percent: compressionRatio })}</span>
               )}
               {hasImportantSnippets && (
                 <div className="important-snippets-tooltip">
-                  <strong>保留的重要片段：</strong>
+                  <strong>{t("保留的重要片段：")}</strong>
                   <ul>
                     {turn.importantSnippets!.slice(0, 3).map((snippet, i) => (
                       <li key={`${snippet}-${i}`}>{snippet}</li>
@@ -388,8 +403,8 @@ function UserBubbleImpl({ turn }: { turn: ChatTurnDto }) {
           )}
         </div>
         <div className="msg-actions">
-          <button type="button" className="msg-action-btn" onClick={() => void onCopy()} title="复制">
-            {copied ? "已复制" : "复制"}
+          <button type="button" className="msg-action-btn" onClick={() => void onCopy()} title={t("复制")}>
+            {copied ? t("已复制") : t("复制")}
           </button>
         </div>
       </div>
@@ -399,16 +414,17 @@ function UserBubbleImpl({ turn }: { turn: ChatTurnDto }) {
 
 function PlanCard({ planPath, onOpen }: { planPath: string; onOpen: (path: string) => void }) {
   const fileName = planPath.split("/").pop() ?? planPath;
+  const { t } = useI18n();
   return (
     <div className="plan-card">
       <div className="plan-card-icon">📋</div>
       <div className="plan-card-body">
-        <div className="plan-card-title">已生成计划</div>
+        <div className="plan-card-title">{t("已生成计划")}</div>
         <div className="plan-card-filename">{fileName}</div>
         <div className="plan-card-path">{planPath}</div>
       </div>
-      <button type="button" className="plan-card-open" onClick={() => onOpen(planPath)} title="在编辑器中打开">
-        打开 →
+      <button type="button" className="plan-card-open" onClick={() => onOpen(planPath)} title={t("在编辑器中打开")}>
+        {t("打开 →")}
       </button>
     </div>
   );
@@ -427,6 +443,7 @@ function AssistantBubbleImpl({
   onRegenerate?: () => void;
   onOpenFile?: (path: string) => void;
 }) {
+  const { t } = useI18n();
   const [copied, setCopied] = useState(false);
 
   const planPath      = extractPlanPath(turn.content);
@@ -452,26 +469,26 @@ function AssistantBubbleImpl({
       {isCompressed && (
         <div className="compression-header">
           <div className="compression-stats">
-            <strong>压缩信息：</strong>
+            <strong>{t("压缩信息：")}</strong>
             {turn.compressionReason && (
-              <span className="reason">原因：{
-                turn.compressionReason === 'context_limit' ? '上下文限制' :
-                turn.compressionReason === 'manual' ? '手动压缩' :
-                turn.compressionReason === 'auto' ? '自动压缩' :
-                turn.compressionReason === 'disk_save' ? '磁盘保存' :
-                turn.compressionReason === 'retained' ? '完整保留' : turn.compressionReason
+              <span className="reason">{t("原因：")}{
+                turn.compressionReason === 'context_limit' ? t("上下文限制") :
+                turn.compressionReason === 'manual' ? t("手动压缩") :
+                turn.compressionReason === 'auto' ? t("自动压缩") :
+                turn.compressionReason === 'disk_save' ? t("磁盘保存") :
+                turn.compressionReason === 'retained' ? t("完整保留") : turn.compressionReason
               }</span>
             )}
             {turn.originalLength && (
-              <span className="ratio">压缩率：{compressionRatio}% ({turn.content.length}/{turn.originalLength}字符)</span>
+              <span className="ratio">{t("压缩率：{{ratio}}% ({{cur}}/{{orig}}字符)", { ratio: compressionRatio ?? 0, cur: turn.content.length, orig: turn.originalLength })}</span>
             )}
             {turn.compressedAt && (
-              <span className="time">时间：{new Date(turn.compressedAt).toLocaleString()}</span>
+              <span className="time">{t("时间：{{time}}", { time: new Date(turn.compressedAt).toLocaleString() })}</span>
             )}
           </div>
           {hasImportantSnippets && (
             <div className="important-snippets">
-              <strong>保留的重要片段：</strong>
+              <strong>{t("保留的重要片段：")}</strong>
               <ul>
                 {turn.importantSnippets!.map((snippet, i) => (
                   <li key={`${snippet}-${i}`} title={snippet}>{snippet}</li>
@@ -484,8 +501,8 @@ function AssistantBubbleImpl({
       <Markdown content={displayContent} />
       {planPath ? <PlanCard planPath={planPath} onOpen={(p) => onOpenFile?.(p)} /> : null}
       <div className="msg-actions">
-        <button type="button" className="msg-action-btn" onClick={() => void onCopy()} title="复制">
-          {copied ? "已复制" : "复制"}
+        <button type="button" className="msg-action-btn" onClick={() => void onCopy()} title={t("复制")}>
+          {copied ? t("已复制") : t("复制")}
         </button>
         {canRegenerate && onRegenerate ? (
           <button
@@ -493,14 +510,14 @@ function AssistantBubbleImpl({
             className="msg-action-btn"
             disabled={regenerating}
             onClick={onRegenerate}
-            title="重新生成"
+            title={t("重新生成")}
           >
-            {regenerating ? "生成中…" : "重新生成"}
+            {regenerating ? t("生成中…") : t("重新生成")}
           </button>
         ) : null}
         {isCompressed && (
-          <span className="compression-badge" title="已压缩内容">
-            🗜️ 压缩
+          <span className="compression-badge" title={t("已压缩内容")}>
+            {t("🗜️ 压缩")}
           </span>
         )}
       </div>
@@ -542,6 +559,49 @@ const AssistantBubble = memo(AssistantBubbleImpl, (prev, next) =>
   prev.onRegenerate === next.onRegenerate &&
   prev.onOpenFile === next.onOpenFile
 );
+
+// ── ProcessSteps: 已完成轮次的过程步骤（工具链 + 中间过程文本）折叠控件 ──────
+
+function ProcessStepsImpl({ items }: { items: ChatTurnDto[] }) {
+  const [open, setOpen] = useState(false);
+  const { t } = useI18n();
+  if (items.length === 0) return null;
+  return (
+    <div className="process-block">
+      <button type="button" className="process-head" onClick={() => setOpen((v) => !v)}>
+        <span className="process-icon">⚙</span>
+        <span className="process-title">{t("执行过程 · {{count}} 步", { count: items.length })}</span>
+        <span className="activity-chev">{open ? "▾" : "▸"}</span>
+      </button>
+      {open ? (
+        <div className="process-body">
+          {items.map((it, idx) => {
+            const key = it.id ?? `p-${idx}`;
+            if (it.role === "tool") {
+              const failed = it.content.startsWith("Error:");
+              const argSummary = it.toolName ? summarizeArgs(it.toolName, it.toolArgs ?? {}) : "";
+              return (
+                <div key={key} className="process-step">
+                  <span className={`tool-status ${failed ? "error" : "done"}`}>
+                    {toolStatusLabelFromModel(failed ? "error" : "done", it.toolName, it.toolArgs)}
+                  </span>
+                  {argSummary ? <span className="process-step-arg">{argSummary}</span> : null}
+                </div>
+              );
+            }
+            return (
+              <div key={key} className="process-step-text">
+                <Markdown content={it.content} showCopy={false} />
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+const ProcessSteps = memo(ProcessStepsImpl, (prev, next) => prev.items === next.items);
 
 // ── ChatLog ───────────────────────────────────────────────────────────────────
 
@@ -656,14 +716,20 @@ export function ChatLog({
         />
       );
     }
-    // 不展示折叠的工具执行摘要（「执行过程 · N 步」/「已执行 N 个步骤」及工具链）。
-    // 进行中的工具仍由 LiveToolCard / liveStatus 展示；完成后只保留最终回复。
+    // 已完成轮次的过程步骤 → 可展开的折叠控件（默认收起）。
+    if (b.kind === "process") return <ProcessSteps items={b.items} />;
+    // 进行中轮次的工具链由 LiveToolCard / liveStatus 展示，不在列表里重复。
     return null;
   }, [lastAssistantIdx, sending, liveEvents.length, onRegenerate, onOpenFile]);
 
   // History rows only — live status/stream render after Virtuoso inside the
   // shared scroller so streaming updates don't depend on Footer remounts.
   const items = useMemo(() => buildChatItems(blocks), [blocks]);
+
+  // 初始贴底 effect 的稳定触发信号：只关心「从空到有内容」的翻转，
+  // 不把 liveEvents.length / sending 这类流式高频值放进 deps，
+  // 避免流式期间 rAF 循环与 ResizeObserver 反复 teardown/重建。
+  const hasContent = items.length > 0 || liveEvents.length > 0 || sending;
 
   // Prepend older messages by shifting firstItemIndex so Virtuoso keeps the
   // previously visible row in place instead of jumping to the new top.
@@ -687,10 +753,37 @@ export function ChatLog({
   const initialBottomAppliedRef = useRef(false);
   useEffect(() => {
     if (initialBottomAppliedRef.current) return;
-    if (items.length === 0 && liveEvents.length === 0 && !sending) return;
+    if (!hasContent) return;
     if (!scrollParent) return;
 
     let cancelled = false;
+    // 用户在初始贴底阶段主动上滚（wheel/touch/键盘翻页）→ 尊重用户位置，
+    // 立即停止钉底，并锁定 initialBottomAppliedRef，避免 deps 变化后重建
+    // effect 再次强制覆盖（atBottomRef 也不会再被写成 true）。
+    let userTookOver = false;
+    const takeOver = () => {
+      userTookOver = true;
+      initialBottomAppliedRef.current = true;
+    };
+    const onWheel = (e: WheelEvent) => {
+      if (e.deltaY < 0) takeOver();
+    };
+    let touchStartY: number | null = null;
+    const onTouchStart = (e: TouchEvent) => {
+      touchStartY = e.touches[0]?.clientY ?? null;
+    };
+    const onTouchMove = (e: TouchEvent) => {
+      const y = e.touches[0]?.clientY;
+      if (touchStartY != null && y != null && y < touchStartY) takeOver();
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "ArrowUp" || e.key === "PageUp" || e.key === "Home") takeOver();
+    };
+    scrollParent.addEventListener("wheel", onWheel, { passive: true });
+    scrollParent.addEventListener("touchstart", onTouchStart, { passive: true });
+    scrollParent.addEventListener("touchmove", onTouchMove, { passive: true });
+    scrollParent.addEventListener("keydown", onKeyDown);
+
     let attempts = 0;
     let settledFrames = 0;
     let lastHeight = 0;
@@ -721,7 +814,7 @@ export function ChatLog({
     };
 
     const pin = () => {
-      if (cancelled) return;
+      if (cancelled || userTookOver) return;
       scrollToTrueBottom();
       atBottomRef.current = true;
       attempts += 1;
@@ -744,7 +837,7 @@ export function ChatLog({
     frame = requestAnimationFrame(pin);
 
     const ro = new ResizeObserver(() => {
-      if (cancelled || initialBottomAppliedRef.current) return;
+      if (cancelled || userTookOver || initialBottomAppliedRef.current) return;
       scrollToTrueBottom();
       atBottomRef.current = true;
       const el = scrollerElRef.current;
@@ -761,8 +854,12 @@ export function ChatLog({
       cancelled = true;
       cancelAnimationFrame(frame);
       ro.disconnect();
+      scrollParent.removeEventListener("wheel", onWheel);
+      scrollParent.removeEventListener("touchstart", onTouchStart);
+      scrollParent.removeEventListener("touchmove", onTouchMove);
+      scrollParent.removeEventListener("keydown", onKeyDown);
     };
-  }, [items.length, liveEvents.length, sending, scrollParent, scrollToTrueBottom]);
+  }, [hasContent, scrollParent, scrollToTrueBottom]);
 
   // 仅挂载时生效：有历史时从底部起，避免先顶后跳
   const initialTopMostItemIndex = useMemo(

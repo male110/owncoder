@@ -10,7 +10,7 @@ const CONTINUATION_INTENT_PATTERN =
 /** 报告式收尾。命中即视为最终报告，优先于续作判断。
  *  不收录"已完成/已经完成"：行动宣言里也常出现。 */
 const FINAL_REPORT_PATTERN =
-  /(总结|汇总|报告如下|以上就是|以上为|综上所述|变更摘要|最终结论|最终报告|完成情况|任务完成|工作完成|完毕|搞定|\bin summary\b|\bhere is the\b|\bconclusion\b|\ball tests pass\b|\ball checks pass\b|\beverything is done\b)/i;
+  /(总结|汇总|报告如下|以上就是|以上为|综上所述|变更摘要|最终结论|最终报告|完成情况|任务完成|工作完成|修复完成|问题已解决|改动如下|修改如下|完毕|搞定|\bin summary\b|\bhere(?:'s| is) (?:the|a) (?:summary|fix|report|result)\b|\bconclusion\b|\ball tests pass\b|\ball checks pass\b|\beverything is done\b|\bfix(?: is)? complete\b|\bthe (?:fix|change|patch) (?:is|was) (?:complete|applied)\b)/i;
 
 /** 是否表达"还要继续行动"。以冒号结尾是最强信号。 */
 export function looksLikeContinuationIntent(content: string): boolean {

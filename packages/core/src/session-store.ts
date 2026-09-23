@@ -443,11 +443,16 @@ function sanitizeHistory(history: ChatTurn[]): ChatTurn[] {
     ) {
       continue;
     }
-    out.push({
+    // Match conversation-store durable policy / Cursor transcripts: keep tool
+    // call identity for timeline reconstruction, but never persist tool bodies
+    // into session.json (they are the main source of multi-100MB sessions).
+    const row: ChatTurn = {
       role: h.role,
-      content: h.content,
-      toolName: typeof h.toolName === "string" ? h.toolName : undefined,
-    });
+      content: h.role === "tool" ? "" : h.content,
+    };
+    if (typeof h.id === "string" && h.id) row.id = h.id;
+    if (typeof h.toolName === "string") row.toolName = h.toolName;
+    out.push(row);
   }
   return out;
 }

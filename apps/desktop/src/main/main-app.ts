@@ -10,6 +10,7 @@ import { SecretsStore } from "./secrets-store";
 import { disposeAllPty } from "./pty";
 import { registerAllHandlers, type IpcContext } from "./ipc/index";
 import { checkForUpdates } from "./updates";
+import { mt } from "./i18n";
 import { indexHost } from "./index-host";
 import { disposeWebFetchRenderer, renderPage } from "./web-fetch-render";
 
@@ -256,7 +257,7 @@ function requestAskUser(
         sessionId: sessionId ?? null,
       });
       const preview = req.question.length > 80 ? `${req.question.slice(0, 80)}…` : req.question;
-      notifyConfirmationNeeded("OwnCoder 需要你确认", preview || "Agent 弹出了选择框，请回到应用确认");
+      notifyConfirmationNeeded(mt("OwnCoder 需要你确认"), preview || mt("Agent 弹出了选择框，请回到应用确认"));
     } catch {
       settleAskUser(requestId, "");
     }
@@ -277,7 +278,7 @@ function requestDangerousConfirmation(command: string, sessionId?: string): Prom
     try {
       win.webContents.send("security:dangerousCommandRequest", { requestId, command, sessionId: sessionId ?? null });
       const preview = command.length > 80 ? `${command.slice(0, 80)}…` : command;
-      notifyConfirmationNeeded("OwnCoder 需要确认命令", preview || "有待执行命令需要你确认");
+      notifyConfirmationNeeded(mt("OwnCoder 需要确认命令"), preview || mt("有待执行命令需要你确认"));
     } catch {
       settleDangerousConfirmation(requestId, false);
     }
@@ -307,9 +308,7 @@ async function openWorkspaceRoot(root: string): Promise<{ root: string; name: st
   // Writable index build runs in a UtilityProcess so the main V8 heap never
   // holds whole-repo file contents during startup.
   const workflow = settingsStore.getEffective();
-  if (workflow.index?.enabled !== false) {
-    indexHost.start(root, workflow.index?.extraIgnore ?? []);
-  }
+  indexHost.start(root, workflow.index?.extraIgnore ?? []);
   return { root, name };
 }
 
@@ -328,11 +327,7 @@ async function switchWorkspaceRoot(root: string): Promise<{ root: string; name: 
   recentStore.setLastWorkspace(root, name);
   chatBufferRef.flushAll();
   const workflow = settingsStore.getEffective();
-  if (workflow.index?.enabled !== false) {
-    indexHost.start(root, workflow.index?.extraIgnore ?? []);
-  } else {
-    indexHost.stop();
-  }
+  indexHost.start(root, workflow.index?.extraIgnore ?? []);
   return { root, name };
 }
 
@@ -479,7 +474,12 @@ function createWindow(): void {
 
   if (process.env.ELECTRON_RENDERER_URL) {
     void mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL);
-    mainWindow.webContents.openDevTools({ mode: "detach" });
+    // Detached DevTools + software rendering has hard-crashed Electron on this
+    // Windows GPU path (exit 4294930435 / crashpad "not connected"). Keep the
+    // default off; opt in with OWNCODER_OPEN_DEVTOOLS=1 when needed.
+    if (process.env.OWNCODER_OPEN_DEVTOOLS === "1") {
+      mainWindow.webContents.openDevTools({ mode: "detach" });
+    }
   } else {
     void mainWindow.loadFile(rendererIndexPath());
   }

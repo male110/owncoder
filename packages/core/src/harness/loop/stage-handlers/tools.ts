@@ -10,11 +10,12 @@ import { resolveStageModel, emitStage } from "../stages.ts";
 import { resolveLoopStrategy } from "../loop-strategy.ts";
 import type { AgentLoopOpts } from "../types.ts";
 import type { SchedulerState, StageHandler, StageHandlerContext } from "./types.ts";
+import { flattenSteps } from "./task-decompose.ts";
 
 /** 把分解结果中的可复用历史合并进 activeTasks，供 ReAct 循环直接使用。 */
 function withDecomposeHistory(opts: AgentLoopOpts, state: SchedulerState): AgentLoopOpts {
-  const steps = state.rawDecompose?.steps;
-  if (!steps?.length || !opts.activeTasks?.length) return opts;
+  const steps = flattenSteps(state.rawDecompose);
+  if (!steps.length || !opts.activeTasks?.length) return opts;
   const byId = new Map(steps.map((s) => [s.id, s.relevantHistory]));
   const shared = state.rawDecompose?.relevantHistory;
   const activeTasks = opts.activeTasks.map((task) => {

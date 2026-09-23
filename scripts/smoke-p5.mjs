@@ -142,7 +142,6 @@ console.log("— plan + checkpoint rollback —");
     session.setWorkflow({
       ...wf,
       harness: { ...wf.harness, checkpoint: true },
-      index: { enabled: false, extraIgnore: [] },
     });
     await session.openWorkspace(dir, "p5");
 
@@ -226,10 +225,6 @@ console.log("— session persist / restore —");
     assert.equal(loaded?.documentWorkflow?.stage, "awaiting_prd_confirmation");
 
     const s2 = cs();
-    s2.setWorkflow({
-      ...s2.getState().workflow,
-      index: { enabled: false, extraIgnore: [] },
-    });
     await s2.openWorkspace(dir, "sess");
     assert.equal(s2.getState().sessionRestored, true);
     assert.equal(s2.getState().mode, "agent");
@@ -240,10 +235,6 @@ console.log("— session persist / restore —");
     s2.setTodoAnchor("2. do y");
     await s2.persist();
     const s3 = cs();
-    s3.setWorkflow({
-      ...s3.getState().workflow,
-      index: { enabled: false, extraIgnore: [] },
-    });
     await s3.openWorkspace(dir, "sess");
     assert.equal(s3.getState().todoAnchor, "2. do y");
   } finally {
@@ -265,10 +256,6 @@ console.log("— project rules —");
     assert.ok(combined.includes("pnpm test"));
 
     const s = cs();
-    s.setWorkflow({
-      ...s.getState().workflow,
-      index: { enabled: false, extraIgnore: [] },
-    });
     await s.openWorkspace(dir, "rules");
     assert.ok(s.getProjectRulesText().includes("TypeScript"));
   } finally {
@@ -403,3 +390,6 @@ console.log("— workflow diff / summary —");
 }
 
 console.log("smoke-p5: ok");
+// The always-on workspace file watcher keeps the event loop alive; exit
+// explicitly now that all assertions have passed.
+process.exit(0);

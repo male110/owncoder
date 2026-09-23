@@ -13,7 +13,12 @@ import {
   loadTurn,
   migrateLegacyHistory,
   projectConversationTurns,
+  sanitizeOversizedEventPayloads,
+  sanitizeOversizedFinalJson,
+  slimDurableEvent,
+  slimTurnFinal,
 } from "./conversation-store.ts";
+import Database from "better-sqlite3";
 
 const roots: string[] = [];
 async function root() {
@@ -57,13 +62,26 @@ describe("conversation store", () => {
   it("returns new fields from events and preserves legacy turns with null defaults", async () => {
     const r = await root();
     const turn = await beginTurn(r, "s", user("input"));
-    await appendTurnEvent(r, "s", turn.turnId, { steps: ["one"] }, { eventType: "task_decomposition" });
+    await appendTurnEvent(
+      r,
+      "s",
+      turn.turnId,
+      {
+        type: "task_decomposition",
+        intent: "意图",
+        tasks: [{ id: "task_1", description: "任务", steps: [{ id: "s1", description: "one", dependsOn: [], informationNeeds: [], stopReadingWhen: [] }] }],
+      },
+      { eventType: "task_decomposition" },
+    );
     await appendTurnEvent(r, "s", turn.turnId, { summary: "done" }, { eventType: "report" });
     await completeTurn(r, "s", turn.turnId);
     const result = await loadRecentTurns(r, "s", 10);
     expect(result.turns[0]).toMatchObject({
       user: user("input"),
-      taskDecomposition: { steps: ["one"] },
+      taskDecomposition: {
+        intent: "意图",
+        tasks: [{ id: "task_1", description: "任务", steps: [{ id: "s1", description: "one", dependsOn: [], informationNeeds: [], stopReadingWhen: [] }] }],
+      },
       report: { summary: "done" },
     });
 
@@ -108,7 +126,9 @@ describe("conversation store", () => {
     const page = await loadRecentTurns(r, "legacy", 10);
     expect(page.turns).toHaveLength(2);
     expect(page.turns[0]!.user).toEqual(assistant("leading"));
-    expect(page.turns[0]!.events.map((e) => e.payload)).toEqual([{ role: "tool", content: "tool output" }]);
+    expect(page.turns[0]!.events.map((e) => e.payload)).toEqual([
+      { role: "tool", content: "", outputOmitted: true },
+    ]);
     expect(page.turns[1]!.user).toEqual(user("next"));
     expect(page.turns[1]!.events.map((e) => e.payload)).toEqual([assistant("reply")]);
     await migrateLegacyHistory(r, "legacy", [user("ignored")]);
@@ -294,5 +314,164 @@ describe("conversation store", () => {
     await Promise.all([completeTurn(r, "a", a.turnId), completeTurn(r, "b", b.turnId)]);
     expect((await loadTurn(r, "a", a.turnId))!.events).toHaveLength(2);
     expect((await loadTurn(r, "b", b.turnId))!.events).toHaveLength(1);
+  });
+
+  it("slimTurnFinal stores assistant text instead of full AgentLoopResult.history", async () => {
+    const r = await root();
+    const turn = await beginTurn(r, "s", user("hello"));
+    await appendTurnEvent(
+      r,
+      "s",
+      turn.turnId,
+      { type: "tool_start", id: "t1", name: "bash" },
+      { eventType: "tool_start" },
+    );
+    await appendTurnEvent(
+      r,
+      "s",
+      turn.turnId,
+      { type: "tool_end", id: "t1", name: "bash", output: "ok", ok: true },
+      { eventType: "tool_end" },
+    );
+    const huge = "x".repeat(50_000);
+    await completeTurn(r, "s", turn.turnId, {
+      history: [
+        user("hello"),
+        { role: "tool", id: "t1", toolName: "bash", content: huge },
+        assistant("done"),
+      ],
+      assistantText: "done",
+      successRejected: false,
+    });
+
+    const stored = slimTurnFinal({
+      history: [user("hello"), assistant("done"), { role: "tool", id: "t1", toolName: "bash", content: huge }],
+      assistantText: "done",
+    });
+    expect(stored).toMatchObject({ role: "assistant", content: "done" });
+    expect(JSON.stringify(stored)).not.toContain(huge);
+
+    const page = await loadRecentTurns(r, "s", 10);
+    expect(projectConversationTurns(page.turns)).toEqual([
+      user("hello"),
+      { role: "tool", id: "t1", toolName: "bash", content: "" },
+      assistant("done"),
+    ]);
+  });
+
+  it("skips and sanitizes oversized legacy final_json without crashing pagination", async () => {
+    const r = await root();
+    const turn = await beginTurn(r, "s", user("hello"));
+    await completeTurn(r, "s", turn.turnId, assistant("tiny"));
+    closeConversationStore(r, "s");
+
+    const db = new Database(conversationStorePath(r, "s"));
+    const monster = JSON.stringify({
+      history: [{ role: "assistant", content: "Z".repeat(2_000_000) }],
+      assistantText: "legacy huge",
+    });
+    db.prepare("UPDATE turns SET final_json = ? WHERE turn_id = ?").run(monster, turn.turnId);
+    db.close();
+
+    const page = await loadRecentTurns(r, "s", 10);
+    expect(page.turns[0]?.final).toMatchObject({ omitted: true, reason: "final_json_too_large" });
+    expect(sanitizeOversizedFinalJson(r, "s")).toBe(1);
+    const after = await loadRecentTurns(r, "s", 10);
+    expect(after.turns[0]?.final).toMatchObject({ omitted: true, reason: "final_json_too_large" });
+  });
+
+  it("slimDurableEvent drops tool/terminal result bodies while keeping ids", () => {
+    const huge = "H".repeat(80_000);
+    const toolEnd = slimDurableEvent({
+      type: "tool_end",
+      id: "c1",
+      name: "bash",
+      ok: true,
+      output: huge,
+    }) as { type: string; id: string; name: string; ok: boolean; output?: string; outputOmitted?: boolean };
+    expect(toolEnd).toMatchObject({
+      type: "tool_end",
+      id: "c1",
+      name: "bash",
+      ok: true,
+      outputOmitted: true,
+    });
+    expect(toolEnd.output).toBeUndefined();
+    expect(JSON.stringify(toolEnd)).not.toContain(huge);
+
+    const toolStart = slimDurableEvent({
+      type: "tool_start",
+      id: "w1",
+      name: "write_file",
+      args: { path: "a.ts", content: "C".repeat(20_000) },
+    }) as { args: { path: string; content: string } };
+    expect(toolStart.args.path).toBe("a.ts");
+    expect(toolStart.args.content.length).toBeLessThan(20_000);
+
+    const terminal = slimDurableEvent({
+      type: "terminal",
+      entry: {
+        id: "t1",
+        command: "npm test",
+        status: "ok",
+        stdout: `${"old\n".repeat(1000)}${"NEW_TAIL"}`,
+        stderr: "E".repeat(80_000),
+      },
+    }) as { entry: { id: string; command: string; status: string; stdout?: string; stderr?: string } };
+    expect(terminal.entry).toMatchObject({ id: "t1", command: "npm test", status: "ok" });
+    expect(terminal.entry.stdout).toBeUndefined();
+    expect(terminal.entry.stderr).toBeUndefined();
+  });
+
+  it("appendTurnEvent does not persist tool_end output bodies", async () => {
+    const r = await root();
+    const turn = await beginTurn(r, "s", user("run"));
+    const huge = "Y".repeat(100_000);
+    await appendTurnEvent(
+      r,
+      "s",
+      turn.turnId,
+      { type: "tool_end", id: "c9", name: "bash", ok: true, output: huge },
+      { eventType: "tool_end" },
+    );
+    await completeTurn(r, "s", turn.turnId, assistant("done"));
+
+    const loaded = await loadTurn(r, "s", turn.turnId);
+    const payload = loaded?.events[0]?.payload as { output?: string; outputOmitted?: boolean; id?: string };
+    expect(payload).toMatchObject({ id: "c9", outputOmitted: true });
+    expect(payload?.output).toBeUndefined();
+    expect(JSON.stringify(loaded)).not.toContain(huge);
+
+    expect(projectConversationTurns([loaded!])).toEqual([
+      user("run"),
+      { role: "tool", id: "c9", toolName: "bash", content: "" },
+      assistant("done"),
+    ]);
+  });
+
+  it("sanitizes oversized legacy event payloads without crashing pagination", async () => {
+    const r = await root();
+    const turn = await beginTurn(r, "s", user("hello"));
+    await appendTurnEvent(r, "s", turn.turnId, { type: "tool_end", id: "x", name: "bash", ok: true, output: "ok" }, { eventType: "tool_end" });
+    await completeTurn(r, "s", turn.turnId, assistant("tiny"));
+    closeConversationStore(r, "s");
+
+    const db = new Database(conversationStorePath(r, "s"));
+    const monster = JSON.stringify({
+      type: "tool_end",
+      id: "x",
+      name: "bash",
+      ok: true,
+      output: "Z".repeat(400_000),
+    });
+    db.prepare("UPDATE events SET payload_json = ? WHERE turn_id = ?").run(monster, turn.turnId);
+    db.close();
+
+    const page = await loadRecentTurns(r, "s", 10);
+    expect(page.turns[0]?.events[0]?.payload).toMatchObject({
+      omitted: true,
+      reason: "event_payload_too_large",
+    });
+    expect(sanitizeOversizedEventPayloads(r, "s")).toBe(1);
   });
 });

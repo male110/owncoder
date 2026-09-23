@@ -147,15 +147,21 @@ describe("applyChatEvent streaming / turn_complete", () => {
     apply({
       type: "task_decomposition",
       sessionId: "s1",
-      understanding: "理解任务",
+      intent: "理解任务",
       userConstraints: ["仅开发模式显示"],
-      steps: [
+      tasks: [
         {
-          id: "s1",
-          description: "定位",
-          dependsOn: [],
-          informationNeeds: [],
-          stopReadingWhen: [],
+          id: "task_1",
+          description: "定位任务",
+          steps: [
+            {
+              id: "s1",
+              description: "定位",
+              dependsOn: [],
+              informationNeeds: [],
+              stopReadingWhen: [],
+            },
+          ],
         },
       ],
       fallback: false,
@@ -167,7 +173,7 @@ describe("applyChatEvent streaming / turn_complete", () => {
     expect(next.liveEvents[0]).toMatchObject({
       kind: "decompose",
       decomposition: {
-        understanding: "理解任务",
+        intent: "理解任务",
         userConstraints: ["仅开发模式显示"],
         fallback: false,
       },

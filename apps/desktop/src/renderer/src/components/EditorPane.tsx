@@ -6,6 +6,7 @@ import editorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker";
 import tsWorker from "monaco-editor/esm/vs/language/typescript/ts.worker?worker";
 import { useUiStore } from "../store/ui-store";
 import { Markdown } from "./Markdown";
+import { useI18n } from "../i18n";
 
 function IconReload({ size = 14 }: { size?: number }) {
   return (
@@ -134,6 +135,7 @@ export function EditorPane({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [mdViewMode, setMdViewMode] = useState<MdViewMode>("preview");
+  const { t } = useI18n();
   const theme = useUiStore((s) => s.theme);
   const monacoTheme = theme === "codex" ? "vs" : "vs-dark";
   const isMarkdown = useMemo(() => isMarkdownPath(path), [path]);
@@ -222,20 +224,20 @@ export function EditorPane({
 
   const mdToggle =
     !diffMode && isMarkdown ? (
-      <div className="editor-md-toggle" role="group" aria-label="Markdown 视图">
+      <div className="editor-md-toggle" role="group" aria-label={t("Markdown 视图")}>
         <button
           type="button"
           className={`ghost tiny${mdViewMode === "source" ? " active" : ""}`}
           onClick={() => setMdViewMode("source")}
         >
-          原码
+          {t("原码")}
         </button>
         <button
           type="button"
           className={`ghost tiny${mdViewMode === "preview" ? " active" : ""}`}
           onClick={() => setMdViewMode("preview")}
         >
-          预览
+          {t("预览")}
         </button>
       </div>
     ) : null;
@@ -247,8 +249,8 @@ export function EditorPane({
         className="ghost tiny editor-icon-btn"
         onClick={() => void load()}
         disabled={loading}
-        title="重新加载"
-        aria-label="重新加载"
+        title={t("重新加载")}
+        aria-label={t("重新加载")}
       >
         <IconReload />
       </button>
@@ -257,8 +259,8 @@ export function EditorPane({
         className="ghost tiny accent editor-icon-btn"
         disabled={!dirty || saving || loading}
         onClick={() => void save()}
-        title={saving ? "保存中…" : "保存"}
-        aria-label={saving ? "保存中" : "保存"}
+        title={saving ? t("保存中…") : t("保存")}
+        aria-label={saving ? t("保存中") : t("保存")}
       >
         <IconSave />
       </button>
@@ -290,7 +292,7 @@ export function EditorPane({
             <div className="editor-path" title={path}>
               {path}
               {dirty && !diffMode ? <span className="editor-dirty">●</span> : null}
-              {diffMode ? <span className="editor-mode-badge">变更对比</span> : null}
+              {diffMode ? <span className="editor-mode-badge">{t("变更对比")}</span> : null}
             </div>
           )}
           <div className="editor-actions">
@@ -301,8 +303,8 @@ export function EditorPane({
                 type="button"
                 className="ghost tiny editor-icon-btn"
                 onClick={onClose}
-                title="关闭"
-                aria-label="关闭"
+                title={t("关闭")}
+                aria-label={t("关闭")}
               >
                 ×
               </button>
@@ -314,7 +316,7 @@ export function EditorPane({
       {error ? <p className="editor-error">{error}</p> : null}
       <div className="editor-pane-body">
         {loading ? (
-          <p className="hint context-empty">加载中…</p>
+          <p className="hint context-empty">{t("加载中…")}</p>
         ) : diffMode ? (
           <DiffEditor
             height="100%"
@@ -356,7 +358,7 @@ export function EditorPane({
             {value.trim() ? (
               <Markdown content={value} className="md-body editor-md-body" showCopy={false} />
             ) : (
-              <p className="hint context-empty">空文档</p>
+              <p className="hint context-empty">{t("空文档")}</p>
             )}
           </div>
         ) : (

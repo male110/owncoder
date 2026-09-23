@@ -9,11 +9,13 @@ import { registerSettingsHandlers } from "./settings";
 import { registerTerminalHandlers } from "./terminal";
 import { registerIndexHandlers } from "./index-ipc";
 import { registerUpdateHandlers } from "./updates";
+import { initLocaleIpc } from "../i18n";
 import type { IpcContext } from "./types";
 
 export { type IpcContext };
 
 export function registerAllHandlers(ctx: IpcContext): void {
+  initLocaleIpc();
   registerWorkspaceHandlers(ctx);
   registerSessionHandlers(ctx);
   registerChatHandlers(ctx);

@@ -15,6 +15,15 @@ describe("web search prompt guidance", () => {
     }
   });
 
+  it("requires exact named identifiers before semantic search", () => {
+    for (const prompt of [BUILTIN_AGENT_PROMPT, BUILTIN_PLAN_PROMPT]) {
+      expect(prompt).toMatch(/## Code location/);
+      expect(prompt).toMatch(/verbatim/);
+      expect(prompt).toMatch(/container first/i);
+      expect(prompt).toMatch(/semantic\/code-map search|semantic rewrite/);
+    }
+  });
+
   it("appends guidance when a saved prompt never mentions web_search", () => {
     const saved = "# Agent Mode — OwnCode\nMake precise edits. Avoid redundant reads.";
     const out = ensureWebSearchGuidance(saved);

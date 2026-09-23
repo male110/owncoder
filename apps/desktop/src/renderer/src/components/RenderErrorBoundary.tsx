@@ -1,4 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
+import { t } from "../../../shared/i18n/core";
 
 type FallbackRenderer = (error: Error, reset: () => void) => ReactNode;
 
@@ -59,9 +60,9 @@ export class RenderErrorBoundary extends Component<Props, State> {
           fontFamily: "system-ui, sans-serif",
         }}
       >
-        <strong>此区域发生错误，已阻止它影响整个应用。</strong>
+        <strong>{t("此区域发生错误，已阻止它影响整个应用。")}</strong>
         <pre style={{ whiteSpace: "pre-wrap", margin: "12px 0" }}>{error.message}</pre>
-        <button type="button" onClick={this.reset}>重试</button>
+        <button type="button" onClick={this.reset}>{t("重试")}</button>
       </section>
     );
   }

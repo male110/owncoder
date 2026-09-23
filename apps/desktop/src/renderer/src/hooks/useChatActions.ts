@@ -25,6 +25,7 @@ import {
   sendQueuedMessage,
 } from "./queue-controller";
 import type { ChatTurnDto, TaskStatusDto } from "../../../preload/index";
+import { t } from "../../../shared/i18n/core";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -280,13 +281,13 @@ export function useChatActions(deps: {
       const summary = preview.length < content.length ? `${preview}…` : preview;
       chat.setHistory((h) => [
         ...h,
-        { role: "assistant", content: `📋 **计划已生成：${fileName}**\n\n${summary}\n\n<!--plan_saved:${planPath}-->` },
+        { role: "assistant", content: `📋 **${t("计划已生成：{{name}}", { name: fileName })}**\n\n${summary}\n\n<!--plan_saved:${planPath}-->` },
       ], sid);
     } catch {
       const fileName = planPath.split("/").pop() ?? planPath;
       chat.setHistory((h) => [
         ...h,
-        { role: "assistant", content: `📋 计划已生成：${fileName}\n\n<!--plan_saved:${planPath}-->` },
+        { role: "assistant", content: `📋 ${t("计划已生成：{{name}}", { name: fileName })}\n\n<!--plan_saved:${planPath}-->` },
       ], sid);
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -297,7 +298,7 @@ export function useChatActions(deps: {
     const cmd = text.trim().toLowerCase();
     if (cmd === "/compact") {
       chat.setHistory(await window.owncoder.compactHistory(sid), sid);
-      chat.setLiveStatus("已保留原始历史；下次请求将由模型生成任务摘要", sid);
+      chat.setLiveStatus(t("已保留原始历史；下次请求将由模型生成任务摘要"), sid);
       ui.clearSentDrafts(sid);
       return true;
     }
@@ -313,13 +314,13 @@ export function useChatActions(deps: {
     if (cmd === "/plan") {
       session.setMode(await window.owncoder.setMode("plan", sid));
       ui.clearSentDrafts(sid);
-      chat.setLiveStatus("已切换到 Plan 模式", sid);
+      chat.setLiveStatus(t("已切换到 Plan 模式"), sid);
       return true;
     }
     if (cmd === "/agent") {
       session.setMode(await window.owncoder.setMode("agent", sid));
       ui.clearSentDrafts(sid);
-      chat.setLiveStatus("已切换到 Agent 模式", sid);
+      chat.setLiveStatus(t("已切换到 Agent 模式"), sid);
       return true;
     }
     if (cmd === "/undo") {
@@ -333,7 +334,7 @@ export function useChatActions(deps: {
         {
           role: "assistant",
           content:
-            "可用命令：\n/compact — 压缩历史\n/clear — 清空对话\n/plan — Plan 模式\n/agent — Agent 模式\n/undo — 撤销上次改动\n/help — 显示帮助",
+            t("可用命令：\n/compact — 压缩历史\n/clear — 清空对话\n/plan — Plan 模式\n/agent — Agent 模式\n/undo — 撤销上次改动\n/help — 显示帮助"),
         },
       ], sid);
       ui.clearSentDrafts(sid);
@@ -365,7 +366,7 @@ export function useChatActions(deps: {
         // emitted its first stage event yet. Subsequent `stage_start` /
         // `thinking_delta` / `tool_start` events will overwrite this with
         // more specific text via `setLiveStatus`.
-        chat.setLiveStatus("正在分解任务...", sid);
+        chat.setLiveStatus(t("正在分解任务…"), sid);
         chat.setHistory((h) => [...h, { role: "user", content: next }], sid);
         applyProvisionalTitleIfNeeded(sid, next);
         try {
@@ -535,9 +536,9 @@ export function useChatActions(deps: {
     if (text.startsWith("/") && !text.startsWith("//")) { void runSlash(text, sid); return; }
     console.log("[onSend] checking workspace...");
     const sendSession = useSessionStore.getState();
-    if (!sendSession.workspace) { console.log("[onSend] workspace not ready → return"); chat.setLiveStatus("工作区尚未就绪，请稍候…", sid); return; }
+    if (!sendSession.workspace) { console.log("[onSend] workspace not ready → return"); chat.setLiveStatus(t("工作区尚未就绪，请稍候…"), sid); return; }
     console.log("[onSend] checking llmConfigured...");
-    if (!sendSession.llmConfigured) { console.log("[onSend] LLM not configured → return"); showError("未配置 LLM API Key", sid); return; }
+    if (!sendSession.llmConfigured) { console.log("[onSend] LLM not configured → return"); showError(t("未配置 LLM API Key"), sid); return; }
 
     try {
       console.log("[onSend] past all checks, clearing draft...");
@@ -589,12 +590,12 @@ export function useChatActions(deps: {
     if (!sid) return;
     if (chat.isSessionSending(sid)) return;
     if (!currentSession.workspace) return;
-    if (!currentSession.llmConfigured) { showError("未配置 LLM API Key", sid); return; }
+    if (!currentSession.llmConfigured) { showError(t("未配置 LLM API Key"), sid); return; }
     chat.setSending(true, sid);
     chat.resetTurnState(sid);
     // Same immediate-feedback rationale as runQueue(): show something the
     // user can read while the IPC roundtrip + first stage event arrive.
-    chat.setLiveStatus("正在分解任务...", sid);
+    chat.setLiveStatus(t("正在分解任务…"), sid);
     chat.setErrorAlert(null, sid);
     chat.setHistory((h) => {
       let lastUser = -1;
@@ -658,11 +659,11 @@ export function useChatActions(deps: {
         // loop 会在同一轮内顺序执行完全部任务（无需用户再手动发消息）。
         const currentSession = useSessionStore.getState();
         if (!currentSession.workspace || !currentSession.llmConfigured) {
-          chat.setLiveStatus("计划已批准。请先配置 LLM，再发送消息开始执行。", sid);
+          chat.setLiveStatus(t("计划已批准。请先配置 LLM，再发送消息开始执行。"), sid);
         } else {
-          enqueueMessage(sid, "开始执行");
+          enqueueMessage(sid, t("开始执行"));
           clearStopRequest(sid);
-          chat.setLiveStatus(`计划已批准，自动开始执行 ${meta.tasks.length} 个任务…`, sid);
+          chat.setLiveStatus(t("计划已批准，自动开始执行 {{count}} 个任务…", { count: meta.tasks.length }), sid);
           void runQueue(sid);
         }
       }
@@ -693,7 +694,7 @@ export function useChatActions(deps: {
   const onRollback = useCallback(async (sidOverride?: string) => {
     const sid = sidOverride ?? getFocusSessionId();
     if (!sid) return;
-    if (!(await customConfirm("撤销上次 Agent 改动？将恢复文件与对话到检查点。"))) return;
+    if (!(await customConfirm(t("撤销上次 Agent 改动？将恢复文件与对话到检查点。")))) return;
     ui.setBusy(true);
     try {
       const res = await window.owncoder.undoAllChanges(sid);

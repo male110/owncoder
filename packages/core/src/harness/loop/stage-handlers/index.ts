@@ -22,7 +22,7 @@ import { emitStage } from "../stages.ts";
 import { normalizeUsage } from "../../observability.ts";
 import type { StageHandler, SchedulerContext } from "./types.ts";
 import { pushCurrentUserMessageOnce } from "./history.ts";
-import { taskDecomposeHandler } from "./task-decompose.ts";
+import { flattenSteps, taskDecomposeHandler } from "./task-decompose.ts";
 import { exploreToolsHandler, executeToolsHandler } from "./tools.ts";
 import { verifyHandler, postVerifyHandler } from "./verify.ts";
 
@@ -44,6 +44,7 @@ export {
 
 export {
   parseDecomposeAnswer,
+  flattenSteps,
   injectStopConditions,
   runTaskDecompose,
   taskDecomposeHandler,
@@ -87,10 +88,11 @@ export async function injectHistoryAndUserMessage(ctx: SchedulerContext): Promis
 
   // 优先当前子任务 relevantHistory → 整单 relevantHistory；都没有则只注入当前用户消息（不再拉历史）
   const currentTaskId = opts.currentTaskId;
+  const flatSteps = flattenSteps(state.rawDecompose);
   const stepHistory = currentTaskId
-    ? state.rawDecompose?.steps?.find((s) => s.id === currentTaskId)?.relevantHistory
+    ? flatSteps.find((s) => s.id === currentTaskId)?.relevantHistory
     : undefined;
-  const firstStepHistory = state.rawDecompose?.steps?.find((s) => (s.relevantHistory?.trim().length ?? 0) > 0)?.relevantHistory;
+  const firstStepHistory = flatSteps.find((s) => (s.relevantHistory?.trim().length ?? 0) > 0)?.relevantHistory;
   const relevantHistory = stepHistory
     ?? state.turnInformationTask?.relevantHistory
     ?? state.rawDecompose?.relevantHistory

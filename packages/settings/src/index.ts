@@ -181,7 +181,7 @@ export const SystemWorkflowConfigSchema = z.object({
     defaultEffort: z.enum(['none', 'off', 'disabled', 'low', 'minimal', 'medium', 'high', 'max']).default('high'),
   }).default({ defaultEffort: 'high' }),
   index: z.object({
-    enabled: z.boolean().default(true),
+    // Symbol index is always enabled; `enabled` was removed as a setting.
     extraIgnore: z.array(z.string()).default([]),
   }),
   harness: z.object({
@@ -199,6 +199,8 @@ export const SystemWorkflowConfigSchema = z.object({
      *  Claude Code caps bash output at ~8KB; 10000 gives a small buffer. */
     bashMaxChars: z.number().int().default(10000),
     checkpoint: z.boolean().default(true),
+    /** UI + LLM reply language: follow OS, Chinese, or English. */
+    locale: z.enum(["system", "zh", "en"]).default("system"),
   }),
   mcp: z
     .object({
@@ -303,7 +305,7 @@ export const BUILTIN_WORKFLOW: SystemWorkflowConfig = SystemWorkflowConfigSchema
     mapTokens: 2000,
   },
   thinking: { defaultEffort: "high" },
-  index: { enabled: true, extraIgnore: [] },
+  index: { extraIgnore: [] },
   harness: {
     patchFirst: true,
     toolOutputMaxChars: 24000,
@@ -311,6 +313,7 @@ export const BUILTIN_WORKFLOW: SystemWorkflowConfig = SystemWorkflowConfigSchema
     compactionToolMaxChars: 2000,
     bashMaxChars: 10000,
     checkpoint: true,
+    locale: "system",
   },
   mcp: { servers: [] },
 });
@@ -386,6 +389,10 @@ export function mergeWorkflow(
       ...builtin.harness,
       ...workflowOverlay?.harness,
       patchFirst: true as const,
+      // Checkpoints are no longer user-configurable (UI entry removed);
+      // pin the effective behavior to the default (enabled) while the
+      // schema keeps accepting `false` in existing workflow.json files.
+      checkpoint: true as const,
     },
     mcp: {
       servers: workflowOverlay?.mcp?.servers ?? builtin.mcp.servers,

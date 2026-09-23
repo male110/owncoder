@@ -1,0 +1,606 @@
+/**
+ * 英文词条。key 即中文 msgid（文案源，见各调用点的 t("中文原文")）。
+ *
+ * 新增界面文案的步骤：
+ *   1. 代码里用 t("中文原文", params?)（{{name}} 为插值占位）；
+ *   2. 在此登记英文译文 —— 类型 `Record<MsgId, string>` 编译期强制覆盖，
+ *      漏译会直接 typecheck 失败。
+ */
+export const en = {
+  // ── 通用 ──────────────────────────────────────────────────────────────────
+  "确定": "OK",
+  "取消": "Cancel",
+  "关闭": "Close",
+  "删除": "Delete",
+  "编辑": "Edit",
+  "保存": "Save",
+  "打开": "Open",
+  "启用": "Enable",
+  "添加": "Add",
+  "新建": "New",
+  "重试": "Retry",
+  "复制": "Copy",
+  "已复制": "Copied",
+  "预览": "Preview",
+  "显示": "Show",
+  "隐藏": "Hide",
+  "跳过": "Skip",
+  "重置": "Reset",
+  "保留": "Keep",
+  "撤销": "Undo",
+  "批准": "Approve",
+  "提交": "Submit",
+  "拒绝": "Deny",
+  "设置": "Settings",
+  "确认": "Confirm",
+  "或": "or",
+  "加载中…": "Loading…",
+  "运行中": "Running",
+  "失败": "Failed",
+  "已完成": "Completed",
+  "已跳过": "Skipped",
+  "待执行": "Pending",
+  "执行中": "In progress",
+  "完成": "Done",
+  "项目": "Projects",
+  "会话": "Session",
+  "新会话": "New session",
+  "加载更多": "Load more",
+  "在编辑器中打开": "Open in editor",
+  "打开设置": "Open settings",
+  "重新加载": "Reload",
+
+  // ── 崩溃兜底页 ────────────────────────────────────────────────────────────
+  "界面发生错误": "Interface error",
+  "应用没有退出。请重新加载界面；错误详情已记录到主进程日志。":
+    "The app did not quit. Reload the interface; error details were written to the main-process log.",
+
+  // ── 标题栏 ────────────────────────────────────────────────────────────────
+  "界面风格": "Appearance",
+  "深色主题": "Dark theme",
+  "切换到深色主题": "Switch to dark theme",
+  "浅色主题": "Light theme",
+  "切换到浅色主题": "Switch to light theme",
+  "界面语言": "Interface language",
+  "跟随系统": "Follow system",
+  "中文": "中文",
+
+  // ── App 壳 ────────────────────────────────────────────────────────────────
+  "文件尚未保存，确定关闭？未保存的修改将丢失。":
+    "This file has unsaved changes. Close it anyway? Unsaved changes will be lost.",
+  "正在停止…": "Stopping…",
+  "选择项目目录，输入任务描述开始": "Choose a project folder, then describe your task to begin",
+  "拖动调整左侧宽度": "Drag to resize the left pane",
+  "已打开文件": "Open files",
+  "对比": "Diff",
+  "关闭 {{name}}": "Close {{name}}",
+  "编辑器操作": "Editor actions",
+  "设置加载失败": "Settings failed to load",
+  "设置未能加载": "Settings could not be loaded",
+  "主界面仍在运行。错误详情已记录到启动终端。":
+    "The main interface is still running. Error details were logged to the launch terminal.",
+  "关闭设置": "Close settings",
+  "正在加载设置": "Loading settings",
+
+  // ── 侧边栏 ────────────────────────────────────────────────────────────────
+  "刚刚": "Just now",
+  "{{n}}分钟": "{{n}} min ago",
+  "{{n}}小时": "{{n}} h ago",
+  "{{n}}天": "{{n}} d ago",
+  "{{n}}月": "{{n}} mo ago",
+  "展开侧边栏": "Expand sidebar",
+  "收缩侧边栏": "Collapse sidebar",
+  "新建对话": "New chat",
+  "添加项目": "Add project",
+  "内置 OwnCoderProject 将自动出现；也可点击「添加项目」打开本地仓库。":
+    "The built-in OwnCoderProject appears automatically; click \u201cAdd project\u201d to open a local repository.",
+  "折叠": "Collapse",
+  "展开": "Expand",
+  "项目视图切换": "Project view toggle",
+  "会话列表": "Session list",
+  "文件目录": "Files",
+  "移除项目": "Remove project",
+  "暂无任务": "No tasks",
+  "任务完成（点击清除）": "Task completed (click to clear)",
+  "需要确认命令（点击查看）": "Command awaiting confirmation (click to view)",
+  "需要确认命令（点击清除）": "Command awaiting confirmation (click to clear)",
+  "确认删除": "Confirm delete",
+  "删除任务": "Delete task",
+
+  // ── 输入区 ────────────────────────────────────────────────────────────────
+  "切换工作区": "Switch workspace",
+  "未打开工作区": "No workspace open",
+  "＋ 打开新目录…": "\uff0b Open new folder…",
+  "提出一个问题或描述要规划的任务…": "Ask a question or describe a task to plan…",
+  "提出一个问题或描述一个任务…": "Ask a question or describe a task…",
+  "剪切": "Cut",
+  "粘贴": "Paste",
+  "全选": "Select all",
+  "可写 · 改代码与跑命令": "Write \u00b7 edit code and run commands",
+  "只读 · 分析与出方案": "Read-only \u00b7 analyze and plan",
+  "切换模型": "Switch model",
+  "暂无可用模型": "No models available",
+  "去设置": "Go to settings",
+  "模型平台": "Model providers",
+  "⚙ 模型设置…": "\u2699 Model settings…",
+  "思考强度": "Thinking effort",
+  "低": "Low",
+  "中": "Medium",
+  "高": "High",
+  "高强度": "High",
+  "中强度": "Medium",
+  "低强度": "Low",
+  "待执行{{count}}条": "{{count}} queued",
+  "移除最早待执行消息": "Remove earliest queued message",
+  "停止": "Stop",
+  "发送": "Send",
+  "正在切换项目，请稍候...": "Switching project, please wait…",
+  "请输入消息": "Enter a message",
+  "发送消息": "Send message",
+
+  // ── 危险命令确认条 ────────────────────────────────────────────────────────
+  "需要确认后才会执行": "Requires confirmation before running",
+  "还有 {{count}} 条等待确认": "{{count}} more awaiting confirmation",
+  "请点击下方按钮决定": "Use the buttons below to decide",
+  "允许一次": "Allow once",
+  "删除文件或目录（可能不可恢复）": "Deletes files or directories (may be irreversible)",
+  "强制推送，可能覆盖远程提交历史": "Force push; may overwrite remote commit history",
+  "硬重置工作区，未提交改动会丢失": "Hard reset; uncommitted changes will be lost",
+  "清理未跟踪文件，相关内容会被删除": "Cleans untracked files; their contents will be deleted",
+  "丢弃工作区改动，恢复到已提交版本": "Discards working-tree changes, restoring the committed version",
+  "暂存或移动工作区改动": "Stages or moves working-tree changes",
+  "从仓库中删除文件": "Removes files from the repository",
+  "强制删除 Git 分支": "Force-deletes a Git branch",
+  "系统级危险操作，可能关机或格式化磁盘": "Dangerous system operation; may shut down or format disks",
+  "修改 Windows 注册表": "Modifies the Windows registry",
+  "写入或改动文件系统内容": "Writes or modifies file-system contents",
+  "删除或清空数据库对象": "Deletes or truncates database objects",
+  "调用可能产生副作用的 MCP 工具": "Calls an MCP tool that may have side effects",
+  "这条命令可能修改系统或项目状态，执行前请确认":
+    "This command may modify system or project state. Confirm before running.",
+
+  // ── 会话面板 ──────────────────────────────────────────────────────────────
+  "夜深了": "Late night",
+  "早上好呀": "Good morning",
+  "中午好": "Good afternoon",
+  "下午好": "Good afternoon",
+  "晚上好呀，今天辛苦啦": "Good evening \u2014 hope your day went well",
+  "夜深了，注意休息": "It's late \u2014 remember to rest",
+  "加载更早消息": "Load earlier messages",
+  "向 OwnCoder 描述任务，@ 引用文件，/ 使用命令，切换 Plan / Agent 模式":
+    "Describe your task to OwnCoder, use @ to reference files and / for commands; switch between Plan / Agent mode",
+  "模型 API Key 尚未配置，请先完成设置后再开始对话。":
+    "The model API key is not configured. Finish setup before starting a chat.",
+  "待执行 {{count}} 条": "{{count}} queued",
+  "删除该待执行消息": "Remove this queued message",
+
+  // ── 终端 ──────────────────────────────────────────────────────────────────
+  "[进程已退出]": "[process exited]",
+  "拖动调整高度": "Drag to resize height",
+  "Agent 执行": "Agent runs",
+  "终端 {{n}}": "Terminal {{n}}",
+  "新建终端": "New terminal",
+  "收起终端": "Collapse terminal",
+  "Agent 执行命令的输出会显示在这里": "Output of Agent-run commands appears here",
+  "等待确认": "Awaiting confirmation",
+  "已拒绝": "Denied",
+  "终端": "Terminal",
+  "{{count}} 个命令等待确认": "{{count}} commands awaiting confirmation",
+  "{{count}} 个命令运行中": "{{count}} commands running",
+
+  // ── 任务进度条 ────────────────────────────────────────────────────────────
+  "任务进度": "Task progress",
+  "进度 {{pct}}%": "Progress {{pct}}%",
+  "全部完成": "All done",
+  "验收：": "Acceptance: ",
+  "跳过此任务": "Skip this task",
+  "重置为待执行": "Reset to pending",
+
+  // ── 变更条 ────────────────────────────────────────────────────────────────
+  "新增": "Added",
+  "修改": "Modified",
+  "变更": "Changes",
+  "全部撤销": "Undo all",
+  "全部保留": "Keep all",
+  "双击打开文件": "Double-click to open file",
+  "查看变更": "View changes",
+
+  // ── 计划条 ────────────────────────────────────────────────────────────────
+  "计划": "Plans",
+  "文档交付物，无需批准": "Document deliverable; no approval needed",
+  "文档": "Document",
+  "关闭预览": "Close preview",
+  "文档交付物 · 无需批准（如需执行请生成实施计划）":
+    "Document deliverable \u00b7 no approval needed (generate an implementation plan to execute)",
+  "批准此计划并自动执行": "Approve this plan and run it automatically",
+
+  // ── 询问用户卡片 ──────────────────────────────────────────────────────────
+  "Agent 需要你确认": "Agent needs your confirmation",
+  "输入你的回答…": "Type your answer…",
+  "还有 {{count}} 个问题等待": "{{count}} more questions waiting",
+  "按 Esc 取消（按未作答处理）": "Press Esc to cancel (treated as unanswered)",
+
+  // ── 更新横幅 / 更新错误 ───────────────────────────────────────────────────
+  "发现新版本": "New version available",
+  "发现新版本 v{{version}}": "New version v{{version}} available",
+  "已下载完成，安装后自动重启": "Download complete; the app restarts after installing",
+  "自动下载失败，可手动下载安装包": "Automatic download failed; you can download the installer manually",
+  "下载中…": "Downloading…",
+  "下载中 {{percent}}%": "Downloading {{percent}}%",
+  "安装并重启": "Install and restart",
+  "下载安装包": "Download installer",
+  "立即更新": "Update now",
+  "打开下载页": "Open download page",
+  "稍后": "Later",
+  "无法获取最新版本信息": "Could not fetch the latest release info",
+  "请求超时（{{ms}}ms）": "Request timed out ({{ms}}ms)",
+
+  // ── 错误横幅 ──────────────────────────────────────────────────────────────
+  "需要配置模型": "Model setup required",
+  "出错了": "Something went wrong",
+  "隐藏详情": "Hide details",
+  "查看技术详情": "Show technical details",
+
+  // ── 命令面板 ──────────────────────────────────────────────────────────────
+  "已固定": "Pinned",
+  "搜索会话、文件或操作…": "Search sessions, files, or actions…",
+  "无匹配结果": "No matches",
+  "引用到输入框": "Insert into input",
+
+  // ── 项目文件树 ────────────────────────────────────────────────────────────
+  "空目录": "Empty directory",
+  "无法读取目录": "Could not read directory",
+
+  // ── 编辑器 ────────────────────────────────────────────────────────────────
+  "Markdown 视图": "Markdown view",
+  "原码": "Source",
+  "保存中…": "Saving…",
+  "保存中": "Saving",
+  "变更对比": "Change diff",
+  "空文档": "Empty document",
+
+  // ── Markdown 渲染 ─────────────────────────────────────────────────────────
+  "复制代码": "Copy code",
+
+  // ── 渲染错误边界 ──────────────────────────────────────────────────────────
+  "此区域发生错误，已阻止它影响整个应用。":
+    "An error occurred in this area; it was stopped from affecting the rest of the app.",
+
+  // ── 脱敏测试 ──────────────────────────────────────────────────────────────
+  "整文件保护": "Whole-file protection",
+  "仅敏感字段": "Sensitive fields only",
+  "脱敏测试": "Redaction test",
+  "选择任意本地文本文件，使用当前已保存的规则生成安全预览。原文件不会被修改，也不会发送给模型。":
+    "Pick any local text file to generate a safety preview with the currently saved rules. The original file is neither modified nor sent to the model.",
+  "正在检测…": "Scanning…",
+  "重新选择文件": "Pick another file",
+  "选择文件测试": "Pick a file to test",
+  "已取消本次测试。": "Test cancelled.",
+  "检查完成": "Scan complete",
+  "文件命中整文件保护规则，非空内容已全部遮罩。":
+    "The file matched whole-file protection rules; all non-empty content was masked.",
+  "文件受保护；已仅检测和遮罩账号、密码、令牌、密钥及连接凭据。":
+    "The file is protected; only account, password, token, key, and connection-credential fields were detected and masked.",
+  "未命中文件规则，已执行敏感字段检测，可用于验证自定义正则。":
+    "No file rule matched; sensitive-field detection was applied \u2014 useful for verifying custom regexes.",
+  " 未发现需要遮罩的值。": " No values needed masking.",
+  "命中的脱敏规则": "Matched redaction rules",
+  "安全预览": "Safety preview",
+  "仅展示处理后的内容": "Processed content only",
+  "（文件内容为空）": "(file is empty)",
+  "预览仅显示前 80 KB；完整文件已按相同规则完成检测。":
+    "Only the first 80 KB of the preview is shown; the full file was scanned with the same rules.",
+
+  // ── 聊天记录 ──────────────────────────────────────────────────────────────
+  "结果": "Result",
+  "复制内容": "Copy content",
+  "📋 复制": "\ud83d\udccb Copy",
+  "执行中...": "Running…",
+  "思考中…": "Thinking…",
+  "思考过程": "Thought process",
+  "任务分解（本地回退）": "Task breakdown (local fallback)",
+  "任务分解：无需计划": "Task breakdown: no plan needed",
+  "任务分解：{{count}} 个步骤": "Task breakdown: {{count}} steps",
+  "执行过程 · {{count}} 步": "Process · {{count}} steps",
+  "+ 添加全局偏好": "Add global preference",
+  "+ 添加项目偏好": "Add project preference",
+  "意图": "Intent",
+  "任务": "Task",
+  "用户约束": "User constraints",
+  "步骤": "Steps",
+  "依赖的前序步骤": "Depends on earlier steps",
+  "停读条件：": "Stop reading when: ",
+  "本次请求未产生计划步骤（琐碎任务 / 提问 / 交还用户）。":
+    "This request produced no plan steps (trivial task / question / handed back to you).",
+  "分解调用失败，以上为本地启发式回退结果，仅供粗略参考。":
+    "The breakdown call failed; the above is a local heuristic fallback for rough reference only.",
+  "已压缩内容": "Compressed content",
+  "压缩{{percent}}%": "Compressed {{percent}}%",
+  "保留的重要片段：": "Retained snippets: ",
+  "已生成计划": "Plan generated",
+  "打开 →": "Open \u2192",
+  "压缩信息：": "Compression info: ",
+  "原因：": "Reason: ",
+  "上下文限制": "Context limit",
+  "手动压缩": "Manual compression",
+  "自动压缩": "Automatic compression",
+  "磁盘保存": "Saved to disk",
+  "完整保留": "Kept in full",
+  "压缩率：{{ratio}}% ({{cur}}/{{orig}}字符)": "Ratio: {{ratio}}% ({{cur}}/{{orig}} chars)",
+  "时间：{{time}}": "Time: {{time}}",
+  "重新生成": "Regenerate",
+  "生成中…": "Generating…",
+  "🗜️ 压缩": "\ud83d\udddc\ufe0f Compressed",
+
+  // ── 工具标签 ──────────────────────────────────────────────────────────────
+  "工具": "Tool",
+  "读取文件": "Read file",
+  "读取符号": "Read symbol",
+  "读取大纲": "Read outline",
+  "写入文件": "Write file",
+  "追加文件": "Append file",
+  "应用补丁": "Apply patch",
+  "编辑文件": "Edit file",
+  "搜索代码": "Search code",
+  "搜索符号": "Search symbols",
+  "图搜索": "Graph search",
+  "代码地图搜索": "Codemap search",
+  "影响分析": "Impact analysis",
+  "列出目录": "List directory",
+  "搜索文本": "Grep text",
+  "运行命令": "Run command",
+  "保存计划": "Save plan",
+  "仓库地图": "Repo map",
+  "生成仓库地图": "Generate repo map",
+  "Git 状态": "Git status",
+  "查看 Git 状态": "Check Git status",
+  "项目依赖": "Project deps",
+  "类型检查": "Type check",
+  "网页搜索": "Web search",
+  "获取网页": "Fetch web page",
+  "语义差异": "Semantic diff",
+  "询问用户": "Ask user",
+  "保存记忆": "Save memory",
+  "更新记忆": "Update memory",
+  "删除记忆": "Delete memory",
+  "列出记忆": "List memories",
+  "会话变更": "Session changes",
+  "撤销变更": "Undo change",
+  "跳转定义": "Go to definition",
+  "查找引用": "Find references",
+  "悬停信息": "Hover info",
+  "文档符号": "Document symbols",
+  "工作区符号": "Workspace symbols",
+  "LSP 诊断": "LSP diagnostics",
+  "检查 LSP 诊断": "Check LSP diagnostics",
+  "代码操作": "Code actions",
+  "保存经验": "Save experience",
+  "保存规格": "Save spec",
+  "保存设计": "Save design",
+  "列出 SDD": "List SDD",
+  "分析问题": "Analyze issue",
+  "报告阻塞": "Report blocker",
+  "正在{{label}}{{tail}}…": "{{label}}{{tail}}…",
+  "{{label}}{{tail}} 失败": "{{label}}{{tail}} failed",
+  "已{{label}}{{tail}}": "Done: {{label}}{{tail}}",
+
+  // ── 聊天事件派生 ──────────────────────────────────────────────────────────
+  "工具调用：{{name}}{{hint}}": "Tool call: {{name}}{{hint}}",
+  "已完成：{{name}}": "Completed: {{name}}",
+  "已跳过：{{name}}": "Skipped: {{name}}",
+  "失败：{{name}}": "Failed: {{name}}",
+  "正在分解任务…": "Breaking down the task…",
+  "阶段：{{label}}": "Stage: {{label}}",
+
+  // ── 聊天动作 / 会话同步 ───────────────────────────────────────────────────
+  "计划已生成：{{name}}": "Plan generated: {{name}}",
+  "已保留原始历史；下次请求将由模型生成任务摘要":
+    "Original history kept; the model will generate a task summary on the next request",
+  "已切换到 Plan 模式": "Switched to Plan mode",
+  "已切换到 Agent 模式": "Switched to Agent mode",
+  "可用命令：\n/compact — 压缩历史\n/clear — 清空对话\n/plan — Plan 模式\n/agent — Agent 模式\n/undo — 撤销上次改动\n/help — 显示帮助":
+    "Available commands:\n/compact — compress history\n/clear — clear the chat\n/plan — Plan mode\n/agent — Agent mode\n/undo — undo the last change\n/help — show this help",
+  "未配置 LLM API Key": "LLM API key not configured",
+  "工作区尚未就绪，请稍候…": "The workspace is not ready yet; please wait…",
+  "计划已批准。请先配置 LLM，再发送消息开始执行。":
+    "Plan approved. Configure the LLM first, then send a message to start.",
+  "开始执行": "Start execution",
+  "计划已批准，自动开始执行 {{count}} 个任务…": "Plan approved; starting {{count}} tasks automatically…",
+  "撤销上次 Agent 改动？将恢复文件与对话到检查点。":
+    "Undo the last Agent changes? Files and the conversation will be restored to the checkpoint.",
+  "本次会话的检查点已不在磁盘上，这些文件修改无法再通过「撤销」回滚。":
+    "This session's checkpoint is no longer on disk; these file changes can no longer be rolled back with \u201cUndo\u201d.",
+  "未配置": "Not configured",
+  "计划已批准，共 {{count}} 个任务。在下方输入框发送消息即可开始执行。":
+    "Plan approved with {{count}} tasks. Send a message in the input box below to start.",
+  "任务执行中：{{done}}/{{total}} 已完成": "Tasks running: {{done}}/{{total}} done",
+  "该项目存在运行中的会话，请等待会话结束后再删除。":
+    "This project has running sessions; wait for them to finish before removing it.",
+
+  // ── 设置面板 ──────────────────────────────────────────────────────────────
+  "模型": "Models",
+  "上下文": "Context",
+  "常规设置": "General",
+  "语言": "Language",
+  "同时作用于界面显示语言与 LLM 回复语言。":
+    "Applies to both the UI language and the LLM reply language.",
+  "MCP": "MCP",
+  "安全": "Security",
+  "规则": "Rules",
+  "偏好记忆": "Memory",
+  "还原": "Restore",
+  "运转": "Operation",
+  "维护": "Maintenance",
+  "已自动保存（{{fp}}）": "Auto-saved ({{fp}})",
+  "一键还原出厂设置？将删除用户工作流覆盖层，保留模型设置，不影响 API Key 环境变量与项目源码。":
+    "Restore factory defaults? This deletes user workflow overlays, keeps model settings, and does not affect API-key environment variables or project sources.",
+  "已还原出厂配置（不含项目规则）": "Factory configuration restored (project rules excluded)",
+  "已自动保存规则：.owncoder/rules/{{name}}": "Rule auto-saved: .owncoder/rules/{{name}}",
+  "# {{name}}\n\n- 优先小范围补丁。\n- 遵循项目既有约定。\n":
+    "# {{name}}\n\n- Prefer small, targeted patches.\n- Follow the project's existing conventions.\n",
+  "已创建 {{name}}": "Created {{name}}",
+  "删除 .owncoder/rules/{{name}}？": "Delete .owncoder/rules/{{name}}?",
+  "已删除规则文件": "Rule file deleted",
+  "系统设置": "System settings",
+  "工作流分区": "Workflow sections",
+  "← 返回工作区": "\u2190 Back to workspace",
+  "上下文窗口": "Context window",
+  "自定义": "Custom",
+  "支持 K/M 后缀，如 512K、2M": "Supports K/M suffixes, e.g. 512K, 2M",
+  "输入占比": "Input share",
+  "输入 ≈{{in}} tokens · 输出 ≈{{out}} tokens": "Input ≈{{in}} tokens \u00b7 output ≈{{out}} tokens",
+  "输入预算段分配": "Input budget allocation",
+  "输入预算扣除系统提示、工具定义等固定段后，剩余空间按以下比例分配给三个动态段。":
+    "After fixed sections (system prompt, tool definitions, \u2026) are subtracted from the input budget, the remaining space is split across three dynamic sections by the ratios below.",
+  "对话历史": "Conversation history",
+  "聊天记录与上下文": "Chat log and context",
+  "工具调用结果": "Tool results",
+  "工具返回给模型的内容，含代码检索结果": "What tools return to the model, including code-search results",
+  "技术栈信息": "Tech-stack info",
+  "项目结构、依赖等": "Project structure, dependencies, etc.",
+  "合计：{{total}}": "Total: {{total}}",
+  "（建议合计 100%）": "(should total 100%)",
+
+  "工具输出最大字符数": "Max tool-output characters",
+  "通过 stdio 连接 MCP 服务器。工具名形如 ": "Connect MCP servers over stdio. Tool names look like ",
+  "，保存后自动连接。": ", and connections are established automatically after saving.",
+  "显示名": "Display name",
+  "命令": "Command",
+  "例如 npx": "e.g. npx",
+  "参数（空格分隔）": "Arguments (space-separated)",
+  "添加 MCP 服务器": "Add MCP server",
+  "启用敏感信息脱敏": "Enable secret redaction",
+  "开启后，内建工具和 MCP 工具返回给大模型的文本都会经过敏感值脱敏；.env 等配置文件只遮罩账号、密码、令牌、密钥和连接凭据，普通配置仍可见。私钥、证书、加密凭据和数据库备份才会整体遮罩。":
+    "When enabled, all text that built-in and MCP tools return to the model is redacted; in config files like .env only accounts, passwords, tokens, keys, and connection credentials are masked while ordinary settings stay visible. Private keys, certificates, encrypted credentials, and database backups are masked entirely.",
+  "配置保存后立即生效，安全相关用户设置优先于项目配置，项目不能静默关闭本机保护；脱敏只影响发送给模型的内容，不修改本地文件。":
+    "Takes effect immediately after saving. Security-related user settings override project configuration; a project cannot silently disable local protection. Redaction only affects content sent to the model and never modifies local files.",
+  "注意：": "Note: ",
+  "脱敏不是命令或第三方 MCP 的完整权限沙箱；可变更数据的 MCP 工具会要求确认，其服务器授权范围仍由本机 MCP 配置决定。":
+    "Redaction is not a full permission sandbox for commands or third-party MCP servers; MCP tools that mutate data require confirmation, and their server-side scopes are still governed by the local MCP configuration.",
+  "文件写入保护": "File-write protection",
+  "可写策略": "Write policy",
+  "宽松（仅保留核心敏感文件保护）": "Loose (core sensitive-file protection only)",
+  "均衡（推荐：保护密钥、依赖、构建产物和锁文件）":
+    "Balanced (recommended: protects keys, dependencies, build artifacts, and lockfiles)",
+  "严格（仅允许主流源码与配置文件）": "Strict (mainstream source and config files only)",
+  "保护敏感文件（.env、密钥）、锁文件（package-lock、yarn.lock）和构建产物目录（dist、build），其余文件可写入。":
+    "Protects sensitive files (.env, keys), lockfiles (package-lock, yarn.lock), and build-artifact directories (dist, build); everything else is writable.",
+  "仅允许主流源码和配置文件扩展名（.ts/.py/.go/.rs/.json/.yaml 等），其他类型文件一律拒绝写入。":
+    "Only mainstream source and config extensions are allowed (.ts/.py/.go/.rs/.json/.yaml, etc.); all other file types are rejected.",
+  "只保留核心安全防护（.git、node_modules、.owncoder 元数据不可写），其余文件均放行。":
+    "Keeps only core protections (.git, node_modules, and .owncoder metadata are not writable); everything else is allowed.",
+  "该策略约束内建文件写入工具；Agent 命令中的潜在写入/删除操作仍会进入危险命令确认。":
+    "This policy constrains built-in file-write tools; potential write/delete operations in Agent commands still go through dangerous-command confirmation.",
+  "严格模式已覆盖 Java/Spring、Kotlin、Maven/Gradle、Node.js、Python、Go、Rust、.NET、PHP、Ruby、移动端、Shell、SQL、GraphQL、Protobuf 及常见前端框架。":
+    "Strict mode already covers Java/Spring, Kotlin, Maven/Gradle, Node.js, Python, Go, Rust, .NET, PHP, Ruby, mobile, Shell, SQL, GraphQL, Protobuf, and common front-end frameworks.",
+  "主流项目默认覆盖": "Mainstream project defaults",
+  "以下类型使用同一份运行时默认清单，不再由界面单独维护：":
+    "The following types share one runtime default list, no longer maintained in the UI:",
+  "内置敏感文件规则": "Built-in sensitive-file rules",
+  "共 {{count}} 条受保护文件规则。.env*、Spring application*/bootstrap* 与 .NET appsettings* 使用敏感字段检测，端口、环境、日志级别等普通配置保持可见；私钥、JKS/keystore、加密凭据和数据库备份整体保护。":
+    "{{count}} protected-file rules. .env*, Spring application*/bootstrap*, and .NET appsettings* use sensitive-field detection so ordinary settings (ports, environment, log level) stay visible; private keys, JKS/keystores, encrypted credentials, and database backups are protected entirely.",
+  "内置敏感值检测规则": "Built-in sensitive-value rules",
+  "OpenAI / Anthropic / AWS / GCP / HuggingFace / GitHub / GitLab / Slack / Stripe Token，":
+    "OpenAI / Anthropic / AWS / GCP / HuggingFace / GitHub / GitLab / Slack / Stripe tokens,",
+  "所有工具输出都会检测以下敏感值（只读展示，不可修改）：":
+    "All tool output is scanned for the following sensitive values (read-only, cannot be modified):",
+  "Bearer Token、JWT、PEM/OpenSSH 私钥、账号 / Username / Login、Password/Passwd/API Key/Secret/Token 字段、环境变量凭据，以及 MongoDB/PostgreSQL/MySQL/Redis/AMQP 连接字符串":
+    "Bearer tokens, JWT, PEM/OpenSSH private keys, account / Username / Login fields, Password/Passwd/API Key/Secret/Token fields, environment-variable credentials, and MongoDB/PostgreSQL/MySQL/Redis/AMQP connection strings",
+  "自定义敏感文件": "Custom sensitive files",
+  "添加额外的敏感文件 glob 模式（每行一个）：": "Add extra sensitive-file glob patterns (one per line):",
+  "敏感文件模式": "Sensitive file patterns",
+  "自定义检测规则": "Custom detection rules",
+  "添加额外正则表达式（每行一个）。无效表达式会被忽略，不会中断文件读取或关闭内置保护。":
+    "Add extra regular expressions (one per line). Invalid expressions are ignored and never interrupt file reads or disable built-in protection.",
+  "检测规则（正则）": "Detection rules (regex)",
+  "项目级规则存于 ": "Project-level rules live in ",
+  "，按文件名排序合并后注入系统提示（有预算截断）。不属于用户工作流，一键还原不会删除。":
+    "; they are merged in filename order and injected into the system prompt (truncated to fit the budget). They are not part of the user workflow and factory reset does not delete them.",
+  "请先打开工作区文件夹。": "Open a workspace folder first.",
+  "请先打开工作区文件夹": "Open a workspace folder first",
+  "暂无规则文件": "No rule files",
+  "选择左侧文件，或新建规则。": "Select a file on the left, or create a rule.",
+  "新规则.md": "new-rule.md",
+  "指纹：": "Fingerprint: ",
+  "（与出厂一致）": "(matches factory)",
+  "（已有用户覆盖）": "(user overrides exist)",
+  "工作流：{{path}}": "Workflow: {{path}}",
+  "模型设置：{{path}}": "Model settings: {{path}}",
+  "一键还原出厂": "Restore factory defaults",
+  "删除用户工作流覆盖；保留模型设置与 API Key，不改项目源码与规则。":
+    "Deletes user workflow overrides; keeps model settings and the API key; does not change project sources or rules.",
+  "自动保存中…": "Auto-saving…",
+  "规则已自动保存": "Rule auto-saved",
+  "已自动保存": "Auto-saved",
+  "自定义平台": "Custom providers",
+  "已启用 {{count}} 个模型": "{{count}} models enabled",
+  "+ 添加平台": "+ Add provider",
+  "暂无平台配置，点击左侧「添加平台」开始。":
+    "No providers configured; click \u201cAdd provider\u201d on the left to start.",
+  "未知错误": "Unknown error",
+  "平台名称": "Provider name",
+  "已启用 {{count}}": "{{count}} enabled",
+  "未启用": "Not enabled",
+  "API 协议": "API protocol",
+  "协议与 Base URL 独立：自建或代理端点也可选 Anthropic Messages。":
+    "Protocol is independent of Base URL: self-hosted or proxy endpoints can also use Anthropic Messages.",
+  "sk-...（本地可留空）": "sk-\u2026 (leave empty for local)",
+  "获取中...": "Fetching…",
+  "获取模型列表": "Fetch model list",
+  "模型列表": "Model list",
+  "按 Esc 退出搜索": "Press Esc to exit search",
+  "手动输入模型 ID，如 gpt-4o、deepseek-chat（Ctrl+F 搜索）":
+    "Enter a model ID manually, e.g. gpt-4o, deepseek-chat (Ctrl+F to search)",
+  "模糊搜索模型名称或 ID…": "Fuzzy-search model names or IDs…",
+  "搜索模型": "Search models",
+  "点击「获取模型列表」拉取，或在上方手动输入模型 ID 后添加":
+    "Click \u201cFetch model list\u201d, or type a model ID above and add it manually",
+  "无匹配模型": "No matching models",
+  "移除该模型": "Remove this model",
+  "添加平台": "Add provider",
+  "「获取并添加」将调用 /v1/models 拉取模型列表；若端点不可用或想稍后手动添加模型，请用「直接添加」。":
+    "\u201cFetch & add\u201d calls /v1/models to pull the model list; if the endpoint is unavailable or you want to add models manually later, use \u201cAdd directly\u201d.",
+  "获取并添加": "Fetch & add",
+  "直接添加": "Add directly",
+  "删除此偏好记忆？": "Delete this memory?",
+  "暂无全局偏好记忆": "No global memories yet",
+  "暂无项目偏好记忆": "No project memories yet",
+  "添加全局偏好": "Add global memory",
+  "添加项目偏好": "Add project memory",
+  "编辑全局偏好": "Edit global memory",
+  "编辑项目偏好": "Edit project memory",
+  "模型在对话中识别到持久偏好时会主动调用 save_memory 工具保存到这里。":
+    "When the model spots a lasting preference in the conversation, it calls save_memory to store it here.",
+  "全局偏好跨项目生效，项目偏好仅在当前工作区生效。":
+    "Global memories apply across projects; project memories only apply in the current workspace.",
+  "标题": "Title",
+  "例如：使用中文回复": "e.g. Reply in Chinese",
+  "内容": "Content",
+  "偏好的详细描述": "Describe the preference in detail",
+  "分类": "Category",
+  "关键词（逗号分隔）": "Keywords (comma-separated)",
+  "中文, 语言, 回复": "Chinese, language, reply",
+  "全局偏好": "Global memories",
+  "当前项目偏好": "Current project memories",
+
+  // ── 主进程对话框 / 错误 ───────────────────────────────────────────────────
+  "OwnCoder 需要你确认": "OwnCoder needs your confirmation",
+  "Agent 弹出了选择框，请回到应用确认": "The Agent raised a prompt \u2014 return to the app to answer",
+  "OwnCoder 需要确认命令": "OwnCoder needs to confirm a command",
+  "有待执行命令需要你确认": "A command is pending your confirmation",
+  "选择要测试脱敏的文件": "Choose a file to test redaction",
+  "当前未启用敏感信息脱敏，请先启用后再测试。":
+    "Secret redaction is not enabled. Enable it before testing.",
+  "文件过大，脱敏测试仅支持 10 MB 以内的文件。":
+    "File too large; redaction testing supports files up to 10 MB.",
+  "读取文件失败：{{msg}}": "Failed to read file: {{msg}}",
+  "索引仅在项目打开时初始化，后续由文件监听增量更新；手动重建已禁用。":
+    "The index is initialized when a project opens and then updated incrementally by file watching; manual rebuild is disabled.",
+  "Codemap 仅在项目打开时初始化，后续由文件监听增量更新；手动重建已禁用。":
+    "Codemap is initialized when a project opens and then updated incrementally by file watching; manual rebuild is disabled.",
+  "请输入要搜索的符号或描述": "Enter a symbol or description to search",
+  "请输入要分析的符号": "Enter a symbol to analyze",
+} as const;
+
+/** msgid 全集（key 即中文文案源）；t() 的合法入参类型。 */
+export type MsgId = keyof typeof en;

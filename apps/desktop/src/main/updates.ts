@@ -5,6 +5,7 @@ import type {
   UpdateDownloadStatusDto,
   UpdateInfoDto,
 } from "../preload/index";
+import { mt } from "./i18n";
 
 /**
  * 基于 electron-updater 的自动更新。
@@ -92,7 +93,7 @@ export async function checkForUpdates(): Promise<UpdateCheckOutcomeDto> {
   const current = app.getVersion();
   const info = await fetchLatestRelease();
   if (!info) {
-    return { status: "error", currentVersion: current, message: "无法获取最新版本信息" };
+    return { status: "error", currentVersion: current, message: mt("无法获取最新版本信息") };
   }
   // semver 比较：electron-updater 内部已过滤，只有更新时才会返回 updateInfo
   if (info.version && info.version !== current) {
@@ -127,7 +128,7 @@ export async function downloadUpdatePackage(): Promise<boolean> {
       lastUpdateInfo = check?.updateInfo ?? null;
     }
     if (!lastUpdateInfo) {
-      statusSink?.({ state: "failed", message: "无法获取最新版本信息" });
+      statusSink?.({ state: "failed", message: mt("无法获取最新版本信息") });
       return false;
     }
     await withTimeout(updater.downloadUpdate(), FETCH_TIMEOUT_MS * 6);
@@ -155,7 +156,7 @@ export function installDownloadedUpdate(): void {
 async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   let timer: NodeJS.Timeout | null = null;
   const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`请求超时（${ms}ms）`)), ms);
+    timer = setTimeout(() => reject(new Error(mt("请求超时（{{ms}}ms）", { ms }))), ms);
   });
   try {
     return await Promise.race([promise, timeout]);

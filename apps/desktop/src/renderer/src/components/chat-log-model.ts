@@ -5,6 +5,7 @@
  */
 import type { ChatTurnDto } from "../../../preload/index";
 import type { LiveEvent } from "../store/chat-store";
+import { t, type MsgId } from "../../../shared/i18n/core";
 
 export type LogBlock =
   | { kind: "user"; turn: ChatTurnDto }
@@ -15,7 +16,7 @@ export type LogBlock =
 export type ChatItem =
   | { kind: "block"; block: LogBlock; key: string };
 
-const TOOL_LABELS: Record<string, string> = {
+const TOOL_LABELS: Record<string, MsgId> = {
   read_file: "读取文件",
   read_symbol: "读取符号",
   read_outline: "读取大纲",
@@ -61,8 +62,9 @@ const TOOL_LABELS: Record<string, string> = {
 };
 
 export function toolLabel(name?: string): string {
-  if (!name) return "工具";
-  return TOOL_LABELS[name] ?? name;
+  if (!name) return t("工具");
+  const id = TOOL_LABELS[name];
+  return id ? t(id) : name;
 }
 
 /** Status line for a tool phase (shared by ChatLog derivation). */
@@ -71,7 +73,7 @@ export function toolStatusLabel(
   name?: string,
   args?: Record<string, unknown>,
 ): string {
-  const verb: Record<string, string> = {
+  const verb: Record<string, MsgId> = {
     read_file: "读取文件",
     read_symbol: "读取符号",
     read_outline: "读取大纲",
@@ -91,7 +93,7 @@ export function toolStatusLabel(
     save_memory: "保存记忆",
     lsp_diagnostics: "检查 LSP 诊断",
   };
-  const label = (name && verb[name]) || toolLabel(name);
+  const label = name && verb[name] ? t(verb[name]) : toolLabel(name);
   const pathHint =
     args && typeof args === "object"
       ? (args.path as string) ||
@@ -100,9 +102,9 @@ export function toolStatusLabel(
         (args.pattern as string)
       : undefined;
   const tail = pathHint ? ` ${pathHint}` : "";
-  if (phase === "running") return `正在${label}${tail}…`;
-  if (phase === "error") return `${label}${tail} 失败`;
-  return `已${label}${tail}`;
+  if (phase === "running") return t("正在{{label}}{{tail}}…", { label, tail });
+  if (phase === "error") return t("{{label}}{{tail}} 失败", { label, tail });
+  return t("已{{label}}{{tail}}", { label, tail });
 }
 
 /** Data transform: ChatTurnDto[] → LogBlock[] (rounds / collapse). */
@@ -213,9 +215,9 @@ export function deriveLiveStatus(
   }
   for (let i = liveEvents.length - 1; i >= 0; i--) {
     const e = liveEvents[i]!;
-    if (e.kind === "thinking" && e.streaming) return "思考中…";
+    if (e.kind === "thinking" && e.streaming) return t("思考中…");
   }
-  return "思考中…";
+  return t("思考中…");
 }
 
 export function lastAssistantBlockIndex(blocks: LogBlock[]): number {
@@ -228,17 +230,18 @@ export function lastAssistantBlockIndex(blocks: LogBlock[]): number {
 /** Compose Virtuoso items from committed history blocks only.
  * Live status + thinking/text/tools render outside Virtuoso (shared scroller)
  * so streaming height changes refresh in place (no remount / no stale row).
- * tools/process 折叠摘要不进入列表（产品不展示工具调用链摘要）。 */
+ * tools（进行中轮次的工具链）不进列表，避免与 LiveToolCard/liveStatus 重复；
+ * process（已完成轮次的过程步骤）以可展开的折叠控件进入列表，供用户回看过程。 */
 export function buildChatItems(blocks: LogBlock[]): ChatItem[] {
   const items: ChatItem[] = [];
   for (let i = 0; i < blocks.length; i++) {
     const b = blocks[i]!;
-    if (b.kind === "tools" || b.kind === "process") continue;
-    items.push({
-      kind: "block",
-      block: b,
-      key: b.turn.id ?? `b-${b.kind}-${i}-${b.turn.content.slice(0, 24)}`,
-    });
+    if (b.kind === "tools") continue;
+    const key =
+      b.kind === "process"
+        ? `b-process-${i}-${b.items[0]?.id ?? b.items.length}`
+        : b.turn.id ?? `b-${b.kind}-${i}-${b.turn.content.slice(0, 24)}`;
+    items.push({ kind: "block", block: b, key });
   }
   return items;
 }

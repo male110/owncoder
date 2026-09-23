@@ -62,14 +62,18 @@ export type LiveEvent =
   | { kind: "structured"; id: string; parts: MessagePart[]; metadata: MessageMetadata };
 
 export interface DecompositionSnapshot {
-  understanding: string;
+  intent: string;
   userConstraints: string[];
-  steps: Array<{
+  tasks: Array<{
     id: string;
     description: string;
-    dependsOn: string[];
-    informationNeeds: Array<{ id: string; question: string }>;
-    stopReadingWhen: Array<{ condition: string; requiredEvidenceIds: string[] }>;
+    steps: Array<{
+      id: string;
+      description: string;
+      dependsOn: string[];
+      informationNeeds: Array<{ id: string; question: string }>;
+      stopReadingWhen: Array<{ condition: string; requiredEvidenceIds: string[] }>;
+    }>;
   }>;
   fallback: boolean;
 }

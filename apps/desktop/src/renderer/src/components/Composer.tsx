@@ -2,6 +2,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AgentMode } from "@owncoder/shared";
 import type { AvailableModel, Provider, ThinkingEffort } from "@owncoder/settings";
 import type { GitStatusDto, ProjectDto } from "../../../preload/index";
+import { useI18n } from "../i18n";
 
 interface Props {
   mode: AgentMode;
@@ -73,6 +74,7 @@ function ComposerImpl({
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const prevSessionIdRef = useRef<string | null>(activeSessionId);
   const didMountRef = useRef(false);
+  const { t } = useI18n();
 
   // Re-focus the textarea whenever the active session changes (new / delete /
   // switch). Focusing on activeSessionId — instead of a one-shot window event
@@ -349,12 +351,12 @@ function ComposerImpl({
             type="button"
             className="ws-trigger"
             onClick={() => setWsMenuOpen((v) => !v)}
-            title="切换工作区"
+            title={t("切换工作区")}
           >
             <span className="ws-icon" aria-hidden>
               📁
             </span>
-            {workspaceName ?? "未打开工作区"}
+            {workspaceName ?? t("未打开工作区")}
             <span className="mode-chevron" aria-hidden>
               ▾
             </span>
@@ -400,7 +402,7 @@ function ComposerImpl({
                     onAddProject();
                   }}
                 >
-                  <span className="ws-menu-name">＋ 打开新目录…</span>
+                  <span className="ws-menu-name">{t("＋ 打开新目录…")}</span>
                 </button>
               </li>
             </ul>
@@ -430,8 +432,8 @@ function ComposerImpl({
           onKeyUp={(e) => syncMention(draft, e.currentTarget.selectionStart)}
           placeholder={
             mode === "plan"
-              ? "提出一个问题或描述要规划的任务…"
-              : "提出一个问题或描述一个任务…"
+              ? t("提出一个问题或描述要规划的任务…")
+              : t("提出一个问题或描述一个任务…")
           }
           rows={3}
           disabled={projectSwitching}
@@ -500,20 +502,20 @@ function ComposerImpl({
             onContextMenu={(e) => e.preventDefault()}
           >
             <button type="button" role="menuitem" disabled={!ctxMenu.hasSelection} onClick={() => execCtxAction("cut")}>
-              <span>剪切</span>
+              <span>{t("剪切")}</span>
               <span className="ctx-menu-key">Ctrl+X</span>
             </button>
             <button type="button" role="menuitem" disabled={!ctxMenu.hasSelection} onClick={() => execCtxAction("copy")}>
-              <span>复制</span>
+              <span>{t("复制")}</span>
               <span className="ctx-menu-key">Ctrl+C</span>
             </button>
             <button type="button" role="menuitem" onClick={() => execCtxAction("paste")}>
-              <span>粘贴</span>
+              <span>{t("粘贴")}</span>
               <span className="ctx-menu-key">Ctrl+V</span>
             </button>
             <div className="ctx-menu-sep" aria-hidden />
             <button type="button" role="menuitem" disabled={!draft.length} onClick={() => execCtxAction("selectAll")}>
-              <span>全选</span>
+              <span>{t("全选")}</span>
               <span className="ctx-menu-key">Ctrl+A</span>
             </button>
           </div>
@@ -552,7 +554,7 @@ function ComposerImpl({
                   </span>
                   <span className="mode-meta">
                     <strong>Agent</strong>
-                    <small>可写 · 改代码与跑命令</small>
+                    <small>{t("可写 · 改代码与跑命令")}</small>
                   </span>
                   {mode === "agent" ? <span className="mode-check">✓</span> : null}
                 </button>
@@ -570,7 +572,7 @@ function ComposerImpl({
                   </span>
                   <span className="mode-meta">
                     <strong>Plan</strong>
-                    <small>只读 · 分析与出方案</small>
+                    <small>{t("只读 · 分析与出方案")}</small>
                   </span>
                   {mode === "plan" ? <span className="mode-check">✓</span> : null}
                 </button>
@@ -586,7 +588,7 @@ function ComposerImpl({
             aria-haspopup="listbox"
             aria-expanded={modelMenuOpen}
             onClick={() => setModelMenuOpen((v) => !v)}
-            title="切换模型"
+            title={t("切换模型")}
           >
             {modelLabel}
             <span className="mode-chevron" aria-hidden>
@@ -597,7 +599,7 @@ function ComposerImpl({
             <div className="model-menu" role="listbox">
               {availableModels.length === 0 ? (
                 <div className="model-menu-empty">
-                  <span>暂无可用模型</span>
+                  <span>{t("暂无可用模型")}</span>
                   <button
                     type="button"
                     className="model-menu-settings"
@@ -606,7 +608,7 @@ function ComposerImpl({
                       onOpenSettings();
                     }}
                   >
-                    去设置
+                    {t("去设置")}
                   </button>
                 </div>
               ) : (
@@ -616,7 +618,7 @@ function ComposerImpl({
                     高度互不拉伸；各自 height:auto / max-height 独立滚动。
                   */}
                   <div className="model-menu-body">
-                    <nav className="model-menu-providers" role="tablist" aria-label="模型平台">
+                    <nav className="model-menu-providers" role="tablist" aria-label={t("模型平台")}>
                       {groupedModels.map((group) => (
                         <button
                           key={group.providerId}
@@ -669,7 +671,7 @@ function ComposerImpl({
                       onOpenSettings();
                     }}
                   >
-                    ⚙ 模型设置…
+                    {t("⚙ 模型设置…")}
                   </button>
                 </>
               )}
@@ -684,10 +686,10 @@ function ComposerImpl({
             aria-haspopup="listbox"
             aria-expanded={thinkingMenuOpen}
             onClick={() => setThinkingMenuOpen((v) => !v)}
-            title="思考强度"
+            title={t("思考强度")}
           >
             <span className="thinking-icon">💭</span>
-            {thinkingEffort === "low" ? "低" : thinkingEffort === "medium" ? "中" : "高"}
+            {thinkingEffort === "low" ? t("低") : thinkingEffort === "medium" ? t("中") : t("高")}
             <span className="mode-chevron" aria-hidden>
               ▾
             </span>
@@ -705,7 +707,7 @@ function ComposerImpl({
                     onSelectThinkingEffort("high");
                   }}
                 >
-                  <span className="thinking-menu-name">高强度</span>
+                  <span className="thinking-menu-name">{t("高强度")}</span>
                   {thinkingEffort === "high" ? <span className="mode-check">✓</span> : null}
                 </button>
               </li>
@@ -720,7 +722,7 @@ function ComposerImpl({
                     onSelectThinkingEffort("medium");
                   }}
                 >
-                  <span className="thinking-menu-name">中强度</span>
+                  <span className="thinking-menu-name">{t("中强度")}</span>
                   {thinkingEffort === "medium" ? <span className="mode-check">✓</span> : null}
                 </button>
               </li>
@@ -735,7 +737,7 @@ function ComposerImpl({
                     onSelectThinkingEffort("low");
                   }}
                 >
-                  <span className="thinking-menu-name">低强度</span>
+                  <span className="thinking-menu-name">{t("低强度")}</span>
                   {thinkingEffort === "low" ? <span className="mode-check">✓</span> : null}
                 </button>
               </li>
@@ -746,12 +748,12 @@ function ComposerImpl({
         <div className="composer-actions">
           {queueCount > 0 ? (
             <div className="queue-badge">
-              <span className="queue-badge-text">待执行{queueCount}条</span>
+              <span className="queue-badge-text">{t("待执行{{count}}条", { count: queueCount })}</span>
               <button
                 type="button"
                 className="queue-badge-remove"
                 onClick={() => onRemoveQueueMessage(0)}
-                title="移除最早待执行消息"
+                title={t("移除最早待执行消息")}
               >
                 ✕
               </button>
@@ -759,20 +761,20 @@ function ComposerImpl({
           ) : null}
           {sending ? (
             <button type="button" className="stop-btn" onClick={onCancel}>
-              停止
+              {t("停止")}
             </button>
           ) : null}
           <button 
             type="submit" 
             className="send" 
             disabled={!draft.trim() || projectSwitching} 
-            aria-label="发送"
+            aria-label={t("发送")}
             title={
               projectSwitching 
-                ? "正在切换项目，请稍候..." 
+                ? t("正在切换项目，请稍候...") 
                 : !draft.trim() 
-                  ? "请输入消息" 
-                  : "发送消息"
+                  ? t("请输入消息") 
+                  : t("发送消息")
             }
           >
             ↑

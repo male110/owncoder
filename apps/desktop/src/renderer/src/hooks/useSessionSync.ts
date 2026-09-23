@@ -20,6 +20,8 @@ import { extractHistoryError, toAppError } from "../components/ErrorBanner";
 import { dropQueue, hydrateQueue, resumeQueue } from "./queue-controller";
 import { sessionStateMachine } from "../store/session-state-machine";
 import type { ChatTurnDto } from "../../../preload/index";
+import { t, type LocalePref } from "../../../shared/i18n/core";
+import { setLocalePref } from "../i18n";
 
 export function useSessionSync() {
   // Subscribe only to the local pending-new flag. Store actions are stable and
@@ -103,7 +105,7 @@ export function useSessionSync() {
       // an empty change list would otherwise read as "nothing to undo".
       if (pending.expired) {
         chat.setErrorAlert(
-          toAppError("本次会话的检查点已不在磁盘上，这些文件修改无法再通过「撤销」回滚。"),
+          toAppError(t("本次会话的检查点已不在磁盘上，这些文件修改无法再通过「撤销」回滚。")),
           sid,
         );
       }
@@ -259,10 +261,11 @@ export function useSessionSync() {
 
     const snap = await window.owncoder.getSettings();
     if (navigationVersion !== undefined && !isNavigationCurrent(navigationVersion)) return null;
+    setLocalePref((snap.effective.harness.locale ?? "system") as LocalePref);
     const sel = snap.effective.selectedModels ?? [];
     session.setAvailableModels(sel);
     session.setProviders(snap.effective.providers ?? []);
-    session.setModelLabel(sel.length > 0 ? sel[0]!.name : "未配置");
+    session.setModelLabel(sel.length > 0 ? sel[0]!.name : t("未配置"));
     session.setThinkingEffort(snap.effective.thinking?.defaultEffort ?? "high");
 
     const auth = await window.owncoder.getLlmAuthStatus();
@@ -382,8 +385,8 @@ export function useSessionSync() {
         ).length;
         chat.setLiveStatus(
           done === 0
-            ? `计划已批准，共 ${meta.tasks.length} 个任务。在下方输入框发送消息即可开始执行。`
-            : `任务执行中：${done}/${meta.tasks.length} 已完成`,
+            ? t("计划已批准，共 {{count}} 个任务。在下方输入框发送消息即可开始执行。", { count: meta.tasks.length })
+            : t("任务执行中：{{done}}/{{total}} 已完成", { done, total: meta.tasks.length }),
           sid,
         );
       } else {
@@ -523,7 +526,7 @@ export function useSessionSync() {
     const projectSessions = useSessionStore.getState().sessionsByProject[root] ?? [];
     const chatStore = useChatStore.getState();
     if (projectSessions.some((s) => chatStore.isSessionSending(s.id))) {
-      alert("该项目存在运行中的会话，请等待会话结束后再删除。");
+      alert(t("该项目存在运行中的会话，请等待会话结束后再删除。"));
       return;
     }
     // 删除前确定下一个要切换为当前项目的项目

@@ -1592,3 +1592,136 @@ describe("Termination Logic", () => {
     });
   });
 
+  describe("Action announcements are not natural completion", () => {
+    it("does not terminate on a continuation-intent text-only response", () => {
+      const state = createLoopState();
+      updateStateAfterResponse(state, {
+        content: "残留均为有意保留项。现在跑测试套件验证行为未破坏。",
+        toolCalls: [],
+        finishReason: "stop",
+        tokens: 10,
+        cost: 0,
+      });
+
+      const result = checkTermination(state, DEFAULT_TERMINATION_CONFIG);
+      expect(result.shouldTerminate).toBe(false);
+    });
+
+    it("does not terminate an English action announcement either", () => {
+      const state = createLoopState();
+      updateStateAfterResponse(state, {
+        content: "Changes are in place. Now I will run the test suite to verify.",
+        toolCalls: [],
+        finishReason: "stop",
+        tokens: 10,
+        cost: 0,
+      });
+
+      const result = checkTermination(state, DEFAULT_TERMINATION_CONFIG);
+      expect(result.shouldTerminate).toBe(false);
+    });
+
+    it("still terminates on a report-style final response", () => {
+      const state = createLoopState();
+      updateStateAfterResponse(state, {
+        content: "以上是本次修改的总结：共改动 3 个文件，测试全部通过。",
+        toolCalls: [],
+        finishReason: "stop",
+        tokens: 10,
+        cost: 0,
+      });
+
+      const result = checkTermination(state, DEFAULT_TERMINATION_CONFIG);
+      expect(result.shouldTerminate).toBe(true);
+    });
+
+    it("does not terminate via consecutive-text-only while announcing actions", () => {
+      const state = createLoopState();
+      // 措辞互不相似，避免触发“输出相似度”卡死检测（那是另一条兜底路径）。
+      const announcements = [
+        "编辑已经落盘。现在跑一遍类型检查确认没有引入错误。",
+        "接下来把 packages 下的测试套件全部跑一遍，看看是否有回归。",
+        "最后再核对一次 lint 与格式输出，马上开始跑冒烟测试。",
+      ];
+      for (const content of announcements) {
+        updateStateAfterResponse(state, {
+          content,
+          toolCalls: [],
+          finishReason: "stop",
+          tokens: 10,
+          cost: 0,
+        });
+      }
+
+      const result = checkTermination(state, DEFAULT_TERMINATION_CONFIG);
+      expect(result.shouldTerminate).toBe(false);
+    });
+  });
+
+  describe("Final reports override unmet information-needs veto", () => {
+    const unmetTask = {
+      id: "step_1",
+      description: "Fix loop termination",
+      status: "in_progress" as const,
+      dependsOn: [],
+      informationNeeds: [{ id: "need_1", question: "Where does the loop exit?" }],
+      stopReadingWhen: [{ condition: "exit condition known", requiredEvidenceIds: ["need_1"] }],
+      evidence: [],
+      retryCount: 0,
+      maxRetries: 0,
+    };
+
+    it("terminates on a report-style response even when information needs are unmet", () => {
+      const state = createLoopState(unmetTask);
+      updateStateAfterResponse(state, {
+        content: "以上是本次修改的总结：已在 react.ts 为未满足分支增加报告出口与续跑预算。",
+        toolCalls: [],
+        finishReason: "stop",
+        tokens: 10,
+        cost: 0,
+      });
+
+      const result = checkTermination(state, DEFAULT_TERMINATION_CONFIG);
+      expect(result.shouldTerminate).toBe(true);
+      if (result.shouldTerminate) {
+        expect(result.reason).toContain("Natural completion");
+      }
+    });
+
+    it("still refuses non-report text while information needs are unmet", () => {
+      const state = createLoopState(unmetTask);
+      updateStateAfterResponse(state, {
+        content: "I think I understand the exit path.",
+        toolCalls: [],
+        finishReason: "stop",
+        tokens: 10,
+        cost: 0,
+      });
+
+      const result = checkTermination(state, DEFAULT_TERMINATION_CONFIG);
+      expect(result.shouldTerminate).toBe(false);
+    });
+
+    it("terminates similar report-style outputs even when information needs are unmet", () => {
+      const state = createLoopState(unmetTask);
+      updateStateAfterResponse(state, {
+        content: "最终报告：循环终止条件已修复，报告产出后不再空转。",
+        toolCalls: [],
+        finishReason: "stop",
+        tokens: 10,
+        cost: 0,
+      });
+      updateStateAfterResponse(state, {
+        content: "最终报告：循环终止条件已修复，报告产出后不再空转。",
+        toolCalls: [],
+        finishReason: "stop",
+        tokens: 10,
+        cost: 0,
+      });
+
+      expect(state.consecutiveSimilarOutputs).toBeGreaterThanOrEqual(1);
+      const result = checkTermination(state, DEFAULT_TERMINATION_CONFIG);
+      expect(result.shouldTerminate).toBe(true);
+    });
+  });
+

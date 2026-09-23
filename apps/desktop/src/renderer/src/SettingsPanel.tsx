@@ -13,23 +13,23 @@ import type { WritePolicy } from "@owncoder/shared";
 import type { RuleFileDto, SettingsSnapshotDto, UserMemoryDto } from "../../preload/index";
 import { BlurNumberInput } from "./components/BlurNumberInput";
 import { SecurityRedactionTest } from "./components/SecurityRedactionTest";
+import type { LocalePref, MsgId } from "../../shared/i18n/core";
+import { setLocalePref, useI18n } from "./i18n";
 
 export type TabId =
+  | "harness"
   | "models"
   | "context"
-  | "index"
-  | "harness"
   | "mcp"
   | "secrets"
   | "rules"
   | "memories"
   | "restore";
 
-const TABS: { id: TabId; label: string; group?: string }[] = [
+const TABS: { id: TabId; label: MsgId; group?: MsgId }[] = [
+  { id: "harness", label: "常规设置", group: "运转" },
   { id: "models", label: "模型", group: "运转" },
   { id: "context", label: "上下文", group: "运转" },
-  { id: "index", label: "索引", group: "运转" },
-  { id: "harness", label: "执行", group: "运转" },
   { id: "mcp", label: "MCP", group: "运转" },
   { id: "secrets", label: "安全", group: "运转" },
   { id: "rules", label: "规则", group: "项目" },
@@ -46,7 +46,8 @@ interface Props {
 }
 
 export function SettingsPanel({ open, onClose, onSaved, initialTab }: Props) {
-  const [tab, setTab] = useState<TabId>(initialTab ?? "models");
+  const [tab, setTab] = useState<TabId>(initialTab ?? "harness");
+  const { t: tr } = useI18n();
 
   // Reset tab when panel reopens with a different initialTab
   useEffect(() => {
@@ -64,6 +65,8 @@ export function SettingsPanel({ open, onClose, onSaved, initialTab }: Props) {
   const savedApiKeyRef = useRef("");
   const latestDraftRef = useRef<SystemWorkflowConfig | null>(null);
   latestDraftRef.current = draft;
+  /** 自动保存 effect 经此 ref 调用最新 persistSettings（组件体内未 memo 函数）。 */
+  const persistSettingsRef = useRef<() => Promise<void>>(async () => {});
 
   const [hasWorkspace, setHasWorkspace] = useState(false);
   const [rules, setRules] = useState<RuleFileDto[]>([]);
@@ -98,6 +101,7 @@ export function SettingsPanel({ open, onClose, onSaved, initialTab }: Props) {
       const secrets = await window.owncoder.getSecrets();
       setSnap(s);
       setDraft(structuredClone(s.effective));
+      setLocalePref((s.effective.harness.locale ?? "system") as LocalePref);
       setLlmApiKey(secrets.llmApiKey ?? "");
       savedApiKeyRef.current = secrets.llmApiKey ?? "";
       setStatus("");
@@ -117,9 +121,8 @@ export function SettingsPanel({ open, onClose, onSaved, initialTab }: Props) {
     if (savingRef.current) return;
     const apiDirty = llmApiKey.trim() !== savedApiKeyRef.current;
     if (!dirty && !apiDirty) return;
-    const timer = setTimeout(() => void persistSettings(), 700);
+    const timer = setTimeout(() => void persistSettingsRef.current(), 700);
     return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draft, snap, llmApiKey, dirty, open]);
 
   // Auto-save the edited rule file shortly after typing stops.
@@ -163,11 +166,12 @@ export function SettingsPanel({ open, onClose, onSaved, initialTab }: Props) {
         savedApiKeyRef.current = llmApiKey.trim();
       }
       setSnap(s);
+      setLocalePref((s.effective.harness.locale ?? "system") as LocalePref);
       // Don't clobber edits made while the async save was in flight.
       if (JSON.stringify(latestDraftRef.current) === savingJson) {
         setDraft(structuredClone(s.effective));
       }
-      setStatus(`已自动保存（${s.fingerprint}）`);
+      setStatus(tr("已自动保存（{{fp}}）", { fp: s.fingerprint }));
       onSaved();
     } catch (e) {
       setStatus(e instanceof Error ? e.message : String(e));
@@ -176,9 +180,12 @@ export function SettingsPanel({ open, onClose, onSaved, initialTab }: Props) {
       setBusy(false);
     }
   };
+  // 每次渲染刷新 ref，使 debounce 到期时始终执行最新闭包
+  // （携带最新 draft/snap/llmApiKey），保存成功→setSnap→dirty 收敛语义不变。
+  persistSettingsRef.current = persistSettings;
 
   const onRestore = async () => {
-    if (!(await customConfirm("一键还原出厂设置？将删除用户工作流覆盖层，保留模型设置，不影响 API Key 环境变量与项目源码。"))) {
+    if (!(await customConfirm(tr("一键还原出厂设置？将删除用户工作流覆盖层，保留模型设置，不影响 API Key 环境变量与项目源码。")))) {
       return;
     }
     settingsRevisionRef.current += 1;
@@ -187,7 +194,8 @@ export function SettingsPanel({ open, onClose, onSaved, initialTab }: Props) {
       const s = await window.owncoder.restoreFactorySettings();
       setSnap(s);
       setDraft(structuredClone(s.effective));
-      setStatus("已还原出厂配置（不含项目规则）");
+      setLocalePref((s.effective.harness.locale ?? "system") as LocalePref);
+      setStatus(tr("已还原出厂配置（不含项目规则）"));
       onSaved();
     } catch (e) {
       setStatus(e instanceof Error ? e.message : String(e));
@@ -216,7 +224,7 @@ export function SettingsPanel({ open, onClose, onSaved, initialTab }: Props) {
     try {
       await window.owncoder.writeRule(selectedRule, ruleBody);
       setRuleDirty(false);
-      setStatus(`已自动保存规则：.owncoder/rules/${selectedRule}`);
+      setStatus(tr("已自动保存规则：.owncoder/rules/{{name}}", { name: selectedRule }));
       onSaved();
     } catch (e) {
       setStatus(e instanceof Error ? e.message : String(e));
@@ -230,12 +238,12 @@ export function SettingsPanel({ open, onClose, onSaved, initialTab }: Props) {
     try {
       await window.owncoder.writeRule(
         name,
-        `# ${name.replace(/\.md$/i, "")}\n\n- 优先小范围补丁。\n- 遵循项目既有约定。\n`,
+        tr("# {{name}}\n\n- 优先小范围补丁。\n- 遵循项目既有约定。\n", { name: name.replace(/\.md$/i, "") }),
       );
       setNewRuleName("");
       await reloadRules();
       await openRule(name);
-      setStatus(`已创建 ${name}`);
+      setStatus(tr("已创建 {{name}}", { name }));
       onSaved();
     } catch (e) {
       setStatus(e instanceof Error ? e.message : String(e));
@@ -246,7 +254,7 @@ export function SettingsPanel({ open, onClose, onSaved, initialTab }: Props) {
 
   const onDeleteRule = async () => {
     if (!selectedRule) return;
-    if (!(await customConfirm(`删除 .owncoder/rules/${selectedRule}？`))) return;
+    if (!(await customConfirm(tr("删除 .owncoder/rules/{{name}}？", { name: selectedRule })))) return;
     setBusy(true);
     try {
       await window.owncoder.deleteRule(selectedRule);
@@ -254,7 +262,7 @@ export function SettingsPanel({ open, onClose, onSaved, initialTab }: Props) {
       setRuleBody("");
       setRuleDirty(false);
       await reloadRules();
-      setStatus("已删除规则文件");
+      setStatus(tr("已删除规则文件"));
       onSaved();
     } catch (e) {
       setStatus(e instanceof Error ? e.message : String(e));
@@ -268,26 +276,26 @@ export function SettingsPanel({ open, onClose, onSaved, initialTab }: Props) {
       className="settings-overlay"
       role="dialog"
       aria-modal="true"
-      aria-label="系统设置"
+      aria-label={tr("系统设置")}
     >
       <div className="settings-modal">
         <div className="settings-layout">
-          <nav className="settings-nav" aria-label="工作流分区">
+          <nav className="settings-nav" aria-label={tr("工作流分区")}>
             <button type="button" className="settings-back" onClick={onClose}>
-              ← 返回工作区
+              {tr("← 返回工作区")}
             </button>
-            {TABS.map((t, i) => {
+            {TABS.map((tb, i) => {
               const prev = TABS[i - 1];
-              const showGroup = t.group && t.group !== prev?.group;
+              const showGroup = tb.group && tb.group !== prev?.group;
               return (
-                <div key={t.id}>
-                  {showGroup ? <div className="settings-nav-group">{t.group}</div> : null}
+                <div key={tb.id}>
+                  {showGroup && tb.group ? <div className="settings-nav-group">{tr(tb.group)}</div> : null}
                   <button
                     type="button"
-                    className={tab === t.id ? "active" : ""}
-                    onClick={() => setTab(t.id)}
+                    className={tab === tb.id ? "active" : ""}
+                    onClick={() => setTab(tb.id)}
                   >
-                    {t.label}
+                    {tr(tb.label)}
                   </button>
                 </div>
               );
@@ -296,7 +304,7 @@ export function SettingsPanel({ open, onClose, onSaved, initialTab }: Props) {
 
         <div className={`settings-body${tab === "models" ? " settings-body-models" : ""}`}>
           <div className="settings-body-head">
-            <h2>{TABS.find((t) => t.id === tab)?.label}</h2>
+            <h2>{tr(TABS.find((tb) => tb.id === tab)?.label ?? "模型")}</h2>
           </div>
           {tab === "models" && <ModelTab draft={draft} patch={patch} />}
 
@@ -304,7 +312,7 @@ export function SettingsPanel({ open, onClose, onSaved, initialTab }: Props) {
             <div className="form">
               {/* Context Window + Input/Output Ratio (single group) */}
               <fieldset>
-                <legend style={{ fontSize: "0.8em", fontWeight: 500 }}>上下文窗口</legend>
+                <legend style={{ fontSize: "0.8em", fontWeight: 500 }}>{tr("上下文窗口")}</legend>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 8 }}>
                   {[
                     { label: "64K", value: 65536 },
@@ -338,8 +346,8 @@ export function SettingsPanel({ open, onClose, onSaved, initialTab }: Props) {
                   <input
                     key={draft.context.contextWindow}
                     type="text"
-                    placeholder="自定义"
-                    title="支持 K/M 后缀，如 512K、2M"
+                    placeholder={tr("自定义")}
+                    title={tr("支持 K/M 后缀，如 512K、2M")}
                     defaultValue={draft.context.contextWindow.toString()}
                     style={{
                       width: 80,
@@ -370,7 +378,7 @@ export function SettingsPanel({ open, onClose, onSaved, initialTab }: Props) {
                   />
                 </div>
                 <label>
-                  输入占比
+                  {tr("输入占比")}
                   <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "nowrap", marginTop: 6 }}>
                     <span style={{ display: "inline-flex", alignItems: "center", gap: 0 }}>
                       <BlurNumberInput
@@ -386,7 +394,7 @@ export function SettingsPanel({ open, onClose, onSaved, initialTab }: Props) {
                       <span style={{ marginLeft: 4, color: "var(--muted)", fontSize: "13px", fontWeight: 500 }}>%</span>
                     </span>
                     <span style={{ color: "var(--muted)", fontSize: "0.85em", whiteSpace: "nowrap", opacity: 0.9 }}>
-                      输入 ≈{(draft.context.contextWindow * draft.context.inputRatio / 100).toLocaleString("zh-CN")} tokens · 输出 ≈{(draft.context.contextWindow * (100 - draft.context.inputRatio) / 100).toLocaleString("zh-CN")} tokens
+                      {tr("输入 ≈{{in}} tokens · 输出 ≈{{out}} tokens", { in: (draft.context.contextWindow * draft.context.inputRatio / 100).toLocaleString("zh-CN"), out: (draft.context.contextWindow * (100 - draft.context.inputRatio) / 100).toLocaleString("zh-CN") })}
                     </span>
                   </div>
                 </label>
@@ -394,14 +402,14 @@ export function SettingsPanel({ open, onClose, onSaved, initialTab }: Props) {
 
               {/* Segment Ratios */}
               <fieldset>
-                <legend style={{ fontSize: "0.8em", fontWeight: 500 }}>输入预算段分配</legend>
+                <legend style={{ fontSize: "0.8em", fontWeight: 500 }}>{tr("输入预算段分配")}</legend>
                 <p className="hint" style={{ marginTop: 0, marginBottom: 10 }}>
-                  输入预算扣除系统提示、工具定义等固定段后，剩余空间按以下比例分配给三个动态段。
+                  {tr("输入预算扣除系统提示、工具定义等固定段后，剩余空间按以下比例分配给三个动态段。")}
                 </p>
                 {([
-                  { key: "historyRatio" as const, label: "对话历史", hint: "聊天记录与上下文" },
-                  { key: "toolResultRatio" as const, label: "工具调用结果", hint: "工具返回给模型的内容，含代码检索结果" },
-                  { key: "techStackRatio" as const, label: "技术栈信息", hint: "项目结构、依赖等" },
+                  { key: "historyRatio" as const, label: tr("对话历史"), hint: tr("聊天记录与上下文") },
+                  { key: "toolResultRatio" as const, label: tr("工具调用结果"), hint: tr("工具返回给模型的内容，含代码检索结果") },
+                  { key: "techStackRatio" as const, label: tr("技术栈信息"), hint: tr("项目结构、依赖等") },
                 ]).map(({ key, label, hint }) => (
                   <div key={key} style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8, flexWrap: "wrap" }}>
                     <span style={{ minWidth: 100, fontSize: "13px", fontWeight: 500 }}>{label}</span>
@@ -423,17 +431,17 @@ export function SettingsPanel({ open, onClose, onSaved, initialTab }: Props) {
                   </div>
                 ))}
                 <div style={{ marginTop: 4, fontSize: "0.85em", color: "var(--muted)" }}>
-                  合计：{Math.round(
+                  {tr("合计：{{total}}", { total: Math.round(
                     ((draft.context.segments?.historyRatio ?? 0.3)
                       + (draft.context.segments?.toolResultRatio ?? 0.65)
                       + (draft.context.segments?.techStackRatio ?? 0.05)) * 100,
-                  )}%
+                  ) })}%
                   {(() => {
                     const sum = (draft.context.segments?.historyRatio ?? 0.3)
                       + (draft.context.segments?.toolResultRatio ?? 0.65)
                       + (draft.context.segments?.techStackRatio ?? 0.05);
                     if (Math.abs(sum - 1) > 0.01) {
-                      return <span style={{ color: "var(--danger, #e74c3c)", marginLeft: 8 }}>（建议合计 100%）</span>;
+                      return <span style={{ color: "var(--danger, #e74c3c)", marginLeft: 8 }}>{tr("（建议合计 100%）")}</span>;
                     }
                     return null;
                   })()}
@@ -443,58 +451,28 @@ export function SettingsPanel({ open, onClose, onSaved, initialTab }: Props) {
             </div>
           )}
 
-          {tab === "index" && (
-            <div className="form">
-              <label className="check">
-                <input
-                  type="checkbox"
-                  checked={draft.index.enabled}
-                  onChange={(e) =>
-                    patch((d) => {
-                      d.index.enabled = e.target.checked;
-                    })
-                  }
-                />
-                启用符号索引
-              </label>
-              <label>
-                额外忽略（每行一条）
-                <textarea
-                  rows={6}
-                  value={draft.index.extraIgnore.join("\n")}
-                  onChange={(e) =>
-                    patch((d) => {
-                      d.index.extraIgnore = e.target.value
-                        .split("\n")
-                        .map((s) => s.trim())
-                        .filter(Boolean);
-                    })
-                  }
-                />
-              </label>
-            </div>
-          )}
-
           {tab === "harness" && (
             <div className="form">
-              <label className="check">
-                <input type="checkbox" checked disabled readOnly />
-                优先打补丁（锁定，不可关闭）
-              </label>
-              <label className="check">
-                <input
-                  type="checkbox"
-                  checked={draft.harness.checkpoint}
-                  onChange={(e) =>
-                    patch((d) => {
-                      d.harness.checkpoint = e.target.checked;
-                    })
-                  }
-                />
-                回合检查点
-              </label>
               <label>
-                工具输出最大字符数
+                {tr("语言")}
+                <select
+                  value={draft.harness.locale ?? "system"}
+                  onChange={(e) => {
+                    const next = e.target.value as LocalePref;
+                    patch((d) => {
+                      d.harness.locale = next;
+                    });
+                    setLocalePref(next);
+                  }}
+                >
+                  <option value="system">{tr("跟随系统")}</option>
+                  <option value="zh">{tr("中文")}</option>
+                  <option value="en">English</option>
+                </select>
+              </label>
+              <p className="hint">{tr("同时作用于界面显示语言与 LLM 回复语言。")}</p>
+              <label>
+                {tr("工具输出最大字符数")}
                 <BlurNumberInput
                   min={500}
                   value={draft.harness.toolOutputMaxChars}
@@ -511,7 +489,7 @@ export function SettingsPanel({ open, onClose, onSaved, initialTab }: Props) {
           {tab === "mcp" && (
             <div className="form">
               <p className="hint">
-                通过 stdio 连接 MCP 服务器。工具名形如 <code>mcp__id__tool</code>，保存后自动连接。
+                {tr("通过 stdio 连接 MCP 服务器。工具名形如 ")}<code>mcp__id__tool</code>{tr("，保存后自动连接。")}
               </p>
               {(draft.mcp?.servers ?? []).map((s, i) => (
                 <div key={`${s.id}-${i}`} className="mcp-server-card">
@@ -530,7 +508,7 @@ export function SettingsPanel({ open, onClose, onSaved, initialTab }: Props) {
                       />
                     </label>
                     <label>
-                      显示名
+                      {tr("显示名")}
                       <input
                         value={s.name ?? ""}
                         onChange={(e) =>
@@ -544,10 +522,10 @@ export function SettingsPanel({ open, onClose, onSaved, initialTab }: Props) {
                     </label>
                   </div>
                   <label>
-                    命令
+                    {tr("命令")}
                     <input
                       value={s.command}
-                      placeholder="例如 npx"
+                      placeholder={tr("例如 npx")}
                       onChange={(e) =>
                         patch((d) => {
                           const servers = [...(d.mcp?.servers ?? [])];
@@ -558,7 +536,7 @@ export function SettingsPanel({ open, onClose, onSaved, initialTab }: Props) {
                     />
                   </label>
                   <label>
-                    参数（空格分隔）
+                    {tr("参数（空格分隔）")}
                     <input
                       value={(s.args ?? []).join(" ")}
                       placeholder="-y @modelcontextprotocol/server-filesystem ."
@@ -587,7 +565,7 @@ export function SettingsPanel({ open, onClose, onSaved, initialTab }: Props) {
                           })
                         }
                       />
-                      启用
+                      {tr("启用")}
                     </label>
                     <button
                       type="button"
@@ -600,7 +578,7 @@ export function SettingsPanel({ open, onClose, onSaved, initialTab }: Props) {
                         })
                       }
                     >
-                      删除
+                      {tr("删除")}
                     </button>
                   </div>
                 </div>
@@ -626,7 +604,7 @@ export function SettingsPanel({ open, onClose, onSaved, initialTab }: Props) {
                   })
                 }
               >
-                添加 MCP 服务器
+                {tr("添加 MCP 服务器")}
               </button>
             </div>
           )}
@@ -643,19 +621,19 @@ export function SettingsPanel({ open, onClose, onSaved, initialTab }: Props) {
                     })
                   }
                 />
-                启用敏感信息脱敏
+                {tr("启用敏感信息脱敏")}
               </label>
               <div className="security-scope-note">
-                开启后，内建工具和 MCP 工具返回给大模型的文本都会经过敏感值脱敏；.env 等配置文件只遮罩账号、密码、令牌、密钥和连接凭据，普通配置仍可见。私钥、证书、加密凭据和数据库备份才会整体遮罩。
-                配置保存后立即生效，安全相关用户设置优先于项目配置，项目不能静默关闭本机保护；脱敏只影响发送给模型的内容，不修改本地文件。
-                <strong> 注意：</strong>脱敏不是命令或第三方 MCP 的完整权限沙箱；可变更数据的 MCP 工具会要求确认，其服务器授权范围仍由本机 MCP 配置决定。
+                {tr("开启后，内建工具和 MCP 工具返回给大模型的文本都会经过敏感值脱敏；.env 等配置文件只遮罩账号、密码、令牌、密钥和连接凭据，普通配置仍可见。私钥、证书、加密凭据和数据库备份才会整体遮罩。")}
+                {tr("配置保存后立即生效，安全相关用户设置优先于项目配置，项目不能静默关闭本机保护；脱敏只影响发送给模型的内容，不修改本地文件。")}
+                <strong> {tr("注意：")}</strong>{tr("脱敏不是命令或第三方 MCP 的完整权限沙箱；可变更数据的 MCP 工具会要求确认，其服务器授权范围仍由本机 MCP 配置决定。")}
               </div>
 
               <SecurityRedactionTest />
 
-              <h3>文件写入保护</h3>
+              <h3>{tr("文件写入保护")}</h3>
               <label>
-                可写策略
+                {tr("可写策略")}
                 <select
                   value={draft.context.writePolicy}
                   onChange={(e) =>
@@ -664,23 +642,23 @@ export function SettingsPanel({ open, onClose, onSaved, initialTab }: Props) {
                     })
                   }
                 >
-                  <option value="loose">宽松（仅保留核心敏感文件保护）</option>
-                  <option value="balanced">均衡（推荐：保护密钥、依赖、构建产物和锁文件）</option>
-                  <option value="strict">严格（仅允许主流源码与配置文件）</option>
+                  <option value="loose">{tr("宽松（仅保留核心敏感文件保护）")}</option>
+                  <option value="balanced">{tr("均衡（推荐：保护密钥、依赖、构建产物和锁文件）")}</option>
+                  <option value="strict">{tr("严格（仅允许主流源码与配置文件）")}</option>
                 </select>
               </label>
               <p className="hint" style={{ marginTop: 4 }}>
-                {draft.context.writePolicy === "balanced" && "保护敏感文件（.env、密钥）、锁文件（package-lock、yarn.lock）和构建产物目录（dist、build），其余文件可写入。"}
-                {draft.context.writePolicy === "strict" && "仅允许主流源码和配置文件扩展名（.ts/.py/.go/.rs/.json/.yaml 等），其他类型文件一律拒绝写入。"}
-                {draft.context.writePolicy === "loose" && "只保留核心安全防护（.git、node_modules、.owncoder 元数据不可写），其余文件均放行。"}
+                {draft.context.writePolicy === "balanced" && tr("保护敏感文件（.env、密钥）、锁文件（package-lock、yarn.lock）和构建产物目录（dist、build），其余文件可写入。")}
+                {draft.context.writePolicy === "strict" && tr("仅允许主流源码和配置文件扩展名（.ts/.py/.go/.rs/.json/.yaml 等），其他类型文件一律拒绝写入。")}
+                {draft.context.writePolicy === "loose" && tr("只保留核心安全防护（.git、node_modules、.owncoder 元数据不可写），其余文件均放行。")}
               </p>
               <p className="hint" style={{ marginTop: 2 }}>
-                该策略约束内建文件写入工具；Agent 命令中的潜在写入/删除操作仍会进入危险命令确认。
-                严格模式已覆盖 Java/Spring、Kotlin、Maven/Gradle、Node.js、Python、Go、Rust、.NET、PHP、Ruby、移动端、Shell、SQL、GraphQL、Protobuf 及常见前端框架。
+                {tr("该策略约束内建文件写入工具；Agent 命令中的潜在写入/删除操作仍会进入危险命令确认。")}
+                {tr("严格模式已覆盖 Java/Spring、Kotlin、Maven/Gradle、Node.js、Python、Go、Rust、.NET、PHP、Ruby、移动端、Shell、SQL、GraphQL、Protobuf 及常见前端框架。")}
               </p>
 
-              <h3>主流项目默认覆盖</h3>
-              <p className="hint">以下类型使用同一份运行时默认清单，不再由界面单独维护：</p>
+              <h3>{tr("主流项目默认覆盖")}</h3>
+              <p className="hint">{tr("以下类型使用同一份运行时默认清单，不再由界面单独维护：")}</p>
               <div className="security-coverage-grid">
                 {SECURITY_STACK_COVERAGE.map((item) => (
                   <div className="security-coverage-item" key={item.name}>
@@ -690,28 +668,27 @@ export function SettingsPanel({ open, onClose, onSaved, initialTab }: Props) {
                 ))}
               </div>
 
-              <h3>内置敏感文件规则</h3>
+              <h3>{tr("内置敏感文件规则")}</h3>
               <p className="hint">
-                共 {BUILTIN_SENSITIVE_FILES.length} 条受保护文件规则。.env*、Spring application*/bootstrap* 与 .NET appsettings* 使用敏感字段检测，端口、环境、日志级别等普通配置保持可见；私钥、JKS/keystore、加密凭据和数据库备份整体保护。
+                {tr("共 {{count}} 条受保护文件规则。.env*、Spring application*/bootstrap* 与 .NET appsettings* 使用敏感字段检测，端口、环境、日志级别等普通配置保持可见；私钥、JKS/keystore、加密凭据和数据库备份整体保护。", { count: BUILTIN_SENSITIVE_FILES.length })}
               </p>
               <div className="secrets-builtin-list">
                 <code>{BUILTIN_SENSITIVE_FILES.join(", ")}</code>
               </div>
 
-              <h3>内置敏感值检测规则</h3>
-              <p className="hint">所有工具输出都会检测以下敏感值（只读展示，不可修改）：</p>
+              <h3>{tr("内置敏感值检测规则")}</h3>
+              <p className="hint">{tr("所有工具输出都会检测以下敏感值（只读展示，不可修改）：")}</p>
               <div className="secrets-builtin-list">
                 <code>
-                  OpenAI / Anthropic / AWS / GCP / HuggingFace / GitHub / GitLab / Slack / Stripe Token，
-                  Bearer Token、JWT、PEM/OpenSSH 私钥、账号 / Username / Login、Password/Passwd/API Key/Secret/Token 字段、
-                  环境变量凭据，以及 MongoDB/PostgreSQL/MySQL/Redis/AMQP 连接字符串
+                  {tr("OpenAI / Anthropic / AWS / GCP / HuggingFace / GitHub / GitLab / Slack / Stripe Token，")}
+                  {tr("Bearer Token、JWT、PEM/OpenSSH 私钥、账号 / Username / Login、Password/Passwd/API Key/Secret/Token 字段、环境变量凭据，以及 MongoDB/PostgreSQL/MySQL/Redis/AMQP 连接字符串")}
                 </code>
               </div>
 
-              <h3>自定义敏感文件</h3>
-              <p className="hint">添加额外的敏感文件 glob 模式（每行一个）：</p>
+              <h3>{tr("自定义敏感文件")}</h3>
+              <p className="hint">{tr("添加额外的敏感文件 glob 模式（每行一个）：")}</p>
               <label>
-                敏感文件模式
+                {tr("敏感文件模式")}
                 <textarea
                   rows={4}
                   value={(draft.secrets?.sensitiveFiles ?? []).join("\n")}
@@ -730,12 +707,12 @@ export function SettingsPanel({ open, onClose, onSaved, initialTab }: Props) {
                 />
               </label>
 
-              <h3>自定义检测规则</h3>
+              <h3>{tr("自定义检测规则")}</h3>
               <p className="hint">
-                添加额外正则表达式（每行一个）。无效表达式会被忽略，不会中断文件读取或关闭内置保护。
+                {tr("添加额外正则表达式（每行一个）。无效表达式会被忽略，不会中断文件读取或关闭内置保护。")}
               </p>
               <label>
-                检测规则（正则）
+                {tr("检测规则（正则）")}
                 <textarea
                   rows={4}
                   value={(draft.secrets?.patterns ?? []).join("\n")}
@@ -759,17 +736,16 @@ export function SettingsPanel({ open, onClose, onSaved, initialTab }: Props) {
           {tab === "rules" && (
             <div className="form rules-form">
               <p className="hint">
-                项目级规则存于 <code>.owncoder/rules/*.md</code>，按文件名排序合并后注入
-                系统提示（有预算截断）。不属于用户工作流，一键还原不会删除。
+                {tr("项目级规则存于 ")}<code>.owncoder/rules/*.md</code>{tr("，按文件名排序合并后注入系统提示（有预算截断）。不属于用户工作流，一键还原不会删除。")}
               </p>
               {!hasWorkspace ? (
-                <p className="hint">请先打开工作区文件夹。</p>
+                <p className="hint">{tr("请先打开工作区文件夹。")}</p>
               ) : (
                 <>
                   <div className="rules-layout">
                     <div className="rules-list">
                       {rules.length === 0 ? (
-                        <p className="hint">暂无规则文件</p>
+                        <p className="hint">{tr("暂无规则文件")}</p>
                       ) : (
                         rules.map((r) => (
                           <button
@@ -789,7 +765,7 @@ export function SettingsPanel({ open, onClose, onSaved, initialTab }: Props) {
                           <div className="prompt-toolbar">
                             <strong>{selectedRule}</strong>
                             <button type="button" className="ghost" disabled={busy} onClick={() => void onDeleteRule()}>
-                              删除
+                              {tr("删除")}
                             </button>
                           </div>
                           <textarea
@@ -802,19 +778,19 @@ export function SettingsPanel({ open, onClose, onSaved, initialTab }: Props) {
                           />
                         </>
                       ) : (
-                        <p className="hint">选择左侧文件，或新建规则。</p>
+                        <p className="hint">{tr("选择左侧文件，或新建规则。")}</p>
                       )}
                     </div>
                   </div>
                   <div className="todo-actions">
                     <input
                       value={newRuleName}
-                      placeholder="新规则.md"
+                      placeholder={tr("新规则.md")}
                       onChange={(e) => setNewRuleName(e.target.value)}
                       style={{ flex: 1, minWidth: 120 }}
                     />
                     <button type="button" className="ghost" disabled={busy} onClick={() => void onCreateRule()}>
-                      新建
+                      {tr("新建")}
                     </button>
                   </div>
                 </>
@@ -827,15 +803,15 @@ export function SettingsPanel({ open, onClose, onSaved, initialTab }: Props) {
           {tab === "restore" && (
             <div className="form">
               <p>
-                指纹：<code>{snap.fingerprint}</code>
-                {snap.matchesBuiltin ? "（与出厂一致）" : "（已有用户覆盖）"}
+                {tr("指纹：")}<code>{snap.fingerprint}</code>
+                {snap.matchesBuiltin ? tr("（与出厂一致）") : tr("（已有用户覆盖）")}
               </p>
-              <p className="mono">工作流：{snap.paths.userWorkflow}</p>
-              <p className="mono">模型设置：{snap.paths.userModels}</p>
+              <p className="mono">{tr("工作流：{{path}}", { path: snap.paths.userWorkflow })}</p>
+              <p className="mono">{tr("模型设置：{{path}}", { path: snap.paths.userModels })}</p>
               <button type="button" className="danger" disabled={busy} onClick={() => void onRestore()}>
-                一键还原出厂
+                {tr("一键还原出厂")}
               </button>
-              <p className="hint">删除用户工作流覆盖；保留模型设置与 API Key，不改项目源码与规则。</p>
+              <p className="hint">{tr("删除用户工作流覆盖；保留模型设置与 API Key，不改项目源码与规则。")}</p>
             </div>
           )}
         </div>
@@ -846,11 +822,11 @@ export function SettingsPanel({ open, onClose, onSaved, initialTab }: Props) {
             {status ||
               (tab === "rules"
                 ? ruleDirty
-                  ? "自动保存中…"
-                  : "规则已自动保存"
+                  ? tr("自动保存中…")
+                  : tr("规则已自动保存")
                 : busy || dirty
-                  ? "自动保存中…"
-                  : "已自动保存")}
+                  ? tr("自动保存中…")
+                  : tr("已自动保存"))}
           </span>
         </footer>
       </div>
@@ -867,9 +843,12 @@ function ModelTab({
   draft: SystemWorkflowConfig;
   patch: (fn: (d: SystemWorkflowConfig) => void) => void;
 }) {
-  const providers = draft.providers ?? [];
+  // useMemo 稳定引用：draft.providers 为 undefined 时复用同一空数组，
+  // 避免每次渲染新建数组进入 effect deps 导致 effect 空转。
+  const providers = useMemo(() => draft.providers ?? [], [draft.providers]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
+  const { t: tr } = useI18n();
 
   useEffect(() => {
     if (adding) return;
@@ -885,7 +864,7 @@ function ModelTab({
   return (
     <div className="model-tab-layout">
       <div className="model-provider-list">
-        <div className="model-provider-list-head">自定义平台</div>
+        <div className="model-provider-list-head">{tr("自定义平台")}</div>
         {providers.map((p) => {
           const enabledCount =
             draft.selectedModels?.filter((m) => m.providerId === p.id).length ?? 0;
@@ -902,7 +881,7 @@ function ModelTab({
               <span className="model-provider-name">{p.name || p.baseUrl}</span>
               <span
                 className={`model-provider-dot ${enabledCount > 0 ? "on" : ""}`}
-                title={`已启用 ${enabledCount} 个模型`}
+                title={tr("已启用 {{count}} 个模型", { count: enabledCount })}
               />
             </button>
           );
@@ -912,7 +891,7 @@ function ModelTab({
           className={`model-provider-item add ${adding ? "active" : ""}`}
           onClick={() => setAdding(true)}
         >
-          + 添加平台
+          {tr("+ 添加平台")}
         </button>
       </div>
 
@@ -937,7 +916,7 @@ function ModelTab({
           />
         ) : (
           <div className="model-empty">
-            <p className="hint">暂无平台配置，点击左侧「添加平台」开始。</p>
+            <p className="hint">{tr("暂无平台配置，点击左侧「添加平台」开始。")}</p>
           </div>
         )}
       </div>
@@ -979,6 +958,7 @@ function ProviderDetail({
   const [listMode, setListMode] = useState<"add" | "search">("add");
   const [modelSearchQuery, setModelSearchQuery] = useState("");
   const modelListInputRef = useRef<HTMLInputElement>(null);
+  const { t: tr } = useI18n();
 
   useEffect(() => {
     setName(provider.name);
@@ -1016,7 +996,7 @@ function ProviderDetail({
     try {
       const result = await window.owncoder.fetchModelList(baseUrl, apiKey || undefined, apiFormat);
       if (!result.ok) {
-        setFetchError(result.error ?? "未知错误");
+        setFetchError(result.error ?? tr("未知错误"));
         return;
       }
       const models = (result.models ?? []).map((m: { id: string; name: string }) => ({
@@ -1110,18 +1090,18 @@ function ProviderDetail({
           <input
             className="model-detail-name-input"
             value={name}
-            placeholder="平台名称"
+            placeholder={tr("平台名称")}
             onChange={(e) => {
               setName(e.target.value);
               syncProvider("name", e.target.value);
             }}
           />
           <span className={`model-status-badge ${enabledCount > 0 ? "on" : ""}`}>
-            {enabledCount > 0 ? `已启用 ${enabledCount}` : "未启用"}
+            {enabledCount > 0 ? tr("已启用 {{count}}", { count: enabledCount }) : tr("未启用")}
           </span>
         </div>
         <button type="button" className="ghost small danger" onClick={removeProvider}>
-          删除
+          {tr("删除")}
         </button>
       </div>
 
@@ -1138,7 +1118,7 @@ function ProviderDetail({
       </label>
 
       <label className="model-detail-field">
-        API 协议
+        {tr("API 协议")}
         <select
           value={apiFormat}
           onChange={(e) => {
@@ -1150,7 +1130,7 @@ function ProviderDetail({
           <option value="openai-chat">OpenAI Chat Completions</option>
           <option value="anthropic-messages">Anthropic Messages</option>
         </select>
-        <span className="hint">协议与 Base URL 独立：自建或代理端点也可选 Anthropic Messages。</span>
+        <span className="hint">{tr("协议与 Base URL 独立：自建或代理端点也可选 Anthropic Messages。")}</span>
       </label>
 
       <label className="model-detail-field">
@@ -1159,7 +1139,7 @@ function ProviderDetail({
           <input
             type={showKey ? "text" : "password"}
             value={apiKey}
-            placeholder="sk-...（本地可留空）"
+            placeholder={tr("sk-...（本地可留空）")}
             autoComplete="off"
             onChange={(e) => {
               setApiKey(e.target.value);
@@ -1167,7 +1147,7 @@ function ProviderDetail({
             }}
           />
           <button type="button" className="ghost tiny" onClick={() => setShowKey((s) => !s)}>
-            {showKey ? "隐藏" : "显示"}
+            {showKey ? tr("隐藏") : tr("显示")}
           </button>
         </div>
       </label>
@@ -1179,7 +1159,7 @@ function ProviderDetail({
           disabled={fetching || !baseUrl.trim()}
           onClick={() => void fetchModels()}
         >
-          {fetching ? "获取中..." : "获取模型列表"}
+          {fetching ? tr("获取中...") : tr("获取模型列表")}
         </button>
       </div>
 
@@ -1201,9 +1181,9 @@ function ProviderDetail({
         }}
       >
         <div className="model-detail-list-head">
-          模型列表
+          {tr("模型列表")}
           {listMode === "search" && (
-            <span className="model-list-mode-hint">按 Esc 退出搜索</span>
+            <span className="model-list-mode-hint">{tr("按 Esc 退出搜索")}</span>
           )}
         </div>
         <div className="model-manual-add">
@@ -1212,7 +1192,7 @@ function ProviderDetail({
               <input
                 ref={modelListInputRef}
                 value={manualModelId}
-                placeholder="手动输入模型 ID，如 gpt-4o、deepseek-chat（Ctrl+F 搜索）"
+                placeholder={tr("手动输入模型 ID，如 gpt-4o、deepseek-chat（Ctrl+F 搜索）")}
                 onChange={(e) => setManualModelId(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") {
@@ -1227,23 +1207,23 @@ function ProviderDetail({
                 disabled={!manualModelId.trim()}
                 onClick={addManualModel}
               >
-                添加
+                {tr("添加")}
               </button>
             </>
           ) : (
             <input
               ref={modelListInputRef}
               value={modelSearchQuery}
-              placeholder="模糊搜索模型名称或 ID…"
+              placeholder={tr("模糊搜索模型名称或 ID…")}
               onChange={(e) => setModelSearchQuery(e.target.value)}
-              aria-label="搜索模型"
+              aria-label={tr("搜索模型")}
             />
           )}
         </div>
         {provider.models.length === 0 ? (
-          <p className="hint">点击「获取模型列表」拉取，或在上方手动输入模型 ID 后添加</p>
+          <p className="hint">{tr("点击「获取模型列表」拉取，或在上方手动输入模型 ID 后添加")}</p>
         ) : filteredModels.length === 0 ? (
-          <p className="hint">无匹配模型</p>
+          <p className="hint">{tr("无匹配模型")}</p>
         ) : (
           filteredModels.map((m) => {
             const isSelected = selectedModels.some((s) => s.id === m.id);
@@ -1265,10 +1245,10 @@ function ProviderDetail({
                 <button
                   type="button"
                   className="ghost tiny danger"
-                  title="移除该模型"
+                  title={tr("移除该模型")}
                   onClick={() => removeModel(m.id)}
                 >
-                  删除
+                  {tr("删除")}
                 </button>
               </div>
             );
@@ -1295,6 +1275,7 @@ function NewProviderForm({
   const [fetching, setFetching] = useState(false);
   const [fetchError, setFetchError] = useState("");
   const [showKey, setShowKey] = useState(false);
+  const { t: tr } = useI18n();
 
   const fetchAndAdd = useCallback(async () => {
     if (!baseUrl.trim()) return;
@@ -1304,7 +1285,7 @@ function NewProviderForm({
       const providerId = `provider_${Date.now().toString(36)}`;
       const result = await window.owncoder.fetchModelList(baseUrl, apiKey || undefined, apiFormat);
       if (!result.ok) {
-        setFetchError(result.error ?? "未知错误");
+        setFetchError(result.error ?? tr("未知错误"));
         return;
       }
       const models = (result.models ?? []).map((m: { id: string; name: string }) => ({
@@ -1350,11 +1331,11 @@ function NewProviderForm({
   return (
     <div className="model-detail">
       <div className="model-detail-head">
-        <div className="model-detail-title">添加平台</div>
+        <div className="model-detail-title">{tr("添加平台")}</div>
       </div>
 
       <label className="model-detail-field">
-        平台名称
+        {tr("平台名称")}
         <input
           value={name}
           placeholder="Ollama / OpenAI / DeepSeek"
@@ -1372,12 +1353,12 @@ function NewProviderForm({
       </label>
 
       <label className="model-detail-field">
-        API 协议
+        {tr("API 协议")}
         <select value={apiFormat} onChange={(e) => setApiFormat(e.target.value as ApiFormat)}>
           <option value="openai-chat">OpenAI Chat Completions</option>
           <option value="anthropic-messages">Anthropic Messages</option>
         </select>
-        <span className="hint">协议与 Base URL 独立：自建或代理端点也可选 Anthropic Messages。</span>
+        <span className="hint">{tr("协议与 Base URL 独立：自建或代理端点也可选 Anthropic Messages。")}</span>
       </label>
 
       <label className="model-detail-field">
@@ -1386,12 +1367,12 @@ function NewProviderForm({
           <input
             type={showKey ? "text" : "password"}
             value={apiKey}
-            placeholder="sk-...（本地可留空）"
+            placeholder={tr("sk-...（本地可留空）")}
             autoComplete="off"
             onChange={(e) => setApiKey(e.target.value)}
           />
           <button type="button" className="ghost tiny" onClick={() => setShowKey((s) => !s)}>
-            {showKey ? "隐藏" : "显示"}
+            {showKey ? tr("隐藏") : tr("显示")}
           </button>
         </div>
       </label>
@@ -1399,7 +1380,7 @@ function NewProviderForm({
       {fetchError && <p className="error-text">{fetchError}</p>}
 
       <p className="hint" style={{ margin: "4px 0 10px" }}>
-        「获取并添加」将调用 /v1/models 拉取模型列表；若端点不可用或想稍后手动添加模型，请用「直接添加」。
+        {tr("「获取并添加」将调用 /v1/models 拉取模型列表；若端点不可用或想稍后手动添加模型，请用「直接添加」。")}
       </p>
 
       <div className="model-detail-actions">
@@ -1409,7 +1390,7 @@ function NewProviderForm({
           disabled={fetching || !baseUrl.trim()}
           onClick={() => void fetchAndAdd()}
         >
-          {fetching ? "获取中..." : "获取并添加"}
+          {fetching ? tr("获取中...") : tr("获取并添加")}
         </button>
         <button
           type="button"
@@ -1417,10 +1398,10 @@ function NewProviderForm({
           disabled={!baseUrl.trim()}
           onClick={addDirect}
         >
-          直接添加
+          {tr("直接添加")}
         </button>
         <button type="button" className="ghost small" onClick={onCancel}>
-          取消
+          {tr("取消")}
         </button>
       </div>
     </div>
@@ -1431,6 +1412,7 @@ function NewProviderForm({
 
 function MemoriesTab() {
   const [globalMemories, setGlobalMemories] = useState<UserMemoryDto[]>([]);
+  const { t: tr } = useI18n();
   const [projectMemories, setProjectMemories] = useState<UserMemoryDto[]>([]);
   const [editing, setEditing] = useState<{ memory: UserMemoryDto; scope: string } | null>(null);
   const [addingScope, setAddingScope] = useState<string | null>(null);
@@ -1501,7 +1483,7 @@ function MemoriesTab() {
   };
 
   const deleteMemory = async (id: string, scope: string) => {
-    if (!(await customConfirm("删除此偏好记忆？"))) return;
+    if (!(await customConfirm(tr("删除此偏好记忆？")))) return;
     await window.owncoder.deleteMemory(id, scope);
     await reload();
   };
@@ -1511,7 +1493,7 @@ function MemoriesTab() {
   const renderList = (items: UserMemoryDto[], scope: string) => (
     <div className="memories-list">
       {items.length === 0 ? (
-        <p className="hint">暂无{scope === "global" ? "全局" : "项目"}偏好记忆</p>
+        <p className="hint">{scope === "global" ? tr("暂无全局偏好记忆") : tr("暂无项目偏好记忆")}</p>
       ) : (
         items.map((m) => (
           <div key={m.id} className="memory-item">
@@ -1524,10 +1506,10 @@ function MemoriesTab() {
               <span className="hint">{new Date(m.updatedAt).toLocaleString()}</span>
               <div className="memory-item-actions">
                 <button type="button" className="ghost tiny" onClick={() => startEdit(m, scope)}>
-                  编辑
+                  {tr("编辑")}
                 </button>
                 <button type="button" className="ghost tiny danger" onClick={() => void deleteMemory(m.id, scope)}>
-                  删除
+                  {tr("删除")}
                 </button>
               </div>
             </div>
@@ -1540,34 +1522,34 @@ function MemoriesTab() {
   return (
     <div className="form">
       <p className="hint">
-        模型在对话中识别到持久偏好时会主动调用 save_memory 工具保存到这里。
-        全局偏好跨项目生效，项目偏好仅在当前工作区生效。
+        {tr("模型在对话中识别到持久偏好时会主动调用 save_memory 工具保存到这里。")}
+        {tr("全局偏好跨项目生效，项目偏好仅在当前工作区生效。")}
       </p>
 
       {showForm ? (
         <div className="memories-form">
           <p className="hint-inline">
-            {addingScope ? `添加${addingScope === "global" ? "全局" : "项目"}偏好` : `编辑${editing?.scope === "global" ? "全局" : "项目"}偏好`}
+            {addingScope ? (addingScope === "global" ? tr("添加全局偏好") : tr("添加项目偏好")) : (editing?.scope === "global" ? tr("编辑全局偏好") : tr("编辑项目偏好"))}
           </p>
           <label>
-            标题
+            {tr("标题")}
             <input
               value={form.title}
-              placeholder="例如：使用中文回复"
+              placeholder={tr("例如：使用中文回复")}
               onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
             />
           </label>
           <label>
-            内容
+            {tr("内容")}
             <textarea
               rows={4}
               value={form.content}
-              placeholder="偏好的详细描述"
+              placeholder={tr("偏好的详细描述")}
               onChange={(e) => setForm((f) => ({ ...f, content: e.target.value }))}
             />
           </label>
           <label>
-            分类
+            {tr("分类")}
             <input
               value={form.category}
               placeholder="general"
@@ -1575,41 +1557,41 @@ function MemoriesTab() {
             />
           </label>
           <label>
-            关键词（逗号分隔）
+            {tr("关键词（逗号分隔）")}
             <input
               value={form.keywords}
-              placeholder="中文, 语言, 回复"
+              placeholder={tr("中文, 语言, 回复")}
               onChange={(e) => setForm((f) => ({ ...f, keywords: e.target.value }))}
             />
           </label>
           <div className="todo-actions">
             <button type="button" className="ghost" onClick={() => void saveForm()}>
-              {editing ? "保存" : "添加"}
+              {editing ? tr("保存") : tr("添加")}
             </button>
             <button type="button" className="ghost" onClick={cancelForm}>
-              取消
+              {tr("取消")}
             </button>
           </div>
         </div>
       ) : null}
 
-      <h3>全局偏好</h3>
+      <h3>{tr("全局偏好")}</h3>
       {renderList(globalMemories, "global")}
       {!showForm ? (
         <button type="button" className="ghost" onClick={() => startAdd("global")}>
-          + 添加全局偏好
+          {tr("+ 添加全局偏好")}
         </button>
       ) : null}
 
-      <h3 style={{ marginTop: "1.5em" }}>当前项目偏好</h3>
+      <h3 style={{ marginTop: "1.5em" }}>{tr("当前项目偏好")}</h3>
       {!hasWorkspace ? (
-        <p className="hint">请先打开工作区文件夹</p>
+        <p className="hint">{tr("请先打开工作区文件夹")}</p>
       ) : (
         <>
           {renderList(projectMemories, "project")}
           {!showForm ? (
             <button type="button" className="ghost" onClick={() => startAdd("project")}>
-              + 添加项目偏好
+              {tr("+ 添加项目偏好")}
             </button>
           ) : null}
         </>

@@ -4,6 +4,8 @@ import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import type { TerminalEntryDto } from "../../../preload/index";
 import { useUiStore } from "../store/ui-store";
+import { t } from "../../../shared/i18n/core";
+import { useI18n } from "../i18n";
 
 const TERMINAL_THEMES = {
   dark: { background: "#0d1014", foreground: "#d8dee9", cursor: "#6b9cc4" },
@@ -194,7 +196,7 @@ let disposed = false;
       if (id === ptyIdRef.current) {
         clearSuggestion();
         inputBufferRef.current = "";
-        term.write("\r\n\x1b[90m[进程已退出]\x1b[0m\r\n", syncCursor);
+        term.write(`\r\n\x1b[90m${t("[进程已退出]")}\x1b[0m\r\n`, syncCursor);
       }
     });
     const onInput = term.onData((data) => {
@@ -296,6 +298,8 @@ export function TerminalDock({ terminalLog }: Props) {
   const [shellTabs, setShellTabs] = useState<number[]>([]);
   const [active, setActive] = useState<string>(AGENT_TAB);
   const seqRef = useRef(0);
+  // map/filter 回调里 t 已是条目变量，取词函数用别名 tr。
+  const { t: tr } = useI18n();
   const dockRef = useRef<HTMLDivElement | null>(null);
 
   const running = terminalLog.filter((t) => t.status === "running").length;
@@ -346,7 +350,7 @@ export function TerminalDock({ terminalLog }: Props) {
     >
       {open ? (
         <>
-          <div className="terminal-resize" onMouseDown={onResizeStart} title="拖动调整高度" />
+          <div className="terminal-resize" onMouseDown={onResizeStart} title={tr("拖动调整高度")} />
           <div className="terminal-tabs">
             <div
               className={active === AGENT_TAB ? "terminal-tab agent active" : "terminal-tab agent"}
@@ -357,7 +361,7 @@ export function TerminalDock({ terminalLog }: Props) {
                 onClick={() => setActive(AGENT_TAB)}
               >
                 <span className="csb-icon">⚙</span>
-                Agent 执行{activeCount ? ` (${activeCount})` : ""}
+                {tr("Agent 执行")}{activeCount ? ` (${activeCount})` : ""}
               </button>
             </div>
             {shellTabs.map((key, i) => (
@@ -367,25 +371,25 @@ export function TerminalDock({ terminalLog }: Props) {
               >
                 <button type="button" className="terminal-tab-main" onClick={() => setActive(String(key))}>
                   <span className="csb-icon">❯</span>
-                  终端 {i + 1}
+                  {tr("终端 {{n}}", { n: i + 1 })}
                 </button>
                 <button
                   type="button"
                   className="terminal-tab-close"
-                  title="关闭"
+                  title={tr("关闭")}
                   onClick={() => closeShell(key)}
                 >
                   ×
                 </button>
               </div>
             ))}
-            <button type="button" className="terminal-tab-add" title="新建终端" onClick={addShell}>
+            <button type="button" className="terminal-tab-add" title={tr("新建终端")} onClick={addShell}>
               ＋
             </button>
             <button
               type="button"
               className="terminal-collapse"
-              title="收起终端"
+              title={tr("收起终端")}
               onClick={() => setOpen(false)}
             >
               ─
@@ -406,7 +410,7 @@ export function TerminalDock({ terminalLog }: Props) {
               style={{ display: active === AGENT_TAB ? "block" : "none" }}
             >
               {terminalLog.length === 0 ? (
-                <p className="hint context-empty">Agent 执行命令的输出会显示在这里</p>
+                <p className="hint context-empty">{tr("Agent 执行命令的输出会显示在这里")}</p>
               ) : (
                 terminalLog.map((t) => (
                   <div key={t.id} className={`term-entry ${t.status}`}>
@@ -417,11 +421,11 @@ export function TerminalDock({ terminalLog }: Props) {
                           exit {t.exitCode}
                         </span>
                       ) : t.status === "running" ? (
-                        <span className="term-badge running">运行中</span>
+                        <span className="term-badge running">{tr("运行中")}</span>
                       ) : t.status === "pending_confirm" ? (
-                        <span className="term-badge pending">等待确认</span>
+                        <span className="term-badge pending">{tr("等待确认")}</span>
                       ) : t.status === "denied" ? (
-                        <span className="term-badge denied">已拒绝</span>
+                        <span className="term-badge denied">{tr("已拒绝")}</span>
                       ) : null}
                     </div>
                     {t.stdout ? <pre className="term-out">{t.stdout}</pre> : null}
@@ -435,11 +439,11 @@ export function TerminalDock({ terminalLog }: Props) {
       ) : (
         <button type="button" className="terminal-statusbar" onClick={() => setOpen(true)}>
           <span className="csb-icon">❯</span>
-          <span className="terminal-statusbar-label">终端</span>
+          <span className="terminal-statusbar-label">{tr("终端")}</span>
           {pending ? (
-            <span className="terminal-statusbar-run terminal-statusbar-pending">{pending} 个命令等待确认</span>
+            <span className="terminal-statusbar-run terminal-statusbar-pending">{tr("{{count}} 个命令等待确认", { count: pending })}</span>
           ) : running ? (
-            <span className="terminal-statusbar-run">{running} 个命令运行中</span>
+            <span className="terminal-statusbar-run">{tr("{{count}} 个命令运行中", { count: running })}</span>
           ) : null}
         </button>
       )}

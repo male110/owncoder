@@ -16,7 +16,7 @@ import {
   BUILTIN_TASK_DECOMPOSE_PROMPT,
   type ModelRef,
 } from "@owncoder/settings";
-import { OS_LOCALE_SYSTEM_PROMPT } from "../../loop.ts";
+import { localeSystemPrompt } from "../../loop.ts";
 import { contextBudgets } from "../../budget.ts";
 import { normalizeUsage } from "../../observability.ts";
 import type { Tracer } from "../../observability.ts";
@@ -134,19 +134,24 @@ export function isCurrentCodeBehaviorInquiry(message: string): boolean {
 }
 
 function extractDecomposeJson(content: string): string | undefined {
-  if (!content.includes("understanding") || !content.includes("steps")) return undefined;
+  if ((!content.includes("intent") && !content.includes("understanding"))
+    || (!content.includes("tasks") && !content.includes("steps"))) return undefined;
   const fenced = content.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1]?.trim();
   const candidate = fenced || content.match(/\{[\s\S]*\}/)?.[0];
   if (!candidate) return undefined;
+  const isDecomposeShape = (parsed: unknown): boolean =>
+    typeof parsed === "object" && parsed !== null
+    && ("intent" in parsed || "understanding" in parsed)
+    && ("tasks" in parsed || "steps" in parsed);
   try {
     const parsed = JSON.parse(candidate);
-    return parsed && typeof parsed === "object" && "understanding" in parsed && "steps" in parsed
+    return isDecomposeShape(parsed)
       ? JSON.stringify(parsed, null, 2)
       : undefined;
   } catch {
     try {
       const parsed = JSON.parse(jsonrepair(candidate));
-      return parsed && typeof parsed === "object" && "understanding" in parsed && "steps" in parsed
+      return isDecomposeShape(parsed)
         ? JSON.stringify(parsed, null, 2)
         : undefined;
     } catch {
@@ -401,49 +406,122 @@ export async function buildDecomposeContext(
 // ── Decompose Answer Parsing ───────────────────────────────────────
 
 /**
- * Parsed shape of the decomposition answer: an understanding paragraph, the
- * limits the user has set, and the steps that follow from both.
+ * Parsed shape of the decomposition answer: the user's intent, the limits the
+ * user has set, and the tasks (each with its steps) that follow from both.
  */
 type DecomposeRelevantHistory = NonNullable<TaskItem["relevantHistory"]>;
 
-interface DecomposeAnswer {
-  intent: string;
-  understanding: string;
-  goal?: string;
-  scope?: string[];
-  relation?: "continue" | "new";
-  completedSteps?: string[];
-  pendingSteps?: string[];
-  findings?: import("../../../turn-rounds.ts").Finding[];
-  checkpoints?: import("../../../turn-rounds.ts").Checkpoint[];
-  userConstraints: string[];
-  steps: Array<{
+interface DecomposeStep {
+  id: string;
+  description: string;
+  dependsOn: string[];
+  informationNeeds: Array<{
     id: string;
-    description: string;
-    dependsOn: string[];
-    informationNeeds: Array<{
-      id: string;
-      question: string;
-      source?: TaskItem["informationNeeds"][number]["source"];
-      priority?: TaskItem["informationNeeds"][number]["priority"];
-      fallback?: string;
-    }>;
-    stopReadingWhen: TaskItem["stopReadingWhen"];
-    verificationCriteria?: TaskItem["verificationCriteria"];
-    rollbackStrategy?: string;
-    estimatedComplexity?: TaskItem["estimatedComplexity"];
-    /** 本步可复用的全部相关历史（自由文本，不限于文件） */
-    relevantHistory?: DecomposeRelevantHistory;
+    question: string;
+    source?: TaskItem["informationNeeds"][number]["source"];
+    priority?: TaskItem["informationNeeds"][number]["priority"];
+    fallback?: string;
   }>;
+  stopReadingWhen: TaskItem["stopReadingWhen"];
+  verificationCriteria?: TaskItem["verificationCriteria"];
+  rollbackStrategy?: string;
+  estimatedComplexity?: TaskItem["estimatedComplexity"];
+  /** 本步可复用的全部相关历史（自由文本，不限于文件） */
+  relevantHistory?: DecomposeRelevantHistory;
+}
+
+interface DecomposeTask {
+  id: string;
+  description: string;
+  steps: DecomposeStep[];
+}
+
+interface DecomposeAnswer {
+  /** 用户意图目的（旧格式 understanding 兜底映射）。 */
+  intent: string;
+  userConstraints: string[];
+  tasks: DecomposeTask[];
   progressStatus?: string;
   /**
    * 整单共享可复用历史（兼容）。写入时会复制到每个缺少 relevantHistory 的子任务。
    */
   relevantHistory?: DecomposeRelevantHistory;
-  sharedEvidence?: import("../../../turn-rounds.ts").FileEvidence[];
 }
 
-function buildInspectCurrentCodeSteps(userMessage: string): DecomposeAnswer["steps"] {
+/**
+ * 归一化便捷方法：把 tasks[].steps 摊平为单一有序步骤列表，供调度侧
+ * （信息任务构建、循环检测、历史注入等）直接使用。
+ */
+export function flattenSteps<T>(
+  source: { tasks: ReadonlyArray<{ steps: ReadonlyArray<T> }> } | null | undefined,
+): T[] {
+  return (source?.tasks ?? []).flatMap((task) => [...task.steps]);
+}
+
+/**
+ * 检测同 task 内 steps 是否存在环依赖（dependsOn 仅允许指向同 task 步骤）。
+ * Exported for testing.
+ */
+export function detectCircularDependency(steps: ReadonlyArray<{ id: string; dependsOn: string[] }>): boolean {
+  const visited = new Set<string>();
+  const recursionStack = new Set<string>();
+
+  const hasCycle = (stepId: string): boolean => {
+    if (recursionStack.has(stepId)) return true;
+    if (visited.has(stepId)) return false;
+
+    visited.add(stepId);
+    recursionStack.add(stepId);
+
+    const step = steps.find((s) => s.id === stepId);
+    if (step) {
+      for (const dep of step.dependsOn) {
+        if (hasCycle(dep)) return true;
+      }
+    }
+
+    recursionStack.delete(stepId);
+    return false;
+  };
+
+  for (const step of steps) {
+    if (hasCycle(step.id)) return true;
+  }
+  return false;
+}
+
+/**
+ * 按 task 分别做环检；若某 task 有环，则清空该 task 内 dependsOn，
+ * 并用 `${task.id}_step_${n}` 重编 id，保证跨 task 全局唯一。
+ * Exported for testing.
+ */
+export function resolveCircularDependenciesInTasks<
+  TStep extends { id: string; dependsOn: string[] },
+  TTask extends { id: string; steps: TStep[] },
+>(
+  tasks: TTask[],
+): { tasks: TTask[]; hadCycle: boolean; cycledTaskIds: string[] } {
+  const cycledTaskIds: string[] = [];
+  const nextTasks = tasks.map((task) => {
+    if (!detectCircularDependency(task.steps)) return task;
+    cycledTaskIds.push(task.id);
+    return {
+      ...task,
+      steps: task.steps.map((step, index) => ({
+        ...step,
+        dependsOn: [] as string[],
+        id: `${task.id}_step_${index + 1}`,
+      })),
+    } as TTask;
+  });
+  return {
+    tasks: nextTasks,
+    hadCycle: cycledTaskIds.length > 0,
+    cycledTaskIds,
+  };
+}
+
+function buildInspectCurrentCodeSteps(userMessage: string): DecomposeStep[] {
   return [{
     id: "step_1",
     description: `定位并阅读与用户问题相关的当前实现：${userMessage}`,
@@ -465,17 +543,20 @@ function buildFallbackRawDecompose(userMessage: string) {
   const plan = generatePlan(userMessage, "");
   return {
     intent: userMessage,
-    understanding: userMessage,
     userConstraints: [] as string[],
     progressStatus: "The decomposition model was unavailable; using a local fallback plan.",
-    steps: plan.steps.map((step, index) => ({
-      id: step.id || `step_${index + 1}`,
-      description: step.description,
-      dependsOn: [],
-      informationNeeds: [],
-      stopReadingWhen: [],
-      relevantHistory: undefined,
-    })),
+    tasks: [{
+      id: "task_1",
+      description: userMessage,
+      steps: plan.steps.map((step, index) => ({
+        id: step.id || `step_${index + 1}`,
+        description: step.description,
+        dependsOn: [],
+        informationNeeds: [],
+        stopReadingWhen: [],
+        relevantHistory: undefined,
+      })),
+    }],
     relevantHistory: "",
   };
 }
@@ -488,27 +569,35 @@ export function recoverEmptyDecomposeSteps(
   answer: DecomposeAnswer,
   userMessage: string,
 ): DecomposeAnswer {
-  if (answer.steps.length > 0) return answer;
+  if (flattenSteps(answer).length > 0) return answer;
   if (isExplicitCodeChangeRequest(userMessage)) {
     return {
       ...answer,
-      understanding: answer.understanding || `用户要求直接修改代码：${userMessage}`,
+      intent: answer.intent || `用户要求直接修改代码：${userMessage}`,
       progressStatus: "新任务，第一步：定位并修改相关代码",
-      steps: [{
-        id: "step_1",
+      tasks: [{
+        id: "task_1",
         description: `定位并修改与用户请求相关的代码：${userMessage}`,
-        dependsOn: [],
-        informationNeeds: [],
-        stopReadingWhen: [],
+        steps: [{
+          id: "step_1",
+          description: `定位并修改与用户请求相关的代码：${userMessage}`,
+          dependsOn: [],
+          informationNeeds: [],
+          stopReadingWhen: [],
+        }],
       }],
     };
   }
   if (isCurrentCodeBehaviorInquiry(userMessage)) {
     return {
       ...answer,
-      understanding: answer.understanding || `用户询问当前代码/当前步骤如何处理：${userMessage}`,
+      intent: answer.intent || `用户询问当前代码/当前步骤如何处理：${userMessage}`,
       progressStatus: "新任务，第一步：定位并阅读相关实现",
-      steps: buildInspectCurrentCodeSteps(userMessage),
+      tasks: [{
+        id: "task_1",
+        description: `定位并阅读与用户问题相关的当前实现：${userMessage}`,
+        steps: buildInspectCurrentCodeSteps(userMessage),
+      }],
     };
   }
   return answer;
@@ -698,8 +787,12 @@ export function packFallbackRelevantHistory(
     if (round.taskDecompose) {
       try {
         const parsed = JSON.parse(round.taskDecompose) as Record<string, unknown>;
-        if (typeof parsed.understanding === "string" && parsed.understanding.trim()) {
-          parts.push(`understanding: ${clipBlock(parsed.understanding.trim(), 400)}`);
+        // 新格式 intent；旧持久化数据的理解段兜底映射。
+        const intent = typeof parsed.intent === "string" && parsed.intent.trim()
+          ? parsed.intent
+          : parsed.understanding;
+        if (typeof intent === "string" && intent.trim()) {
+          parts.push(`intent: ${clipBlock(intent.trim(), 400)}`);
         }
         if (Array.isArray(parsed.userConstraints)) {
           const constraints = parsed.userConstraints
@@ -748,9 +841,12 @@ function ensureStepRelevantHistories(
   return {
     ...answer,
     relevantHistory: shared,
-    steps: answer.steps.map((step) => ({
-      ...step,
-      relevantHistory: step.relevantHistory ?? shared,
+    tasks: answer.tasks.map((task) => ({
+      ...task,
+      steps: task.steps.map((step) => ({
+        ...step,
+        relevantHistory: step.relevantHistory ?? shared,
+      })),
     })),
   };
 }
@@ -759,19 +855,23 @@ function ensureStepRelevantHistories(
  * Parse the answer. Tolerant by design — a malformed field degrades to a safe
  * default rather than failing the turn.
  *
- * Accepts a bare JSON array too, so a user who kept the old array-only prompt on
- * this node keeps working.
+ * New shape: top-level `intent` + `tasks[].steps`. Old shapes are normalized:
+ * a top-level `steps` array (or bare JSON array) is wrapped into a single
+ * `task_1`, and a legacy `understanding` fills `intent`. Removed legacy keys
+ * (goal/scope/relation/completedSteps/pendingSteps/findings/checkpoints/
+ * sharedEvidence) are ignored without migration.
  *
  * Exported for testing.
  */
 export function parseDecomposeAnswer(text: string): DecomposeAnswer | null {
-  // 防止无限循环：限制最大步骤数
+  // 防止无限循环：限制最大任务数与步骤数
+  const MAX_TASKS = 20;
   const MAX_STEPS = 20;
   const MAX_INFORMATION_NEEDS_PER_STEP = 10;
   
   const objectMatch = text.match(/\{[\s\S]*\}/);
   const arrayMatch = text.match(/\[[\s\S]*\]/);
-  // Prefer whichever encloses the other: an object wrapping "steps" starts before
+  // Prefer whichever encloses the other: an object wrapping "tasks" starts before
   // the array it contains.
   const source =
     objectMatch && (!arrayMatch || objectMatch.index! < arrayMatch.index!)
@@ -786,108 +886,127 @@ export function parseDecomposeAnswer(text: string): DecomposeAnswer | null {
     return null;
   }
 
-  const rawSteps = Array.isArray(raw)
-    ? raw
-    : Array.isArray((raw as Record<string, unknown>)?.steps)
-      ? ((raw as Record<string, unknown>).steps as unknown[])
-      : [];
   const obj = (Array.isArray(raw) ? {} : raw ?? {}) as Record<string, unknown>;
 
-  // 限制步骤数量，防止无限循环
-  const limitedRawSteps = rawSteps.slice(0, MAX_STEPS);
-  
-  // 检测重复步骤：如果连续多个步骤描述完全相同，则只保留一个
-  const deduplicatedSteps = [];
-  let lastDescription = "";
-  let duplicateCount = 0;
-  
-  for (let i = 0; i < limitedRawSteps.length; i++) {
-    const step = (limitedRawSteps[i] ?? {}) as Record<string, unknown>;
-    const description = typeof step.description === "string" ? step.description.trim() : "";
-    
-    if (!description) continue;
-    
-    // 检测重复模式
-    if (description === lastDescription) {
-      duplicateCount++;
-      // 如果连续3个相同的步骤，说明可能陷入循环，跳过后续重复
-      if (duplicateCount >= 2) {
-        console.warn(`[task_decompose] 检测到重复步骤，跳过: ${description}`);
-        continue;
-      }
-    } else {
-      duplicateCount = 0;
-      lastDescription = description;
-    }
-    
-    deduplicatedSteps.push({step, i: deduplicatedSteps.length});
-  }
+  // 新格式 tasks[] 优先；旧格式（顶层 steps / 裸数组）包成单个 task_1。
+  const rawTasks: unknown[] = Array.isArray(obj.tasks)
+    ? obj.tasks.slice(0, MAX_TASKS)
+    : [{
+        id: "task_1",
+        description: "",
+        steps: (Array.isArray(raw) ? raw : Array.isArray(obj.steps) ? obj.steps : []).slice(0, MAX_STEPS),
+      }];
 
-  const steps = deduplicatedSteps
-    .map(({step, i}) => {
+  const parseTaskSteps = (rawSteps: unknown[]): DecomposeStep[] => {
+    // 限制步骤数量，防止无限循环
+    const limitedRawSteps = rawSteps.slice(0, MAX_STEPS);
+  
+    // 检测重复步骤：如果连续多个步骤描述完全相同，则只保留一个
+    const deduplicatedSteps = [];
+    let lastDescription = "";
+    let duplicateCount = 0;
+  
+    for (let i = 0; i < limitedRawSteps.length; i++) {
+      const step = (limitedRawSteps[i] ?? {}) as Record<string, unknown>;
       const description = typeof step.description === "string" ? step.description.trim() : "";
-      if (!description) return null;
+    
+      if (!description) continue;
+    
+      // 检测重复模式
+      if (description === lastDescription) {
+        duplicateCount++;
+        // 如果连续3个相同的步骤，说明可能陷入循环，跳过后续重复
+        if (duplicateCount >= 2) {
+          console.warn(`[task_decompose] 检测到重复步骤，跳过: ${description}`);
+          continue;
+        }
+      } else {
+        duplicateCount = 0;
+        lastDescription = description;
+      }
+    
+      deduplicatedSteps.push({step, i: deduplicatedSteps.length});
+    }
+
+    return deduplicatedSteps
+      .map(({step, i}) => {
+        const description = typeof step.description === "string" ? step.description.trim() : "";
+        if (!description) return null;
       
-      // 确保步骤ID唯一性
-      const stepId = typeof step.id === "string" && step.id.trim() ? step.id.trim() : `step_${i + 1}`;
+        // 确保步骤ID唯一性
+        const stepId = typeof step.id === "string" && step.id.trim() ? step.id.trim() : `step_${i + 1}`;
       
-      return {
-        id: stepId,
-        description,
-        dependsOn: Array.isArray(step.dependsOn)
-          ? step.dependsOn.filter((d): d is string => typeof d === "string")
-          : [],
-        informationNeeds: Array.isArray(step.informationNeeds)
-          ? step.informationNeeds
-              .slice(0, MAX_INFORMATION_NEEDS_PER_STEP) // 限制信息需求数量
-              .flatMap((need, needIndex) => {
-                const rawNeed = (need ?? {}) as Record<string, unknown>;
-                const question = typeof rawNeed.question === "string" ? rawNeed.question.trim() : "";
-                if (!question) return [];
-                const fallback = typeof rawNeed.fallback === "string" ? rawNeed.fallback.trim() : "";
-                return [{
-                  id: typeof rawNeed.id === "string" && rawNeed.id.trim() ? rawNeed.id.trim() : `need_${needIndex + 1}`,
-                  question,
-                  source: parseInformationNeedSource(rawNeed.source),
-                  priority: parseInformationNeedPriority(rawNeed.priority),
-                  fallback: fallback || undefined,
-                }];
-              })
-          : [],
-        stopReadingWhen: parseStopReadingWhen(step.stopReadingWhen),
-        verificationCriteria: parseVerificationCriteria(step.verificationCriteria),
-        rollbackStrategy: typeof step.rollbackStrategy === "string"
-          ? step.rollbackStrategy.trim() || undefined
-          : undefined,
-        estimatedComplexity: parseEstimatedComplexity(step.estimatedComplexity),
-        // 优先使用步骤级可复用历史
-        relevantHistory: parseRelevantHistory(step.relevantHistory),
-      };
-    })
-    .filter((s): s is NonNullable<typeof s> => s !== null);
+        return {
+          id: stepId,
+          description,
+          dependsOn: Array.isArray(step.dependsOn)
+            ? step.dependsOn.filter((d): d is string => typeof d === "string")
+            : [],
+          informationNeeds: Array.isArray(step.informationNeeds)
+            ? step.informationNeeds
+                .slice(0, MAX_INFORMATION_NEEDS_PER_STEP) // 限制信息需求数量
+                .flatMap((need, needIndex) => {
+                  const rawNeed = (need ?? {}) as Record<string, unknown>;
+                  const question = typeof rawNeed.question === "string" ? rawNeed.question.trim() : "";
+                  if (!question) return [];
+                  const fallback = typeof rawNeed.fallback === "string" ? rawNeed.fallback.trim() : "";
+                  return [{
+                    id: typeof rawNeed.id === "string" && rawNeed.id.trim() ? rawNeed.id.trim() : `need_${needIndex + 1}`,
+                    question,
+                    source: parseInformationNeedSource(rawNeed.source),
+                    priority: parseInformationNeedPriority(rawNeed.priority),
+                    fallback: fallback || undefined,
+                  }];
+                })
+            : [],
+          stopReadingWhen: parseStopReadingWhen(step.stopReadingWhen),
+          verificationCriteria: parseVerificationCriteria(step.verificationCriteria),
+          rollbackStrategy: typeof step.rollbackStrategy === "string"
+            ? step.rollbackStrategy.trim() || undefined
+            : undefined,
+          estimatedComplexity: parseEstimatedComplexity(step.estimatedComplexity),
+          // 优先使用步骤级可复用历史
+          relevantHistory: parseRelevantHistory(step.relevantHistory),
+        };
+      })
+      .filter((s): s is NonNullable<typeof s> => s !== null);
+  };
+
+  const tasks: DecomposeTask[] = rawTasks.flatMap((rawTask) => {
+    const taskObj = (rawTask ?? {}) as Record<string, unknown>;
+    const steps = parseTaskSteps(Array.isArray(taskObj.steps) ? taskObj.steps : []);
+    const id = typeof taskObj.id === "string" && taskObj.id.trim() ? taskObj.id.trim() : "";
+    const description = typeof taskObj.description === "string" ? taskObj.description.trim() : "";
+    // 任务间依赖不在 schema 内：显式丢弃 tasks[].dependsOn，仅保留 steps[].dependsOn。
+    if ("dependsOn" in taskObj && taskObj.dependsOn != null) {
+      console.warn(
+        `[task_decompose] 忽略 tasks[].dependsOn（仅支持同 task 内 steps[].dependsOn）: ${id || "(unnamed)"}`,
+      );
+    }
+    return [{ id, description, steps }];
+  });
 
   // 整单共享可复用历史（兼容旧输出；写入时复制到缺省的子任务）
   const relevantHistory = parseRelevantHistory(obj.relevantHistory);
 
+  // 兼容旧格式：understanding 兜底填充 intent。
+  const intent = typeof obj.intent === "string" && obj.intent.trim()
+    ? obj.intent.trim()
+    : typeof obj.understanding === "string" ? obj.understanding.trim() : "";
+
   return {
-    intent: typeof obj.intent === "string" ? obj.intent.trim() : "",
-    understanding: typeof obj.understanding === "string" ? obj.understanding.trim() : "",
+    intent,
     userConstraints: Array.isArray(obj.userConstraints)
       ? obj.userConstraints
           .map((c) => (typeof c === "string" ? c.trim() : ""))
           .filter((c) => c.length > 0)
       : [],
-    steps,
+    tasks: tasks.map((task, taskIndex) => ({
+      ...task,
+      id: task.id || `task_${taskIndex + 1}`,
+    })),
     progressStatus: typeof obj.progressStatus === "string" ? obj.progressStatus.trim() : undefined,
-    goal: typeof obj.goal === "string" ? obj.goal.trim() : undefined,
-    scope: Array.isArray(obj.scope) ? obj.scope.filter((x): x is string => typeof x === "string") : undefined,
-    relation: obj.relation === "continue" || obj.relation === "new" ? obj.relation : undefined,
-    completedSteps: Array.isArray(obj.completedSteps) ? obj.completedSteps.filter((x): x is string => typeof x === "string") : undefined,
-    pendingSteps: Array.isArray(obj.pendingSteps) ? obj.pendingSteps.filter((x): x is string => typeof x === "string") : undefined,
-    findings: Array.isArray(obj.findings) ? obj.findings as import("../../../turn-rounds.ts").Finding[] : undefined,
-    checkpoints: Array.isArray(obj.checkpoints) ? obj.checkpoints as import("../../../turn-rounds.ts").Checkpoint[] : undefined,
     relevantHistory,
-    sharedEvidence: Array.isArray(obj.sharedEvidence) ? obj.sharedEvidence as import("../../../turn-rounds.ts").FileEvidence[] : undefined,
   };
 }
 
@@ -905,7 +1024,7 @@ function buildTurnInformationTask(answer: DecomposeAnswer): TaskItem | null {
   const MAX_INFORMATION_NEEDS = 50;
   let totalNeeds = 0;
 
-  for (const step of answer.steps) {
+  for (const step of flattenSteps(answer)) {
     const stepNeedIds: string[] = [];
     const canonicalNeedIds = new Map<string, string>();
     
@@ -973,7 +1092,7 @@ function buildTurnInformationTask(answer: DecomposeAnswer): TaskItem | null {
   if (!informationNeeds.length) return null;
   return {
     id: "__turn_information_plan__",
-    description: answer.understanding || "Complete this turn's information plan.",
+    description: answer.intent || "Complete this turn's information plan.",
     status: "in_progress",
     dependsOn: [],
     informationNeeds,
@@ -1058,36 +1177,32 @@ export async function runTaskDecompose(
   task: TaskItem | null; 
   decomposeTokens: number;
   rawDecompose?: {
-    understanding: string;
-    goal?: string;
-    scope?: string[];
-    relation?: "continue" | "new";
-    completedSteps?: string[];
-    pendingSteps?: string[];
-    findings?: import("../../../turn-rounds.ts").Finding[];
-    checkpoints?: import("../../../turn-rounds.ts").Checkpoint[];
+    intent: string;
     userConstraints?: string[];
     progressStatus?: string;
-    steps: Array<{
+    tasks: Array<{
       id: string;
       description: string;
-      dependsOn: string[];
-      informationNeeds: Array<{
+      steps: Array<{
         id: string;
-        question: string;
-        source?: TaskItem["informationNeeds"][number]["source"];
-        priority?: TaskItem["informationNeeds"][number]["priority"];
-        fallback?: string;
+        description: string;
+        dependsOn: string[];
+        informationNeeds: Array<{
+          id: string;
+          question: string;
+          source?: TaskItem["informationNeeds"][number]["source"];
+          priority?: TaskItem["informationNeeds"][number]["priority"];
+          fallback?: string;
+        }>;
+        stopReadingWhen: Array<{ condition: string; requiredEvidenceIds: string[] }>;
+        verificationCriteria?: TaskItem["verificationCriteria"];
+        rollbackStrategy?: string;
+        estimatedComplexity?: TaskItem["estimatedComplexity"];
+        relevantHistory?: TaskRelevantHistory;
       }>;
-      stopReadingWhen: Array<{ condition: string; requiredEvidenceIds: string[] }>;
-      verificationCriteria?: TaskItem["verificationCriteria"];
-      rollbackStrategy?: string;
-      estimatedComplexity?: TaskItem["estimatedComplexity"];
-      relevantHistory?: TaskRelevantHistory;
     }>;
     /** 方案A：整单共享上下文（每个 step 也自带一份） */
     relevantHistory?: TaskRelevantHistory;
-    sharedEvidence?: import("../../../turn-rounds.ts").FileEvidence[];
   };
   fallback?: boolean;
 }> {
@@ -1104,7 +1219,7 @@ export async function runTaskDecompose(
     const { tagUserInput } = await import("../../message-tags.js");
     const decomposeMessages: ChatMessage[] = [
       { role: "system", content: systemPrompt },
-      { role: "system", content: OS_LOCALE_SYSTEM_PROMPT },
+      { role: "system", content: localeSystemPrompt(opts.workflow.harness.locale) },
       {
         role: "user",
         content: [
@@ -1142,90 +1257,56 @@ export async function runTaskDecompose(
     // 模型把短句判成 discuss 而留下空 steps。
     if (answer) {
       answer = recoverEmptyDecomposeSteps(answer, opts.userMessage);
-      // 兼容旧的自定义 prompt；内置 prompt 会显式返回 intent。
-      if (!answer.intent) answer.intent = answer.understanding || opts.userMessage;
+      // 兼容旧的自定义 prompt（只输出 understanding，解析层已兜底映射为 intent）；
+      // 仍无 intent 时用用户原话兜底。
+      if (!answer.intent) answer.intent = opts.userMessage;
     }
 
-    // 循环检测：检查是否有异常多的步骤或重复模式
-    if (answer && answer.steps.length > 0) {
-      // 检测循环依赖
-      const detectCircularDependency = (steps: DecomposeAnswer["steps"]) => {
-        const visited = new Set<string>();
-        const recursionStack = new Set<string>();
-        
-        const hasCycle = (stepId: string): boolean => {
-          if (recursionStack.has(stepId)) {
-            return true; // 发现循环
-          }
-          if (visited.has(stepId)) {
-            return false; // 已经访问过，无循环
-          }
-          
-          visited.add(stepId);
-          recursionStack.add(stepId);
-          
-          const step = steps.find(s => s.id === stepId);
-          if (step) {
-            for (const dep of step.dependsOn) {
-              if (hasCycle(dep)) {
-                return true;
-              }
-            }
-          }
-          
-          recursionStack.delete(stepId);
-          return false;
-        };
-        
-        for (const step of steps) {
-          if (hasCycle(step.id)) {
-            return true;
-          }
-        }
-        return false;
-      };
-      
-      // 检查是否存在循环依赖
-      if (detectCircularDependency(answer.steps)) {
-        console.error(`[task_decompose] 检测到循环依赖，使用fallback计划`);
+    // 循环检测：按 task 分别做环检（dependsOn 仅限同 task）；清依赖时重编全局唯一 step id
+    if (answer && flattenSteps(answer).length > 0) {
+      const resolved = resolveCircularDependenciesInTasks(answer.tasks);
+      if (resolved.hadCycle) {
+        console.error(`[task_decompose] 检测到循环依赖，已按 task 清除依赖并重编全局唯一 step id`);
         writeEventLog({
-          category: "stage_error", 
+          category: "stage_error",
           message: "task_decompose 检测到循环依赖",
           details: {
             sessionId: opts.sessionId,
-            stepIds: answer.steps.map(s => s.id),
-            dependencies: answer.steps.map(s => ({id: s.id, dependsOn: s.dependsOn})),
+            cycledTaskIds: resolved.cycledTaskIds,
+            stepIds: flattenSteps({ tasks: resolved.tasks }).map((s) => s.id),
+            dependencies: flattenSteps(answer).map((s) => ({ id: s.id, dependsOn: s.dependsOn })),
           },
         });
-        // 清除依赖关系，防止循环
-        answer.steps = answer.steps.map((step, index) => ({
-          ...step,
-          dependsOn: [], // 清除所有依赖关系
-          id: `step_${index + 1}`, // 重新生成ID确保唯一性
-        }));
+        answer.tasks = resolved.tasks;
       }
-      
-      // 检测重复描述模式
-      const descriptions = answer.steps.map(s => s.description.toLowerCase().trim());
-      const descriptionCounts = new Map<string, number>();
-      for (const desc of descriptions) {
-        descriptionCounts.set(desc, (descriptionCounts.get(desc) || 0) + 1);
-      }
-      
-      const maxRepeats = Math.max(...Array.from(descriptionCounts.values()));
-      if (maxRepeats > 3) {
-        console.warn(`[task_decompose] 检测到重复步骤模式，最大重复次数: ${maxRepeats}`);
-        // 去重：只保留第一次出现的步骤
-        const seenDescriptions = new Set<string>();
-        answer.steps = answer.steps.filter((step) => {
-          const desc = step.description.toLowerCase().trim();
-          if (seenDescriptions.has(desc)) {
-            return false;
-          }
-          seenDescriptions.add(desc);
-          return true;
-        });
-      }
+
+      // 检测重复描述模式（逐任务去重）
+      answer.tasks = answer.tasks.map((task) => {
+        const descriptions = task.steps.map(s => s.description.toLowerCase().trim());
+        const descriptionCounts = new Map<string, number>();
+        for (const desc of descriptions) {
+          descriptionCounts.set(desc, (descriptionCounts.get(desc) || 0) + 1);
+        }
+
+        const maxRepeats = Math.max(0, ...Array.from(descriptionCounts.values()));
+        if (maxRepeats > 3) {
+          console.warn(`[task_decompose] 检测到重复步骤模式，最大重复次数: ${maxRepeats}`);
+          // 去重：只保留第一次出现的步骤
+          const seenDescriptions = new Set<string>();
+          return {
+            ...task,
+            steps: task.steps.filter((step) => {
+              const desc = step.description.toLowerCase().trim();
+              if (seenDescriptions.has(desc)) {
+                return false;
+              }
+              seenDescriptions.add(desc);
+              return true;
+            }),
+          };
+        }
+        return task;
+      });
     }
 
     if (!answer) {
@@ -1264,27 +1345,30 @@ export async function runTaskDecompose(
     // 构建原始任务分解结果（steps[].relevantHistory 供 React 循环直接复用）
     const rawDecompose = {
       intent: answer.intent,
-      understanding: answer.understanding || opts.userMessage,
       userConstraints: answer.userConstraints,
       progressStatus: answer.progressStatus,
-      steps: answer.steps.map((s) => ({
-        id: s.id,
-        description: s.description,
-        dependsOn: s.dependsOn,
-        informationNeeds: s.informationNeeds || [],
-        stopReadingWhen: s.stopReadingWhen || [],
-        verificationCriteria: s.verificationCriteria,
-        rollbackStrategy: s.rollbackStrategy,
-        estimatedComplexity: s.estimatedComplexity,
-        relevantHistory: s.relevantHistory,
+      tasks: answer.tasks.map((t) => ({
+        id: t.id,
+        description: t.description,
+        steps: t.steps.map((s) => ({
+          id: s.id,
+          description: s.description,
+          dependsOn: s.dependsOn,
+          informationNeeds: s.informationNeeds || [],
+          stopReadingWhen: s.stopReadingWhen || [],
+          verificationCriteria: s.verificationCriteria,
+          rollbackStrategy: s.rollbackStrategy,
+          estimatedComplexity: s.estimatedComplexity,
+          relevantHistory: s.relevantHistory,
+        })),
       })),
       relevantHistory: answer.relevantHistory,
     };
 
     // Build the agent plan from decomposition
     const agentPlan: AgentPlan = {
-      goal: answer.understanding || opts.userMessage,
-      steps: answer.steps.map((s) => ({
+      goal: answer.intent || opts.userMessage,
+      steps: flattenSteps(answer).map((s) => ({
         id: s.id,
         description: s.description,
         status: "pending" as const,
@@ -1319,11 +1403,18 @@ export async function runTaskDecompose(
 
     // Push the decomposition result into messages if provided
     if (messages) {
+      const taskBlocks = answer.tasks.map((task, taskIndex) => {
+        const heading = `Task ${taskIndex + 1} (${task.id}): ${task.description || "(no description)"}`;
+        const stepLines = task.steps
+          .map((s, i) => `  ${i + 1}. [${s.id}] ${s.description}`)
+          .join("\n");
+        return stepLines ? `${heading}\n${stepLines}` : heading;
+      }).join("\n\n");
       const decomposeBlock = [
         "## Task decomposition",
-        `Goal: ${answer.understanding}`,
+        `Intent: ${answer.intent}`,
         answer.userConstraints.length > 0 ? `\nConstraints:\n${answer.userConstraints.map((c) => `- ${c}`).join("\n")}` : "",
-        `\nSteps:\n${answer.steps.map((s, i) => `${i + 1}. ${s.description}`).join("\n")}`,
+        taskBlocks ? `\nTasks:\n${taskBlocks}` : "",
       ].filter(Boolean).join("\n");
       messages.push({ role: "system", content: decomposeBlock });
       decomposeTokens = Math.ceil(decomposeBlock.length / 4);
@@ -1397,17 +1488,21 @@ export const taskDecomposeHandler: StageHandler = {
     if (result.rawDecompose) {
       opts.onEvent?.({
         type: "task_decomposition",
-        understanding: result.rawDecompose.understanding,
+        intent: result.rawDecompose.intent,
         userConstraints: result.rawDecompose.userConstraints ?? [],
-        steps: result.rawDecompose.steps.map((step) => ({
-          id: step.id,
-          description: step.description,
-          dependsOn: step.dependsOn,
-          informationNeeds: step.informationNeeds.map((need) => ({
-            id: need.id,
-            question: need.question,
+        tasks: result.rawDecompose.tasks.map((task) => ({
+          id: task.id,
+          description: task.description,
+          steps: task.steps.map((step) => ({
+            id: step.id,
+            description: step.description,
+            dependsOn: step.dependsOn,
+            informationNeeds: step.informationNeeds.map((need) => ({
+              id: need.id,
+              question: need.question,
+            })),
+            stopReadingWhen: step.stopReadingWhen,
           })),
-          stopReadingWhen: step.stopReadingWhen,
         })),
         fallback: result.fallback === true,
       });
@@ -1417,35 +1512,31 @@ export const taskDecomposeHandler: StageHandler = {
         details: {
           sessionId: opts.sessionId,
           fallback: result.fallback === true,
-          understanding: result.rawDecompose.understanding,
-          steps: result.rawDecompose.steps,
+          intent: result.rawDecompose.intent,
+          tasks: result.rawDecompose.tasks,
         },
       });
     }
     if (opts.sessionId && result.rawDecompose) {
       const persisted: PersistedDecompose = {
-        understanding: result.rawDecompose.understanding,
-        relevantHistory: result.rawDecompose.relevantHistory,
-        goal: result.rawDecompose.goal,
-        scope: result.rawDecompose.scope,
-        relation: result.rawDecompose.relation,
-        completedSteps: result.rawDecompose.completedSteps,
-        pendingSteps: result.rawDecompose.pendingSteps,
-        findings: result.rawDecompose.findings,
-        checkpoints: result.rawDecompose.checkpoints,
-        sharedEvidence: result.rawDecompose.sharedEvidence,
+        intent: result.rawDecompose.intent,
         userConstraints: result.rawDecompose.userConstraints ?? [],
         progressStatus: result.rawDecompose.progressStatus,
-        steps: result.rawDecompose.steps.map((step) => ({
-          id: step.id,
-          description: step.description,
-          dependsOn: step.dependsOn,
-          informationNeeds: step.informationNeeds,
-          stopReadingWhen: step.stopReadingWhen,
-          verificationCriteria: step.verificationCriteria,
-          rollbackStrategy: step.rollbackStrategy,
-          estimatedComplexity: step.estimatedComplexity,
-          relevantHistory: step.relevantHistory,
+        relevantHistory: result.rawDecompose.relevantHistory,
+        tasks: result.rawDecompose.tasks.map((task) => ({
+          id: task.id,
+          description: task.description,
+          steps: task.steps.map((step) => ({
+            id: step.id,
+            description: step.description,
+            dependsOn: step.dependsOn,
+            informationNeeds: step.informationNeeds,
+            stopReadingWhen: step.stopReadingWhen,
+            verificationCriteria: step.verificationCriteria,
+            rollbackStrategy: step.rollbackStrategy,
+            estimatedComplexity: step.estimatedComplexity,
+            relevantHistory: step.relevantHistory,
+          })),
         })),
       };
       try {

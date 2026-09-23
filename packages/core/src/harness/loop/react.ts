@@ -19,7 +19,12 @@ import {
 } from "./termination.ts";
 import { getGlobalMetricsCollector } from "./termination-metrics.ts";
 import { normalizeUsage, type Tracer } from "../observability.ts";
-import { shouldInjectPostToolTextNudge } from "./continuation-intent.ts";
+import { looksLikeContinuationIntent, looksLikeFinalReport, shouldInjectPostToolTextNudge } from "./continuation-intent.ts";
+import {
+  formatFinalTaskReports,
+  isolateMessagesForNextTask,
+  type TaskReport,
+} from "./task-reports.ts";
 
 // ── ReactSteps helpers ─────────────────────────────────────────────────────────
 /** Look up a single step's config from the node's reactSteps, falling back to defaults. */
@@ -363,7 +368,7 @@ function formatCurrentTaskContext(task: TaskItem): string {
     "### Execution flow",
     "1. Read the <task> block above. Note ID / Description / Information needs / Stop-exploration criteria / Confirmed refined evidence.",
     "2. Call tools as needed:",
-    "   - Exploration tools (read_file / grep / search_symbols / lsp_* / repo_map / read_symbol / read_outline, etc.) — use them only to fill unmet needs. Use the most specific available search anchor before broader exploration; preserve concrete text and avoid replacing known names, expressions, or signatures with guesses. Locate the relevant code before reading it, then inspect the smallest surrounding range that establishes the behavior and its conditions. Whole-file read_file is only for files under 10KB. Files 10KB or larger MUST call read_outline first; then use read_symbol only for one unique symbol, or read_file with both offset and limit from the outline's line range. Never retry a rejected large-file read without a range or fall back to reading the whole file. Successful read_file/read_symbol results stay in this turn's context automatically.",
+    "   - Exploration tools (read_file / grep / search_symbols / lsp_* / repo_map / read_symbol / read_outline, etc.) — use them only to fill unmet needs. When the user or task provides concrete identifiers, search those strings verbatim first; if both a container and a member are named, locate the container before the member. Do not start from a semantic rewrite or codemap_search while an exact name is available. Preserve concrete text and avoid replacing known names, expressions, or signatures with guesses. Locate the relevant code before reading it, then inspect the smallest surrounding range that establishes the behavior and its conditions. Whole-file read_file is only for files under 10KB. Files 10KB or larger MUST call read_outline first; then use read_symbol only for one unique symbol, or read_file with both offset and limit from the outline's line range. Never retry a rejected large-file read without a range or fall back to reading the whole file. Successful read_file/read_symbol results stay in this turn's context automatically.",
     "   - External knowledge (web_search / web_fetch) — required when a need cannot be answered from this repository: unknown APIs, docs, error messages, library behavior, version-specific details. Search before guessing. After web_search, web_fetch the best official/source URL. If the same local error or unknown remains after one retry, search instead of repeating the same edit.",
     "   - Implementation tools (apply_patch / write_file / append_file / type_check / bash) — use them only after every informationNeed and every stopReadingWhen.requiredEvidenceId is met.",
     "3. Termination — stop calling tools and produce the final answer only when ALL of the following hold:",
@@ -801,6 +806,11 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
   // 导致循环提前终止。此计数器在工具执行后注入一次 nudge 引导继续，超过上限才退出。
   let postToolTextNudgeCount = 0;
   const maxPostToolTextNudges = 2;
+  // ── 信息需求未满足时压探索的续跑预算 ──
+  // 该分支此前无上限 continue：报告已产出仍被无限拉回探索，直到 maxIter/工具硬上限
+  // 才停（"报告都出来了还在不停循环"）。与 nudge 一样给有限预算，耗尽后尊重收尾。
+  let unmetNeedsContinueCount = 0;
+  const maxUnmetNeedsContinues = 2;
   // 上一轮是否执行了工具调用（用于判断本轮是否为"工具执行后的纯文本响应"）
   let prevIterHadToolCalls = false;
 
@@ -921,6 +931,10 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
   const taskDriven = opts.mode === "agent" && Array.isArray(opts.activeTasks) && opts.activeTasks.length > 0;
   let tasks: TaskItem[] = taskDriven ? opts.activeTasks!.map((t) => ({ ...t })) : [];
   let currentTask: TaskItem | null = null;
+  /** Stable messages prefix at loop entry (system/context/decompose/user). */
+  const messagePrefixLen = messages.length;
+  /** Per-task reports retained across switches; composed into the final report. */
+  const taskReports: TaskReport[] = [];
 
   // ═══════════════════════════════════════════════════════════════════════════
   // New Termination System (零 nudge, 3 层终止) - 完全集成
@@ -1371,10 +1385,14 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
 
       // 弱模型：工具执行后只回纯文本时，按意图决定是否 nudge（上限 maxPostToolTextNudges）。
       // 总结性报告不 nudge；行动宣言或探索未完成则 nudge。连续纯文本则尊重结束意图。
+      // 行动宣言（“现在跑测试……”）无论上一轮是否执行过工具都 nudge——
+      // 否则首轮就宣布下一步的回复会被直接当成最终报告落库。
+      const isActionAnnounce =
+        looksLikeContinuationIntent(content) && !looksLikeFinalReport(content);
       const nudgeInfoTask = activeInformationTask();
       const nudgeExplorationComplete = nudgeInfoTask ? isExplorationComplete(nudgeInfoTask) : false;
       if (
-        toolsRanLastIter &&
+        (toolsRanLastIter || isActionAnnounce) &&
         content.trim() &&
         !documentDelivered &&
         !handoffRequested &&
@@ -1419,8 +1437,11 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
       }
 
       // Information needs: do not treat a text-only reply as completion while
-      // unmet. Keep nudging exploration until needs are filled or a hard limit
-      // (max iterations / tool cap via checkTermination) fires — never force-block here.
+      // unmet. Keep nudging exploration within a bounded budget — never let the
+      // unmet-needs veto run past the model's final report or past the budget,
+      // or "报告已产出"的会话会空转到硬上限（且遮蔽下方任务步进/完成路径）。
+      // 报告式收尾优先：looksLikeFinalReport 命中即视为最终报告（与 nudge 分支
+      // 及 continuation-intent 的既定语义一致），不再压探索，走完成路径。
       const unmetInfoTask = activeInformationTask();
       if (
         unmetInfoTask &&
@@ -1428,8 +1449,11 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
         !isExplorationComplete(unmetInfoTask) &&
         content.trim() &&
         !documentDelivered &&
-        !handoffRequested
+        !handoffRequested &&
+        !looksLikeFinalReport(content) &&
+        unmetNeedsContinueCount < maxUnmetNeedsContinues
       ) {
+        unmetNeedsContinueCount++;
         updateStateAfterResponse(loopState, {
           content,
           toolCalls: [],
@@ -1468,6 +1492,12 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
         const failed = /incomplete|failed|unable|cannot|error|failed/i.test(content);
         currentTask.status = failed ? "failed" : "completed";
         currentTask.result = content.slice(0, 200);
+        taskReports.push({
+          taskId: currentTask.id,
+          description: currentTask.description,
+          status: currentTask.status,
+          report: content,
+        });
         logReasoningStep(reasoningTrace, {
           type: "reflection",
           content: `Task ${currentTask.id} → ${currentTask.status}: ${currentTask.result}`,
@@ -1482,17 +1512,37 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
           // Previous task's similar-output / stop / text-only counters must not
           // terminate the next task on the following iteration's checkTermination.
           resetOutputTrackingForNewTask(loopState);
+          // Isolate LLM context: drop previous task's assistant/tool turns so
+          // the next task starts from the stable prefix only (no prior report).
+          isolateMessagesForNextTask(messages, messagePrefixLen);
+          rawReadToolMessages.length = 0;
+          postToolTextNudgeCount = 0;
+          unmetNeedsContinueCount = 0;
+          consecutiveReadonlyIters = 0;
+          prevIterHadToolCalls = false;
           next.status = "in_progress";
           await persistTaskUpdate(next.id);
-          messages.push({
-            role: "system",
-            content: `Task ${justDone.id} ${justDone.status === "completed" ? "completed" : "failed"}. Now starting task ${next.id}: ${next.description}`,
+          writeEventLog({
+            category: "react_loop",
+            message: `任务切换：已隔离上一任务 messages，开始 ${next.id}`,
+            details: {
+              stageId,
+              iteration: i,
+              completedTaskId: justDone.id,
+              completedStatus: justDone.status,
+              nextTaskId: next.id,
+              messagePrefixLen,
+              messagesLen: messages.length,
+              retainedReports: taskReports.length,
+            },
           });
           continue;
         }
         await persistTaskUpdate(null);
         const { done, total } = taskProgress(tasks);
-        history.push({ role: "assistant", content: `All tasks processed (${done}/${total} completed).` });
+        const finalReport = formatFinalTaskReports(taskReports, { done, total });
+        history.push({ role: "assistant", content: finalReport });
+        opts.onEvent?.({ type: "assistant_delta", text: finalReport });
         writeEventLog({
           category: "react_loop",
           message: `ReAct loop 退出: 全部任务已处理 (${done}/${total})，iteration ${i}`,
@@ -1501,11 +1551,17 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
             iteration: i,
             done,
             total,
-            lastTaskId: currentTask?.id ?? justDone.id,
+            lastTaskId: justDone.id,
             finishReason,
+            reportCount: taskReports.length,
           },
         });
-        return finalizeSuccess({ lastAssistant: content, aborted: false, correctionCount, documentWorkflow: documentWorkflowUpdate });
+        return finalizeSuccess({
+          lastAssistant: finalReport,
+          aborted: false,
+          correctionCount,
+          documentWorkflow: documentWorkflowUpdate,
+        });
       }
 
       if (content.trim()) {

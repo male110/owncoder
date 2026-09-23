@@ -68,30 +68,34 @@ export interface SchedulerState {
   roundIndex?: number;
   /** Raw task decomposition result with full informationNeeds (for history recall). */
   rawDecompose?: {
-    understanding: string;
+    intent: string;
     userConstraints?: string[];
     progressStatus?: string;
-    steps: Array<{
+    tasks: Array<{
       id: string;
       description: string;
-      dependsOn: string[];
-      informationNeeds: Array<{
+      steps: Array<{
         id: string;
-        question: string;
-        source?: "file" | "search" | "command";
-        priority?: "blocking" | "important" | "nice-to-have";
-        fallback?: string;
+        description: string;
+        dependsOn: string[];
+        informationNeeds: Array<{
+          id: string;
+          question: string;
+          source?: "file" | "search" | "command";
+          priority?: "blocking" | "important" | "nice-to-have";
+          fallback?: string;
+        }>;
+        stopReadingWhen: Array<{ condition: string; requiredEvidenceIds: string[] }>;
+        verificationCriteria?: {
+          command: string;
+          expectedOutput: string;
+          exitCode?: number;
+        };
+        rollbackStrategy?: string;
+        estimatedComplexity?: "low" | "medium" | "high";
+        /** 本步可复用的全部相关历史（自由文本） */
+        relevantHistory?: TaskRelevantHistory;
       }>;
-      stopReadingWhen: Array<{ condition: string; requiredEvidenceIds: string[] }>;
-      verificationCriteria?: {
-        command: string;
-        expectedOutput: string;
-        exitCode?: number;
-      };
-      rollbackStrategy?: string;
-      estimatedComplexity?: "low" | "medium" | "high";
-      /** 本步可复用的全部相关历史（自由文本） */
-      relevantHistory?: TaskRelevantHistory;
     }>;
     /** 整单共享可复用历史（兼容；优先使用 steps[].relevantHistory） */
     relevantHistory?: TaskRelevantHistory;

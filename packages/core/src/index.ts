@@ -83,6 +83,8 @@ import {
   loadRecentTurns,
   loadOlderTurns,
   projectConversationTurns,
+  sanitizeOversizedFinalJson,
+  sanitizeOversizedEventPayloads,
 } from "./conversation-store.ts";
 
 import type { TerminalEntry } from "./harness/terminal.ts";
@@ -759,6 +761,26 @@ export class SessionOrchestrator {
   }> {
     const root = this.sessionWorkspaceRoot(sessionId);
 
+    // Repair oversized legacy final_json blobs before any page read. Cheap when
+    // already sanitized; prevents a single 300MB JSON.parse from killing Electron.
+    try {
+      const changed = sanitizeOversizedFinalJson(root, sessionId);
+      if (changed > 0) {
+        console.warn(`[conversation] sanitized ${changed} oversized final_json row(s) in ${sessionId}`);
+      }
+    } catch (error) {
+      console.warn(`[conversation] sanitize oversized final_json failed for ${sessionId}:`, error);
+    }
+
+    try {
+      const eventChanged = sanitizeOversizedEventPayloads(root, sessionId);
+      if (eventChanged > 0) {
+        console.warn(`[conversation] sanitized ${eventChanged} oversized event payload(s) in ${sessionId}`);
+      }
+    } catch (error) {
+      console.warn(`[conversation] sanitize oversized event payloads failed for ${sessionId}:`, error);
+    }
+
     // If the conversation store already has data, use it directly.
     const page = beforeSeq == null
       ? await loadRecentTurns(root, sessionId, limit)
@@ -866,11 +888,11 @@ export class SessionOrchestrator {
     // 更新索引配置。轻量切换也必须把全局查询索引切到新项目，
     // 否则后续会话的 search_symbols 仍会命中上一个项目。
     this.index.setExtraIgnore?.(this.state.workflow.index.extraIgnore ?? []);
-    if (this.state.workflow.index.enabled) {
-      void this.index.open(root, undefined, { mode: "query" }).catch((error) => {
-        console.warn(`[session] readonly index open failed:`, error);
-      });
-    }
+    // Symbol index is always on (no longer configurable): open read-only
+    // immediately so search_symbols never hits a previous workspace.
+    void this.index.open(root, undefined, { mode: "query" }).catch((error) => {
+      console.warn(`[session] readonly index open failed:`, error);
+    });
     initLlmLogger(root);
 
     // 重新加载项目规则（轻量级操作）
@@ -930,11 +952,10 @@ export class SessionOrchestrator {
     // Chat must become usable before indexing. Main process opens the existing
     // SQLite readonly (if present); the desktop IndexHost UtilityProcess owns
     // writable scan/build and must not block this return path.
-    if (this.state.workflow.index.enabled) {
-      void this.index.open(root, undefined, { mode: "query" }).catch((error) => {
-        console.warn(`[session] readonly index open failed:`, error);
-      });
-    }
+    // Symbol index is always on (no longer configurable).
+    void this.index.open(root, undefined, { mode: "query" }).catch((error) => {
+      console.warn(`[session] readonly index open failed:`, error);
+    });
     void this.index.ragLoad?.(root)?.catch(() => undefined);
 
     // Live incremental updates: watch the workspace and push file
@@ -991,7 +1012,6 @@ export class SessionOrchestrator {
     this.fileWatcher = null;
     for (const t of this.fileWatchTimers.values()) clearTimeout(t);
     this.fileWatchTimers.clear();
-    if (!this.state.workflow.index.enabled) return;
 
     const skip = new Set([
       "node_modules",
@@ -2017,7 +2037,7 @@ export class SessionOrchestrator {
     r.abort = abortController;
 
     // 创建 MessageProjector 用于构建结构化消息
-    const { MessageProjector } = await import("./message-projector");
+    const { MessageProjector } = await import("./message-projector.js");
     const projector = new MessageProjector();
 
     // Capture workspace root for persist. openWorkspace() may switch the active
@@ -2104,16 +2124,9 @@ export class SessionOrchestrator {
           ev.type === "minimum_context_decision" || ev.type === "minimum_context_read_follow_up") {
         return;
       }
-      const payload = ev.type === "terminal"
-        ? {
-            ...ev,
-            entry: {
-              ...ev.entry,
-              stdout: ev.entry.stdout?.slice(-32_000),
-              stderr: ev.entry.stderr?.slice(-32_000),
-            },
-          }
-        : ev;
+      // Large tool/terminal bodies are truncated inside appendTurnEvent
+      // (slimDurableEvent) so every write path stays bounded.
+      const payload = ev;
       eventPersist = eventPersist.then(() => appendTurnEvent(capturedRoot, sessionId, turnId, payload, {
         eventType: ev.type,
       })).catch((error) => {

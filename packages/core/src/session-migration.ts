@@ -5,7 +5,7 @@
  */
 
 import type { ChatTurn, MessageMetadata } from "./harness/loop/types";
-import { MessageProjector } from "./message-projector";
+import { MessageProjector } from "./message-projector.ts";
 
 /**
  * 迁移单个 ChatTurn
