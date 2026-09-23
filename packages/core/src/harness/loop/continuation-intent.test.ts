@@ -3,6 +3,7 @@ import { test } from "vitest";
 import {
   looksLikeContinuationIntent,
   looksLikeFinalReport,
+  modelNeedsLoopNudge,
   shouldInjectPostToolTextNudge,
 } from "./continuation-intent.ts";
 
@@ -77,4 +78,24 @@ test("nudges by default while exploration is still incomplete", () => {
   // 报告式收尾优先于默认 nudge：未满足的信息需求交给下游探索引导分支处理
   assert.equal(shouldInjectPostToolTextNudge("好的，任务完成。", false), false);
   assert.equal(shouldInjectPostToolTextNudge("以上是本次修改的总结。", false), false);
+});
+
+// 没有 tasks / 没有 turn information plan 时，react 循环把 explorationComplete 视为 true。
+// 普通收尾文本不得再被默认 nudge 拖住，否则会出现「该结束却不结束」。
+test("does not nudge plain completion text when there is no exploration work left", () => {
+  assert.equal(shouldInjectPostToolTextNudge("好的。", true), false);
+  assert.equal(shouldInjectPostToolTextNudge("已按你的要求处理完毕。", true), false);
+  assert.equal(shouldInjectPostToolTextNudge("Done.", true), false);
+});
+
+test("nudges weak models and skips strong models", () => {
+  assert.equal(modelNeedsLoopNudge("gemini-2.5-flash"), true);
+  assert.equal(modelNeedsLoopNudge("claude-3-5-haiku-20241022"), true);
+  assert.equal(modelNeedsLoopNudge("gpt-4o-mini"), true);
+  assert.equal(modelNeedsLoopNudge("qwen2.5-coder"), true);
+  assert.equal(modelNeedsLoopNudge("claude-sonnet-4"), false);
+  assert.equal(modelNeedsLoopNudge("claude-opus-4"), false);
+  assert.equal(modelNeedsLoopNudge("gpt-4o"), false);
+  assert.equal(modelNeedsLoopNudge("gemini-2.5-pro"), false);
+  assert.equal(modelNeedsLoopNudge(""), true);
 });

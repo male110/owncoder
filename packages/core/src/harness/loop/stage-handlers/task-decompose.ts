@@ -1328,7 +1328,7 @@ export async function runTaskDecompose(
         task: null,
         decomposeTokens: 0,
         fallback: true,
-        rawDecompose: buildFallbackRawDecompose(opts.userMessage),
+        rawDecompose: buildFallbackRawDecompose(planText.trim() || opts.userMessage),
       };
     }
 
@@ -1507,7 +1507,7 @@ export const taskDecomposeHandler: StageHandler = {
         fallback: result.fallback === true,
       });
       writeEventLog({
-        category: "other",
+        category: "task_decompose",
         message: result.fallback ? "Task decomposition fallback generated" : "Task decomposition completed",
         details: {
           sessionId: opts.sessionId,

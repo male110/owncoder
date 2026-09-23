@@ -19,7 +19,7 @@ import {
 } from "./termination.ts";
 import { getGlobalMetricsCollector } from "./termination-metrics.ts";
 import { normalizeUsage, type Tracer } from "../observability.ts";
-import { looksLikeContinuationIntent, looksLikeFinalReport, shouldInjectPostToolTextNudge } from "./continuation-intent.ts";
+import { looksLikeContinuationIntent, looksLikeFinalReport, modelNeedsLoopNudge, shouldInjectPostToolTextNudge } from "./continuation-intent.ts";
 import {
   formatFinalTaskReports,
   isolateMessagesForNextTask,
@@ -135,8 +135,8 @@ function levenshtein(a: string, b: string): number {
 
 // ── ReAct Loop (Enhanced Tool-Calling Stage) ───────────────
 
-/** Max consecutive iterations with identical tool-call signatures (fed to termination). */
-const MAX_REPEAT_TOOL_CALLS = 3;
+/** Max identical tool+args+result calls before termination treats it as a loop. */
+const MAX_REPEAT_TOOL_CALLS = 2;
 /** Hard cap on total tool invocations across the entire loop (fed to termination). */
 const MAX_TOTAL_TOOL_CALLS = 100;
 const MAX_TOOL_HISTORY_CHARS = 4 * 1024;
@@ -806,11 +806,10 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
   // 导致循环提前终止。此计数器在工具执行后注入一次 nudge 引导继续，超过上限才退出。
   let postToolTextNudgeCount = 0;
   const maxPostToolTextNudges = 2;
-  // ── 信息需求未满足时压探索的续跑预算 ──
-  // 该分支此前无上限 continue：报告已产出仍被无限拉回探索，直到 maxIter/工具硬上限
-  // 才停（"报告都出来了还在不停循环"）。与 nudge 一样给有限预算，耗尽后尊重收尾。
-  let unmetNeedsContinueCount = 0;
-  const maxUnmetNeedsContinues = 2;
+  // 弱模型检测（state_machine.weakModelDetection）关闭时全员不 nudge；
+  // 开启时仅弱模型注入（Flash / Haiku / Mini 等），Sonnet / Opus / GPT-4 等强模型不引导。
+  const weakModelDetection = stepBool(reactSteps, "state_machine", "weakModelDetection", true);
+  const loopNudgeEnabled = weakModelDetection && modelNeedsLoopNudge(model.model);
   // 上一轮是否执行了工具调用（用于判断本轮是否为"工具执行后的纯文本响应"）
   let prevIterHadToolCalls = false;
 
@@ -1034,6 +1033,31 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
   const syncLoopTask = (): void => {
     loopState.currentTask = activeInformationTask() ?? undefined;
   };
+  // 启动时同步一次：无 active task 时也要清掉/挂上 turn information task，
+  // 否则 termination 层拿不到正确的 currentTask，容易空转到硬上限。
+  syncLoopTask();
+
+  // task-driven 但没有任何可执行 pending/in_progress 任务：直接收尾，不要再进 LLM 循环。
+  if (taskDriven && !currentTask) {
+    await persistTaskUpdate(null);
+    const { done, total } = taskProgress(tasks);
+    const finalReport = formatFinalTaskReports(taskReports, { done, total });
+    if (finalReport.trim()) {
+      history.push({ role: "assistant", content: finalReport });
+      opts.onEvent?.({ type: "assistant_delta", text: finalReport });
+    }
+    writeEventLog({
+      category: "react_loop",
+      message: `ReAct loop 退出: 无 pending tasks (${done}/${total})，跳过循环`,
+      details: { stageId, done, total, taskDriven: true },
+    });
+    return finalizeSuccess({
+      lastAssistant: finalReport,
+      aborted: false,
+      correctionCount,
+      documentWorkflow: documentWorkflowUpdate,
+    });
+  }
 
   for (let i = 0; i < maxIter; i++) {
     // ═══════════════════════════════════════════════════════════════════════════
@@ -1390,8 +1414,13 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
       const isActionAnnounce =
         looksLikeContinuationIntent(content) && !looksLikeFinalReport(content);
       const nudgeInfoTask = activeInformationTask();
-      const nudgeExplorationComplete = nudgeInfoTask ? isExplorationComplete(nudgeInfoTask) : false;
+      // 无 information task（没有 tasks / 无 turn plan）时，探索条件视为已满足：
+      // 不能默认 false，否则 shouldInjectPostToolTextNudge 会对任意非报告纯文本
+      // 持续 nudge，表现为「没有 tasks 时该结束却不结束」。
+      const nudgeExplorationComplete = nudgeInfoTask ? isExplorationComplete(nudgeInfoTask) : true;
       if (
+        loopNudgeEnabled &&
+        !taskDriven &&
         (toolsRanLastIter || isActionAnnounce) &&
         content.trim() &&
         !documentDelivered &&
@@ -1436,49 +1465,6 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
         continue;
       }
 
-      // Information needs: do not treat a text-only reply as completion while
-      // unmet. Keep nudging exploration within a bounded budget — never let the
-      // unmet-needs veto run past the model's final report or past the budget,
-      // or "报告已产出"的会话会空转到硬上限（且遮蔽下方任务步进/完成路径）。
-      // 报告式收尾优先：looksLikeFinalReport 命中即视为最终报告（与 nudge 分支
-      // 及 continuation-intent 的既定语义一致），不再压探索，走完成路径。
-      const unmetInfoTask = activeInformationTask();
-      if (
-        unmetInfoTask &&
-        unmetInfoTask.informationNeeds.length > 0 &&
-        !isExplorationComplete(unmetInfoTask) &&
-        content.trim() &&
-        !documentDelivered &&
-        !handoffRequested &&
-        !looksLikeFinalReport(content) &&
-        unmetNeedsContinueCount < maxUnmetNeedsContinues
-      ) {
-        unmetNeedsContinueCount++;
-        updateStateAfterResponse(loopState, {
-          content,
-          toolCalls: [],
-          finishReason: finishReason ?? "stop",
-          tokens: responseUsage.totalTokens,
-          cost: (responseUsage.promptTokens / 1000) * 0.002 + (responseUsage.completionTokens / 1000) * 0.01,
-        });
-        history.push({ role: "assistant", content });
-        const missingNeeds = pendingInformationNeeds(unmetInfoTask);
-        messages.push({
-          role: "system",
-          content:
-            `Information needs are not yet met: ${missingNeeds.join(", ") || "stop-exploration criteria unmet"}. ` +
-            "Call exploration tools that can fill these needs before giving a final answer. " +
-            "If a need is not in this repository, use web_search (then web_fetch) rather than guessing. " +
-            "Successful reads stay in this turn's context. Do not conclude while these needs are unmet.",
-        });
-        logReasoningStep(reasoningTrace, {
-          type: "observation",
-          content: `Information needs still unmet (${missingNeeds.join(", ") || "stop-exploration criteria unmet"}); continuing exploration instead of ending on a text-only reply.`,
-          timestamp: Date.now(),
-        });
-        continue;
-      }
-
       // ── Hard step-driver: model reported text ⇒ current task done/failed ⇒ advance ──
       if (taskDriven && currentTask && content.trim()) {
         updateStateAfterResponse(loopState, {
@@ -1517,7 +1503,6 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
           isolateMessagesForNextTask(messages, messagePrefixLen);
           rawReadToolMessages.length = 0;
           postToolTextNudgeCount = 0;
-          unmetNeedsContinueCount = 0;
           consecutiveReadonlyIters = 0;
           prevIterHadToolCalls = false;
           next.status = "in_progress";
@@ -1732,6 +1717,7 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
     // tool results are recorded (so the model has the facts) but BEFORE the
     // next LLM call, steering it toward producing output.
     if (
+      loopNudgeEnabled &&
       allReadonly &&
       consecutiveReadonlyIters >= READONLY_TRANSITION_THRESHOLD &&
       consecutiveReadonlyIters < maxConsecutiveReadonlyIters

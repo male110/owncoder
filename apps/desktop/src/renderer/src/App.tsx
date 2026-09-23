@@ -465,7 +465,14 @@ export function App() {
     <div className="app-frame">
       <TitleBar
         title={showBlank || sessionTitle === "新会话" ? t("新会话") : sessionTitle}
-        gitSummary={gitStatus?.isRepo ? gitStatus.summary : null}
+        gitSummary={
+          gitStatus?.isRepo
+            ? ["干净", "已改", "未跟踪", "有改动", "Git 状态获取失败"].reduce(
+                (summary, label) => summary.replaceAll(label, t(label)),
+                gitStatus.summary,
+              )
+            : null
+        }
         gitDirty={gitStatus?.dirty}
       />
       <UpdateBanner />

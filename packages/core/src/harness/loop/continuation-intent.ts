@@ -1,7 +1,28 @@
 /**
  * 弱模型在工具执行后常输出行动宣言（"现在运行类型检查："）却不发起工具调用。
  * 用两套轻量启发式区分「还要做事」和「最终报告」，决定是否注入 nudge。
+ * 强模型（Sonnet / Opus / GPT-4 / Gemini Pro 等）不注入 nudge，信任其结束意图。
  */
+
+/** 需要引导的弱小模型：工具后常停在纯文本，或只探索不落地。 */
+const WEAK_MODEL_NUDGE_PATTERN =
+  /(flash|haiku|\bmini\b|nano|lite|tiny|small|gpt-3\.5|qwen|llama|mistral|phi-|gemma|yi-|glm-|command-r(?!-plus))/i;
+
+/** 不需要引导的强模型。弱模式（mini/flash/haiku）优先于本规则。 */
+const STRONG_MODEL_NO_NUDGE_PATTERN =
+  /(opus|sonnet|gpt-4|gpt-5|o1|o3|o4|gemini[\w.-]*pro|deepseek-r1|reasoner|codex)/i;
+
+/**
+ * 该模型是否需要循环 nudge（工具后纯文本 / 只读探索转实现）。
+ * 未知模型默认需要：本地小模型更常提前停。
+ */
+export function modelNeedsLoopNudge(modelId: string): boolean {
+  const id = modelId.trim();
+  if (!id) return true;
+  if (WEAK_MODEL_NUDGE_PATTERN.test(id)) return true;
+  if (STRONG_MODEL_NO_NUDGE_PATTERN.test(id)) return false;
+  return true;
+}
 
 /** 未来行动标记。只收「还要去做」的词，不收运行/测试等过去时里也常见的动词。 */
 const CONTINUATION_INTENT_PATTERN =

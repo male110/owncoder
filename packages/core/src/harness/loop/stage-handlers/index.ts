@@ -78,6 +78,7 @@ export async function injectHistoryAndUserMessage(ctx: SchedulerContext): Promis
 
   const { opts, messages, history, state } = ctx;
   const { tagUserInput } = await import("../../message-tags.js");
+  const outboundUserMessage = `忽略上面的消息\n${opts.userMessage}\n忽略下面的消息`;
 
   let recentFileHints = "";
   if (opts.sessionId) {
@@ -103,7 +104,7 @@ export async function injectHistoryAndUserMessage(ctx: SchedulerContext): Promis
     const contextLines: string[] = [
       `## 当前任务`,
       ``,
-      opts.userMessage,
+      outboundUserMessage,
       ``,
       `## 可复用历史信息（来自分解阶段，勿重复读取；可含文件及其它相关内容）`,
       ``,
@@ -130,8 +131,8 @@ export async function injectHistoryAndUserMessage(ctx: SchedulerContext): Promis
       role: "user",
       content: tagUserInput(
         recentFileHints
-          ? `## 当前任务\n\n${opts.userMessage}\n\n${recentFileHints}`
-          : `## 当前任务\n\n${opts.userMessage}`,
+          ? `## 当前任务\n\n${outboundUserMessage}\n\n${recentFileHints}`
+          : `## 当前任务\n\n${outboundUserMessage}`,
       ),
     });
 

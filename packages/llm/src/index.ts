@@ -429,6 +429,7 @@ export function writeEventLog(event: {
     | "abort"
     | "retry"
     | "verify"
+    | "task_decompose"
     | "checkpoint"
     | "turn_separator"  // 新增：轮次分隔符
     | "other";

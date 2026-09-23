@@ -221,13 +221,7 @@ export function checkTermination(
   // Layer 2: Loop Detection (Prevent Infinite Loops)
   // ═══════════════════════════════════════════════════════════════════════════
   
-  const unmetNeeds = hasUnmetInformationNeeds(state.currentTask);
-  // 报告式收尾优先于“信息需求未满足”否决：否则模型已经写出最终报告时，
-  // 相似输出 / 自然完成 / 连续纯文本收敛层全部被关掉，只能空转到硬上限
-  // （与 react.ts 的 unmetNeedsContinue 预算及 looksLikeFinalReport 出口对齐）。
-  const finalReport = looksLikeFinalReport(state.lastContent);
-
-  // 2.1 Tool loop detection (same tool + args repeated)
+  // 2.1 Tool loop detection (same tool + args + result repeated; at most twice)
   //     → Catches stuck patterns like: read → read → read
   if (config.enableStuckDetection) {
     const loopDetection = detectToolLoop(state.toolCallHistory, config.maxSameToolRepeat);
@@ -247,7 +241,7 @@ export function checkTermination(
   //     → consecutiveSimilarOutputs >= 1 means 2 similar outputs detected
   //     → Treat as normal completion: the model has converged on a final answer,
   //       so do NOT surface "Task may be incomplete" / error events.
-  if (config.enableOutputSimilarityCheck && (!unmetNeeds || finalReport) && state.consecutiveSimilarOutputs >= 1) {
+  if (config.enableOutputSimilarityCheck && state.consecutiveSimilarOutputs >= 1) {
     return {
       shouldTerminate: true,
       reason: `Detected ${state.consecutiveSimilarOutputs + 1} consecutive similar outputs (threshold: 80%)`,
@@ -263,41 +257,39 @@ export function checkTermination(
   
   // 2.3 Adaptive exploration-skip convergence (OpenAI Agents / Anthropic Computer Use)
   //     Counter is the primary signal; complexity scales the threshold.
-  //     Semantic similarity and unmet evidence are guards against premature stop.
+  //     Semantic similarity is a guard against premature stop.
   const skipThreshold = resolveExplorationSkipThreshold(state, config);
   if (skipThreshold > 0 && state.explorationSkipCount >= skipThreshold) {
     const explorationCfg = config.explorationTermination;
     const complexity = state.currentTask?.estimatedComplexity ?? "low";
 
-    if (!(explorationCfg.requireProgressEvidence && hasUnmetInformationNeeds(state.currentTask))) {
-      const previous = state.previousContent.trim();
-      const current = state.lastContent.trim();
-      const similarity = previous && current
-        ? calculateSimilarity(state.previousContent, state.lastContent)
-        : 1;
-      const semanticallyStuck =
-        !explorationCfg.enableSemanticCheck ||
-        previous.length === 0 ||
-        similarity >= explorationCfg.semanticSimilarityThreshold ||
-        state.consecutiveSimilarOutputs >= 1;
+    const previous = state.previousContent.trim();
+    const current = state.lastContent.trim();
+    const similarity = previous && current
+      ? calculateSimilarity(state.previousContent, state.lastContent)
+      : 1;
+    const semanticallyStuck =
+      !explorationCfg.enableSemanticCheck ||
+      previous.length === 0 ||
+      similarity >= explorationCfg.semanticSimilarityThreshold ||
+      state.consecutiveSimilarOutputs >= 1;
 
-      if (semanticallyStuck) {
-        return {
-          shouldTerminate: true,
-          reason: `Exploration complete after ${state.explorationSkipCount} skipped exploration calls (threshold: ${skipThreshold})`,
-          lastAssistant: state.lastContent || synthesizeFallbackResponse(state),
-          // Normal convergence, not an aborted/incomplete task: skipped calls are
-          // redundant after exploration is complete and must not surface as errors.
-          aborted: false,
-          metadata: {
-            explorationSkipCount: state.explorationSkipCount,
-            threshold: skipThreshold,
-            complexity,
-            similarity,
-            normalCompletion: true,
-          },
-        };
-      }
+    if (semanticallyStuck) {
+      return {
+        shouldTerminate: true,
+        reason: `Exploration complete after ${state.explorationSkipCount} skipped exploration calls (threshold: ${skipThreshold})`,
+        lastAssistant: state.lastContent || synthesizeFallbackResponse(state),
+        // Normal convergence, not an aborted/incomplete task: skipped calls are
+        // redundant after exploration is complete and must not surface as errors.
+        aborted: false,
+        metadata: {
+          explorationSkipCount: state.explorationSkipCount,
+          threshold: skipThreshold,
+          complexity,
+          similarity,
+          normalCompletion: true,
+        },
+      };
     }
   }
   
@@ -305,8 +297,8 @@ export function checkTermination(
   // Layer 3: Natural Completion (Trust the Model)
   // ═══════════════════════════════════════════════════════════════════════════
   
-  // 3.1 Model returned text + no tool calls + finish_reason=stop
-  //     → NORMAL exit, except when listed information needs are still unmet.
+  // 3.1 Model returned text + no tool calls + finish_reason=stop → NORMAL exit.
+  //     Unmet information needs no longer veto completion (that continue was removed).
   if (
     state.lastFinishReason === "stop" &&
     state.lastToolCalls.length === 0 &&
@@ -318,19 +310,6 @@ export function checkTermination(
     if (isActionAnnouncement(state.lastContent)) {
       return { shouldTerminate: false };
     }
-    // 簿记上的 unmet needs 不能否决已经写好的最终报告（证据被编辑失效、
-    // outline/web 证据无法 verified 时尤为常见）。
-    if (unmetNeeds && !finalReport) {
-      return { shouldTerminate: false };
-    }
-    // 最终报告同样跳过 task validation：它与 unmetNeeds 检查同一套 evidence 簿记，
-    // 否则报告出口会被 validation 再次否决，循环依旧停不下来。
-    if (config.enableTaskValidation && state.currentTask && !finalReport) {
-      const validation = validateTaskCompletion(state.currentTask, state.lastContent);
-      if (!validation.isComplete) {
-        return { shouldTerminate: false };
-      }
-    }
     return {
       shouldTerminate: true,
       reason: "Natural completion (model returned final response)",
@@ -340,8 +319,7 @@ export function checkTermination(
   }
   
   // 3.2 Model returned text without tools for N consecutive turns
-  //     → After 2 consecutive text-only turns, treat as complete — unless
-  //     information needs are still unmet (keep exploring until a hard limit).
+  //     → After 2 consecutive text-only turns, treat as complete.
   if (
     state.lastToolCalls.length === 0 &&
     state.lastContent.trim() &&
@@ -350,9 +328,6 @@ export function checkTermination(
     // 行动宣言不算“只说不做”的结束意图：继续给模型执行机会，
     // 由 react.ts 的 nudge 预算（maxPostToolTextNudges）与 Layer 1/2 硬上限兜底。
     if (isActionAnnouncement(state.lastContent)) {
-      return { shouldTerminate: false };
-    }
-    if (unmetNeeds && !finalReport) {
       return { shouldTerminate: false };
     }
     return {
@@ -390,7 +365,7 @@ const HASH_SHIFT_BITS = 5;                     // String hash shift amount
  * Pattern: same tool + same arguments called repeatedly within a short window.
  * 
  * @param history - Tool call history
- * @param maxRepeat - Maximum allowed repetitions (e.g., 2 means "first call + 2 repeats = 3 total calls")
+ * @param maxRepeat - Max identical (tool + args + result) calls allowed (e.g. 2 → 3rd call is a loop)
  * @returns Detection result with loop status, tool name, and call count
  */
 function resolveExplorationSkipThreshold(
@@ -417,19 +392,6 @@ function resolveExplorationSkipThreshold(
  */
 function isActionAnnouncement(text: string): boolean {
   return looksLikeContinuationIntent(text) && !looksLikeFinalReport(text);
-}
-
-function hasUnmetInformationNeeds(task: LoopState["currentTask"]): boolean {
-  if (!task?.informationNeeds?.length) return false;
-  const satisfied = new Set(
-    (task.evidence ?? []).map((item) => item.needId).filter((id): id is string => Boolean(id)),
-  );
-  if (task.informationNeeds.some((need) => !satisfied.has(need.id))) return true;
-  return (task.stopReadingWhen ?? []).some(
-    (criterion) =>
-      criterion.requiredEvidenceIds.length > 0 &&
-      !criterion.requiredEvidenceIds.every((needId) => satisfied.has(needId)),
-  );
 }
 
 function detectToolLoop(
@@ -633,63 +595,6 @@ function simpleHash(str: string): string {
     hash = hash & hash; // Convert to 32-bit integer
   }
   return hash.toString(36);
-}
-
-/**
- * Validate if a task is complete based on its requirements.
- * 
- * Returns { isComplete: true } if:
- * - All information needs are satisfied (evidence collected)
- * - All stop-reading criteria are met
- * - Acceptance criteria are fulfilled (if defined)
- */
-function validateTaskCompletion(
-  task: TaskItem,
-  _modelResponse: string,
-): { isComplete: boolean; missingNeeds?: string[]; reason?: string } {
-  // If task has no explicit requirements, trust the model
-  if (!task.informationNeeds || task.informationNeeds.length === 0) {
-    return { isComplete: true };
-  }
-  
-  // Check information needs
-  const satisfiedNeeds = new Set(
-    task.evidence.map(e => e.needId)
-  );
-  
-  const missingNeeds = task.informationNeeds
-    .filter(need => !satisfiedNeeds.has(need.id))
-    .map(need => need.id);
-  
-  if (missingNeeds.length > 0) {
-    return {
-      isComplete: false,
-      missingNeeds,
-      reason: `Unmet information needs: ${missingNeeds.join(", ")}`
-    };
-  }
-  
-  // Check stop-reading criteria
-  if (task.stopReadingWhen && task.stopReadingWhen.length > 0) {
-    for (const criterion of task.stopReadingWhen) {
-      // Skip criteria without evidence requirements
-      if (!criterion.requiredEvidenceIds || criterion.requiredEvidenceIds.length === 0) {
-        continue;
-      }
-      
-      const allEvidenceMet = criterion.requiredEvidenceIds.every(
-        needId => satisfiedNeeds.has(needId)
-      );
-      if (!allEvidenceMet) {
-        return {
-          isComplete: false,
-          reason: `Stop-reading criterion not met: ${criterion.condition}`
-        };
-      }
-    }
-  }
-  
-  return { isComplete: true };
 }
 
 /**

@@ -546,7 +546,10 @@ export function projectConversationTurns(turns: ConversationTurn[]): ChatTurn[] 
           payload.role === "system") &&
         typeof payload.content === "string"
       ) {
-        pushUnique({ ...payload } as ChatTurn);
+        // Assistant events are intermediate loop output. The canonical final
+        // response is stored in final_json; replaying these events on reopen
+        // makes progress text look like the answer and can duplicate deltas.
+        if (payload.role !== "assistant") pushUnique({ ...payload } as ChatTurn);
       }
     }
 

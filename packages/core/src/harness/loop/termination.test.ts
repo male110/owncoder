@@ -75,6 +75,20 @@ describe("Termination Logic", () => {
       assertTerminated(result); expect(result.reason).toContain("Natural completion");
     });
 
+    it("should terminate on finish_reason=stop when there is no current task", () => {
+      // 无 tasks / 无 turn information plan：currentTask 为空，纯文本 stop 必须能自然结束。
+      const state = createLoopState();
+      expect(state.currentTask).toBeUndefined();
+      state.lastFinishReason = "stop";
+      state.lastContent = "已处理完毕，没有更多工作。";
+      state.lastToolCalls = [];
+
+      const result = checkTermination(state, DEFAULT_TERMINATION_CONFIG);
+
+      assertTerminated(result);
+      expect(result.reason).toContain("Natural completion");
+    });
+
     it("should NOT terminate on finish_reason=stop if no content", () => {
       const state = createLoopState();
       state.lastFinishReason = "stop";
@@ -121,7 +135,7 @@ describe("Termination Logic", () => {
       expect(result.shouldTerminate).toBe(false);
     });
 
-    it("should NOT treat finish_reason=stop as completion while information needs are unmet", () => {
+    it("treats finish_reason=stop as completion even while information needs are unmet", () => {
       const state = createLoopState({
         id: "step_1",
         description: "Inspect login",
@@ -138,10 +152,13 @@ describe("Termination Logic", () => {
       state.lastToolCalls = [];
 
       const result = checkTermination(state, DEFAULT_TERMINATION_CONFIG);
-      expect(result.shouldTerminate).toBe(false);
+      expect(result.shouldTerminate).toBe(true);
+      if (result.shouldTerminate) {
+        expect(result.reason).toContain("Natural completion");
+      }
     });
 
-    it("should NOT terminate on similar outputs while information needs are unmet", () => {
+    it("terminates on similar outputs even while information needs are unmet", () => {
       const state = createLoopState({
         id: "step_1",
         description: "Inspect login",
@@ -158,7 +175,7 @@ describe("Termination Logic", () => {
       state.consecutiveSimilarOutputs = 1;
 
       const result = checkTermination(state, DEFAULT_TERMINATION_CONFIG);
-      expect(result.shouldTerminate).toBe(false);
+      expect(result.shouldTerminate).toBe(true);
     });
 
     it("should terminate repeated tools without progress even while information needs are unmet", () => {
@@ -1300,7 +1317,7 @@ describe("Termination Logic", () => {
       }
     });
 
-    it("should not converge on exploration-skip while information needs are unmet", () => {
+    it("converges on exploration-skip even while information needs are unmet", () => {
       const state = createLoopState({
         id: "step_1",
         description: "Inspect login",
@@ -1316,7 +1333,10 @@ describe("Termination Logic", () => {
       state.lastContent = "Let me read the file...";
 
       const result = checkTermination(state, DEFAULT_TERMINATION_CONFIG);
-      expect(result.shouldTerminate).toBe(false);
+      expect(result.shouldTerminate).toBe(true);
+      if (result.shouldTerminate) {
+        expect(result.reason).toContain("Exploration complete");
+      }
     });
 
     it("should not terminate before threshold", () => {
@@ -1402,7 +1422,7 @@ describe("Termination Logic", () => {
       }
     });
 
-    it("should not terminate while information needs remain unmet", () => {
+    it("terminates on exploration-skip even while information needs remain unmet", () => {
       const state = createLoopState({
         id: "t1",
         description: "needs more evidence",
@@ -1418,7 +1438,10 @@ describe("Termination Logic", () => {
       state.lastContent = "Still gathering context";
 
       const result = checkTermination(state, DEFAULT_TERMINATION_CONFIG);
-      expect(result.shouldTerminate).toBe(false);
+      expect(result.shouldTerminate).toBe(true);
+      if (result.shouldTerminate) {
+        expect(result.reason).toContain("Exploration complete");
+      }
     });
 
     it("should NOT terminate when semantic similarity is below threshold (negative)", () => {
@@ -1658,7 +1681,7 @@ describe("Termination Logic", () => {
     });
   });
 
-  describe("Final reports override unmet information-needs veto", () => {
+  describe("Unmet information needs no longer veto completion", () => {
     const unmetTask = {
       id: "step_1",
       description: "Fix loop termination",
@@ -1688,7 +1711,7 @@ describe("Termination Logic", () => {
       }
     });
 
-    it("still refuses non-report text while information needs are unmet", () => {
+    it("terminates on non-report text even while information needs are unmet", () => {
       const state = createLoopState(unmetTask);
       updateStateAfterResponse(state, {
         content: "I think I understand the exit path.",
@@ -1699,7 +1722,10 @@ describe("Termination Logic", () => {
       });
 
       const result = checkTermination(state, DEFAULT_TERMINATION_CONFIG);
-      expect(result.shouldTerminate).toBe(false);
+      expect(result.shouldTerminate).toBe(true);
+      if (result.shouldTerminate) {
+        expect(result.reason).toContain("Natural completion");
+      }
     });
 
     it("terminates similar report-style outputs even when information needs are unmet", () => {
