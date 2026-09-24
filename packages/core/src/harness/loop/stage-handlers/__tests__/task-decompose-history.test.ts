@@ -26,6 +26,7 @@ import {
   extractStructuredHistory,
   parseDecomposeAnswer,
   packFallbackRelevantHistory,
+  buildFallbackRawDecompose,
   isCurrentCodeBehaviorInquiry,
   recoverEmptyDecomposeSteps,
   formatRecalledHistoryChunks,
@@ -40,6 +41,7 @@ import {
 } from "../task-decompose.ts";
 import { BUILTIN_WORKFLOW } from "@owncoder/settings";
 import { contextBudgets } from "../../../budget.ts";
+import { localeJsonValuesPrompt, localeSystemPrompt } from "../../../loop.ts";
 
 // ── 临时目录 ──
 let tmpDir: string;
@@ -649,6 +651,73 @@ describe("decompose→report/evidence 同轮持久化", () => {
     expect(blocks[2]).not.toContain("src/a.ts");
     expect(blocks[2]).not.toContain("[file changes]");
     expect(blocks[2]).not.toContain("[evidence]");
+  });
+});
+
+describe("分解阶段 locale 拼装不得诱导纯文本", () => {
+  it("JSON 协议语言指令不包含 Always reply，且与聊天 locale 分离", () => {
+    const jsonLocale = localeJsonValuesPrompt("zh");
+    const chatLocale = localeSystemPrompt("zh");
+    expect(jsonLocale).toMatch(/JSON string values/);
+    expect(jsonLocale).toMatch(/Do not write a free-form chat reply/);
+    expect(jsonLocale).not.toMatch(/Always reply/);
+    expect(chatLocale).toMatch(/Always reply in Chinese \(zh-CN\)/);
+  });
+});
+
+describe("parseDecomposeAnswer / fallback：intent 用原话，纯文本收成 task", () => {
+  it("可从 Markdown 围栏中提取 JSON", () => {
+    const answer = parseDecomposeAnswer([
+      "下面是分解结果：",
+      "```json",
+      JSON.stringify({
+        intent: "定位登录实现",
+        userConstraints: [],
+        tasks: [{
+          id: "task_1",
+          description: "阅读 AuthService",
+          steps: [{
+            id: "step_1",
+            description: "定位 AuthService.login",
+            dependsOn: [],
+            informationNeeds: [],
+            stopReadingWhen: [],
+          }],
+        }],
+        progressStatus: "开始定位",
+        relevantHistory: "",
+      }),
+      "```",
+    ].join("\n"));
+
+    expect(answer).not.toBeNull();
+    expect(answer!.intent).toBe("定位登录实现");
+    expect(answer!.tasks[0].steps[0].description).toContain("AuthService.login");
+  });
+
+  it("纯散文无 JSON 时返回 null，不把原文当结构化结果", () => {
+    expect(parseDecomposeAnswer("用户想了解历史信息如何处理，下面直接解释……")).toBeNull();
+  });
+
+  it("fallback：intent 用用户原话，模型纯文本收成单一 task", () => {
+    const userMessage = "现在任务分解这一步，历史信息是如何处理的？";
+    const modelProse = "当然可以。任务分解阶段会读取最近对话，并按相关度筛选……这是一整段自然语言回答。";
+    const fallback = buildFallbackRawDecompose(userMessage, modelProse);
+    expect(fallback.intent).toBe(userMessage);
+    expect(fallback.intent).not.toContain("当然可以");
+    expect(fallback.tasks).toHaveLength(1);
+    expect(fallback.tasks[0].description).toBe(modelProse);
+    expect(fallback.tasks[0].steps).toHaveLength(1);
+    expect(fallback.tasks[0].steps[0].description).toBe(modelProse);
+    expect(fallback.progressStatus).toMatch(/plain text|fallback/i);
+  });
+
+  it("fallback 无模型纯文本时仍用用户原话生成本地 plan", () => {
+    const userMessage = "现在任务分解这一步，历史信息是如何处理的？";
+    const fallback = buildFallbackRawDecompose(userMessage);
+    expect(fallback.intent).toBe(userMessage);
+    expect(fallback.tasks[0].description).toBe(userMessage);
+    expect(fallback.progressStatus).toMatch(/fallback/i);
   });
 });
 

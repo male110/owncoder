@@ -19,7 +19,7 @@ import {
 } from "./termination.ts";
 import { getGlobalMetricsCollector } from "./termination-metrics.ts";
 import { normalizeUsage, type Tracer } from "../observability.ts";
-import { looksLikeContinuationIntent, looksLikeFinalReport, modelNeedsLoopNudge, shouldInjectPostToolTextNudge } from "./continuation-intent.ts";
+import { modelNeedsLoopNudge, shouldInjectPostToolTextNudge } from "./continuation-intent.ts";
 import {
   formatFinalTaskReports,
   isolateMessagesForNextTask,
@@ -802,12 +802,13 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
   };
 
   // ── 弱模型容错：工具执行后模型返回纯文本（无新工具调用）时的 nudge 计数 ──
-  // 某些模型（如 Gemini Flash 2.5）在工具调用后会输出一段文本总结而不继续调用工具，
-  // 导致循环提前终止。此计数器在工具执行后注入一次 nudge 引导继续，超过上限才退出。
+  // 默认信任 LLM。仅当「特定小模型 allowlist + LLM 返回纯文本 + 所需信息未拿到」同时满足才 nudge。
+  // 「纯文本」= 本轮 LLM 响应无 tool_calls；用户输入不作为门槛。
   let postToolTextNudgeCount = 0;
   const maxPostToolTextNudges = 2;
   // 弱模型检测（state_machine.weakModelDetection）关闭时全员不 nudge；
-  // 开启时仅弱模型注入（Flash / Haiku / Mini 等），Sonnet / Opus / GPT-4 等强模型不引导。
+  // 开启时仅 allowlist 小模型可引导；未知/强模型不引导。
+  // LLM 纯文本与信息缺失在各自 nudge 注入点再判定。
   const weakModelDetection = stepBool(reactSteps, "state_machine", "weakModelDetection", true);
   const loopNudgeEnabled = weakModelDetection && modelNeedsLoopNudge(model.model);
   // 上一轮是否执行了工具调用（用于判断本轮是否为"工具执行后的纯文本响应"）
@@ -1407,26 +1408,24 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
         continue;
       }
 
-      // 弱模型：工具执行后只回纯文本时，按意图决定是否 nudge（上限 maxPostToolTextNudges）。
-      // 总结性报告不 nudge；行动宣言或探索未完成则 nudge。连续纯文本则尊重结束意图。
-      // 行动宣言（“现在跑测试……”）无论上一轮是否执行过工具都 nudge——
-      // 否则首轮就宣布下一步的回复会被直接当成最终报告落库。
-      const isActionAnnounce =
-        looksLikeContinuationIntent(content) && !looksLikeFinalReport(content);
+      // 弱模型：LLM 本轮只回纯文本（无 tool_calls）时，仅在所需信息未拿到时 nudge（上限 maxPostToolTextNudges）。
+      // 三条件：allowlist 小模型（loopNudgeEnabled）+ LLM 纯文本（本分支）+ 信息缺失（hasPendingInfo）。
+      // 无 information task / 无 informationNeeds / 探索已完成 → 不引导，信任 LLM。
       const nudgeInfoTask = activeInformationTask();
-      // 无 information task（没有 tasks / 无 turn plan）时，探索条件视为已满足：
-      // 不能默认 false，否则 shouldInjectPostToolTextNudge 会对任意非报告纯文本
-      // 持续 nudge，表现为「没有 tasks 时该结束却不结束」。
-      const nudgeExplorationComplete = nudgeInfoTask ? isExplorationComplete(nudgeInfoTask) : true;
+      const hasPendingInfo =
+        !!nudgeInfoTask &&
+        nudgeInfoTask.informationNeeds.length > 0 &&
+        !isExplorationComplete(nudgeInfoTask);
       if (
         loopNudgeEnabled &&
         !taskDriven &&
-        (toolsRanLastIter || isActionAnnounce) &&
+        toolsRanLastIter &&
+        hasPendingInfo &&
         content.trim() &&
         !documentDelivered &&
         !handoffRequested &&
         postToolTextNudgeCount < maxPostToolTextNudges &&
-        shouldInjectPostToolTextNudge(content, nudgeExplorationComplete)
+        shouldInjectPostToolTextNudge(content, false)
       ) {
         postToolTextNudgeCount++;
         writeEventLog({
@@ -1437,7 +1436,8 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
             iteration: i,
             finishReason,
             content: content.slice(0, 200),
-            explorationComplete: nudgeExplorationComplete,
+            explorationComplete: false,
+            hasPendingInfo,
             postToolTextNudgeCount,
           },
         });
@@ -1716,8 +1716,15 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
     // without transitioning to implementation. The nudge is injected AFTER
     // tool results are recorded (so the model has the facts) but BEFORE the
     // next LLM call, steering it toward producing output.
+    // 必要门槛：所需信息尚未拿到（无 information task / 探索已完成 → 信任 LLM，不引导）。
+    const readonlyNudgeInfoTask = activeInformationTask();
+    const readonlyNudgePendingInfo =
+      !!readonlyNudgeInfoTask &&
+      readonlyNudgeInfoTask.informationNeeds.length > 0 &&
+      !isExplorationComplete(readonlyNudgeInfoTask);
     if (
       loopNudgeEnabled &&
+      readonlyNudgePendingInfo &&
       allReadonly &&
       consecutiveReadonlyIters >= READONLY_TRANSITION_THRESHOLD &&
       consecutiveReadonlyIters < maxConsecutiveReadonlyIters

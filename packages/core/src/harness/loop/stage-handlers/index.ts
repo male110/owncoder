@@ -49,6 +49,7 @@ export {
   runTaskDecompose,
   taskDecomposeHandler,
   extractStructuredHistory,
+  buildFallbackRawDecompose,
 } from "./task-decompose.ts";
 
 export {

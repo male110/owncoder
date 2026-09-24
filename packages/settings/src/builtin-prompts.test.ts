@@ -5,6 +5,7 @@ import {
   ensureWebSearchGuidance,
 } from "./builtin-prompts.js";
 import { BUILTIN_WORKFLOW, mergeWorkflow } from "./index.js";
+import { BUILTIN_TASK_DECOMPOSE_PROMPT } from "./task-decompose-prompt.js";
 
 describe("web search prompt guidance", () => {
   it("puts web_search in the agent and plan loops before Stop", () => {
@@ -42,6 +43,18 @@ describe("web search prompt guidance", () => {
     });
     expect(merged.prompts.agent).toMatch(/web_search/);
     expect(merged.prompts.plan).toMatch(/web_search/);
+  });
+});
+
+describe("task decompose prompt JSON contract", () => {
+  it("把 JSON-only 契约放在开篇，且示例不含 NBSP", () => {
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(
+      /^You are the request-understanding[\s\S]*Your entire reply must be exactly one valid JSON object/,
+    );
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(/planning protocol, not a chat turn/);
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(/Never write that explanation as free-form text outside JSON/);
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).not.toMatch(/\u00a0/);
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).not.toMatch(/Always reply/);
   });
 });
 

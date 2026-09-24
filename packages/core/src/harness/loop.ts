@@ -33,6 +33,16 @@ export function localeSystemPrompt(pref: LocaleSetting | undefined = "system"): 
   return `## Language\nAlways reply in ${replyLocaleLabel(pref)}. Use this language for all explanations, comments, and output regardless of what language the user writes in.`;
 }
 
+/** 结构化 JSON 协议调用用：只约束 JSON 字符串字段语言，不要求整段用自然语言作答。 */
+export function localeJsonValuesPrompt(pref: LocaleSetting | undefined = "system"): string {
+  const lang = replyLocaleLabel(pref);
+  return [
+    "## Language",
+    `Write JSON string values (intent, descriptions, questions, progressStatus, relevantHistory, etc.) in ${lang}, regardless of the user's language.`,
+    "Do not write a free-form chat reply, explanation, or any text outside the JSON object.",
+  ].join("\n");
+}
+
 /** @deprecated Prefer localeSystemPrompt(workflow.harness.locale). Kept for callers that still assume OS-only. */
 export const OS_LOCALE_SYSTEM_PROMPT = localeSystemPrompt("system");
 

@@ -16,7 +16,7 @@ import {
   BUILTIN_TASK_DECOMPOSE_PROMPT,
   type ModelRef,
 } from "@owncoder/settings";
-import { localeSystemPrompt } from "../../loop.ts";
+import { localeJsonValuesPrompt } from "../../loop.ts";
 import { contextBudgets } from "../../budget.ts";
 import { normalizeUsage } from "../../observability.ts";
 import type { Tracer } from "../../observability.ts";
@@ -539,15 +539,50 @@ function buildInspectCurrentCodeSteps(userMessage: string): DecomposeStep[] {
   }];
 }
 
-function buildFallbackRawDecompose(userMessage: string) {
-  const plan = generatePlan(userMessage, "");
+/**
+ * 本地兜底分解。
+ * - intent：只用用户原话（截断保护），禁止把模型散文整段写入 intent
+ * - 若有模型纯文本（解析失败时的 planText）：收成单一 task，避免丢弃有用内容
+ * - 无模型纯文本（网络/中止等）：用本地 generatePlan 生成可执行 steps
+ * Exported for testing.
+ */
+export function buildFallbackRawDecompose(userMessage: string, modelPlainText?: string) {
+  const seed = userMessage.trim() || "(empty request)";
+  // 截断异常长输入，避免把整段粘贴内容当 intent 展示
+  const intent = seed.length > 500 ? `${seed.slice(0, 500)}…` : seed;
+  const prose = (modelPlainText ?? "").trim();
+
+  if (prose) {
+    // 保留模型纯文本作为单一 task；过长时截断，避免 UI/持久化膨胀
+    const taskBody = prose.length > 8000 ? `${prose.slice(0, 8000)}…` : prose;
+    return {
+      intent,
+      userConstraints: [] as string[],
+      progressStatus: "The decomposition model returned plain text; using it as a single fallback task.",
+      tasks: [{
+        id: "task_1",
+        description: taskBody,
+        steps: [{
+          id: "step_1",
+          description: taskBody,
+          dependsOn: [],
+          informationNeeds: [],
+          stopReadingWhen: [],
+          relevantHistory: undefined,
+        }],
+      }],
+      relevantHistory: "",
+    };
+  }
+
+  const plan = generatePlan(intent, "");
   return {
-    intent: userMessage,
+    intent,
     userConstraints: [] as string[],
     progressStatus: "The decomposition model was unavailable; using a local fallback plan.",
     tasks: [{
       id: "task_1",
-      description: userMessage,
+      description: intent,
       steps: plan.steps.map((step, index) => ({
         id: step.id || `step_${index + 1}`,
         description: step.description,
@@ -868,9 +903,13 @@ export function parseDecomposeAnswer(text: string): DecomposeAnswer | null {
   const MAX_TASKS = 20;
   const MAX_STEPS = 20;
   const MAX_INFORMATION_NEEDS_PER_STEP = 10;
-  
-  const objectMatch = text.match(/\{[\s\S]*\}/);
-  const arrayMatch = text.match(/\[[\s\S]*\]/);
+
+  // 先剥 Markdown 围栏，再取 JSON；避免模型「解释 + ```json ... ```」时整段失败
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1]?.trim();
+  const normalized = fenced || text;
+
+  const objectMatch = normalized.match(/\{[\s\S]*\}/);
+  const arrayMatch = normalized.match(/\[[\s\S]*\]/);
   // Prefer whichever encloses the other: an object wrapping "tasks" starts before
   // the array it contains.
   const source =
@@ -1217,9 +1256,12 @@ export async function runTaskDecompose(
   const systemPrompt = prompt?.trim() || BUILTIN_TASK_DECOMPOSE_PROMPT;
   try {
     const { tagUserInput } = await import("../../message-tags.js");
+    // 分解是 JSON 协议调用：语言指令只作用于 JSON 字符串字段。
+    // 不得使用 localeSystemPrompt 的 "Always reply in …"，否则会诱导独立散文。
+    const localePrompt = localeJsonValuesPrompt(opts.workflow.harness.locale);
     const decomposeMessages: ChatMessage[] = [
       { role: "system", content: systemPrompt },
-      { role: "system", content: localeSystemPrompt(opts.workflow.harness.locale) },
+      { role: "system", content: localePrompt },
       {
         role: "user",
         content: [
@@ -1311,8 +1353,33 @@ export async function runTaskDecompose(
 
     if (!answer) {
       tracer.endSpan(planSpanId, "error", { reason: "Parse failure" });
-      // Fallback: generate a generic plan
+      writeEventLog({
+        category: "stage_error",
+        message: "task_decompose 解析失败：模型未返回可解析 JSON，已使用本地结构化兜底",
+        details: {
+          sessionId: opts.sessionId,
+          planTextChars: planText.length,
+          // 只记前缀便于排查，不把全文当最终回复下发
+          planTextPreview: planText.trim().slice(0, 240),
+        },
+      });
+      // Fallback：intent 用用户原话；模型纯文本（planText）收成单一 task，不丢弃。
+      const rawDecompose = buildFallbackRawDecompose(opts.userMessage, planText);
       const agentPlan = generatePlan(opts.userMessage, "");
+      // 有模型纯文本时，用其作为可展示/可跟进的单一 step，覆盖本地 generic plan
+      if (rawDecompose.tasks[0]?.steps?.length) {
+        agentPlan.steps = rawDecompose.tasks.flatMap((t) =>
+          t.steps.map((s) => ({
+            id: s.id,
+            description: s.description,
+            status: "pending" as const,
+            dependsOn: s.dependsOn,
+            retryCount: 0,
+            maxRetries: 3,
+          })),
+        );
+        agentPlan.goal = rawDecompose.intent || opts.userMessage;
+      }
       reasoningTrace.plan = agentPlan;
       memory.setActivePlan({
         id: `plan_${Date.now().toString(36)}`,
@@ -1328,7 +1395,7 @@ export async function runTaskDecompose(
         task: null,
         decomposeTokens: 0,
         fallback: true,
-        rawDecompose: buildFallbackRawDecompose(planText.trim() || opts.userMessage),
+        rawDecompose,
       };
     }
 
