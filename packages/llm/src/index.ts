@@ -746,6 +746,11 @@ export async function chatCompletion(
   const codec = resolveCodec(ref);
   const url = codec.buildUrl(ref.baseUrl);
   const body = codec.encodeRequest(encodeInput(ref, messages, opts, false));
+  writeEventLog({
+    category: "other",
+    message: `实际发送请求体 (${codec.format}, sync)`,
+    details: body,
+  });
   const apiKey = resolveApiKey(ref, opts?.apiKey);
 
   const startTime = Date.now();
@@ -838,6 +843,11 @@ export async function chatCompletionStream(
   const codec = resolveCodec(ref);
   const url = codec.buildUrl(ref.baseUrl);
   const body = codec.encodeRequest(encodeInput(ref, messages, opts, true));
+  writeEventLog({
+    category: "other",
+    message: `实际发送请求体 (${codec.format}, stream)`,
+    details: body,
+  });
   const apiKey = resolveApiKey(ref, opts?.apiKey);
 
   const startTime = Date.now();
