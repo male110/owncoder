@@ -14,7 +14,7 @@ import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react"
 
 // ── Stores ────────────────────────────────────────────────────────────────────
 import { useSessionStore } from "./store/session-store";
-import type { ActivePlanMetaDto } from "../../preload/index";
+import type { ActivePlanMetaDto, ChatAttachmentDto } from "../../preload/index";
 import { useChatStore } from "./store/chat-store";
 import { getComposerDraftKey, useUiStore } from "./store/ui-store";
 import { customConfirm } from "./utils/customConfirm";
@@ -328,7 +328,7 @@ export function App() {
   const showBlank = pendingNewSession || (sessions.length === 0 && !activeSessionId);
 
   // ── Send wrapper ──────────────────────────────────────────────────────────────
-  const handleSend = useCallback(() => { onSend(); }, [onSend]);
+  const handleSend = useCallback((attachments?: ChatAttachmentDto[]) => { onSend(attachments); }, [onSend]);
 
   // ── Composer callbacks (stabilized so React.memo can skip re-renders) ─────────
   // PENDING_DRAFT_KEY is used when there is no active session / pending new

@@ -330,6 +330,13 @@ export async function buildDecomposeContext(
     }
   }
 
+  // 即使结构化轮次来自持久化 rounds，也显式把当前上传图片 URL 放进分解历史；
+  // URL 不写入用户正文，避免图片在文本历史路径中丢失。
+  const currentAttachmentUrls = (opts.attachments ?? []).map((attachment) => attachment.url).filter(Boolean);
+  if (currentAttachmentUrls.length > 0) {
+    roundLines.unshift(`## Current uploaded images\n${currentAttachmentUrls.map((url) => `- ${url}`).join("\n")}`);
+  }
+
   if (roundLines.length === 0) {
     // Fallback: heuristic extraction (no decompose JSON, no evidence).
     const structuredHistory = extractStructuredHistory(opts.history, minRounds, true);
@@ -1259,6 +1266,10 @@ export async function runTaskDecompose(
     // 分解是 JSON 协议调用：语言指令只作用于 JSON 字符串字段。
     // 不得使用 localeSystemPrompt 的 "Always reply in …"，否则会诱导独立散文。
     const localePrompt = localeJsonValuesPrompt(opts.workflow.harness.locale);
+    const sessionAttachments = opts.history
+      .flatMap((turn) => turn.attachments ?? [])
+      .concat(opts.attachments ?? [])
+      .filter((attachment, index, all) => all.findIndex((item) => item.url === attachment.url) === index);
     const decomposeMessages: ChatMessage[] = [
       { role: "system", content: systemPrompt },
       { role: "system", content: localePrompt },
@@ -1266,9 +1277,12 @@ export async function runTaskDecompose(
         role: "user",
         content: [
           tagUserInput(opts.userMessage),
+          sessionAttachments.length > 0
+            ? `## Uploaded image URLs (preserve these URLs in this task context)\n${sessionAttachments.map((attachment) => `- ${attachment.url}`).join("\n")}`
+            : "",
           `## CONTEXT (background information)\n${await buildDecomposeContext(opts, budgets)}`,
-        ].join("\n\n"),
-        attachments: opts.attachments,
+        ].filter(Boolean).join("\n\n"),
+        attachments: sessionAttachments,
       },
     ];
 
@@ -1610,6 +1624,7 @@ export const taskDecomposeHandler: StageHandler = {
           opts.userMessage,
           persisted,
           collectToolCallsFromTurns(opts.history),
+          (opts.attachments ?? []).map((attachment) => attachment.url),
         );
         if (record) ctx.state.roundIndex = record.index;
       } catch (error) {

@@ -40,9 +40,9 @@
   --user-bubble-border: #2a3d52;
   --code-inline-bg: #1a1e28;
   --table-head-bg: #141820;
-  /* Quieter active session highlight (less blue punch) */
-  --session-active: #161c24;
-  --session-active-hover: #1a222c;
+  /* Active session: readable at a glance, still restrained */
+  --session-active: #1a2530;
+  --session-active-hover: #1e2b38;
   --danger-btn-bg: #2a1818;
   --danger-btn-border: #5a3030;
   --surface-tint: #11151b;
@@ -122,8 +122,8 @@
   --user-bubble-border: #c4d3d7;
   --code-inline-bg: #e9e7e2;
   --table-head-bg: #eeece7;
-  --session-active: #dfe8e9;
-  --session-active-hover: #d5e1e3;
+  --session-active: #d2e0e4;
+  --session-active-hover: #c6d7dc;
   --danger-btn-bg: #f9e8e6;
   --danger-btn-border: #dfb5b0;
   --surface-tint: #eeece7;
@@ -808,10 +808,10 @@ body,
   border-radius: 8px;
 }
 
-/* 高亮整块 session-wrap，使状态图标落在边框/背景内（暗色下去掉刺眼加粗/粗竖条） */
+/* 高亮整块 session-wrap，使状态图标落在边框/背景内；选中态需一眼可辨但仍克制 */
 .session-wrap.active {
   background: var(--session-active);
-  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--accent) 55%, transparent);
+  box-shadow: inset 3px 0 0 var(--accent);
 }
 
 .session-wrap.active:hover {
@@ -824,7 +824,8 @@ body,
 }
 
 .session-wrap.active .session-title {
-  font-weight: 400;
+  font-weight: 560;
+  color: var(--text);
 }
 
 /* ── Session status icons (leftmost in sidebar) ── */
@@ -6885,12 +6886,12 @@ button.ghost.tiny.danger:hover {
 }
 
 :root[data-theme="codex"] .session-wrap.active {
-  background: rgba(63, 97, 114, 0.11);
-  box-shadow: inset 2px 0 0 var(--accent);
+  background: rgba(63, 97, 114, 0.18);
+  box-shadow: inset 3px 0 0 var(--accent);
 }
 
 :root[data-theme="codex"] .session-wrap.active:hover {
-  background: rgba(63, 97, 114, 0.15);
+  background: rgba(63, 97, 114, 0.24);
 }
 
 :root[data-theme="codex"] .agent-body {

@@ -142,6 +142,8 @@ export interface TurnRoundRecord {
   createdAt: string;
   updatedAt: string;
   userInput: string;
+  /** 用户消息中图片附件的 URL，供后续任务分解历史复用。 */
+  attachmentUrls?: string[];
   taskDecompose?: PersistedDecompose;
   assistantReport?: string;
   evidence?: PersistedEvidence[];
@@ -472,6 +474,9 @@ export function formatRoundBlock(
 ): string {
   const includeProcessInfo = options?.includeProcessInfo ?? true;
   const parts: string[] = [`## Round ${displayIndex}`, `[user] ${round.userInput}`];
+  if (round.attachmentUrls?.length) {
+    parts.push(`[user image URLs]\n${round.attachmentUrls.map((url) => `- ${url}`).join("\n")}`);
+  }
   if (round.taskDecompose) {
     parts.push(`[decompose] ${formatDecomposeSummary(round.taskDecompose)}`);
   }
@@ -742,6 +747,7 @@ export async function persistDecomposeRound(
   userInput: string,
   decompose: PersistedDecompose,
   toolCalls: PersistedToolCall[] = [],
+  attachmentUrls: string[] = [],
 ): Promise<TurnRoundRecord | null> {
   const input = userInput.trim();
   const cleaned = sanitizeDecompose(decompose);
@@ -754,6 +760,7 @@ export async function persistDecomposeRound(
     // Same user turn still open (decompose ran, report not written yet) → update in place.
     if (last && last.userInput === clip(input, MAX_USER_INPUT_CHARS) && !last.assistantReport) {
       last.taskDecompose = cleaned;
+      if (attachmentUrls.length > 0) last.attachmentUrls = [...new Set(attachmentUrls.filter(Boolean))];
       if (toolCalls.length > 0) last.toolCalls = sanitizeToolCalls(toolCalls);
       last.updatedAt = now;
       await writeFile(workspaceRoot, file);
@@ -764,6 +771,7 @@ export async function persistDecomposeRound(
       createdAt: now,
       updatedAt: now,
       userInput: clip(input, MAX_USER_INPUT_CHARS),
+      attachmentUrls: attachmentUrls.length > 0 ? [...new Set(attachmentUrls.filter(Boolean))] : undefined,
       taskDecompose: cleaned,
       toolCalls: toolCalls.length > 0 ? sanitizeToolCalls(toolCalls) : undefined,
     };

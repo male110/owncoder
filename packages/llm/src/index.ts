@@ -706,6 +706,25 @@ function encodeInput(
   };
 }
 
+function findImageUrls(value: unknown): string[] {
+  const urls: string[] = [];
+  const visit = (item: unknown): void => {
+    if (!item || typeof item !== "object") return;
+    if (Array.isArray(item)) {
+      item.forEach(visit);
+      return;
+    }
+    const record = item as Record<string, unknown>;
+    if (record.type === "image_url" && record.image_url && typeof record.image_url === "object") {
+      const url = (record.image_url as Record<string, unknown>).url;
+      if (typeof url === "string" && url) urls.push(url);
+    }
+    Object.values(record).forEach(visit);
+  };
+  visit(value);
+  return [...new Set(urls)];
+}
+
 function requestHeaders(
   codec: ProtocolCodec,
   apiKey: string | undefined,
@@ -746,6 +765,8 @@ export async function chatCompletion(
   const codec = resolveCodec(ref);
   const url = codec.buildUrl(ref.baseUrl);
   const body = codec.encodeRequest(encodeInput(ref, messages, opts, false));
+  const requestImageUrls = findImageUrls(body);
+  console.log(`[llm] final request image URLs: hasImageUrl=${requestImageUrls.length > 0} count=${requestImageUrls.length}`, requestImageUrls);
   const apiKey = resolveApiKey(ref, opts?.apiKey);
 
   const startTime = Date.now();
@@ -838,6 +859,8 @@ export async function chatCompletionStream(
   const codec = resolveCodec(ref);
   const url = codec.buildUrl(ref.baseUrl);
   const body = codec.encodeRequest(encodeInput(ref, messages, opts, true));
+  const requestImageUrls = findImageUrls(body);
+  console.log(`[llm] final request image URLs: hasImageUrl=${requestImageUrls.length > 0} count=${requestImageUrls.length}`, requestImageUrls);
   const apiKey = resolveApiKey(ref, opts?.apiKey);
 
   const startTime = Date.now();

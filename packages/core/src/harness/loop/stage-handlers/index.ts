@@ -80,6 +80,10 @@ export async function injectHistoryAndUserMessage(ctx: SchedulerContext): Promis
   const { opts, messages, history, state } = ctx;
   const { tagUserInput } = await import("../../message-tags.js");
   const outboundUserMessage = opts.userMessage;
+  const sessionAttachments = history
+    .flatMap((turn) => turn.attachments ?? [])
+    .concat(opts.attachments ?? [])
+    .filter((attachment, index, all) => all.findIndex((item) => item.url === attachment.url) === index);
 
   let recentFileHints = "";
   if (opts.sessionId) {
@@ -119,7 +123,7 @@ export async function injectHistoryAndUserMessage(ctx: SchedulerContext): Promis
     messages.push({
       role: "user",
       content: tagUserInput(contextLines.join("\n")),
-      attachments: opts.attachments,
+      attachments: sessionAttachments,
     });
 
     writeEventLog({
@@ -139,7 +143,7 @@ export async function injectHistoryAndUserMessage(ctx: SchedulerContext): Promis
           ? `## 当前任务\n\n${outboundUserMessage}\n\n${recentFileHints}`
           : `## 当前任务\n\n${outboundUserMessage}`,
       ),
-      attachments: opts.attachments,
+      attachments: sessionAttachments,
     });
 
     writeEventLog({
@@ -151,7 +155,7 @@ export async function injectHistoryAndUserMessage(ctx: SchedulerContext): Promis
     });
   }
 
-  pushCurrentUserMessageOnce(history, opts.userMessage, opts.attachments);
+  pushCurrentUserMessageOnce(history, opts.userMessage, sessionAttachments);
 }
 
 /**
