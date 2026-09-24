@@ -49,12 +49,41 @@ describe("web search prompt guidance", () => {
 describe("task decompose prompt JSON contract", () => {
   it("把 JSON-only 契约放在开篇，且示例不含 NBSP", () => {
     expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(
-      /^You are the request-understanding[\s\S]*Your entire reply must be exactly one valid JSON object/,
+      /^You are the request-understanding[\s\S]*Produce only one valid JSON object/,
     );
-    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(/planning protocol, not a chat turn/);
-    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(/Never write that explanation as free-form text outside JSON/);
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(/planning protocol, not chat/);
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(/Explanations must live inside JSON, never as free text outside/);
     expect(BUILTIN_TASK_DECOMPOSE_PROMPT).not.toMatch(/\u00a0/);
     expect(BUILTIN_TASK_DECOMPOSE_PROMPT).not.toMatch(/Always reply/);
+  });
+
+  it("要求从上下文提取 relevantHistory，并区分整单与步骤级", () => {
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(/## Relevant History/);
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(/Extract task-relevant history into `relevantHistory`/);
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(/original goal and scope/);
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(/user requirements and prohibitions/);
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(/key decisions and their reasons/);
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(/files \/ symbols \/ modules \/ docs already inspected or modified/);
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(/conclusions from prior code reading/);
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(/failed attempts and known errors/);
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(/Distinguish confirmed facts from assumptions/);
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(/do not copy conversation or source code/);
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(
+      /Top-level `relevantHistory` stores history reusable across the whole plan/,
+    );
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(
+      /step-level `relevantHistory` stores history needed only by that step/,
+    );
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(/Empty string when there is no relevant task history/);
+  });
+
+  it("把 continue/继续 理解为完成最近一次任务分解的全部剩余任务，而不是只完成某个 step", () => {
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(
+      /If the user says continue, 继续, or similar resume wording, treat it as a request to complete every remaining task from the most recent task decomposition — not to finish only a previous step/,
+    );
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(
+      /the work needed this turn is every remaining task from the most recent task decomposition — include all of those tasks in `tasks`, not a single leftover step/,
+    );
   });
 });
 

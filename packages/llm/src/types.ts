@@ -18,9 +18,17 @@ export interface ToolCall {
   };
 }
 
+export interface ChatAttachment {
+  name: string;
+  mimeType: string;
+  url: string;
+  size?: number;
+}
+
 export interface ChatMessage {
   role: ChatRole;
   content?: string | null;
+  attachments?: ChatAttachment[];
   tool_calls?: ToolCall[];
   tool_call_id?: string;
   name?: string;

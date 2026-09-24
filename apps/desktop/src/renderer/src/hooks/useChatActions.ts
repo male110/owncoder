@@ -367,11 +367,21 @@ export function useChatActions(deps: {
         // `thinking_delta` / `tool_start` events will overwrite this with
         // more specific text via `setLiveStatus`.
         chat.setLiveStatus(t("正在分解任务…"), sid);
-        chat.setHistory((h) => [...h, { role: "user", content: next }], sid);
-        applyProvisionalTitleIfNeeded(sid, next);
+        chat.setHistory(
+          (h) => [
+            ...h,
+            {
+              role: "user",
+              content: next.text,
+              ...(next.attachments?.length ? { attachments: next.attachments } : {}),
+            },
+          ],
+          sid,
+        );
+        applyProvisionalTitleIfNeeded(sid, next.text);
         try {
           await new Promise((r) => setTimeout(r, 0));
-          const res = await window.owncoder.sendChat(next, sid);
+          const res = await window.owncoder.sendChat(next.text, sid, next.attachments);
           // Kick off refreshChanges IMMEDIATELY — don't wait for applyChatResult.
           // The backend has finished writing files by now, so the changes panel
           // can start populating while history/title updates settle.
@@ -411,7 +421,7 @@ export function useChatActions(deps: {
     return () => clearQueueRunner(owner);
   }, [runQueue]);
 
-  const onSend = useCallback(async () => {
+  const onSend = useCallback(async (attachments?: import("../../../preload/index").ChatAttachmentDto[]) => {
     try {
       console.log("[onSend] called");
       let sid = getFocusSessionId();
@@ -475,8 +485,10 @@ export function useChatActions(deps: {
       }
     }
 
+    const hasAttachments = Array.isArray(attachments) && attachments.length > 0;
+
     if (!sid) {
-      if (!text) { console.log("[onSend] no sid, no text → return"); return; }
+      if (!text && !hasAttachments) { console.log("[onSend] no sid, no text → return"); return; }
       await depsRef.current.onNewSession();
       // onNewSession detaches the active session and arms `pendingNewSessionRef`
       // (it deliberately leaves `activeSessionId` null so the new session's
@@ -496,7 +508,8 @@ export function useChatActions(deps: {
         depsRef.current.pendingNewSessionRef.current,
       );
     }
-    if (!text) { console.log("[onSend] text still empty after re-read → return"); return; }
+    if (!text && !hasAttachments) { console.log("[onSend] text still empty after re-read → return"); return; }
+    text = text ?? "";
 
     // 方案B: if a new-session click is pending, create the real session now.
     const currentSession = useSessionStore.getState();
@@ -533,7 +546,7 @@ export function useChatActions(deps: {
 
     console.log("[onSend] after sid check, text=", text?.substring(0, 50), "session=", session);
     // 只匹配单斜杠开头的命令（如 /clear），不匹配双斜杠（如 // 注释）
-    if (text.startsWith("/") && !text.startsWith("//")) { void runSlash(text, sid); return; }
+    if (text && text.startsWith("/") && !text.startsWith("//")) { void runSlash(text, sid); return; }
     console.log("[onSend] checking workspace...");
     const sendSession = useSessionStore.getState();
     if (!sendSession.workspace) { console.log("[onSend] workspace not ready → return"); chat.setLiveStatus(t("工作区尚未就绪，请稍候…"), sid); return; }
@@ -566,7 +579,7 @@ export function useChatActions(deps: {
       }
 
       console.log("[onSend] enqueueing message, sid=", sid);
-      enqueueMessage(sid, text);
+      enqueueMessage(sid, text, attachments);
       // 用户主动发送新消息，清除可能残留的停止标志，确保队列能正常执行。
       clearStopRequest(sid);
       console.log("[onSend] running queue...");

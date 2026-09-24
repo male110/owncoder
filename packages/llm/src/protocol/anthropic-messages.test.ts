@@ -112,6 +112,55 @@ describe("anthropicMessagesCodec encode", () => {
     expect(body.messages.at(-1)?.role).toBe("user");
   });
 
+  it("encodes multi-image attachments as source.url blocks and non-images as plain text", () => {
+    const body = encodeAnthropicMessages({
+      model: "claude-sonnet-4",
+      messages: [
+        {
+          role: "user",
+          content: "look",
+          attachments: [
+            { name: "a.png", mimeType: "image/png", url: "https://cdn.example/a.png" },
+            { name: "b.jpg", mimeType: "image/jpeg", url: "https://cdn.example/b.jpg" },
+            { name: "notes.pdf", mimeType: "application/pdf", url: "https://cdn.example/notes.pdf" },
+          ],
+        },
+      ],
+      stream: false,
+    });
+
+    expect(body.messages[0]).toEqual({
+      role: "user",
+      content: [
+        { type: "text", text: "look" },
+        {
+          type: "image",
+          source: { type: "url", media_type: "image/png", url: "https://cdn.example/a.png" },
+        },
+        {
+          type: "image",
+          source: { type: "url", media_type: "image/jpeg", url: "https://cdn.example/b.jpg" },
+        },
+        {
+          type: "text",
+          text: "[文件附件] notes.pdf (application/pdf): https://cdn.example/notes.pdf",
+        },
+      ],
+    });
+  });
+
+  it("keeps plain text user messages as a single text block", () => {
+    const body = encodeAnthropicMessages({
+      model: "claude-sonnet-4",
+      messages: [{ role: "user", content: "hi only" }],
+      stream: false,
+    });
+    expect(body.messages[0]).toEqual({
+      role: "user",
+      content: [{ type: "text", text: "hi only" }],
+    });
+  });
+
   it("merges consecutive same-role messages and prepends a user turn when needed", () => {
     const body = encodeAnthropicMessages({
       model: "claude-sonnet-4",

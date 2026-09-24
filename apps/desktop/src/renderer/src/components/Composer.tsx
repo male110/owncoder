@@ -1,7 +1,7 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { AgentMode } from "@owncoder/shared";
 import type { AvailableModel, Provider, ThinkingEffort } from "@owncoder/settings";
-import type { GitStatusDto, ProjectDto } from "../../../preload/index";
+import type { GitStatusDto, ProjectDto, ChatAttachmentDto } from "../../../preload/index";
 import { useI18n } from "../i18n";
 
 interface Props {
@@ -23,7 +23,7 @@ interface Props {
   pendingNewSession: boolean;
   modeMenuOpen: boolean;
   onDraft: (v: string) => void;
-  onSend: () => void;
+  onSend: (attachments?: ChatAttachmentDto[]) => void;
   onCancel: () => void;
   onNewSession: () => void;
   onMode: (mode: AgentMode) => void;
@@ -125,6 +125,33 @@ function ComposerImpl({
   const [mentionStart, setMentionStart] = useState(0);
   const [mentionHits, setMentionHits] = useState<string[]>([]);
   const [mentionIndex, setMentionIndex] = useState(0);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [attachments, setAttachments] = useState<Array<{ file: File; status: "uploading" | "error" | "success"; result?: ChatAttachmentDto; error?: string }>>([]);
+  const uploadStatus = attachments.some((item) => item.status === "uploading")
+    ? "uploading"
+    : attachments.some((item) => item.status === "error")
+      ? "error"
+      : attachments.length > 0
+        ? "success"
+        : "idle";
+
+  const uploadFile = useCallback(async (file: File) => {
+    setAttachments((items) => [...items, { file, status: "uploading" }]);
+    try {
+      const data = new Uint8Array(await file.arrayBuffer());
+      const result = await window.owncoder.uploadFile({ name: file.name, type: file.type, data, provider: "uguu" });
+      const attachment = { name: result.name || file.name, mimeType: file.type || "application/octet-stream", url: result.url, size: result.size };
+      setAttachments((items) => items.map((item) => item.file === file ? { ...item, status: "success", result: attachment } : item));
+    } catch (error) {
+      setAttachments((items) => items.map((item) => item.file === file ? { ...item, status: "error", error: error instanceof Error ? error.message : "上传失败，请重试" } : item));
+    }
+  }, []);
+
+  const onFileSelected = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = [...(e.target.files ?? [])];
+    e.target.value = "";
+    for (const file of files) void uploadFile(file);
+  }, [uploadFile]);
   
   // 超时保护：防止 projectSwitching 异常卡死导致 UI 永久禁用
   useEffect(() => {
@@ -353,13 +380,15 @@ function ComposerImpl({
       onSubmit={(e) => {
         e.preventDefault();
         console.log("[Composer] form submitted, projectSwitching=", projectSwitching, "draft=", JSON.stringify(draft));
-        if (projectSwitching) return;
+        if (projectSwitching || uploadStatus === "uploading") return;
         if (mentionQuery !== null && mentionHits.length > 0) {
           insertMention(mentionHits[mentionIndex]!);
           return;
         }
         console.log("[Composer] calling onSend()");
-        onSend();
+        const ready = attachments.filter((item) => item.status === "success").map((item) => item.result!);
+        onSend(ready);
+        setAttachments([]);
       }}
     >
       {(isEmptySession || pendingNewSession) ? (
@@ -542,6 +571,18 @@ function ComposerImpl({
       </div>
 
       <div className="composer-bar">
+        <input ref={fileInputRef} className="composer-file-input" type="file" multiple onChange={onFileSelected} />
+        <button
+          type="button"
+          className="upload-trigger"
+          aria-label="上传文件"
+          title="上传图片或文件"
+          disabled={projectSwitching}
+          onClick={() => fileInputRef.current?.click()}
+        >
+          ＋ <span>上传</span>
+        </button>
+        {attachments.map((item) => <div key={`${item.file.name}-${item.file.lastModified}`} className={`upload-chip ${item.status === "error" ? "error" : ""}`} role="status"><span className="upload-chip-name">{item.status === "uploading" ? `上传中：${item.file.name}` : item.status === "error" ? `上传失败：${item.file.name}` : item.file.name}</span>{item.status === "error" ? <button type="button" onClick={() => void uploadFile(item.file)}>{t("重试")}</button> : null}<button type="button" aria-label="移除附件" onClick={() => setAttachments((xs) => xs.filter((x) => x !== item))}>×</button></div>)}
         <div className="mode-picker" ref={modeMenuRef}>
           <button
             type="button"

@@ -3832,6 +3832,68 @@ button.ghost.accent {
   transition: height 120ms ease;
 }
 
+.composer-file-input {
+  display: none;
+}
+
+.upload-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 6px 10px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.upload-trigger:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.upload-trigger:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.upload-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: min(320px, 45vw);
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.upload-chip.error {
+  border-color: var(--danger-btn-border);
+  color: var(--danger-text);
+}
+
+.upload-chip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.upload-chip button {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.upload-error {
+  color: var(--danger-text);
+  font-size: 12px;
+}
+
 .composer-bar {
   display: flex;
   align-items: center;

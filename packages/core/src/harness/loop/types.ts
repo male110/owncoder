@@ -1,4 +1,4 @@
-import type { ChatMessage, ToolDef } from "@owncoder/llm";
+import type { ChatAttachment, ChatMessage, ToolDef } from "@owncoder/llm";
 import type { ModelRef, SystemWorkflowConfig } from "@owncoder/settings";
 import type { AgentMode } from "@owncoder/shared";
 import type { IndexClient } from "@owncoder/index";
@@ -242,6 +242,7 @@ export interface ChatTurn {
    * 当 parts 不存在时，这是完整内容
    */
   content: string;
+  attachments?: ChatAttachment[];
   toolName?: string;
   
   /**
@@ -312,6 +313,7 @@ export interface AgentLoopOpts {
   codemap?: ToolContext["codemap"];
   history: ChatTurn[];
   userMessage: string;
+  attachments?: ChatAttachment[];
   signal?: AbortSignal;
   onEvent?: (ev: TurnEventInput) => void;
   maxIterations?: number;
@@ -389,6 +391,8 @@ export interface AgentLoopOpts {
      */
     archive?: (turn: ChatTurn, sessionId: string) => void | Promise<void>;
     archiveRound?: (round: import("./history-vector.ts").HistoryRoundInput) => void | Promise<void>;
+    /** 删除某会话的待归档队列与已写入向量。 */
+    deleteSession?: (sessionId: string) => void;
     /** 释放归档存储及其 native 资源。 */
     close?: () => void;
   };

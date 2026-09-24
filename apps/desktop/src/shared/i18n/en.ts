@@ -305,7 +305,7 @@ export const en = {
   "思考过程": "Thought process",
   "任务分解（本地回退）": "Task breakdown (local fallback)",
   "任务分解：无需计划": "Task breakdown: no plan needed",
-  "任务分解：{{count}} 个步骤": "Task breakdown: {{count}} steps",
+  "任务分解：{{count}} 个任务": "Task breakdown: {{count}} tasks",
   "执行过程 · {{count}} 步": "Process · {{count}} steps",
   "+ 添加全局偏好": "Add global preference",
   "+ 添加项目偏好": "Add project preference",

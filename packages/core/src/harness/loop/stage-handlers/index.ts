@@ -116,7 +116,11 @@ export async function injectHistoryAndUserMessage(ctx: SchedulerContext): Promis
       contextLines.push(``, recentFileHints);
     }
 
-    messages.push({ role: "user", content: tagUserInput(contextLines.join("\n")) });
+    messages.push({
+      role: "user",
+      content: tagUserInput(contextLines.join("\n")),
+      attachments: opts.attachments,
+    });
 
     writeEventLog({
       category: "other",
@@ -135,6 +139,7 @@ export async function injectHistoryAndUserMessage(ctx: SchedulerContext): Promis
           ? `## 当前任务\n\n${outboundUserMessage}\n\n${recentFileHints}`
           : `## 当前任务\n\n${outboundUserMessage}`,
       ),
+      attachments: opts.attachments,
     });
 
     writeEventLog({
@@ -146,7 +151,7 @@ export async function injectHistoryAndUserMessage(ctx: SchedulerContext): Promis
     });
   }
 
-  pushCurrentUserMessageOnce(history, opts.userMessage);
+  pushCurrentUserMessageOnce(history, opts.userMessage, opts.attachments);
 }
 
 /**

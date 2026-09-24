@@ -11,13 +11,16 @@
  */
 import { useChatStore } from "../store/chat-store";
 
-const queues = new Map<string, string[]>();
+import type { ChatAttachmentDto } from "../../../preload/index";
+
+export interface QueuedMessage { text: string; attachments?: ChatAttachmentDto[] }
+const queues = new Map<string, QueuedMessage[]>();
 const running = new Set<string>();
 const stopRequested = new Set<string>();
 let runner: ((sid: string, oneOnly?: boolean) => Promise<void>) | null = null;
 let runnerOwner: symbol | null = null;
 
-function snapshot(sid: string): string[] {
+function snapshot(sid: string): QueuedMessage[] {
   return [...(queues.get(sid) ?? [])];
 }
 
@@ -74,16 +77,16 @@ export function clearStopRequest(sid: string): void {
 }
 
 /** Append a message and persist immediately ("每次发送也要保存"). */
-export function enqueueMessage(sid: string, text: string): void {
+export function enqueueMessage(sid: string, text: string, attachments?: QueuedMessage["attachments"]): void {
   const q = queues.get(sid) ?? [];
-  q.push(text);
+  q.push(attachments?.length ? { text, attachments } : { text });
   queues.set(sid, q);
   syncStore(sid);
   persist(sid);
 }
 
 /** Pop the next message and persist immediately so a restart never re-runs it. */
-export function dequeueMessage(sid: string): string | undefined {
+export function dequeueMessage(sid: string): QueuedMessage | undefined {
   const q = queues.get(sid);
   if (!q || q.length === 0) return undefined;
   const next = q[0]!;
@@ -105,10 +108,35 @@ export function sendQueuedMessage(sid: string, index: number): void {
   void runner(sid, true);
 }
 
+function isAttachment(value: unknown): value is NonNullable<QueuedMessage["attachments"]>[number] {
+  if (!value || typeof value !== "object") return false;
+  const row = value as { name?: unknown; mimeType?: unknown; url?: unknown; size?: unknown };
+  return typeof row.name === "string" && typeof row.mimeType === "string" && typeof row.url === "string";
+}
+
+function normalizeQueuedMessage(value: unknown): QueuedMessage | null {
+  if (typeof value === "string") {
+    return value.length > 0 ? { text: value } : null;
+  }
+  if (!value || typeof value !== "object") return null;
+  const row = value as { text?: unknown; attachments?: unknown };
+  const text = typeof row.text === "string" ? row.text : "";
+  const attachments = Array.isArray(row.attachments)
+    ? row.attachments.filter(isAttachment).map((item) => ({
+        name: item.name,
+        mimeType: item.mimeType,
+        url: item.url,
+        ...(typeof item.size === "number" ? { size: item.size } : {}),
+      }))
+    : undefined;
+  if (!text && !(attachments && attachments.length > 0)) return null;
+  return attachments && attachments.length > 0 ? { text, attachments } : { text };
+}
+
 /** Restore a queue from persisted state (session switch / app startup). */
 export function hydrateQueue(sid: string, messages: unknown): void {
   const msgs = Array.isArray(messages)
-    ? messages.filter((m): m is string => typeof m === "string" && m.length > 0)
+    ? messages.map(normalizeQueuedMessage).filter((m): m is QueuedMessage => m !== null)
     : [];
   queues.set(sid, msgs);
   syncStore(sid);

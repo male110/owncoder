@@ -23,6 +23,7 @@ const THINKING_BUDGET: Record<string, number> = {
 
 type AnthropicContentBlock =
   | { type: "text"; text: string }
+  | { type: "image"; source: { type: "url"; media_type: string; url: string } }
   | { type: "tool_use"; id: string; name: string; input: unknown }
   | { type: "tool_result"; tool_use_id: string; content: string }
   | { type: "thinking"; thinking: string };
@@ -122,10 +123,17 @@ export function encodeAnthropicMessages(input: ProtocolEncodeInput): AnthropicRe
     }
     flushToolResults();
     if (msg.role === "user") {
-      rawMessages.push({
-        role: "user",
-        content: [textBlock(msg.content ?? "")],
-      });
+      const blocks: AnthropicContentBlock[] = [];
+      if (msg.content) blocks.push(textBlock(msg.content));
+      for (const attachment of msg.attachments ?? []) {
+        if (attachment.mimeType.toLowerCase().startsWith("image/") && /^https?:\/\//i.test(attachment.url)) {
+          blocks.push({ type: "image", source: { type: "url", media_type: attachment.mimeType, url: attachment.url } });
+        } else {
+          blocks.push(textBlock(`[文件附件] ${attachment.name} (${attachment.mimeType || "application/octet-stream"}): ${attachment.url}`));
+        }
+      }
+      if (blocks.length === 0) blocks.push(textBlock(""));
+      rawMessages.push({ role: "user", content: blocks });
       continue;
     }
     // assistant

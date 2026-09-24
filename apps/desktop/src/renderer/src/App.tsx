@@ -468,7 +468,7 @@ export function App() {
         gitSummary={
           gitStatus?.isRepo
             ? ["干净", "已改", "未跟踪", "有改动", "Git 状态获取失败"].reduce(
-                (summary, label) => summary.replaceAll(label, t(label)),
+                (summary, label) => summary.replaceAll(label, t(label as Parameters<typeof t>[0])),
                 gitStatus.summary,
               )
             : null

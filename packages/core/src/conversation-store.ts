@@ -1,5 +1,5 @@
 import Database from "better-sqlite3";
-import { mkdir } from "node:fs/promises";
+import { mkdir, unlink } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import type { ChatTurn } from "./harness/loop/types.ts";
 
@@ -76,6 +76,16 @@ function slimChatTurn(turn: unknown): ChatTurn | null {
   };
   if (typeof row.id === "string") slim.id = row.id;
   if (typeof row.toolName === "string") slim.toolName = row.toolName;
+  if (Array.isArray(row.attachments) && row.attachments.length) {
+    const attachments = row.attachments.filter((item): item is NonNullable<ChatTurn["attachments"]>[number] =>
+      !!item &&
+      typeof item === "object" &&
+      typeof item.name === "string" &&
+      typeof item.mimeType === "string" &&
+      typeof item.url === "string",
+    );
+    if (attachments.length) slim.attachments = attachments;
+  }
   return slim;
 }
 
@@ -639,4 +649,18 @@ export function closeConversationStore(root: string, sessionId: string): void {
   const path = conversationStorePath(root, sessionId);
   connections.get(path)?.close();
   connections.delete(path);
+}
+
+/** Close the SQLite handle and unlink `{id}.conversation.sqlite` plus WAL/SHM sidecars. */
+export async function deleteConversationStore(root: string, sessionId: string): Promise<void> {
+  if (!sessionId || /[\\/]/.test(sessionId) || sessionId.includes("..")) return;
+  const path = conversationStorePath(root, sessionId);
+  closeConversationStore(root, sessionId);
+  for (const file of [path, `${path}-wal`, `${path}-shm`]) {
+    try {
+      await unlink(file);
+    } catch {
+      /* missing is fine */
+    }
+  }
 }

@@ -9,6 +9,7 @@ import { registerSettingsHandlers } from "./settings";
 import { registerTerminalHandlers } from "./terminal";
 import { registerIndexHandlers } from "./index-ipc";
 import { registerUpdateHandlers } from "./updates";
+import { registerUploadHandlers } from "../uploads";
 import { initLocaleIpc } from "../i18n";
 import type { IpcContext } from "./types";
 
@@ -23,4 +24,5 @@ export function registerAllHandlers(ctx: IpcContext): void {
   registerTerminalHandlers(ctx);
   registerIndexHandlers(ctx);
   registerUpdateHandlers(ctx);
+  registerUploadHandlers();
 }

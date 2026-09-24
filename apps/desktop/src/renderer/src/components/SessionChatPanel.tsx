@@ -276,10 +276,14 @@ export function SessionChatPanel({
             {t("待执行 {{count}} 条", { count: queuedMessages.length })}
           </span>
           <ol className="queued-messages-list">
-            {queuedMessages.map((msg, i) => (
-              <li key={`${msg}-${i}`} className="queued-messages-item">
+            {queuedMessages.map((msg, i) => {
+              const label = msg.text.trim()
+                || (msg.attachments?.length ? msg.attachments.map((a) => a.name).join(", ") : "");
+              const preview = label.length > 80 ? `${label.slice(0, 80)}…` : label;
+              return (
+              <li key={`${msg.text}-${i}-${msg.attachments?.map((a) => a.url).join("|") ?? ""}`} className="queued-messages-item">
                 <span className="queued-messages-text">
-                  {msg.length > 80 ? `${msg.slice(0, 80)}…` : msg}
+                  {preview || "（附件）"}
                 </span>
                 <button
                   type="button"
@@ -298,7 +302,8 @@ export function SessionChatPanel({
                   {t("删除")}
                 </button>
               </li>
-            ))}
+              );
+            })}
           </ol>
         </div>
       ) : null}

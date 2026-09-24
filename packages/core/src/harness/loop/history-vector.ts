@@ -67,6 +67,8 @@ export interface HistoryVectorStore {
    * 未归档时，向量召回只能覆盖极少量片段，此时应回退到「最近 N 轮 → LLM 过滤」。
    */
   countBySession(sessionId: string): number;
+  /** 删除某会话的全部归档向量；会话删除时调用。 */
+  deleteBySession(sessionId: string): void;
 }
 
 /** Compact round payload used for semantic recall without exposing raw turn output. */

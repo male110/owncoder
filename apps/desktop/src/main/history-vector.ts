@@ -239,6 +239,8 @@ class SqliteVecHistoryStore implements HistoryVectorStore {
   private oldestStmt: Database.Statement;
   private deleteVecStmt: Database.Statement;
   private deleteMetaStmt: Database.Statement;
+  private deleteSessionMetaStmt: Database.Statement;
+  private sessionRowidsStmt: Database.Statement;
   private sessionBytesStmt: Database.Statement;
 
   constructor(dbPath: string) {
@@ -302,6 +304,12 @@ class SqliteVecHistoryStore implements HistoryVectorStore {
     );
     this.deleteVecStmt = this.db.prepare(`DELETE FROM history_chunks_vec WHERE rowid = ?`);
     this.deleteMetaStmt = this.db.prepare(`DELETE FROM history_chunks_meta WHERE rowid = ?`);
+    this.sessionRowidsStmt = this.db.prepare(
+      `SELECT rowid FROM history_chunks_meta WHERE session_id = ?`,
+    );
+    this.deleteSessionMetaStmt = this.db.prepare(
+      `DELETE FROM history_chunks_meta WHERE session_id = ?`,
+    );
     this.sessionBytesStmt = this.db.prepare(
       `SELECT COALESCE(SUM(length(CAST(content AS BLOB))), 0) AS n FROM history_chunks_meta WHERE session_id = ?`,
     );
@@ -390,6 +398,17 @@ class SqliteVecHistoryStore implements HistoryVectorStore {
   countBySession(sessionId: string): number {
     const row = this.countStmt.get(sessionId) as { n: number } | undefined;
     return row?.n ?? 0;
+  }
+
+  deleteBySession(sessionId: string): void {
+    const drop = this.db.transaction(() => {
+      const rows = this.sessionRowidsStmt.all(sessionId) as Array<{ rowid: number }>;
+      for (const row of rows) {
+        this.deleteVecStmt.run(row.rowid);
+      }
+      this.deleteSessionMetaStmt.run(sessionId);
+    });
+    drop();
   }
 
   private sessionBytes(sessionId: string): number {
@@ -483,6 +502,12 @@ export function createHistoryVector(dbPath: string): AgentLoopOpts["historyVecto
         },
       });
       void drain();
+    },
+    deleteSession: (sessionId: string) => {
+      for (let i = pending.length - 1; i >= 0; i--) {
+        if (pending[i]?.sessionId === sessionId) pending.splice(i, 1);
+      }
+      store.deleteBySession(sessionId);
     },
     close: () => {
       closed = true;

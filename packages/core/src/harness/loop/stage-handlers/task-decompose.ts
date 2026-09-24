@@ -1268,6 +1268,7 @@ export async function runTaskDecompose(
           tagUserInput(opts.userMessage),
           `## CONTEXT (background information)\n${await buildDecomposeContext(opts, budgets)}`,
         ].join("\n\n"),
+        attachments: opts.attachments,
       },
     ];
 
@@ -1573,15 +1574,11 @@ export const taskDecomposeHandler: StageHandler = {
         })),
         fallback: result.fallback === true,
       });
+      // 任务分解结果已由 LLM 响应日志中的 [ASSISTANT] 记录；这里只保留状态消息，
+      // 避免再将同一份结构化结果写入 DEBUG 日志。
       writeEventLog({
         category: "task_decompose",
         message: result.fallback ? "Task decomposition fallback generated" : "Task decomposition completed",
-        details: {
-          sessionId: opts.sessionId,
-          fallback: result.fallback === true,
-          intent: result.rawDecompose.intent,
-          tasks: result.rawDecompose.tasks,
-        },
       });
     }
     if (opts.sessionId && result.rawDecompose) {

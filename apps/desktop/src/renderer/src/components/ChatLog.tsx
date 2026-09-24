@@ -265,13 +265,13 @@ function DecomposeCard({ decomposition }: { decomposition: DecompositionSnapshot
   const [open, setOpen] = useState(true);
   const { t } = useI18n();
   const { intent, userConstraints, tasks, fallback } = decomposition;
-  const stepCount = tasks.reduce((n, task) => n + task.steps.length, 0);
+  const taskCount = tasks.length;
 
   const title = fallback
     ? t("任务分解（本地回退）")
-    : stepCount === 0
+    : taskCount === 0
       ? t("任务分解：无需计划")
-      : t("任务分解：{{count}} 个步骤", { count: stepCount });
+      : t("任务分解：{{count}} 个任务", { count: taskCount });
 
   return (
     <div className={`decompose-card${fallback ? " fallback" : ""}`}>

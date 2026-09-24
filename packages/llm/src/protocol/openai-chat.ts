@@ -1,4 +1,4 @@
-import type { ChatChoiceMessage, ChatRequest, ChatResponse, ToolCall } from "../types.js";
+import type { ChatChoiceMessage, ChatResponse, ToolCall } from "../types.js";
 import type { ThinkingEffort } from "../thinking.js";
 import type {
   ListedModel,
@@ -433,9 +433,23 @@ export const openaiChatCodec: ProtocolCodec = {
   },
 
   encodeRequest(input: ProtocolEncodeInput): unknown {
-    const body: ChatRequest = {
+    const messages = input.messages.map((message) => {
+      if (!message.attachments?.length || message.role !== "user") return message;
+      const content: Array<Record<string, unknown>> = [];
+      if (message.content) content.push({ type: "text", text: message.content });
+      for (const attachment of message.attachments) {
+        if (attachment.mimeType.toLowerCase().startsWith("image/") && /^https?:\/\//i.test(attachment.url)) {
+          content.push({ type: "image_url", image_url: { url: attachment.url } });
+        } else {
+          content.push({ type: "text", text: `[文件附件] ${attachment.name} (${attachment.mimeType || "application/octet-stream"}): ${attachment.url}` });
+        }
+      }
+      const { attachments: _attachments, ...rest } = message;
+      return { ...rest, content };
+    });
+    const body: Record<string, unknown> = {
       model: input.model,
-      messages: input.messages,
+      messages,
       stream: input.stream,
       temperature: input.temperature ?? 0.2,
       max_tokens: input.maxTokens ?? 16384,

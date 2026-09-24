@@ -1,3 +1,4 @@
+import type { ChatAttachment } from "@owncoder/llm";
 import type { AgentMode, WorkspaceInfo } from "@owncoder/shared";
 import type { AskUserRequest } from "./harness/tools/types.ts";
 import { BUILTIN_WORKFLOW, type SystemWorkflowConfig } from "@owncoder/settings";
@@ -92,12 +93,15 @@ import {
   clearPersistedSession,
   createSessionFile,
   deleteSessionFile,
+  deleteSessionSidecars,
   listSessionMetas,
   loadSessionById,
   type PersistedSession,
   saveSessionById,
+  sanitizeQueuedMessages,
   setActiveSessionId,
   toggleSessionPin,
+  type QueuedMessage,
   type SessionMeta,
 } from "./session-store.ts";
 import type { TaskRunState } from "./task-run.ts";
@@ -159,7 +163,7 @@ export interface SessionState {
   activeSessionId: string | null;
   sessionTitle: string | null;
   /** Messages queued while a turn was running; persisted to survive restarts. */
-  queuedMessages?: string[];
+  queuedMessages?: QueuedMessage[];
   /** 统一任务运行状态（会话级快照）。 */
   taskRunState?: TaskRunState | null;
 }
@@ -185,7 +189,7 @@ interface SessionRuntime {
   sessionRestored: boolean;
   sessionTitle: string | null;
   sessionCreatedAt: string | null;
-  queuedMessages: string[];
+  queuedMessages: QueuedMessage[];
   /** 统一任务运行状态；从会话快照恢复，供下一轮 agent 循环继续。 */
   taskRunState: TaskRunState | null;
   keptPaths: Set<string>;
@@ -249,13 +253,13 @@ export class SessionOrchestrator {
   private sessionRoots = new Map<string, string>();
 
   /** Session execution coordinator - ensures at most one active drain loop per session */
-  private coordinator: SessionRunCoordinator<AgentLoopResult, { turnId: string; onEvent?: (ev: TurnEvent) => void }> = 
+  private coordinator: SessionRunCoordinator<AgentLoopResult, { turnId: string; onEvent?: (ev: TurnEvent) => void; attachments?: ChatAttachment[] }> = 
     new SessionRunCoordinator(
       // Drain handler: 执行一轮代理循环，使用 input.context 中的 onEvent
-      async (sessionId: string, input: SessionInput<{ turnId: string; onEvent?: (ev: TurnEvent) => void }>) => {
-        const { turnId, onEvent } = input.context || {};
+      async (sessionId: string, input: SessionInput<{ turnId: string; onEvent?: (ev: TurnEvent) => void; attachments?: ChatAttachment[] }>) => {
+        const { turnId, onEvent, attachments } = input.context || {};
         if (!turnId) throw new Error(`Missing turnId for session ${sessionId}`);
-        return await this.executeAgentTurn(sessionId, input.text, turnId, onEvent);
+        return await this.executeAgentTurn(sessionId, input.text, turnId, onEvent, attachments);
       },
       // Continuation check: 检查是否需要继续（暂时总是返回 false）
       async (_sessionId: string, _lastResult: AgentLoopResult) => {
@@ -861,12 +865,10 @@ export class SessionOrchestrator {
   }
 
   /** Persist the session's queued (not yet executed) messages to the session file. */
-  setQueuedMessages(messages: string[], sessionId?: string): void {
+  setQueuedMessages(messages: QueuedMessage[] | string[], sessionId?: string): void {
     const r = this.rtOpt(sessionId);
     if (!r) return;
-    r.queuedMessages = Array.isArray(messages)
-      ? messages.filter((m) => typeof m === "string" && m.length > 0)
-      : [];
+    r.queuedMessages = sanitizeQueuedMessages(messages);
     void this.persist(sessionId);
   }
 
@@ -1095,7 +1097,7 @@ export class SessionOrchestrator {
     todoAnchor: string | null;
     lastCheckpointId: string | null;
     documentWorkflow?: DocumentWorkflowState | null;
-    queuedMessages?: string[];
+    queuedMessages?: QueuedMessage[] | string[];
     taskRunState?: TaskRunState | null;
   }): void {
     const id = saved.id ?? null;
@@ -1173,9 +1175,7 @@ export class SessionOrchestrator {
       r.todoAnchor = saved.todoAnchor;
       r.lastCheckpointId = saved.lastCheckpointId;
       r.documentWorkflow = saved.documentWorkflow ?? null;
-      r.queuedMessages = Array.isArray(saved.queuedMessages)
-        ? saved.queuedMessages.filter((m) => typeof m === "string" && m.length > 0)
-        : [];
+      r.queuedMessages = sanitizeQueuedMessages(saved.queuedMessages);
       r.taskRunState = restoreTaskRunState(saved.taskRunState, id) ?? null;
       r.sessionTitle = saved.title ?? null;
       r.sessionCreatedAt = saved.createdAt ?? null;
@@ -1365,6 +1365,12 @@ export class SessionOrchestrator {
     // No runtime or active-session bookkeeping needed.
     if (projectRoot && projectRoot !== ws.root) {
       await deleteSessionFile(projectRoot, id);
+      await deleteSessionSidecars(projectRoot, id);
+      try {
+        this.historyVector?.deleteSession?.(id);
+      } catch (error) {
+        console.warn(`[session] 清除历史向量失败: ${id}`, error);
+      }
       return { activeId: null };
     }
     // Cancel any in-flight turn for the deleted session before removing it.
@@ -1375,6 +1381,12 @@ export class SessionOrchestrator {
     }
     await this.coordinator.cleanup(id);
     const nextId = await deleteSessionFile(ws.root, id);
+    await deleteSessionSidecars(ws.root, id);
+    try {
+      this.historyVector?.deleteSession?.(id);
+    } catch (error) {
+      console.warn(`[session] 清除历史向量失败: ${id}`, error);
+    }
     this.runtimes.delete(id);
     this.sessionRoots.delete(id);
     if (this.state.activeSessionId === id) {
@@ -1420,13 +1432,15 @@ export class SessionOrchestrator {
     if (lastUserIdx < 0) {
       throw new Error("没有可重新生成的用户消息");
     }
-    const userText = r.history[lastUserIdx]!.content.trim();
-    if (!userText) {
+    const lastUser = r.history[lastUserIdx]!;
+    const userText = lastUser.content.trim();
+    const attachments = lastUser.attachments ?? [];
+    if (!userText && !attachments.length) {
       throw new Error("上一条用户消息为空");
     }
     r.history = r.history.slice(0, lastUserIdx);
     await this.persist(sessionId);
-    return this.sendMessage(userText, onEvent, sessionId);
+    return this.sendMessage(userText, onEvent, sessionId, attachments);
   }
 
   /** Flush current chat session to `.owncoder/sessions/{id}.json`. */
@@ -1966,9 +1980,10 @@ export class SessionOrchestrator {
     text: string,
     onEvent?: (ev: TurnEvent) => void,
     sessionId?: string,
+    attachments: import("@owncoder/llm").ChatAttachment[] = [],
   ): Promise<AgentLoopResult> {
     const trimmed = text.trim();
-    if (!trimmed) {
+    if (!trimmed && !attachments.length) {
       throw new Error("消息不能为空");
     }
     
@@ -2001,16 +2016,21 @@ export class SessionOrchestrator {
 
     // Generate the durable turn id and claim the conversation-store row first.
     const turnId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-    await beginTurn(workspaceRoot, sid, { role: "user", content: trimmed }, turnId);
+    const userTurn: ChatTurn = {
+      role: "user",
+      content: trimmed,
+      ...(attachments.length ? { attachments } : {}),
+    };
+    await beginTurn(workspaceRoot, sid, userTurn, turnId);
 
     // beginTurn 成功后再写入 runtime + session JSON，保证并发 loadHistoryPage
     // 看到 store 已有行时会跳过 migrate，不会再复制一条 user。
-    r.history = [...r.history, { role: "user" as const, content: trimmed }];
+    r.history = [...r.history, userTurn];
     await this.persist(sid);
 
     // 通过协调器提交输入，传递 onEvent 上下文
     // 协调器会自动处理队列、串行化和 drain loop
-    return await this.coordinator.admit(sid, trimmed, { turnId, onEvent });
+    return await this.coordinator.admit(sid, trimmed, { turnId, onEvent, attachments });
   }
 
   /**
@@ -2022,6 +2042,7 @@ export class SessionOrchestrator {
     text: string,
     turnId: string,
     onEvent?: (ev: TurnEvent) => void,
+    attachments: import("@owncoder/llm").ChatAttachment[] = [],
   ): Promise<AgentLoopResult> {
     const r = this.rt(sessionId);
     const ws = this.sessionWorkspace(sessionId);
@@ -2149,6 +2170,7 @@ export class SessionOrchestrator {
       },
       history: r.history,
       userMessage: trimmed,
+      attachments,
       signal: abortController.signal,
       onEvent: (ev) => {
         const stamped = stampTurnEvent(ev, sessionId);

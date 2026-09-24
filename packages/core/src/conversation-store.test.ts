@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { access, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -8,6 +8,7 @@ import {
   closeConversationStore,
   completeTurn,
   conversationStorePath,
+  deleteConversationStore,
   loadOlderTurns,
   loadRecentTurns,
   loadTurn,
@@ -473,5 +474,22 @@ describe("conversation store", () => {
       reason: "event_payload_too_large",
     });
     expect(sanitizeOversizedEventPayloads(r, "s")).toBe(1);
+  });
+
+  it("deleteConversationStore closes the handle and removes sqlite sidecars", async () => {
+    const r = await root();
+    const turn = await beginTurn(r, "s", user("hello"));
+    await completeTurn(r, "s", turn.turnId, assistant("bye"));
+    const sqlite = conversationStorePath(r, "s");
+    await access(sqlite);
+
+    await deleteConversationStore(r, "s");
+
+    await expect(access(sqlite)).rejects.toThrow();
+    await expect(access(`${sqlite}-wal`)).rejects.toThrow();
+    await expect(access(`${sqlite}-shm`)).rejects.toThrow();
+
+    const page = await loadRecentTurns(r, "s", 10);
+    expect(page.turns).toHaveLength(0);
   });
 });
