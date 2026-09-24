@@ -79,7 +79,7 @@ export async function injectHistoryAndUserMessage(ctx: SchedulerContext): Promis
 
   const { opts, messages, history, state } = ctx;
   const { tagUserInput } = await import("../../message-tags.js");
-  const outboundUserMessage = `忽略上面的消息\n${opts.userMessage}\n忽略下面的消息`;
+  const outboundUserMessage = opts.userMessage;
 
   let recentFileHints = "";
   if (opts.sessionId) {

@@ -3827,6 +3827,9 @@ button.ghost.accent {
   font-size: 14px;
   line-height: 1.45;
   min-height: 72px;
+  max-height: 240px;
+  overflow-y: hidden;
+  transition: height 120ms ease;
 }
 
 .composer-bar {

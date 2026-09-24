@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { AgentMode } from "@owncoder/shared";
 import type { AvailableModel, Provider, ThinkingEffort } from "@owncoder/settings";
 import type { GitStatusDto, ProjectDto } from "../../../preload/index";
@@ -73,6 +73,24 @@ function ComposerImpl({
   const thinkingMenuRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const prevSessionIdRef = useRef<string | null>(activeSessionId);
+  const autoResizeTextarea = useCallback(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+
+    // 先清除旧高度再读取 scrollHeight，确保删除内容后也能回缩。
+    el.style.height = "auto";
+    const minHeight = 72;
+    const maxHeight = 240;
+    const nextHeight = Math.min(Math.max(el.scrollHeight, minHeight), maxHeight);
+    el.style.height = `${nextHeight}px`;
+    el.style.overflowY = el.scrollHeight > maxHeight ? "auto" : "hidden";
+  }, []);
+
+  useLayoutEffect(() => {
+    autoResizeTextarea();
+    window.addEventListener("resize", autoResizeTextarea);
+    return () => window.removeEventListener("resize", autoResizeTextarea);
+  }, [autoResizeTextarea, draft]);
   const didMountRef = useRef(false);
   const { t } = useI18n();
 
@@ -437,6 +455,7 @@ function ComposerImpl({
           }
           rows={3}
           disabled={projectSwitching}
+          aria-label={mode === "plan" ? t("提出一个问题或描述要规划的任务…") : t("提出一个问题或描述一个任务…")}
           onKeyDown={(e) => {
             if (mentionQuery !== null && mentionHits.length > 0) {
               if (e.key === "ArrowDown") {
