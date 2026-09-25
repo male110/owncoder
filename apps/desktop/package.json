@@ -1,6 +1,6 @@
 {
   "name": "@owncoder/desktop",
-  "version": "0.1.17",
+  "version": "0.1.18",
   "private": true,
   "description": "OwnCoder desktop shell",
   "main": "./out/main/index.js",
@@ -127,8 +127,10 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
-      "differentialPackage": true
+      "differentialPackage": true,
+      "artifactName": "${productName} Web Setup ${version}.${ext}"
     },
+    "afterAllArtifactBuild": "./scripts/flatten-nsis-output.mjs",
     "publish": {
       "provider": "generic",
       "url": "https://zy-1310897501.cos.ap-nanjing.myqcloud.com/owncoder/"
