@@ -19,21 +19,14 @@ function endsWithVersionSegment(base: string): boolean {
 /**
  * Normalize LLM API base URL before joining protocol paths
  * (`messages`, `chat/completions`, `models`, …):
- * - if path already ends with `/v` + digits → keep as-is (no double `/v1`)
- * - otherwise append `/v1`
  * Always returns with a trailing slash for safe relative URL joining.
  *
  * @example
- * normalizeApiBaseUrl("https://api.anthropic.com")     // → ".../v1/"
- * normalizeApiBaseUrl("https://api.anthropic.com/v1")  // → ".../v1/"
- * normalizeApiBaseUrl("https://proxy.example/anthropic") // → ".../anthropic/v1/"
+ * normalizeApiBaseUrl("https://api.anthropic.com")     // → "https://api.anthropic.com/"
+ * normalizeApiBaseUrl("https://api.anthropic.com/v1")  // → "https://api.anthropic.com/v1/"
+ * normalizeApiBaseUrl("https://proxy.example/anthropic") // → "https://proxy.example/anthropic/"
  */
 export function normalizeApiBaseUrl(baseUrl: string): string {
   const trimmed = baseUrl.trim();
-  if (!trimmed) return ensureTrailingSlash(trimmed);
-
-  if (endsWithVersionSegment(trimmed)) {
-    return ensureTrailingSlash(trimmed.replace(/\/+$/, ""));
-  }
-  return ensureTrailingSlash(`${trimmed.replace(/\/+$/, "")}/v1`);
+  return ensureTrailingSlash(trimmed.replace(/\/+$/, ""));
 }

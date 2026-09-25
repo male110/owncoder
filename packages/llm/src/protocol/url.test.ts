@@ -9,18 +9,18 @@ describe("ensureTrailingSlash", () => {
 });
 
 describe("normalizeApiBaseUrl", () => {
-  it("appends /v1 when base has no version segment", () => {
-    expect(normalizeApiBaseUrl("https://api.anthropic.com")).toBe("https://api.anthropic.com/v1/");
-    expect(normalizeApiBaseUrl("https://api.anthropic.com/")).toBe("https://api.anthropic.com/v1/");
+  it("only adds trailing slash without modifying the path", () => {
+    expect(normalizeApiBaseUrl("https://api.anthropic.com")).toBe("https://api.anthropic.com/");
+    expect(normalizeApiBaseUrl("https://api.anthropic.com/")).toBe("https://api.anthropic.com/");
     expect(normalizeApiBaseUrl("http://127.0.0.1:8080/anthropic")).toBe(
-      "http://127.0.0.1:8080/anthropic/v1/",
+      "http://127.0.0.1:8080/anthropic/",
     );
     expect(normalizeApiBaseUrl("https://gateway.example.com/claude")).toBe(
-      "https://gateway.example.com/claude/v1/",
+      "https://gateway.example.com/claude/",
     );
   });
 
-  it("does not double /v1 when base already ends with /v + digits", () => {
+  it("preserves existing version segments", () => {
     expect(normalizeApiBaseUrl("https://api.anthropic.com/v1")).toBe("https://api.anthropic.com/v1/");
     expect(normalizeApiBaseUrl("https://api.anthropic.com/v1/")).toBe("https://api.anthropic.com/v1/");
     expect(normalizeApiBaseUrl("https://openrouter.ai/api/v1")).toBe("https://openrouter.ai/api/v1/");

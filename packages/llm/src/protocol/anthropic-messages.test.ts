@@ -38,14 +38,14 @@ describe("anthropicMessagesCodec encode", () => {
     expect(anthropicMessagesCodec.listModelsUrl("https://llm.internal.example/v1")).toBe(
       "https://llm.internal.example/v1/models",
     );
-    // 无版本后缀时自动补 /v1，避免打到 .../anthropic/messages
+    // 不再自动添加 /v1，保持原始路径
     expect(anthropicMessagesCodec.buildUrl("http://127.0.0.1:8080/anthropic")).toBe(
-      "http://127.0.0.1:8080/anthropic/v1/messages",
+      "http://127.0.0.1:8080/anthropic/messages",
     );
     expect(anthropicMessagesCodec.listModelsUrl("http://127.0.0.1:8080/anthropic")).toBe(
-      "http://127.0.0.1:8080/anthropic/v1/models",
+      "http://127.0.0.1:8080/anthropic/models",
     );
-    // 已以 /v1 结尾则不重复追加
+    // 已有 /v1 路径时保持不变
     expect(anthropicMessagesCodec.buildUrl("http://127.0.0.1:8080/anthropic/v1")).toBe(
       "http://127.0.0.1:8080/anthropic/v1/messages",
     );

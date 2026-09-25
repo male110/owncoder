@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="OwnCoder">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#5b8cff"/>
+      <stop offset="100%" stop-color="#7c5cff"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="16" fill="url(#g)"/>
+  <!-- 盾牌图标：强化安全主题 -->
+  <path d="M32 16l-12 6v10c0 7.5 5.2 14.5 12 16 6.8-1.5 12-8.5 12-16V22l-12-6z" fill="rgba(255,255,255,0.95)" stroke="rgba(255,255,255,0.2)" stroke-width="0.5"/>
+  <path d="M28 32l3 3 6-8" stroke="#5b8cff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+</svg>

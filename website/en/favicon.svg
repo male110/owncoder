@@ -6,4 +6,7 @@
     </linearGradient>
   </defs>
   <rect width="64" height="64" rx="16" fill="url(#g)"/>
+  <!-- Shield icon: reinforcing security theme -->
+  <path d="M32 16l-12 6v10c0 7.5 5.2 14.5 12 16 6.8-1.5 12-8.5 12-16V22l-12-6z" fill="rgba(255,255,255,0.95)" stroke="rgba(255,255,255,0.2)" stroke-width="0.5"/>
+  <path d="M28 32l3 3 6-8" stroke="#5b8cff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
 </svg>

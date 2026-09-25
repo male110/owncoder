@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="OwnCoder — Security-First AI Coding Tool. Auto-redacts passwords & keys, code & index stay local, never uploaded to cloud." />
+  <meta name="theme-color" content="#0b1220" />
+  <title>OwnCoder — Security-First AI Coding Tool</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="bg-glow" aria-hidden="true"></div>
+
+  <header class="site-header">
+    <div class="container nav">
+      <a class="brand" href="#top" aria-label="OwnCoder Home">
+        <span class="brand-name">OwnCoder</span>
+      </a>
+      <nav class="nav-links" aria-label="Main navigation">
+        <a href="#security">Security</a>
+        <a href="#features">Features</a>
+        <a href="#local">Local-First</a>
+        <a href="#download" class="nav-cta">Download</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="top">
+    <section class="hero container">
+      <p class="eyebrow">Security-First · Local Execution · Zero Telemetry</p>
+      <h1>Security first, <span class="hero-accent">code stays local.</span></h1>
+      <p class="hero-lead">
+        OwnCoder is an AI-powered desktop coding tool for developers. Auto-redacts passwords and keys before sending to LLMs, 
+        with code analysis and indexing done entirely locally—no source upload, no cloud indexing.
+      </p>
+      <div class="hero-actions">
+        <a class="btn btn-primary" href="https://gitee.com/f6688/owncoder/releases" target="_blank" rel="noopener noreferrer">
+          Download for Windows
+        </a>
+        <a class="btn btn-ghost" href="https://gitee.com/f6688/owncoder" target="_blank" rel="noopener noreferrer">
+          View Source
+        </a>
+      </div>
+      <ul class="trust-row" aria-label="Core promises">
+        <li>Auto-redact passwords/keys</li>
+        <li>No code upload</li>
+        <li>Local-only indexing</li>
+        <li>Zero telemetry</li>
+      </ul>
+    </section>
+
+    <section id="security" class="section container">
+      <div class="section-head">
+        <p class="eyebrow">Security First</p>
+        <h2>Sensitive data blocked before reaching models</h2>
+        <p class="section-desc">
+          Database passwords, API keys, SSH private keys won't leave your machine just because an agent read a file. 
+          OwnCoder automatically detects and replaces them with <code>[REDACTED]</code> before sending requests.
+        </p>
+      </div>
+
+      <div class="grid-3">
+        <article class="card">
+          <div class="card-icon" aria-hidden="true">01</div>
+          <h3>File Matching</h3>
+          <p>60+ built-in globs covering <code>.env</code>, <code>*.pem</code>, <code>*.key</code>, kubeconfig, terraform variables, and other sensitive files.</p>
+        </article>
+        <article class="card">
+          <div class="card-icon" aria-hidden="true">02</div>
+          <h3>Format Recognition</h3>
+          <p>25+ key format patterns: OpenAI, AWS, GCP, GitHub tokens, database connection strings, JWT, PEM private key blocks, etc.</p>
+        </article>
+        <article class="card">
+          <div class="card-icon" aria-hidden="true">03</div>
+          <h3>Keyword Fallback</h3>
+          <p>Recognizes <code>password</code>, <code>secret</code>, <code>token</code>, and environment variable suffixes like <code>*_PASSWORD</code> to reduce leaks.</p>
+        </article>
+      </div>
+
+      <div class="split demo-panel">
+        <div>
+          <h3>Two Redaction Levels</h3>
+          <ul class="check-list">
+            <li><strong>Value-level redaction</strong>: Masks only sensitive fields while preserving structure, allowing agents to understand configuration format.</li>
+            <li><strong>Full-file redaction</strong>: Entire private keys and certificates are masked, agents only know "this is sensitive."</li>
+            <li><strong>Customizable rules</strong>: Add your own globs and patterns in settings, with local preview validation.</li>
+          </ul>
+        </div>
+        <div class="code-window" role="img" aria-label="Before and after redaction example">
+          <div class="code-window-bar">
+            <span></span><span></span><span></span>
+            <em>.env → Before sending</em>
+          </div>
+<pre><code><span class="tok-key">DB_HOST</span>=localhost
+<span class="tok-key">DB_USER</span>=app
+<span class="tok-key">DB_PASSWORD</span>=<span class="tok-redacted">[REDACTED]</span>
+<span class="tok-key">OPENAI_API_KEY</span>=<span class="tok-redacted">[REDACTED]</span>
+<span class="tok-key">SSH_PRIVATE_KEY</span>=<span class="tok-redacted">[REDACTED]</span></code></pre>
+        </div>
+      </div>
+    </section>
+
+    <section id="local" class="section section-alt">
+      <div class="container">
+        <div class="section-head">
+          <p class="eyebrow">Local-First · No Cloud Index</p>
+          <h2>No code upload, no cloud indexing</h2>
+          <p class="section-desc">
+            Analysis, search, embeddings, and experience memory all run on your machine. No "cloud knowledge base" syncing repos to third-party servers.
+          </p>
+        </div>
+
+        <div class="grid-2">
+          <article class="card card-lg">
+            <h3>Fully Local Index System</h3>
+            <p>Unified SQLite + FTS5 index: symbol search, full-text retrieval, experience indexing with incremental scanning respecting <code>.gitignore</code>.</p>
+            <ul class="check-list compact">
+              <li>35+ language symbol indexing (tree-sitter)</li>
+              <li>Local RAG embeddings, works offline</li>
+              <li>Data stays on your machine, never touches OwnCoder cloud</li>
+            </ul>
+          </article>
+          <article class="card card-lg">
+            <h3>Privacy Built Into Defaults</h3>
+            <ul class="check-list compact">
+              <li><strong>No code upload</strong>: Source code never synced to OwnCoder servers</li>
+              <li><strong>No cloud indexing</strong>: No remote vector DB or code repo mirrors</li>
+              <li><strong>Zero telemetry</strong>: No usage data collection, crash reports, or analytics</li>
+              <li><strong>Full control</strong>: Keys and workspace data always on your machine</li>
+            </ul>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="features" class="section container">
+      <div class="section-head">
+        <p class="eyebrow">Core Capabilities</p>
+        <h2>Beyond security, equally powerful</h2>
+        <p class="section-desc">Plan and Agent dual modes, execution-level verification, inline change review—turning AI coding into an auditable, reversible engineering workflow.</p>
+      </div>
+
+      <div class="grid-3">
+        <article class="card">
+          <h3>Plan + Agent</h3>
+          <p>Plan mode for read-only analysis and proposals; Agent mode for editing files, running commands, and tests. Think first, then act.</p>
+        </article>
+        <article class="card">
+          <h3>Execution-Level Verification</h3>
+          <p>Auto-runs type checks, linting, and related tests after changes; enters auto-fix loop on failure instead of "looks like it works."</p>
+        </article>
+        <article class="card">
+          <h3>Inline Change Review</h3>
+          <p>Shows file-by-file diffs after each operation, with per-file keep/undo and batch keep/undo all support.</p>
+        </article>
+        <article class="card">
+          <h3>Write & Command Protection</h3>
+          <p>Three-tier write policies prevent accidental critical path modifications; dangerous commands require confirmation, timeout defaults to deny (fail-closed).</p>
+        </article>
+        <article class="card">
+          <h3>High Cache Hit Rate</h3>
+          <p>Context optimized for real billing scenarios, impressive cache hit rates make daily iteration more token-efficient.</p>
+        </article>
+        <article class="card">
+          <h3>Open Model Integration</h3>
+          <p>Compatible with any OpenAI Chat Completions API: DeepSeek, Tongyi, Zhipu, Moonshot, etc.—bring your own config.</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="download" class="section cta-section">
+      <div class="container cta-box">
+        <p class="eyebrow">Get Started</p>
+        <h2>Build security defaults into your workflow</h2>
+        <p>
+          Currently supports Windows primarily. Download the installer from Gitee Releases, 
+          configure your own model API in settings, and start coding.
+        </p>
+        <div class="hero-actions">
+          <a class="btn btn-primary" href="https://gitee.com/f6688/owncoder/releases" target="_blank" rel="noopener noreferrer">
+            Download Now
+          </a>
+          <a class="btn btn-ghost" href="https://gitee.com/f6688/owncoder" target="_blank" rel="noopener noreferrer">
+            Gitee Repository
+          </a>
+        </div>
+        <p class="fineprint">License: PolyForm Noncommercial 1.0.0 (Free for non-commercial use; commercial use requires separate authorization)</p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container footer-inner">
+      <div class="brand brand-footer">
+        <span class="brand-name">OwnCoder</span>
+      </div>
+      <p>Security-First AI Coding Tool — Your code, always yours.</p>
+      <p class="footer-meta">© <span id="year"></span> OwnCoder</p>
+    </div>
+  </footer>
+
+  <script>
+    document.getElementById("year").textContent = String(new Date().getFullYear());
+  </script>
+  <script async src="https://01a0aa89-d212-7984-96e9-45fa2ee539c2.spst2.com/ustat.js"></script>
+</body>
+</html>
