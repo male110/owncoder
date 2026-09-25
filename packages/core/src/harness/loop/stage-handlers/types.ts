@@ -66,7 +66,7 @@ export interface SchedulerState {
   decomposeTokens: number;
   /** Index of this turn in `.owncoder/sessions/{id}.rounds.json` after decompose persist. */
   roundIndex?: number;
-  /** Raw task decomposition result with full informationNeeds (for history recall). */
+  /** Raw task decomposition result (for history recall). */
   rawDecompose?: {
     intent: string;
     userConstraints?: string[];
@@ -78,13 +78,6 @@ export interface SchedulerState {
         id: string;
         description: string;
         dependsOn: string[];
-        informationNeeds: Array<{
-          id: string;
-          question: string;
-          source?: "file" | "search" | "command";
-          priority?: "blocking" | "important" | "nice-to-have";
-          fallback?: string;
-        }>;
         stopReadingWhen: Array<{ condition: string; requiredEvidenceIds: string[] }>;
         verificationCriteria?: {
           command: string;

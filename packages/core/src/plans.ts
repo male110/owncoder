@@ -23,19 +23,6 @@ export type PlanStatus = "pending_approval" | "approved" | "executing" | "comple
 /** 计划文件种类：可批准的执行计划 vs 仅查看的文档交付物（PRD/TDD 等）。 */
 export type PlanKind = "plan" | "document";
 
-export interface TaskInformationNeed {
-  /** Stable task-local identifier used by the model when recording evidence. */
-  id: string;
-  /** The fact that must be established before exploration is complete. */
-  question: string;
-  /** Source type for this information need. */
-  source?: "file" | "search" | "command";
-  /** Priority level for this information need. */
-  priority?: "blocking" | "important" | "nice-to-have";
-  /** Fallback assumption if the information cannot be obtained. */
-  fallback?: string;
-}
-
 export interface TaskEvidence {
   needId: string;
   summary: string;
@@ -56,8 +43,8 @@ export interface TaskEvidence {
 export interface TaskStopCriterion {
   /** Human-readable, observable condition for ending repository exploration. */
   condition: string;
-  /** Information needs whose verified evidence makes this condition true. */
-  requiredEvidenceIds: string[];
+  /** When true, this criterion is considered satisfied. */
+  satisfied?: boolean;
 }
 
 /**
@@ -119,12 +106,8 @@ export interface TaskItem {
   status: TaskStatus;
   acceptance?: string;
   dependsOn: string[];
-  /** Facts that must be grounded before the task stops exploring. */
-  informationNeeds: TaskInformationNeed[];
-  /** Enforced only when every referenced information need has verified evidence. */
+  /** Optional conditions that signal exploration is complete. */
   stopReadingWhen: TaskStopCriterion[];
-  /** LLM-confirmed facts that are bound to successful tool output. */
-  evidence: TaskEvidence[];
   result?: string;
   retryCount: number;
   maxRetries: number;
@@ -165,8 +148,6 @@ const PLANS_INDEX_FILE = ".owncoder/plans/.index.json";
 const SESSIONS_DIR = ".owncoder/sessions";
 /** Matches the tool output emitted by save_plan ("Saved plan: .owncoder/plans/x.md"). */
 const SAVED_PLAN_RE = /Saved plan: (\.owncoder\/plans\/[^\s`"')]+)/g;
-/** Bound retained source evidence so history grows only with compact, task-used code. */
-export const MAX_TASK_EVIDENCE_EXCERPT_CHARS = Number.MAX_SAFE_INTEGER;
 
 interface PlansIndexFile {
   version: 1;
@@ -459,84 +440,20 @@ export function normalizeActiveMeta(meta: Partial<ActivePlanMeta>): ActivePlanMe
   };
 }
 
-function normalizeInformationNeeds(value: unknown): TaskInformationNeed[] {
+function normalizeStopCriteria(value: unknown): TaskStopCriterion[] {
   if (!Array.isArray(value)) return [];
-  const seen = new Set<string>();
-  return value.flatMap((item, index) => {
-    const raw = (item ?? {}) as Record<string, unknown>;
-    const question = typeof raw.question === "string" ? raw.question.trim() : "";
-    if (!question) return [];
-    const baseId = typeof raw.id === "string" && raw.id.trim() ? raw.id.trim() : `need_${index + 1}`;
-    const id = seen.has(baseId) ? `${baseId}_${index + 1}` : baseId;
-    seen.add(id);
-    
-    // Parse new optional fields
-    const source = raw.source === "file" || raw.source === "search" || raw.source === "command" 
-      ? raw.source 
-      : undefined;
-    const priority = raw.priority === "blocking" || raw.priority === "important" || raw.priority === "nice-to-have"
-      ? raw.priority
-      : undefined;
-    const fallback = typeof raw.fallback === "string" ? raw.fallback.trim() || undefined : undefined;
-    
-    return [{ id, question, source, priority, fallback }];
-  });
-}
-
-function normalizeStopCriteria(value: unknown, needs: readonly TaskInformationNeed[]): TaskStopCriterion[] {
-  if (!Array.isArray(value)) return [];
-  const knownNeedIds = new Set(needs.map((need) => need.id));
   return value.flatMap((item) => {
     const raw = typeof item === "string" ? { condition: item } : (item ?? {}) as Record<string, unknown>;
     const condition = typeof raw.condition === "string" ? raw.condition.trim().slice(0, 800) : "";
     if (!condition) return [];
-    const requestedIds = Array.isArray(raw.requiredEvidenceIds)
-      ? raw.requiredEvidenceIds.filter((id): id is string => typeof id === "string" && knownNeedIds.has(id))
-      : [];
-    // Legacy Markdown stores only the prose criterion. Binding it to all task
-    // needs preserves the original meaning while making the stop predicate explicit.
     return [{
       condition,
-      requiredEvidenceIds: requestedIds.length > 0 ? [...new Set(requestedIds)] : needs.map((need) => need.id),
-    }];
-  });
-}
-
-function normalizeEvidence(value: unknown, needs: readonly TaskInformationNeed[]): TaskEvidence[] {
-  if (!Array.isArray(value)) return [];
-  const knownNeedIds = new Set(needs.map((need) => need.id));
-  return value.flatMap((item) => {
-    const raw = (item ?? {}) as Record<string, unknown>;
-    // Empty needId is allowed (snippet archive without need accounting).
-    const needId = typeof raw.needId === "string" ? raw.needId.trim() : "";
-    const summary = typeof raw.summary === "string" ? raw.summary.trim() : "";
-    const rawExcerpt = typeof raw.excerpt === "string" ? raw.excerpt : "";
-    // Preserve the exact formatted source lines. In particular, formatWithLines()
-    // intentionally begins single-digit line numbers with spaces.
-    const excerpt = rawExcerpt.trim()
-      ? rawExcerpt
-      : undefined;
-    if (!summary) return [];
-    // Non-empty needId must still match a known information need when reloading.
-    if (needId && !knownNeedIds.has(needId)) return [];
-    const number = (key: "startLine" | "endLine") =>
-      typeof raw[key] === "number" && Number.isInteger(raw[key]) && raw[key] > 0 ? raw[key] : undefined;
-    return [{
-      needId,
-      summary,
-      excerpt,
-      path: typeof raw.path === "string" ? raw.path.trim().slice(0, 500) || undefined : undefined,
-      symbol: typeof raw.symbol === "string" ? raw.symbol.trim().slice(0, 500) || undefined : undefined,
-      startLine: number("startLine"),
-      endLine: number("endLine"),
-      sourceHash: typeof raw.sourceHash === "string" ? raw.sourceHash.trim().slice(0, 128) || undefined : undefined,
+      satisfied: typeof raw.satisfied === "boolean" ? raw.satisfied : false,
     }];
   });
 }
 
 function normalizeTask(t: Partial<TaskItem>): TaskItem {
-  const informationNeeds = normalizeInformationNeeds(t.informationNeeds);
-  
   // Parse verification criteria
   let verificationCriteria: TaskItem["verificationCriteria"] = undefined;
   if (t.verificationCriteria && typeof t.verificationCriteria === "object") {
@@ -573,9 +490,7 @@ function normalizeTask(t: Partial<TaskItem>): TaskItem {
       : "pending",
     acceptance: typeof t.acceptance === "string" ? t.acceptance : undefined,
     dependsOn: Array.isArray(t.dependsOn) ? t.dependsOn.filter((d) => typeof d === "string") : [],
-    informationNeeds,
-    stopReadingWhen: normalizeStopCriteria(t.stopReadingWhen, informationNeeds),
-    evidence: normalizeEvidence(t.evidence, informationNeeds),
+    stopReadingWhen: normalizeStopCriteria(t.stopReadingWhen),
     result: typeof t.result === "string" ? t.result : undefined,
     retryCount: typeof t.retryCount === "number" ? t.retryCount : 0,
     maxRetries: typeof t.maxRetries === "number" ? t.maxRetries : 2,
@@ -706,7 +621,6 @@ export function parseTasksFromMarkdown(content: string): TaskItem[] {
   const push = (
     description: string,
     acceptance?: string,
-    informationNeeds: TaskInformationNeed[] = [],
     stopReadingWhen: string[] = [],
   ) => {
     const d = description.trim();
@@ -718,34 +632,24 @@ export function parseTasksFromMarkdown(content: string): TaskItem[] {
       status: "pending",
       acceptance: acceptance?.trim() || undefined,
       dependsOn: idx > 1 ? [`task_${idx - 1}`] : [],
-      informationNeeds,
       stopReadingWhen: stopReadingWhen.map((condition) => ({
         condition,
-        requiredEvidenceIds: informationNeeds.map((need) => need.id),
+        satisfied: false,
       })),
-      evidence: [],
       retryCount: 0,
       maxRetries: 2,
     });
   };
 
   const metadataAfter = (index: number) => {
-    const informationNeeds: TaskInformationNeed[] = [];
     const stopReadingWhen: string[] = [];
     for (let cursor = index + 1; cursor < lines.length; cursor++) {
       const candidate = lines[cursor] ?? "";
       if (/^\s*(?:[-*]\s+\[[ xX]\]|\d+[.、)])/u.test(candidate)) break;
-      const value = candidate.match(/^\s*[>/*-]?\s*(?:信息需求|information\s*needs?)[:：]\s*(.+)$/i)?.[1];
-      if (value) {
-        for (const question of value.split(/[；;]+/).map((part) => part.trim()).filter(Boolean)) {
-          informationNeeds.push({ id: `need_${informationNeeds.length + 1}`, question });
-        }
-        continue;
-      }
       const stop = candidate.match(/^\s*[>/*-]?\s*(?:停止阅读|停止探索|stop\s*(?:reading|exploring)\s*when)[:：]\s*(.+)$/i)?.[1];
       if (stop) stopReadingWhen.push(...stop.split(/[；;]+/).map((part) => part.trim()).filter(Boolean));
     }
-    return { informationNeeds, stopReadingWhen };
+    return { stopReadingWhen };
   };
 
   for (let i = 0; i < lines.length; i++) {
@@ -755,7 +659,7 @@ export function parseTasksFromMarkdown(content: string): TaskItem[] {
       const desc = box[1]!.replace(/\s*[—–-]\s*$/, "");
       const acc = lines[i + 1]?.match(/^\s*[>/*]?\s*(?:验收|acceptance|验证)[:：]\s*(.+)$/i)?.[1];
       const metadata = metadataAfter(i);
-      push(desc, acc, metadata.informationNeeds, metadata.stopReadingWhen);
+      push(desc, acc, metadata.stopReadingWhen);
       continue;
     }
     const ord = line.match(/^\s*(\d+)[.、)]\s+(.+)$/);
@@ -763,7 +667,7 @@ export function parseTasksFromMarkdown(content: string): TaskItem[] {
       const desc = ord[2]!;
       const acc = lines[i + 1]?.match(/^\s*[>/*]?\s*(?:验收|acceptance|验证)[:：]\s*(.+)$/i)?.[1];
       const metadata = metadataAfter(i);
-      push(desc, acc, metadata.informationNeeds, metadata.stopReadingWhen);
+      push(desc, acc, metadata.stopReadingWhen);
       continue;
     }
   }
@@ -776,9 +680,7 @@ export function parseTasksFromMarkdown(content: string): TaskItem[] {
         description: compact,
         status: "pending",
         dependsOn: [],
-        informationNeeds: [],
         stopReadingWhen: [],
-        evidence: [],
         retryCount: 0,
         maxRetries: 2,
       });

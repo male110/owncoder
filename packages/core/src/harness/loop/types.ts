@@ -59,7 +59,6 @@ type TurnEventFields =
           id: string;
           description: string;
           dependsOn: string[];
-          informationNeeds: Array<{ id: string; question: string }>;
           stopReadingWhen: Array<{ condition: string; requiredEvidenceIds: string[] }>;
         }>;
       }>;

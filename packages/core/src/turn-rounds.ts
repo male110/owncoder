@@ -90,14 +90,7 @@ export interface PersistedDecomposeStep {
   id: string;
   description: string;
   dependsOn: string[];
-  informationNeeds: Array<{
-    id: string;
-    question: string;
-    source?: "file" | "search" | "command";
-    priority?: "blocking" | "important" | "nice-to-have";
-    fallback?: string;
-  }>;
-  stopReadingWhen: Array<{ condition: string; requiredEvidenceIds: string[] }>;
+  stopReadingWhen: Array<{ condition: string; satisfied?: boolean }>;
   verificationCriteria?: {
     command: string;
     expectedOutput: string;
@@ -237,37 +230,14 @@ function sanitizeDecompose(raw: unknown): PersistedDecompose | undefined {
       typeof s.relevantHistory === "string" && s.relevantHistory.trim()
         ? clip(s.relevantHistory.trim(), MAX_UNDERSTANDING_CHARS)
         : undefined;
-    const informationNeeds: PersistedDecomposeStep["informationNeeds"] = Array.isArray(s.informationNeeds)
-      ? s.informationNeeds
-          .slice(0, MAX_NEEDS_PER_STEP)
-          .flatMap((need, ni) => {
-            if (!need || typeof need !== "object") return [];
-            const n = need as Record<string, unknown>;
-            const question = typeof n.question === "string" ? clip(n.question.trim(), MAX_NEED_QUESTION_CHARS) : "";
-            if (!question) return [];
-            const id = typeof n.id === "string" && n.id.trim() ? n.id.trim() : `need_${ni + 1}`;
-            const source = n.source === "file" ? "file" : n.source === "search" ? "search" : n.source === "command" ? "command" : undefined;
-            const priority = n.priority === "blocking" ? "blocking" : n.priority === "important" ? "important" : n.priority === "nice-to-have" ? "nice-to-have" : undefined;
-            const fallback = typeof n.fallback === "string" ? n.fallback.trim() : "";
-            return [{
-              id,
-              question,
-              source,
-              priority,
-              fallback: fallback || undefined,
-            }];
-          })
-      : [];
     const stopReadingWhen = Array.isArray(s.stopReadingWhen)
       ? s.stopReadingWhen.flatMap((item) => {
           if (!item || typeof item !== "object") return [];
           const c = item as Record<string, unknown>;
           const condition = typeof c.condition === "string" ? c.condition.trim() : "";
-          const requiredEvidenceIds = Array.isArray(c.requiredEvidenceIds)
-            ? c.requiredEvidenceIds.filter((id): id is string => typeof id === "string" && id.trim().length > 0)
-            : [];
-          if (!condition || !requiredEvidenceIds.length) return [];
-          return [{ condition, requiredEvidenceIds: [...new Set(requiredEvidenceIds)] }];
+          const satisfied = typeof c.satisfied === "boolean" ? c.satisfied : false;
+          if (!condition) return [];
+          return [{ condition, satisfied }];
         })
       : [];
     return [
@@ -277,7 +247,6 @@ function sanitizeDecompose(raw: unknown): PersistedDecompose | undefined {
         dependsOn: Array.isArray(s.dependsOn)
           ? s.dependsOn.filter((d): d is string => typeof d === "string")
           : [],
-        informationNeeds,
         stopReadingWhen,
         verificationCriteria: (() => {
           if (!s.verificationCriteria || typeof s.verificationCriteria !== "object") return undefined;

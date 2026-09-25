@@ -1,12 +1,9 @@
-import { readFile, stat } from "node:fs/promises";
 import { platform } from "node:os";
 import upath from "upath";
 import { relative, resolve } from "node:path";
 import { assertLlmAuth, chatCompletionStream, writeEventLog, type ChatMessage, type ToolCall } from "@owncoder/llm";
 import { defaultReactSteps, type PipelineNode, type ReactStepConfig } from "@owncoder/settings";
 import { clampText } from "../budget.ts";
-import { isRedactionEnabled, redactSecrets } from "../redact.ts";
-import { formatWithLines } from "../tools/shared.ts";
 import {
   createLoopState,
   checkTermination,
@@ -90,7 +87,6 @@ import {
   classifyPlanKind,
   extractTitle,
   isPlanPath,
-  type TaskEvidence,
   type TaskItem,
 } from "../../plans.ts";
 import { MemoryManager } from "../memory.ts";
@@ -189,124 +185,10 @@ function summarizeToolActionForUser(
   return null;
 }
 
-function hasVerifiedEvidence(item: TaskEvidence): boolean {
-  return Boolean(
-    (item.kind ?? "source") === "source" &&
-    item.path &&
-    item.excerpt &&
-    Number.isInteger(item.startLine) && item.startLine! > 0 &&
-    Number.isInteger(item.endLine) && item.endLine! >= item.startLine! &&
-    Boolean(item.sourceHash),
-  );
-}
-
-type EvidenceExcerptCapture =
-  | { excerpt: string }
-  | { error: string };
-
-function formatVerifiedEvidence(items: readonly TaskEvidence[]): string {
-  return [
-    "Verified source evidence retained:",
-    ...items.map((item) => {
-      const source = [
-        item.path ?? "unknown file",
-        item.symbol ? `#${item.symbol}` : "",
-        `L${item.startLine ?? "?"}${item.endLine !== item.startLine ? `-${item.endLine ?? "?"}` : ""}`,
-      ].filter(Boolean).join(" ");
-      return [
-        `- [${item.needId}] ${item.summary}`,
-        `  Source: ${source}`,
-        "```",
-        item.excerpt ?? "",
-        "```",
-      ].join("\n");
-    }),
-  ].join("\n");
-}
-
-async function captureVerifiedEvidenceExcerpt(
-  workspaceRoot: string,
-  canonicalPath: string,
-  startLine: number,
-  endLine: number,
-  expectedVersion: string,
-  workflow: AgentLoopOpts["workflow"],
-): Promise<EvidenceExcerptCapture> {
-  try {
-    const workspace = resolve(workspaceRoot);
-    const absolute = resolve(workspace, canonicalPath);
-    const workspaceRelative = relative(workspace, absolute);
-    if (
-      workspaceRelative === "" ||
-      workspaceRelative.startsWith("..") ||
-      resolve(workspace, workspaceRelative) !== absolute
-    ) {
-      return { error: "the cited path is outside the workspace" };
-    }
-
-    const fileStat = await stat(absolute);
-    const currentVersion = `${fileStat.size}:${fileStat.mtimeMs}`;
-    if (currentVersion !== expectedVersion) {
-      return { error: "the cited file changed after it was read" };
-    }
-    const text = await readFile(absolute, "utf8");
-
-    const sourceLines = text.split(/\r?\n/);
-    if (startLine < 1 || endLine < startLine || endLine > sourceLines.length) {
-      return { error: "the cited range is outside the current file" };
-    }
-
-    const selectedLines = sourceLines.slice(startLine - 1, endLine);
-    let visibleLines = selectedLines;
-    if (isRedactionEnabled(workflow)) {
-      const redacted = redactSecrets(selectedLines.join("\n"), canonicalPath, {
-        sensitiveFiles: workflow.secrets?.sensitiveFiles,
-        patterns: workflow.secrets?.patterns,
-      });
-      visibleLines = redacted.text.split("\n");
-      if (visibleLines.length !== selectedLines.length) {
-        visibleLines = selectedLines.map((line) => redactSecrets(line, canonicalPath, {
-          sensitiveFiles: workflow.secrets?.sensitiveFiles,
-          patterns: workflow.secrets?.patterns,
-        }).text);
-      }
-    }
-
-    const excerpt = formatWithLines(visibleLines.join("\n"), startLine);
-    console.log(
-      `[evidence 保存] ${canonicalPath} L${startLine}-${endLine}, 片段 ${excerpt.length} 字符`,
-    );
-    return { excerpt };
-  } catch {
-    return { error: "the cited file could not be read for evidence retention" };
-  }
-}
-
-function satisfiedInformationNeedIds(task: TaskItem): Set<string> {
-  return new Set(task.evidence.filter(hasVerifiedEvidence).map((item) => item.needId));
-}
-
-function pendingInformationNeeds(task: TaskItem): string[] {
-  const satisfied = satisfiedInformationNeedIds(task);
-  return task.informationNeeds.filter((need) => !satisfied.has(need.id)).map((need) => need.id);
-}
-
-function informationNeedMatchesPath(question: string, path: string): boolean {
-  const q = question.replace(/\\/g, "/").toLowerCase();
-  const p = path.replace(/\\/g, "/").replace(/^\.\//, "").toLowerCase();
-  if (!p) return false;
-  if (q.includes(p)) return true;
-  const base = p.split("/").pop() ?? "";
-  return base.length >= 3 && q.includes(base);
-}
-
 function isExplorationComplete(task: TaskItem): boolean {
-  const satisfied = satisfiedInformationNeedIds(task);
-  return task.informationNeeds.length > 0 &&
-    task.informationNeeds.every((need) => satisfied.has(need.id)) &&
-    task.stopReadingWhen.every((criterion) =>
-      criterion.requiredEvidenceIds.length > 0 && criterion.requiredEvidenceIds.every((needId) => satisfied.has(needId)),
-    );
+  // 新逻辑: 基于 stopReadingWhen 条件判定探索是否完成
+  if (!task.stopReadingWhen.length) return false;
+  return task.stopReadingWhen.every((criterion) => criterion.satisfied === true);
 }
 
 function formatPackedHistory(task: TaskItem): string {
@@ -316,74 +198,40 @@ function formatPackedHistory(task: TaskItem): string {
     : "";
 }
 
-function formatInformationNeedsList(task: TaskItem): string {
-  const pending = new Set(pendingInformationNeeds(task));
-  const lines = task.informationNeeds.map((need) => {
-    const extras = [
-      need.source ? `source=${need.source}` : "",
-      need.priority ? `priority=${need.priority}` : "",
-      need.fallback ? `fallback=${need.fallback}` : "",
-    ].filter(Boolean);
-    return `- [${pending.has(need.id) ? "unmet" : "met"}] ${need.id}: ${need.question}${extras.length ? ` (${extras.join(", ")})` : ""}`;
-  });
-  return `Information needs:\n${lines.join("\n")}`;
-}
+
 
 function formatStopReadingWhen(task: TaskItem): string {
   if (!task.stopReadingWhen.length) return "";
-  const satisfied = satisfiedInformationNeedIds(task);
   return `Stop-exploration criteria:\n${task.stopReadingWhen.map((criterion) =>
-    `- [${criterion.requiredEvidenceIds.every((id) => satisfied.has(id)) ? "met" : "unmet"}] ${criterion.condition}`
+    `- [${criterion.satisfied ? "met" : "unmet"}] ${criterion.condition}`
   ).join("\n")}`;
 }
 
-function formatConfirmedEvidence(task: TaskItem): string {
-  const evidence = task.evidence.filter(hasVerifiedEvidence).map((item) => {
-    const source = [
-      item.path,
-      item.symbol ? `#${item.symbol}` : "",
-      `L${item.startLine}${item.endLine !== item.startLine ? `-${item.endLine}` : ""}`,
-    ].filter(Boolean).join(" ");
-    return [
-      `- [${item.needId}] ${item.summary} (${source})`,
-      "  Retained excerpt:",
-      "  ```",
-      item.excerpt ?? "",
-      "  ```",
-    ].join("\n");
-  });
-  return evidence.length ? `Confirmed refined evidence:\n${evidence.join("\n")}` : "";
-}
 
-function explorationStatusGuidance(task: TaskItem, whenNoNeeds: string): string {
-  if (!task.informationNeeds.length) return whenNoNeeds;
+
+function explorationStatusGuidance(task: TaskItem, whenNoStopCriteria: string): string {
+  if (!task.stopReadingWhen.length) return whenNoStopCriteria;
   return isExplorationComplete(task)
-    ? "All information needs and stop-exploration criteria are satisfied. Do not call read_file, grep, search_symbols, web_search, or other exploration tools; only edit, verify, report a blocker, or give the final result."
-    : "Call exploration tools only to fill the unmet information needs or stop-exploration criteria above. For needs that are not in this repository (errors, APIs, docs, library behavior), use web_search (then web_fetch) instead of guessing. Whole-file reads are only for files under 10KB. Files 10KB or larger: use read_outline first, then read_symbol or a bounded read_file(offset+limit); never request the complete file. Successful reads stay in this turn's context; continue with an edit, verification, blocker, or final result when the needs are met.";
+    ? "All stop-exploration criteria are satisfied. Do not call read_file, grep, search_symbols, web_search, or other exploration tools; only edit, verify, report a blocker, or give the final result."
+    : "Call exploration tools only to satisfy the stop-exploration criteria above. For needs that are not in this repository (errors, APIs, docs, library behavior), use web_search (then web_fetch) instead of guessing. Whole-file reads are only for files under 10KB. Files 10KB or larger: use read_outline first, then read_symbol or a bounded read_file(offset+limit); never request the complete file. Successful reads stay in this turn's context; continue with an edit, verification, blocker, or final result when the criteria are met.";
 }
 
 function formatCurrentTaskContext(task: TaskItem): string {
   return [
     "## **Current Task (in progress, prioritize; move to the next only after completion)**",
     "### Execution flow",
-    "1. Read the <task> block above. Note ID / Description / Information needs / Stop-exploration criteria / Confirmed refined evidence.",
+    "1. Read the <task> block above. Note ID / Description / Stop-exploration criteria.",
     "2. Call tools as needed:",
-    "   - Exploration tools (read_file / grep / search_symbols / lsp_* / repo_map / read_symbol / read_outline, etc.) — use them only to fill unmet needs. When the user or task provides concrete identifiers, search those strings verbatim first; if both a container and a member are named, locate the container before the member. Do not start from a semantic rewrite or codemap_search while an exact name is available. Preserve concrete text and avoid replacing known names, expressions, or signatures with guesses. Locate the relevant code before reading it, then inspect the smallest surrounding range that establishes the behavior and its conditions. Whole-file read_file is only for files under 10KB. Files 10KB or larger MUST call read_outline first; then use read_symbol only for one unique symbol, or read_file with both offset and limit from the outline's line range. Never retry a rejected large-file read without a range or fall back to reading the whole file. Successful read_file/read_symbol results stay in this turn's context automatically.",
-    "   - External knowledge (web_search / web_fetch) — required when a need cannot be answered from this repository: unknown APIs, docs, error messages, library behavior, version-specific details. Search before guessing. After web_search, web_fetch the best official/source URL. If the same local error or unknown remains after one retry, search instead of repeating the same edit.",
-    "   - Implementation tools (apply_patch / write_file / append_file / type_check / bash) — use them only after every informationNeed and every stopReadingWhen.requiredEvidenceId is met.",
-    "3. Termination — stop calling tools and produce the final answer only when ALL of the following hold:",
-    "   a. The goal is achieved;",
-    "   b. Every Information need is met (Confirmed refined evidence covers every need-id);",
-    "   c. Every Stop-exploration criteria requiredEvidenceId is met.",
-    "   Local hard-validation enforces this (isExplorationComplete) — no second LLM evaluation is required.",
+    "   - Exploration tools (read_file / grep / search_symbols / lsp_* / repo_map / read_symbol / read_outline, etc.) — use to understand the codebase. When the user or task provides concrete identifiers, search those strings verbatim first. Locate the relevant code before reading it, then inspect the smallest surrounding range that establishes the behavior. Whole-file read_file is only for files under 10KB. Files 10KB or larger MUST call read_outline first; then use read_symbol only for one unique symbol, or read_file with both offset and limit from the outline's line range.",
+    "   - External knowledge (web_search / web_fetch) — required for unknown APIs, docs, error messages, library behavior, version-specific details. Search before guessing.",
+    "   - Implementation tools (apply_patch / write_file / append_file / type_check / bash) — use when ready to make changes.",
+    "3. Termination — stop calling tools and produce the final answer when the goal is achieved and stop-exploration criteria are met.",
     "4. Tool failure: read the error and correct it first; if the same action fails twice, switch path or switch tool. If the failure is an unexplained error or missing external knowledge, call web_search before more local retries.",
     `ID: ${task.id}`,
     `Description: ${task.description}`,
     task.acceptance ? `Acceptance criteria: ${task.acceptance}` : "",
     formatPackedHistory(task),
-    task.informationNeeds.length ? formatInformationNeedsList(task) : "",
     formatStopReadingWhen(task),
-    formatConfirmedEvidence(task),
     explorationStatusGuidance(
       task,
       "Use tools to execute this task. Report the result in one sentence when done; do not keep calling tools.",
@@ -393,13 +241,11 @@ function formatCurrentTaskContext(task: TaskItem): string {
 
 function formatTurnInformationContext(task: TaskItem): string {
   return [
-    "## **This Turn's Information Needs (in progress, prioritize; not persisted across user messages)**",
-    "These needs come from this turn's task_decompose. Investigate only unmet items; successful read_file/read_symbol results stay in this turn's context automatically.",
+    "## **This Turn's Task (in progress, prioritize; not persisted across user messages)**",
+    "This comes from this turn's task_decompose. Successful read_file/read_symbol results stay in this turn's context automatically.",
     `This turn's goal: ${task.description}`,
     formatPackedHistory(task),
-    formatInformationNeedsList(task),
     formatStopReadingWhen(task),
-    formatConfirmedEvidence(task),
     explorationStatusGuidance(task, ""),
   ].filter(Boolean).join("\n");
 }
@@ -436,233 +282,6 @@ function summarizeToolResultForHistory(
     return `${call.name} completed: ${output.slice(0, MAX_TOOL_HISTORY_CHARS)}${output.length > MAX_TOOL_HISTORY_CHARS ? " …[truncated]" : ""}`;
   }
   return `${call.name} completed: ${output.slice(0, MAX_TOOL_HISTORY_CHARS)}${output.length > MAX_TOOL_HISTORY_CHARS ? " …[summary truncated]" : ""}`;
-}
-
-/**
- * 从LLM回复中自动提取文件片段引用
- *
- * 解析回复中的行号引用（如 "第10-20行"、"lines 10-20"、"L10-20" 等），
- * 从已读取的文件内容中提取对应片段，自动保存为证据。
- *
- * @param content LLM回复的文本内容
- * @param rawReadToolMessages 本轮已读取的文件工具消息
- * @param workspaceRoot 工作区根目录
- * @returns 提取的证据列表
- */
-async function extractExcerptsFromAssistantReply(
-  content: string,
-  rawReadToolMessages: readonly ChatMessage[],
-  workspaceRoot: string,
-): Promise<Array<{ path: string; startLine: number; endLine: number; excerpt: string; summary: string }>> {
-  const excerpts: Array<{ path: string; startLine: number; endLine: number; excerpt: string; summary: string }> = [];
-
-  // 匹配行号引用的正则表达式模式
-  // 支持格式：
-  // - "第10-20行"、"第10到20行"、"第10~20行"
-  // - "lines 10-20"、"line 10-20"、"L10-20"、"L10~20"
-  // - "10-20行"、"10到20行"
-  // - "src/file.ts:10-20"、"src/file.ts#L10-20"
-  // - 带文件名的引用："file.ts 的第10-20行"、"file.ts lines 10-20"
-  const lineRefPatterns = [
-    // 带文件名的引用：file.ts:10-20 或 file.ts#L10-20
-    /(?:^|[\s`"'])([^\s`"':#]+(?:\.[a-zA-Z]+))[:#]L?(\d+)(?:\s*[-–—~到至]\s*(\d+))?/gim,
-    // "file.ts 的第10-20行" 或 "file.ts lines 10-20"
-    /([^\s`"':#]+\.[a-zA-Z]+)\s*(?:的)?(?:第|lines?\s*|L\s*)(\d+)(?:\s*[-–—~到至]\s*(\d+))?/gim,
-    // 独立的行号引用："第10-20行"、"lines 10-20"、"L10-20"
-    /(?:第|lines?\s*|L\s*)(\d+)(?:\s*[-–—~到至]\s*(\d+))?行?/gim,
-  ];
-
-  // 从工具消息中解析已读取的文件内容
-  const fileContents = new Map<string, { path: string; startLine: number; endLine: number; lines: string[] }>();
-  for (const msg of rawReadToolMessages) {
-    if (msg.name === "read_file" && msg.content) {
-      // 尝试从content中解析文件路径和行号
-      const pathMatch = msg.content.match(/^(?:Read|Failed to read)\s+(.+?)\s+\(lines?\s+(\d+)-(\d+)\s+of\s+(\d+)\)/m);
-      if (pathMatch) {
-        const filePath = pathMatch[1]!;
-        const startLine = parseInt(pathMatch[2]!, 10);
-        const endLine = parseInt(pathMatch[3]!, 10);
-        // 从content中提取实际的文件内容（跳过第一行摘要）
-        const contentLines = msg.content.split('\n');
-        if (contentLines.length > 1) {
-          const fileKey = canonicalReadPath(workspaceRoot, filePath);
-          fileContents.set(fileKey, {
-            path: filePath,
-            startLine,
-            endLine,
-            lines: contentLines.slice(1), // 跳过第一行摘要
-          });
-        }
-      }
-    }
-  }
-
-  // 解析所有行号引用
-  const extractedRefs = new Set<string>(); // 去重
-
-  for (const pattern of lineRefPatterns) {
-    let match;
-    while ((match = pattern.exec(content)) !== null) {
-      let filePath: string | undefined;
-      let startLine: number;
-      let endLine: number;
-
-      if (match.length === 4) {
-        // 带文件名的引用
-        filePath = match[1];
-        startLine = parseInt(match[2]!, 10);
-        endLine = match[3] ? parseInt(match[3], 10) : startLine;
-      } else if (match.length === 3) {
-        // 独立的行号引用
-        startLine = parseInt(match[1]!, 10);
-        endLine = match[2] ? parseInt(match[2], 10) : startLine;
-      } else {
-        continue;
-      }
-
-      // 验证行号有效性
-      if (isNaN(startLine) || isNaN(endLine) || startLine < 1 || endLine < startLine) {
-        continue;
-      }
-
-      // 限制提取范围，避免过大
-      if (endLine - startLine > 100) {
-        endLine = startLine + 100;
-      }
-
-      // 查找匹配的文件内容
-      let matchedFile: { path: string; startLine: number; endLine: number; lines: string[] } | undefined;
-
-      if (filePath) {
-        // 有文件名，尝试匹配
-        const canonicalPath = canonicalReadPath(workspaceRoot, filePath);
-        matchedFile = fileContents.get(canonicalPath);
-
-        // 如果精确匹配失败，尝试模糊匹配
-        if (!matchedFile) {
-          const fileEntries = Array.from(fileContents.entries());
-          for (const [key, value] of fileEntries) {
-            if (key.endsWith(filePath!) || filePath!.endsWith(key.split('/').pop()!)) {
-              matchedFile = value;
-              break;
-            }
-          }
-        }
-      } else {
-        // 没有文件名，使用唯一已读取的文件
-        if (fileContents.size === 1) {
-          const fileValues = Array.from(fileContents.values());
-          matchedFile = fileValues[0];
-        }
-      }
-
-      if (!matchedFile) {
-        continue;
-      }
-
-      // 检查请求的行范围是否在已读取的范围内
-      const requestedStart = startLine;
-      const requestedEnd = endLine;
-      const fileStart = matchedFile.startLine;
-      const fileEnd = matchedFile.endLine;
-
-      // 如果请求的范围完全在已读取范围内
-      if (requestedStart >= fileStart && requestedEnd <= fileEnd) {
-        const refKey = `${matchedFile.path}:${requestedStart}-${requestedEnd}`;
-        if (extractedRefs.has(refKey)) {
-          continue; // 去重
-        }
-        extractedRefs.add(refKey);
-
-        // 计算在lines数组中的索引
-        const startIdx = requestedStart - fileStart;
-        const endIdx = requestedEnd - fileStart;
-        const excerptLines = matchedFile.lines.slice(startIdx, endIdx + 1);
-
-        if (excerptLines.length > 0) {
-          excerpts.push({
-            path: matchedFile.path,
-            startLine: requestedStart,
-            endLine: requestedEnd,
-            excerpt: excerptLines.join('\n'),
-            summary: `Extracted from ${matchedFile.path} lines ${requestedStart}-${requestedEnd}`,
-          });
-        }
-      }
-    }
-  }
-
-  return excerpts;
-}
-
-/**
- * 从LLM回复中自动提取证据并保存到历史记录
- *
- * 当LLM返回纯文本回复（没有工具调用）时，自动解析其中对文件行号的引用，
- * 从已读取的文件内容中提取对应片段，保存为证据到历史记录。
- *
- * @param content LLM回复的文本内容
- * @param rawReadToolMessages 本轮已读取的文件工具消息
- * @param history 历史记录数组
- * @param workspaceRoot 工作区根目录
- * @param memory 内存管理器
- * @returns 是否成功提取并保存了证据
- */
-async function autoExtractAndSaveEvidence(
-  content: string,
-  rawReadToolMessages: readonly ChatMessage[],
-  history: ChatTurn[],
-  workspaceRoot: string,
-  memory: MemoryManager,
-): Promise<boolean> {
-  // 只处理非空回复
-  if (!content.trim()) {
-    return false;
-  }
-
-  // 检查是否有已读取的文件
-  if (rawReadToolMessages.length === 0) {
-    return false;
-  }
-
-  try {
-    // 提取片段
-    const excerpts = await extractExcerptsFromAssistantReply(content, rawReadToolMessages, workspaceRoot);
-
-    if (excerpts.length === 0) {
-      return false;
-    }
-
-    // 格式化为证据格式并保存到历史
-    const evidenceItems = excerpts.map((excerpt) => ({
-      needId: "auto_extracted",
-      summary: excerpt.summary,
-      excerpt: excerpt.excerpt,
-      path: excerpt.path,
-      startLine: excerpt.startLine,
-      endLine: excerpt.endLine,
-    }));
-
-    // 保存到历史记录
-    history.push({
-      role: "tool",
-      id: `auto_extract_evidence-${Date.now().toString(36)}`,
-      content: formatVerifiedEvidence(evidenceItems),
-      toolName: "auto_extract_evidence",
-    });
-
-    // 记录到内存
-    memory.addToolOutput(
-      "auto_extract_evidence",
-      `Auto-extracted ${excerpts.length} excerpt(s) from assistant reply: ${excerpts.map((e) => `${e.path}:${e.startLine}-${e.endLine}`).join(", ")}`,
-    );
-
-    return true;
-  } catch (error) {
-    // 自动提取失败不应影响主流程
-    console.warn("[auto-extract] Failed to extract excerpts from assistant reply:", error);
-    return false;
-  }
 }
 
 interface DocumentDeliverable {
@@ -721,18 +340,7 @@ function canonicalReadPath(workspaceRoot: string, inputPath: string): string {
   return CASE_INSENSITIVE_PATHS ? rel.toLowerCase() : rel;
 }
 
-async function sourceVersion(workspaceRoot: string, canonicalPath: string): Promise<string | null> {
-  try {
-    const workspace = resolve(workspaceRoot);
-    const absolute = resolve(workspace, canonicalPath);
-    const rel = relative(workspace, absolute);
-    if (rel === "" || rel.startsWith("..") || resolve(workspace, rel) !== absolute) return null;
-    const fileStat = await stat(absolute);
-    return `${fileStat.size}:${fileStat.mtimeMs}`;
-  } catch {
-    return null;
-  }
-}
+
 
 export async function runReActLoop(args: ReActLoopArgs): Promise<{
   lastAssistant: string;
@@ -987,32 +595,9 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
   const persistTaskUpdate = async (nextId: string | null): Promise<void> => {
     if (opts.onTaskUpdate) await opts.onTaskUpdate(tasks, nextId);
   };
-  const invalidateStaleEvidence = async (task: TaskItem): Promise<boolean> => {
-    const retained: TaskEvidence[] = [];
-    for (const evidence of task.evidence) {
-      if (
-        !evidence.path ||
-        !evidence.sourceHash ||
-        !evidence.excerpt ||
-        !Number.isInteger(evidence.startLine) ||
-        !Number.isInteger(evidence.endLine)
-      ) continue;
-      if (await sourceVersion(toolCtx.workspaceRoot, evidence.path) !== evidence.sourceHash) continue;
-      const captured = await captureVerifiedEvidenceExcerpt(
-        toolCtx.workspaceRoot,
-        evidence.path,
-        evidence.startLine!,
-        evidence.endLine!,
-        evidence.sourceHash,
-        opts.workflow,
-      );
-      if ("excerpt" in captured && captured.excerpt === evidence.excerpt) {
-        retained.push(evidence);
-      }
-    }
-    if (retained.length === task.evidence.length) return false;
-    task.evidence = retained;
-    return true;
+  // Evidence tracking removed - stop criteria evaluated directly
+  const invalidateStaleEvidence = async (_task: TaskItem): Promise<boolean> => {
+    return false;
   };
   if (taskDriven) {
     const startId = opts.currentTaskId ?? tasks[0]?.id ?? null;
@@ -1029,8 +614,6 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
 
   const turnInformationTask: TaskItem | null = !taskDriven ? (transientInformationTask ?? null) : null;
   const activeInformationTask = (): TaskItem | null => currentTask ?? turnInformationTask;
-  const informationTasks = (): TaskItem[] =>
-    turnInformationTask ? [...tasks, turnInformationTask] : tasks;
   const syncLoopTask = (): void => {
     loopState.currentTask = activeInformationTask() ?? undefined;
   };
@@ -1408,19 +991,17 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
         continue;
       }
 
-      // 弱模型：LLM 本轮只回纯文本（无 tool_calls）时，仅在所需信息未拿到时 nudge（上限 maxPostToolTextNudges）。
-      // 三条件：allowlist 小模型（loopNudgeEnabled）+ LLM 纯文本（本分支）+ 信息缺失（hasPendingInfo）。
-      // 无 information task / 无 informationNeeds / 探索已完成 → 不引导，信任 LLM。
+      // 弱模型：LLM 本轮只回纯文本（无 tool_calls）时，仅在探索未完成时 nudge（上限 maxPostToolTextNudges）。
+      // 三条件：allowlist 小模型（loopNudgeEnabled）+ LLM 纯文本（本分支）+ 探索未完成。
       const nudgeInfoTask = activeInformationTask();
-      const hasPendingInfo =
+      const hasPendingExploration =
         !!nudgeInfoTask &&
-        nudgeInfoTask.informationNeeds.length > 0 &&
         !isExplorationComplete(nudgeInfoTask);
       if (
         loopNudgeEnabled &&
         !taskDriven &&
         toolsRanLastIter &&
-        hasPendingInfo &&
+        hasPendingExploration &&
         content.trim() &&
         !documentDelivered &&
         !handoffRequested &&
@@ -1437,7 +1018,7 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
             finishReason,
             content: content.slice(0, 200),
             explorationComplete: false,
-            hasPendingInfo,
+            hasPendingExploration,
             postToolTextNudgeCount,
           },
         });
@@ -1568,25 +1149,6 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
           history.push({ role: "assistant", content });
         }
 
-        // ── 自动提取证据：从LLM回复中提取文件片段引用并保存到历史 ──
-        // 当LLM返回纯文本回复时，自动解析其中对文件行号的引用，
-        // 从已读取的文件内容中提取对应片段，保存为证据到历史记录。
-        if (rawReadToolMessages.length > 0) {
-          const extracted = await autoExtractAndSaveEvidence(
-            content,
-            rawReadToolMessages,
-            history,
-            toolCtx.workspaceRoot,
-            memory,
-          );
-          if (extracted) {
-            logReasoningStep(reasoningTrace, {
-              type: "observation",
-              content: "Auto-extracted file excerpts from assistant reply and saved to history",
-              timestamp: Date.now(),
-            });
-          }
-        }
       }
       logReasoningStep(reasoningTrace, {
         type: "observation",
@@ -1716,15 +1278,14 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
     // without transitioning to implementation. The nudge is injected AFTER
     // tool results are recorded (so the model has the facts) but BEFORE the
     // next LLM call, steering it toward producing output.
-    // 必要门槛：所需信息尚未拿到（无 information task / 探索已完成 → 信任 LLM，不引导）。
+    // 必要门槛：探索尚未完成（无 information task / 探索已完成 → 信任 LLM，不引导）。
     const readonlyNudgeInfoTask = activeInformationTask();
-    const readonlyNudgePendingInfo =
+    const readonlyNudgePendingExploration =
       !!readonlyNudgeInfoTask &&
-      readonlyNudgeInfoTask.informationNeeds.length > 0 &&
       !isExplorationComplete(readonlyNudgeInfoTask);
     if (
       loopNudgeEnabled &&
-      readonlyNudgePendingInfo &&
+      readonlyNudgePendingExploration &&
       allReadonly &&
       consecutiveReadonlyIters >= READONLY_TRANSITION_THRESHOLD &&
       consecutiveReadonlyIters < maxConsecutiveReadonlyIters
@@ -1859,35 +1420,13 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
       return { call, id, result };
     };
 
-    const invalidateEvidenceForPath = async (inputPath: string): Promise<void> => {
-      const canonicalPath = canonicalReadPath(toolCtx.workspaceRoot, inputPath);
-      let changed = false;
-      for (const task of informationTasks()) {
-        const retained = task.evidence.filter((evidence) => evidence.path !== canonicalPath);
-        if (retained.length !== task.evidence.length) {
-          task.evidence = retained;
-          changed = true;
-        }
-      }
-      if (changed) {
-        // Persist every affected task before a subsequent model call can use a stale lock.
-        await persistTaskUpdate(currentTask?.id ?? null);
-      }
+    // Evidence tracking removed
+    const invalidateEvidenceForPath = async (_inputPath: string): Promise<void> => {
+      // No-op: evidence removed
     };
 
     const invalidateAllTaskEvidence = async (): Promise<void> => {
-      let changed = false;
-      for (const task of informationTasks()) {
-        if (task.evidence.length > 0) {
-          task.evidence = [];
-          changed = true;
-        }
-      }
-      if (changed) {
-        // Bash does not expose a reliable changed-path set. Clearing the active
-        // evidence is conservative: stale evidence must never keep exploration locked.
-        await persistTaskUpdate(currentTask?.id ?? null);
-      }
+      // No-op: evidence removed
     };
 
     const executedToolResults: Array<{ name: string; arguments: Record<string, unknown>; result: string }> = [];
@@ -1956,35 +1495,7 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
           emitFreshnessFollowUp(contextControl?.recordFreshRead(resultMetadata) ?? null);
         }
 
-        const evidenceTask = activeInformationTask();
-        // A successful source navigation result can satisfy a matching need.
-        // Keep only a compact marker in the task block; the full result remains
-        // in this turn's messages and is persisted after the loop.
-        if (evidenceTask) {
-          const sourceHash = resultMetadata.contentHash ?? `${resultMetadata.size}:${resultMetadata.mtimeMs}`;
-          const satisfied = satisfiedInformationNeedIds(evidenceTask);
-          const matched = evidenceTask.informationNeeds.filter(
-            (need) => !satisfied.has(need.id) && informationNeedMatchesPath(need.question, resultMetadata.path),
-          );
-          if (matched.length > 0) {
-            evidenceTask.evidence = [
-              ...evidenceTask.evidence,
-              ...matched.map((need): TaskEvidence => ({
-                kind: resultMetadata.kind === "read_outline" ? "navigation" : "source",
-                needId: need.id,
-                summary: `${resultMetadata.kind === "read_outline" ? "Outlined" : "Read"} ${resultMetadata.path} lines ${resultMetadata.startLine}-${resultMetadata.endLine}`,
-                excerpt: resultMetadata.kind === "read_outline"
-                  ? undefined
-                  : `${resultMetadata.kind === "read_file" ? "Read" : "Read"} ${resultMetadata.path} L${resultMetadata.startLine}-${resultMetadata.endLine}\n${r.result.output}`,
-                path: resultMetadata.path,
-                startLine: resultMetadata.startLine,
-                endLine: resultMetadata.endLine,
-                sourceHash,
-              })),
-            ];
-            if (currentTask && evidenceTask === currentTask) await persistTaskUpdate(currentTask.id);
-          }
-        }
+        // Evidence collection removed - stop criteria are now evaluated directly
       }
 
       // 文件修改类工具执行后，向对话流推一条 assistant 总结，让用户看到行动反馈（解决静默执行）。
@@ -2118,7 +1629,6 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
       const informationTask = activeInformationTask();
       if (
         informationTask &&
-        informationTask.informationNeeds.length > 0 &&
         isExplorationComplete(informationTask) &&
         READONLY_TOOLS.has(calls[ti]!.name)
       ) {

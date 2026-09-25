@@ -422,13 +422,6 @@ interface DecomposeStep {
   id: string;
   description: string;
   dependsOn: string[];
-  informationNeeds: Array<{
-    id: string;
-    question: string;
-    source?: TaskItem["informationNeeds"][number]["source"];
-    priority?: TaskItem["informationNeeds"][number]["priority"];
-    fallback?: string;
-  }>;
   stopReadingWhen: TaskItem["stopReadingWhen"];
   verificationCriteria?: TaskItem["verificationCriteria"];
   rollbackStrategy?: string;
@@ -533,15 +526,9 @@ function buildInspectCurrentCodeSteps(userMessage: string): DecomposeStep[] {
     id: "step_1",
     description: `定位并阅读与用户问题相关的当前实现：${userMessage}`,
     dependsOn: [],
-    informationNeeds: [{
-      id: "need_1",
-      question: `当前代码或当前步骤如何处理该问题：${userMessage}`,
-      source: "search",
-      priority: "blocking",
-    }],
     stopReadingWhen: [{
       condition: "已定位并读到相关实现及其判断条件",
-      requiredEvidenceIds: ["need_1"],
+      satisfied: false,
     }],
   }];
 }
@@ -573,7 +560,6 @@ export function buildFallbackRawDecompose(userMessage: string, modelPlainText?: 
           id: "step_1",
           description: taskBody,
           dependsOn: [],
-          informationNeeds: [],
           stopReadingWhen: [],
           relevantHistory: undefined,
         }],
@@ -594,7 +580,6 @@ export function buildFallbackRawDecompose(userMessage: string, modelPlainText?: 
         id: step.id || `step_${index + 1}`,
         description: step.description,
         dependsOn: [],
-        informationNeeds: [],
         stopReadingWhen: [],
         relevantHistory: undefined,
       })),
@@ -624,7 +609,6 @@ export function recoverEmptyDecomposeSteps(
           id: "step_1",
           description: `定位并修改与用户请求相关的代码：${userMessage}`,
           dependsOn: [],
-          informationNeeds: [],
           stopReadingWhen: [],
         }],
       }],
@@ -645,19 +629,7 @@ export function recoverEmptyDecomposeSteps(
   return answer;
 }
 
-function parseInformationNeedSource(
-  value: unknown,
-): TaskItem["informationNeeds"][number]["source"] {
-  return value === "file" || value === "search" || value === "command" ? value : undefined;
-}
-
-function parseInformationNeedPriority(
-  value: unknown,
-): TaskItem["informationNeeds"][number]["priority"] {
-  return value === "blocking" || value === "important" || value === "nice-to-have"
-    ? value
-    : undefined;
-}
+// Information needs parsing removed - no longer used
 
 function parseVerificationCriteria(value: unknown): TaskItem["verificationCriteria"] {
   if (!value || typeof value !== "object") return undefined;
@@ -909,7 +881,7 @@ export function parseDecomposeAnswer(text: string): DecomposeAnswer | null {
   // 防止无限循环：限制最大任务数与步骤数
   const MAX_TASKS = 20;
   const MAX_STEPS = 20;
-  const MAX_INFORMATION_NEEDS_PER_STEP = 10;
+
 
   // 先剥 Markdown 围栏，再取 JSON；避免模型「解释 + ```json ... ```」时整段失败
   const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1]?.trim();
@@ -988,23 +960,7 @@ export function parseDecomposeAnswer(text: string): DecomposeAnswer | null {
           dependsOn: Array.isArray(step.dependsOn)
             ? step.dependsOn.filter((d): d is string => typeof d === "string")
             : [],
-          informationNeeds: Array.isArray(step.informationNeeds)
-            ? step.informationNeeds
-                .slice(0, MAX_INFORMATION_NEEDS_PER_STEP) // 限制信息需求数量
-                .flatMap((need, needIndex) => {
-                  const rawNeed = (need ?? {}) as Record<string, unknown>;
-                  const question = typeof rawNeed.question === "string" ? rawNeed.question.trim() : "";
-                  if (!question) return [];
-                  const fallback = typeof rawNeed.fallback === "string" ? rawNeed.fallback.trim() : "";
-                  return [{
-                    id: typeof rawNeed.id === "string" && rawNeed.id.trim() ? rawNeed.id.trim() : `need_${needIndex + 1}`,
-                    question,
-                    source: parseInformationNeedSource(rawNeed.source),
-                    priority: parseInformationNeedPriority(rawNeed.priority),
-                    fallback: fallback || undefined,
-                  }];
-                })
-            : [],
+
           stopReadingWhen: parseStopReadingWhen(step.stopReadingWhen),
           verificationCriteria: parseVerificationCriteria(step.verificationCriteria),
           rollbackStrategy: typeof step.rollbackStrategy === "string"
@@ -1057,96 +1013,30 @@ export function parseDecomposeAnswer(text: string): DecomposeAnswer | null {
 }
 
 /**
- * Convert this turn's decomposition into the same evidence-backed shape used by
- * approved plans. It deliberately remains scheduler-local: a new user message
- * receives a new decomposition instead of inheriting stale investigation state.
+ * Convert this turn's decomposition into a task with stop criteria.
+ * No longer tracks information needs - stop criteria are evaluated directly.
  */
 function buildTurnInformationTask(answer: DecomposeAnswer): TaskItem | null {
-  const informationNeeds: TaskItem["informationNeeds"] = [];
   const stopReadingWhen: TaskItem["stopReadingWhen"] = [];
-  const usedIds = new Set<string>();
-  
-  // 防止无限循环：限制最大信息需求数
-  const MAX_INFORMATION_NEEDS = 50;
-  let totalNeeds = 0;
 
   for (const step of flattenSteps(answer)) {
-    const stepNeedIds: string[] = [];
-    const canonicalNeedIds = new Map<string, string>();
-    
-    for (const need of step.informationNeeds) {
-      // 防止信息需求过多
-      if (totalNeeds >= MAX_INFORMATION_NEEDS) {
-        console.warn(`[task_decompose] 信息需求数量超限，已达到最大值 ${MAX_INFORMATION_NEEDS}`);
-        break;
-      }
-      
-      const baseId = need.id || "need";
-      let id = baseId;
-      let suffix = 2;
-      
-      // 防止ID生成死循环
-      let attempts = 0;
-      const MAX_ATTEMPTS = 100;
-      while (usedIds.has(id) && attempts < MAX_ATTEMPTS) {
-        id = `${baseId}_${suffix++}`;
-        attempts++;
-      }
-      
-      // 如果尝试次数过多，可能存在问题，强制使用带时间戳的唯一ID
-      if (attempts >= MAX_ATTEMPTS) {
-        id = `${baseId}_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
-        console.warn(`[task_decompose] ID生成尝试过多，使用时间戳ID: ${id}`);
-      }
-      
-      usedIds.add(id);
-      informationNeeds.push({
-        id,
-        question: need.question,
-        source: need.source,
-        priority: need.priority,
-        fallback: need.fallback,
+    for (const criterion of step.stopReadingWhen) {
+      stopReadingWhen.push({
+        condition: criterion.condition,
+        satisfied: false,
       });
-      stepNeedIds.push(id);
-      totalNeeds++;
-      
-      if (!canonicalNeedIds.has(need.id)) {
-        canonicalNeedIds.set(need.id, id);
-      }
-    }
-    
-    // 防止信息需求过多时跳出外层循环
-    if (totalNeeds >= MAX_INFORMATION_NEEDS) {
-      break;
-    }
-    
-    if (stepNeedIds.length) {
-      for (const criterion of step.stopReadingWhen) {
-        const requiredEvidenceIds = criterion.requiredEvidenceIds
-          .map((needId) => canonicalNeedIds.get(needId))
-          .filter((needId): needId is string => Boolean(needId));
-        if (requiredEvidenceIds.length) {
-          stopReadingWhen.push({
-            condition: criterion.condition,
-            requiredEvidenceIds: [...new Set(requiredEvidenceIds)],
-          });
-        }
-      }
     }
   }
 
-  if (!informationNeeds.length) return null;
+  if (!stopReadingWhen.length) return null;
   return {
     id: "__turn_information_plan__",
-    description: answer.intent || "Complete this turn's information plan.",
+    description: answer.intent || "Complete this turn's task.",
     status: "in_progress",
     dependsOn: [],
-    informationNeeds,
     stopReadingWhen,
-    evidence: [],
     retryCount: 0,
     maxRetries: 0,
-    // 整单信息任务也携带可复用历史
     relevantHistory: answer.relevantHistory,
   };
 }
@@ -1161,38 +1051,22 @@ function buildTurnInformationTask(answer: DecomposeAnswer): TaskItem | null {
 export function injectStopConditions(
   systemPrompt: string,
   steps: Array<{
-    informationNeeds: Array<{
-      id: string;
-      question: string;
-      source?: TaskItem["informationNeeds"][number]["source"];
-      priority?: TaskItem["informationNeeds"][number]["priority"];
-      fallback?: string;
-    }>;
-    stopReadingWhen: Array<{ condition: string; requiredEvidenceIds: string[] }>;
+    stopReadingWhen: Array<{ condition: string; satisfied?: boolean }>;
   }>,
 ): string {
   const regex = /__STOP_READING_START__[\s\S]*?__STOP_READING_END__/;
 
-  // Collect every information need with its paired stop condition across all steps.
-  const needs: Array<{ id: string; question: string; condition: string }> = [];
+  // Collect all stop conditions across steps
+  const conditions: string[] = [];
   for (const step of steps) {
-    for (const need of step.informationNeeds) {
-      const criterion = step.stopReadingWhen.find(
-        (c) => c.requiredEvidenceIds.includes(need.id),
-      );
-      needs.push({
-        id: need.id,
-        question: need.question,
-        condition: criterion?.condition ?? "(no stop condition specified)",
-      });
+    for (const criterion of step.stopReadingWhen) {
+      conditions.push(criterion.condition);
     }
   }
 
   let replacement: string;
-  if (needs.length > 0) {
-    const lines = needs.map(
-      (n) => `- ${n.id}: "${n.question}"\n  → Stop when: "${n.condition}"`,
-    );
+  if (conditions.length > 0) {
+    const lines = conditions.map((cond, idx) => `${idx + 1}. ${cond}`);
     replacement = [
       "**Stop conditions for this step — AUTHORITATIVE, not a suggestion:**",
       ...lines,
@@ -1233,14 +1107,7 @@ export async function runTaskDecompose(
         id: string;
         description: string;
         dependsOn: string[];
-        informationNeeds: Array<{
-          id: string;
-          question: string;
-          source?: TaskItem["informationNeeds"][number]["source"];
-          priority?: TaskItem["informationNeeds"][number]["priority"];
-          fallback?: string;
-        }>;
-        stopReadingWhen: Array<{ condition: string; requiredEvidenceIds: string[] }>;
+        stopReadingWhen: Array<{ condition: string; satisfied?: boolean }>;
         verificationCriteria?: TaskItem["verificationCriteria"];
         rollbackStrategy?: string;
         estimatedComplexity?: TaskItem["estimatedComplexity"];
@@ -1436,7 +1303,6 @@ export async function runTaskDecompose(
           id: s.id,
           description: s.description,
           dependsOn: s.dependsOn,
-          informationNeeds: s.informationNeeds || [],
           stopReadingWhen: s.stopReadingWhen || [],
           verificationCriteria: s.verificationCriteria,
           rollbackStrategy: s.rollbackStrategy,
@@ -1581,10 +1447,7 @@ export const taskDecomposeHandler: StageHandler = {
             id: step.id,
             description: step.description,
             dependsOn: step.dependsOn,
-            informationNeeds: step.informationNeeds.map((need) => ({
-              id: need.id,
-              question: need.question,
-            })),
+
             stopReadingWhen: step.stopReadingWhen,
           })),
         })),
@@ -1610,7 +1473,7 @@ export const taskDecomposeHandler: StageHandler = {
             id: step.id,
             description: step.description,
             dependsOn: step.dependsOn,
-            informationNeeds: step.informationNeeds,
+
             stopReadingWhen: step.stopReadingWhen,
             verificationCriteria: step.verificationCriteria,
             rollbackStrategy: step.rollbackStrategy,

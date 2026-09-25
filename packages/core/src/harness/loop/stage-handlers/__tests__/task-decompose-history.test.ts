@@ -159,7 +159,7 @@ describe("extractStructuredHistory (旧格式 fallback)", () => {
     const decomposeObj = {
       intent: "理解用户需求",
       userConstraints: ["不能修改配置"],
-      tasks: [{ id: "task_1", description: "任务1", steps: [{ id: "s1", description: "步骤1", dependsOn: [], informationNeeds: [], stopReadingWhen: [] }] }],
+      tasks: [{ id: "task_1", description: "任务1", steps: [{ id: "s1", description: "步骤1", dependsOn: [], stopReadingWhen: [] }] }],
     };
     const history: ChatTurn[] = [
       mkTurn("user", "分析需求"),
@@ -178,7 +178,7 @@ describe("extractStructuredHistory (旧格式 fallback)", () => {
   it("fenced JSON 也可识别为 decompose", () => {
     const decomposeObj = {
       intent: "fenced 解析",
-      tasks: [{ id: "task_1", description: "任务", steps: [{ id: "s1", description: "步骤", dependsOn: [], informationNeeds: [], stopReadingWhen: [] }] }],
+      tasks: [{ id: "task_1", description: "任务", steps: [{ id: "s1", description: "步骤", dependsOn: [], stopReadingWhen: [] }] }],
     };
     const history: ChatTurn[] = [
       mkTurn("user", "请求"),
@@ -262,7 +262,7 @@ describe("decompose→report/evidence 同轮持久化", () => {
             id: "s1",
             description: "扫描目录结构",
             dependsOn: [],
-            informationNeeds: [{ id: "n1", question: "有哪些子目录？" }],
+
             stopReadingWhen: [{ condition: "知道所有顶层目录", requiredEvidenceIds: [] }],
           },
         ],
@@ -680,7 +680,6 @@ describe("parseDecomposeAnswer / fallback：intent 用原话，纯文本收成 t
             id: "step_1",
             description: "定位 AuthService.login",
             dependsOn: [],
-            informationNeeds: [],
             stopReadingWhen: [],
           }],
         }],
@@ -722,7 +721,7 @@ describe("parseDecomposeAnswer / fallback：intent 用原话，纯文本收成 t
 });
 
 describe("parseDecomposeAnswer 保留 prompt 约定字段", () => {
-  it("解析 informationNeeds 的 source/priority/fallback 以及步骤验证字段", () => {
+  it("解析步骤验证字段", () => {
     const answer = parseDecomposeAnswer(JSON.stringify({
       intent: "User wants Redis caching (act: request_change, intent: implement).",
       userConstraints: ["Must use Redis"],
@@ -732,15 +731,6 @@ describe("parseDecomposeAnswer 保留 prompt 约定字段", () => {
           id: "step_1",
           description: "Confirm AuthService.login and add Redis caching",
           dependsOn: [],
-          informationNeeds: [
-            {
-              id: "need_1",
-              question: "Where is AuthService.login implemented?",
-              source: "file",
-              priority: "blocking",
-              fallback: "Assume src/auth/login.ts",
-            },
-          ],
           stopReadingWhen: [
             {
               condition: "login implementation located",
@@ -760,13 +750,10 @@ describe("parseDecomposeAnswer 保留 prompt 约定字段", () => {
 
     expect(answer).not.toBeNull();
     expect(answer!.tasks[0].steps).toHaveLength(1);
-    expect(answer!.tasks[0].steps[0].informationNeeds).toEqual([
+    expect(answer!.tasks[0].steps[0].stopReadingWhen).toEqual([
       {
-        id: "need_1",
-        question: "Where is AuthService.login implemented?",
-        source: "file",
-        priority: "blocking",
-        fallback: "Assume src/auth/login.ts",
+        condition: "Found AuthService.login implementation",
+        satisfied: false,
       },
     ]);
     expect(answer!.tasks[0].steps[0].verificationCriteria).toEqual({
@@ -787,15 +774,6 @@ describe("parseDecomposeAnswer 保留 prompt 约定字段", () => {
           id: "step_1",
           description: "Inspect current login path",
           dependsOn: [],
-          informationNeeds: [
-            {
-              id: "need_1",
-              question: "What is the current cache?",
-              source: "database",
-              priority: "urgent",
-              fallback: "   ",
-            },
-          ],
           stopReadingWhen: [],
           verificationCriteria: { command: "", expectedOutput: "ok" },
           estimatedComplexity: "extreme",
@@ -804,13 +782,7 @@ describe("parseDecomposeAnswer 保留 prompt 约定字段", () => {
     }));
 
     expect(answer).not.toBeNull();
-    expect(answer!.tasks[0].steps[0].informationNeeds[0]).toEqual({
-      id: "need_1",
-      question: "What is the current cache?",
-      source: undefined,
-      priority: undefined,
-      fallback: undefined,
-    });
+    expect(answer!.tasks[0].steps[0].stopReadingWhen).toEqual([]);
     expect(answer!.tasks[0].steps[0].verificationCriteria).toBeUndefined();
     expect(answer!.tasks[0].steps[0].estimatedComplexity).toBeUndefined();
   });
@@ -827,17 +799,8 @@ describe("parseDecomposeAnswer 保留 prompt 约定字段", () => {
           id: "step_1",
           description: "接入 Redis 缓存",
           dependsOn: [],
-          informationNeeds: [
-            {
-              id: "need_1",
-              question: "AuthService.login 在哪实现？",
-              source: "file",
-              priority: "blocking",
-              fallback: "假设在 src/auth/login.ts",
-            },
-          ],
           stopReadingWhen: [
-            { condition: "已定位 login 实现", requiredEvidenceIds: ["need_1"] },
+            { condition: "已定位 login 实现", satisfied: false },
           ],
           verificationCriteria: {
             command: "pnpm test",
@@ -851,12 +814,9 @@ describe("parseDecomposeAnswer 保留 prompt 约定字段", () => {
     });
 
     expect(record).not.toBeNull();
-    expect(record!.taskDecompose?.tasks[0].steps[0].informationNeeds[0]).toEqual({
-      id: "need_1",
-      question: "AuthService.login 在哪实现？",
-      source: "file",
-      priority: "blocking",
-      fallback: "假设在 src/auth/login.ts",
+    expect(record!.taskDecompose?.tasks[0].steps[0].stopReadingWhen[0]).toEqual({
+      condition: "已定位 login 实现",
+      satisfied: false,
     });
     expect(record!.taskDecompose?.tasks[0].steps[0].verificationCriteria).toEqual({
       command: "pnpm test",
@@ -875,12 +835,12 @@ describe("parseDecomposeAnswer 保留 prompt 约定字段", () => {
         {
           id: "task_1",
           description: "任务一描述",
-          steps: [{ id: "s1", description: "步骤一", dependsOn: [], informationNeeds: [], stopReadingWhen: [] }],
+          steps: [{ id: "s1", description: "步骤一", dependsOn: [], stopReadingWhen: [] }],
         },
         {
           id: "task_2",
           description: "任务二描述",
-          steps: [{ id: "s2", description: "步骤二", dependsOn: ["s1"], informationNeeds: [], stopReadingWhen: [] }],
+          steps: [{ id: "s2", description: "步骤二", dependsOn: ["s1"], stopReadingWhen: [] }],
         },
       ],
       progressStatus: "进行中",
@@ -903,13 +863,13 @@ describe("parseDecomposeAnswer 保留 prompt 约定字段", () => {
           id: "task_1",
           description: "任务一",
           dependsOn: ["task_0"],
-          steps: [{ id: "s1", description: "步骤一", dependsOn: [], informationNeeds: [], stopReadingWhen: [] }],
+          steps: [{ id: "s1", description: "步骤一", dependsOn: [], stopReadingWhen: [] }],
         },
         {
           id: "task_2",
           description: "任务二",
           dependsOn: ["task_1"],
-          steps: [{ id: "s2", description: "步骤二", dependsOn: ["s1"], informationNeeds: [], stopReadingWhen: [] }],
+          steps: [{ id: "s2", description: "步骤二", dependsOn: ["s1"], stopReadingWhen: [] }],
         },
       ],
     }));
@@ -927,7 +887,7 @@ describe("parseDecomposeAnswer 保留 prompt 约定字段", () => {
     const answer = parseDecomposeAnswer(JSON.stringify({
       understanding: "旧格式理解段",
       userConstraints: ["旧约束"],
-      steps: [{ id: "s1", description: "旧步骤", dependsOn: [], informationNeeds: [], stopReadingWhen: [] }],
+      steps: [{ id: "s1", description: "旧步骤", dependsOn: [], stopReadingWhen: [] }],
       goal: "旧目标",
       scope: ["旧范围"],
       relation: "continue",
@@ -964,7 +924,7 @@ describe("parseDecomposeAnswer 保留 prompt 约定字段", () => {
       goal: "旧目标",
       relation: "continue",
       sharedEvidence: [],
-      steps: [{ id: "s1", description: "旧步骤", dependsOn: [], informationNeeds: [], stopReadingWhen: [] }],
+      steps: [{ id: "s1", description: "旧步骤", dependsOn: [], stopReadingWhen: [] }],
     } as unknown as PersistedDecompose;
     const record = await persistDecomposeRound(tmpDir, "legacy-shape-session", "旧请求", legacy);
 
@@ -1088,7 +1048,6 @@ describe("relevantHistory 为可承载全部相关历史的字符串", () => {
           id: "step_1",
           description: "Add Redis caching",
           dependsOn: [],
-          informationNeeds: [],
           stopReadingWhen: [],
           relevantHistory: historyText,
         },
@@ -1111,7 +1070,6 @@ describe("relevantHistory 为可承载全部相关历史的字符串", () => {
           id: "step_1",
           description: "Reuse prior login.ts read",
           dependsOn: [],
-          informationNeeds: [],
           stopReadingWhen: [],
           relevantHistory: {
             files: [
@@ -1156,14 +1114,12 @@ describe("relevantHistory 为可承载全部相关历史的字符串", () => {
           id: "step_1",
           description: "Add Redis caching",
           dependsOn: [],
-          informationNeeds: [],
           stopReadingWhen: [],
         },
         {
           id: "step_2",
           description: "Verify login latency",
           dependsOn: ["step_1"],
-          informationNeeds: [],
           stopReadingWhen: [],
           relevantHistory: "step-local notes",
         },
@@ -1290,8 +1246,7 @@ describe("当前代码/当前步骤行为询问不得空 steps", () => {
     const recovered = recoverEmptyDecomposeSteps(misclassified!, originalQuestion);
     expect(recovered.tasks[0].steps.length).toBeGreaterThan(0);
     expect(recovered.tasks[0].steps[0].description).toMatch(/定位|阅读|实现|历史信息/);
-    expect(recovered.tasks[0].steps[0].informationNeeds[0]?.question).toContain("历史信息");
-    expect(recovered.tasks[0].steps[0].informationNeeds[0]?.source).toBe("search");
+    expect(recovered.tasks[0].steps[0].stopReadingWhen.length).toBeGreaterThan(0);
     expect(recovered.progressStatus).toMatch(/定位并阅读/);
   });
 
@@ -1410,7 +1365,7 @@ describe("分解历史：最近5轮 + 按用户输入向量召回（同容器不
     await persistDecomposeRound(tmpDir, SESSION_ID, userInput, {
       intent: "最近一轮理解",
       userConstraints: [],
-      tasks: [{ id: "task_1", description: "最近一轮任务", steps: [{ id: "s1", description: "做点事", dependsOn: [], informationNeeds: [], stopReadingWhen: [] }] }],
+      tasks: [{ id: "task_1", description: "最近一轮任务", steps: [{ id: "s1", description: "做点事", dependsOn: [], stopReadingWhen: [] }] }],
     });
     await persistRoundReport(tmpDir, SESSION_ID, userInput, "最近一轮报告");
 
@@ -1425,7 +1380,7 @@ describe("分解历史：最近5轮 + 按用户输入向量召回（同容器不
     await persistDecomposeRound(tmpDir, SESSION_ID, userInput, {
       intent: "最近一轮理解-完整保留",
       userConstraints: [],
-      tasks: [{ id: "task_1", description: "接线召回任务", steps: [{ id: "s1", description: "接线召回", dependsOn: [], informationNeeds: [], stopReadingWhen: [] }] }],
+      tasks: [{ id: "task_1", description: "接线召回任务", steps: [{ id: "s1", description: "接线召回", dependsOn: [], stopReadingWhen: [] }] }],
     });
     await persistRoundReport(tmpDir, SESSION_ID, userInput, "最近一轮完整报告");
 

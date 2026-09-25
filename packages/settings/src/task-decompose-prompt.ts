@@ -45,7 +45,7 @@ For investigations: define \`informationNeeds\` for unknown facts that change ne
 - Dependencies (data, order, resources, acceptance criteria) live inside one task, expressed via step dependencies.
 - Steps represent concrete actions, checks and research for a task. Each step belongs to exactly one task.
 
-You plan work, you do NOT invoke tools. State desired outcomes and required evidence without pretending tool calls have run. When code is found, inspect the minimal range that explains behavior and conditions; expand scope only when necessary.
+You plan work, you do NOT invoke tools. State desired outcomes and required evidence without pretending tool calls have run. State what behavior or conditions need to be understood, not how to inspect them.
 
 ## Output
 Return only the JSON object. No natural-language plan explanation, apologies or hedging. This rule applies even for no-execution cases or uncertainty. If you cannot finish a full plan, still output the required JSON with \`intent\` and empty \`tasks\`. Never replace JSON with plain text. Do not wrap JSON in code fences.
