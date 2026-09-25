@@ -13,7 +13,7 @@ import { createSseFramer } from "./protocol/sse.js";
 import type { ThinkingConfig } from "./thinking.js";
 import type { ModelRef } from "./model-ref.js";
 
-export type { ChatMessage, ChatResponse, ToolCall, ToolDef } from "./types.js";
+export type { ChatMessage, ChatAttachment, ChatResponse, ToolCall, ToolDef } from "./types.js";
 export type { ApiFormat } from "./protocol/types.js";
 export { API_FORMATS, isApiFormat } from "./protocol/types.js";
 export { resolveApiFormat, isOfficialAnthropicHost } from "./protocol/resolve.js";
@@ -429,6 +429,7 @@ export function writeEventLog(event: {
     | "abort"
     | "retry"
     | "verify"
+    | "task_decompose"
     | "checkpoint"
     | "turn_separator"  // 新增：轮次分隔符
     | "other";
@@ -623,6 +624,34 @@ function httpError(ref: ModelRef, status: number, text: string, apiKey?: string 
   return new Error(`LLM HTTP ${status}: ${text.slice(0, 500)}`);
 }
 
+/**
+ * 判断 HTTP 状态码和响应文本是否应该重试
+ * 对于临时性错误（5xx）、某些 4xx 错误以及特定错误消息，允许重试
+ */
+function isRetryableStatus(status: number, text?: string): boolean {
+  // 5xx 服务器错误通常是临时的，应该重试
+  if (status >= 500) return true;
+  // 400 Bad Request 可能是临时问题，尝试重试
+  if (status === 400) return true;
+  // 408 Request Timeout 应该重试
+  if (status === 408) return true;
+  // 429 Too Many Requests 应该重试（带延迟）
+  if (status === 429) return true;
+  // Upstream access forbidden 错误应该重试
+  if (text && text.includes('Upstream access forbidden')) return true;
+  // LLM 拒绝回复（如内容审核触发）应该重试
+  if (text && text.includes("I can't discuss that")) return true;
+  // 其他 4xx 客户端错误（如 401, 403, 404）不应该重试
+  return false;
+}
+
+/**
+ * 延迟指定毫秒数
+ */
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /** Default timeout for connection setup and missing model progress (2 minutes). */
 const LLM_TIMEOUT_MS = 120_000;
 
@@ -692,13 +721,34 @@ function encodeInput(
 ): ProtocolEncodeInput {
   return {
     model: ref.model,
-    messages,
+    messages: [
+      ...messages,
+    ],
     tools: opts?.tools,
     temperature: opts?.temperature,
     maxTokens: opts?.maxTokens,
     stream,
     thinking: opts?.thinking,
   };
+}
+
+function findImageUrls(value: unknown): string[] {
+  const urls: string[] = [];
+  const visit = (item: unknown): void => {
+    if (!item || typeof item !== "object") return;
+    if (Array.isArray(item)) {
+      item.forEach(visit);
+      return;
+    }
+    const record = item as Record<string, unknown>;
+    if (record.type === "image_url" && record.image_url && typeof record.image_url === "object") {
+      const url = (record.image_url as Record<string, unknown>).url;
+      if (typeof url === "string" && url) urls.push(url);
+    }
+    Object.values(record).forEach(visit);
+  };
+  visit(value);
+  return [...new Set(urls)];
 }
 
 function requestHeaders(
@@ -740,81 +790,121 @@ export async function chatCompletion(
 ): Promise<ChatResponse> {
   const codec = resolveCodec(ref);
   const url = codec.buildUrl(ref.baseUrl);
-  const body = codec.encodeRequest(encodeInput(ref, messages, opts, false));
+  const body = await codec.encodeRequest(encodeInput(ref, messages, opts, false));
+  const requestImageUrls = findImageUrls(body);
+  console.log(`[llm] final request image URLs: hasImageUrl=${requestImageUrls.length > 0} count=${requestImageUrls.length}`, requestImageUrls);
   const apiKey = resolveApiKey(ref, opts?.apiKey);
 
   const startTime = Date.now();
   const seq = ++logSeq;
   const cs = combinedSignal(opts?.signal, opts?.timeout);
+  
+  const maxRetries = 3;
+  let lastError: Error | null = null;
+  
   try {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: requestHeaders(codec, apiKey, false),
-      body: JSON.stringify(body),
-      signal: cs.signal,
-    });
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        const res = await fetch(url, {
+          method: "POST",
+          headers: requestHeaders(codec, apiKey, false),
+          body: JSON.stringify(body),
+          signal: cs.signal,
+        });
 
-    if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      const err = httpError(ref, res.status, text, opts?.apiKey);
-      writeCallLog({
-        seq,
-        timestamp: timestampStr(),
-        purpose: opts?.purpose ?? "unknown",
-        model: logModel(ref),
-        messages,
-        tools: opts?.tools,
-        temperature: opts?.temperature,
-        maxTokens: opts?.maxTokens,
-        response: null,
-        streaming: false,
-        durationMs: Date.now() - startTime,
-        error: err.message,
-        taskId: opts?.taskId,
-      });
-      throw err;
+        if (!res.ok) {
+          const text = await res.text().catch(() => "");
+          const err = httpError(ref, res.status, text, opts?.apiKey);
+          
+          // 如果是可重试的错误且还有重试机会，则延迟后重试
+          if (isRetryableStatus(res.status, text) && attempt < maxRetries) {
+            const retryDelay = (attempt + 1) * 3000; // 第1次3秒，第2次6秒，第3次9秒
+            console.log(`[llm] HTTP ${res.status} error, retrying in ${Math.round(retryDelay)}ms (attempt ${attempt + 1}/${maxRetries})...`);
+            await delay(retryDelay);
+            lastError = err;
+            continue; // 重试
+          }
+          
+          // 否则直接抛出错误
+          writeCallLog({
+            seq,
+            timestamp: timestampStr(),
+            purpose: opts?.purpose ?? "unknown",
+            model: logModel(ref),
+            messages,
+            tools: opts?.tools,
+            temperature: opts?.temperature,
+            maxTokens: opts?.maxTokens,
+            response: null,
+            streaming: false,
+            durationMs: Date.now() - startTime,
+            error: err.message,
+            taskId: opts?.taskId,
+          });
+          throw err;
+        }
+
+        const json = await res.json();
+        let decoded: ChatResponse;
+        try {
+          decoded = codec.decodeResponse(json);
+        } catch (e) {
+          const err = e instanceof Error ? e : new Error(String(e));
+          writeCallLog({
+            seq,
+            timestamp: timestampStr(),
+            purpose: opts?.purpose ?? "unknown",
+            model: logModel(ref),
+            messages,
+            tools: opts?.tools,
+            temperature: opts?.temperature,
+            maxTokens: opts?.maxTokens,
+            response: null,
+            streaming: false,
+            durationMs: Date.now() - startTime,
+            error: err.message,
+            taskId: opts?.taskId,
+          });
+          throw err;
+        }
+
+        writeCallLog({
+          seq,
+          timestamp: timestampStr(),
+          purpose: opts?.purpose ?? "unknown",
+          model: logModel(ref),
+          messages,
+          tools: opts?.tools,
+          temperature: opts?.temperature,
+          maxTokens: opts?.maxTokens,
+          response: decoded,
+          streaming: false,
+          durationMs: Date.now() - startTime,
+          taskId: opts?.taskId,
+        });
+
+        return decoded;
+      } catch (e) {
+        // 捕获网络错误或 AbortSignal 取消
+        if (opts?.signal?.aborted || cs.signal.aborted) {
+          throw e; // 用户取消不重试
+        }
+        
+        // 如果还有重试机会，延迟后重试
+        if (attempt < maxRetries) {
+          const retryDelay = (attempt + 1) * 3000; // 第1次3秒，第2次6秒，第3次9秒
+          console.log(`[llm] Request error, retrying in ${Math.round(retryDelay)}ms (attempt ${attempt + 1}/${maxRetries})...`);
+          await delay(retryDelay);
+          lastError = e instanceof Error ? e : new Error(String(e));
+          continue;
+        }
+        
+        throw e;
+      }
     }
-
-    const json = await res.json();
-    let decoded: ChatResponse;
-    try {
-      decoded = codec.decodeResponse(json);
-    } catch (e) {
-      const err = e instanceof Error ? e : new Error(String(e));
-      writeCallLog({
-        seq,
-        timestamp: timestampStr(),
-        purpose: opts?.purpose ?? "unknown",
-        model: logModel(ref),
-        messages,
-        tools: opts?.tools,
-        temperature: opts?.temperature,
-        maxTokens: opts?.maxTokens,
-        response: null,
-        streaming: false,
-        durationMs: Date.now() - startTime,
-        error: err.message,
-        taskId: opts?.taskId,
-      });
-      throw err;
-    }
-
-    writeCallLog({
-      seq,
-      timestamp: timestampStr(),
-      purpose: opts?.purpose ?? "unknown",
-      model: logModel(ref),
-      messages,
-      tools: opts?.tools,
-      temperature: opts?.temperature,
-      maxTokens: opts?.maxTokens,
-      response: decoded,
-      streaming: false,
-      durationMs: Date.now() - startTime,
-      taskId: opts?.taskId,
-    });
-
-    return decoded;
+    
+    // 如果所有重试都失败了，抛出最后一个错误
+    throw lastError ?? new Error("Request failed after all retries");
   } finally {
     cs.cancel();
   }
@@ -832,120 +922,163 @@ export async function chatCompletionStream(
 ): Promise<ChatResponse> {
   const codec = resolveCodec(ref);
   const url = codec.buildUrl(ref.baseUrl);
-  const body = codec.encodeRequest(encodeInput(ref, messages, opts, true));
+  const body = await codec.encodeRequest(encodeInput(ref, messages, opts, true));
+  const requestImageUrls = findImageUrls(body);
+  console.log(`[llm] final request image URLs: hasImageUrl=${requestImageUrls.length > 0} count=${requestImageUrls.length}`, requestImageUrls);
   const apiKey = resolveApiKey(ref, opts?.apiKey);
 
   const startTime = Date.now();
   const seq = ++logSeq;
   const cs = combinedSignal(opts?.signal, opts?.timeout);
+  
+  const maxRetries = 3;
+  
   try {
-    let res: Response;
-    try {
-      res = await fetch(url, {
-        method: "POST",
-        headers: requestHeaders(codec, apiKey, true),
-        body: JSON.stringify(body),
-        signal: cs.signal,
-      });
-    } catch (e) {
-      // A caller cancellation or our own connection timeout must surface as-is;
-      // only genuine streaming incompatibilities fall back to non-streaming.
-      if (opts?.signal?.aborted || cs.signal.aborted) throw e;
-      return chatCompletion(ref, messages, opts);
-    }
-
-    if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      if (codec.shouldFallbackToNonStream(res.status, text)) {
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      let res: Response;
+      try {
+        res = await fetch(url, {
+          method: "POST",
+          headers: requestHeaders(codec, apiKey, true),
+          body: JSON.stringify(body),
+          signal: cs.signal,
+        });
+      } catch (e) {
+        // A caller cancellation or our own connection timeout must surface as-is;
+        // only genuine streaming incompatibilities fall back to non-streaming.
+        if (opts?.signal?.aborted || cs.signal.aborted) throw e;
+        
+        // 如果还有重试机会，延迟后重试
+        if (attempt < maxRetries) {
+          const retryDelay = (attempt + 1) * 3000; // 第1次3秒，第2次6秒，第3次9秒
+          console.log(`[llm] Stream request error, retrying in ${Math.round(retryDelay)}ms (attempt ${attempt + 1}/${maxRetries})...`);
+          await delay(retryDelay);
+          continue;
+        }
+        
         return chatCompletion(ref, messages, opts);
       }
-      const err = httpError(ref, res.status, text, opts?.apiKey);
-      writeCallLog({
-        seq,
-        timestamp: timestampStr(),
-        purpose: opts?.purpose ?? "unknown",
-        model: logModel(ref),
-        messages,
-        tools: opts?.tools,
-        temperature: opts?.temperature,
-        maxTokens: opts?.maxTokens,
-        response: null,
-        streaming: true,
-        durationMs: Date.now() - startTime,
-        error: err.message,
-        taskId: opts?.taskId,
-      });
-      throw err;
-    }
 
-    const ctype = res.headers.get("content-type") ?? "";
-    if (!ctype.includes("text/event-stream") && !ctype.includes("application/x-ndjson")) {
-      // Provider ignored stream → json body
-      try {
-        const json = await res.json();
-        const decoded = codec.decodeResponse(json);
-        if (decoded.choices?.length) {
-          const content = decoded.choices[0]?.message?.content ?? "";
-          if (content) opts?.onDelta?.(content);
-          writeCallLog({
-            seq,
-            timestamp: timestampStr(),
-            purpose: opts?.purpose ?? "unknown",
-            model: logModel(ref),
-            messages,
-            tools: opts?.tools,
-            temperature: opts?.temperature,
-            maxTokens: opts?.maxTokens,
-            response: decoded,
-            streaming: true,
-            durationMs: Date.now() - startTime,
-            taskId: opts?.taskId,
-          });
-          return decoded;
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        if (codec.shouldFallbackToNonStream(res.status, text)) {
+          return chatCompletion(ref, messages, opts);
         }
-      } catch {
-        /* fall through to fail */
+        
+        const err = httpError(ref, res.status, text, opts?.apiKey);
+        
+        // 如果是可重试的错误且还有重试机会，则延迟后重试
+        if (isRetryableStatus(res.status, text) && attempt < maxRetries) {
+          const retryDelay = (attempt + 1) * 3000; // 第1次3秒，第2次6秒，第3次9秒
+          console.log(`[llm] Stream HTTP ${res.status} error, retrying in ${Math.round(retryDelay)}ms (attempt ${attempt + 1}/${maxRetries})...`);
+          await delay(retryDelay);
+          continue;
+        }
+        
+        writeCallLog({
+          seq,
+          timestamp: timestampStr(),
+          purpose: opts?.purpose ?? "unknown",
+          model: logModel(ref),
+          messages,
+          tools: opts?.tools,
+          temperature: opts?.temperature,
+          maxTokens: opts?.maxTokens,
+          response: null,
+          streaming: true,
+          durationMs: Date.now() - startTime,
+          error: err.message,
+          taskId: opts?.taskId,
+        });
+        throw err;
       }
-      return chatCompletion(ref, messages, opts);
-    }
 
-    if (!res.body) {
-      return chatCompletion(ref, messages, opts);
-    }
+      const ctype = res.headers.get("content-type") ?? "";
+      if (!ctype.includes("text/event-stream") && !ctype.includes("application/x-ndjson")) {
+        // Provider ignored stream → json body
+        try {
+          const json = await res.json();
+          const decoded = codec.decodeResponse(json);
+          if (decoded.choices?.length) {
+            const content = decoded.choices[0]?.message?.content ?? "";
+            if (content) opts?.onDelta?.(content);
+            writeCallLog({
+              seq,
+              timestamp: timestampStr(),
+              purpose: opts?.purpose ?? "unknown",
+              model: logModel(ref),
+              messages,
+              tools: opts?.tools,
+              temperature: opts?.temperature,
+              maxTokens: opts?.maxTokens,
+              response: decoded,
+              streaming: true,
+              durationMs: Date.now() - startTime,
+              taskId: opts?.taskId,
+            });
+            return decoded;
+          }
+        } catch {
+          /* fall through to fail */
+        }
+        return chatCompletion(ref, messages, opts);
+      }
 
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    const parser = codec.createStreamParser({
-      onDelta: opts?.onDelta,
-      onThinkingDelta: opts?.onThinkingDelta,
-    });
-    const framer = createSseFramer((event) => {
-      const progressed = parser.feed(event);
-      // Only meaningful, parsed model progress refreshes the idle timeout.
-      // Keep-alive comments and malformed SSE data cannot hold the request open.
-      if (progressed) cs.resetTimeout();
-    });
+      if (!res.body) {
+        return chatCompletion(ref, messages, opts);
+      }
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      framer.push(decoder.decode(value, { stream: true }));
-    }
-    framer.flush();
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      const parser = codec.createStreamParser({
+        onDelta: opts?.onDelta,
+        onThinkingDelta: opts?.onThinkingDelta,
+      });
+      const framer = createSseFramer((event) => {
+        const progressed = parser.feed(event);
+        // Only meaningful, parsed model progress refreshes the idle timeout.
+        // Keep-alive comments and malformed SSE data cannot hold the request open.
+        if (progressed) cs.resetTimeout();
+      });
 
-    let response: ChatResponse;
-    try {
-      response = parser.finish();
-    } catch (e) {
-      const empty = e instanceof Error && e.message === "empty stream";
-      const err = empty
-        ? new Error(
-            `Stream completed but received no content, tool_calls, or finish_reason from ${ref.model} (empty stream). ` +
-              `This may indicate a server-side issue with the model deployment or streaming compatibility.`,
-          )
-        : e instanceof Error
-          ? e
-          : new Error(String(e));
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        framer.push(decoder.decode(value, { stream: true }));
+      }
+      framer.flush();
+
+      let response: ChatResponse;
+      try {
+        response = parser.finish();
+      } catch (e) {
+        const empty = e instanceof Error && e.message === "empty stream";
+        const err = empty
+          ? new Error(
+              `Stream completed but received no content, tool_calls, or finish_reason from ${ref.model} (empty stream). ` +
+                `This may indicate a server-side issue with the model deployment or streaming compatibility.`,
+            )
+          : e instanceof Error
+            ? e
+            : new Error(String(e));
+        writeCallLog({
+          seq,
+          timestamp: timestampStr(),
+          purpose: opts?.purpose ?? "unknown",
+          model: logModel(ref),
+          messages,
+          tools: opts?.tools,
+          temperature: opts?.temperature,
+          maxTokens: opts?.maxTokens,
+          response: null,
+          streaming: true,
+          durationMs: Date.now() - startTime,
+          error: err.message,
+          taskId: opts?.taskId,
+        });
+        throw err;
+      }
+
       writeCallLog({
         seq,
         timestamp: timestampStr(),
@@ -955,31 +1088,17 @@ export async function chatCompletionStream(
         tools: opts?.tools,
         temperature: opts?.temperature,
         maxTokens: opts?.maxTokens,
-        response: null,
+        response,
         streaming: true,
         durationMs: Date.now() - startTime,
-        error: err.message,
         taskId: opts?.taskId,
       });
-      throw err;
+
+      return response;
     }
-
-    writeCallLog({
-      seq,
-      timestamp: timestampStr(),
-      purpose: opts?.purpose ?? "unknown",
-      model: logModel(ref),
-      messages,
-      tools: opts?.tools,
-      temperature: opts?.temperature,
-      maxTokens: opts?.maxTokens,
-      response,
-      streaming: true,
-      durationMs: Date.now() - startTime,
-      taskId: opts?.taskId,
-    });
-
-    return response;
+    
+    // 所有重试都失败后，应该不会到达这里
+    throw new Error("Stream request failed after all retries");
   } finally {
     cs.cancel();
   }

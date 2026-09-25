@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type { WorkspaceDirEntryDto } from "../../../preload/index";
+import { useI18n } from "../i18n";
 
 interface Props {
   root: string;
@@ -22,6 +23,7 @@ function TreeNode({ root, entry, depth, onOpenFile, expandedDirs, onToggleDir }:
   const open = entry.kind === "dir" && expandedDirs[entry.path] === true;
   const [children, setChildren] = useState<WorkspaceDirEntryDto[] | null>(null);
   const [loading, setLoading] = useState(false);
+  const { t } = useI18n();
 
   const loadChildren = useCallback(async () => {
     if (entry.kind !== "dir") return;
@@ -78,9 +80,9 @@ function TreeNode({ root, entry, depth, onOpenFile, expandedDirs, onToggleDir }:
         </button>
         {open ? (
           <div className="file-tree-children">
-            {loading ? <p className="nav-empty nested">加载中…</p> : null}
+            {loading ? <p className="nav-empty nested">{t("加载中…")}</p> : null}
             {!loading && children && children.length === 0 ? (
-              <p className="nav-empty nested">空目录</p>
+              <p className="nav-empty nested">{t("空目录")}</p>
             ) : null}
             {!loading &&
               children?.map((child) => (
@@ -118,6 +120,7 @@ function TreeNode({ root, entry, depth, onOpenFile, expandedDirs, onToggleDir }:
 export function ProjectFileTree({ root, onOpenFile, expandedDirs, onToggleDir }: Props) {
   const [entries, setEntries] = useState<WorkspaceDirEntryDto[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const { t } = useI18n();
 
   useEffect(() => {
     let cancelled = false;
@@ -129,7 +132,7 @@ export function ProjectFileTree({ root, onOpenFile, expandedDirs, onToggleDir }:
         if (!cancelled) setEntries(list);
       })
       .catch((err: unknown) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : "无法读取目录");
+        if (!cancelled) setError(err instanceof Error ? err.message : t("无法读取目录"));
       });
     return () => {
       cancelled = true;
@@ -137,8 +140,8 @@ export function ProjectFileTree({ root, onOpenFile, expandedDirs, onToggleDir }:
   }, [root]);
 
   if (error) return <p className="nav-empty nested">{error}</p>;
-  if (entries === null) return <p className="nav-empty nested">加载中…</p>;
-  if (entries.length === 0) return <p className="nav-empty nested">空目录</p>;
+  if (entries === null) return <p className="nav-empty nested">{t("加载中…")}</p>;
+  if (entries.length === 0) return <p className="nav-empty nested">{t("空目录")}</p>;
 
   return (
     <div className="file-tree">

@@ -23,6 +23,7 @@ const THINKING_BUDGET: Record<string, number> = {
 
 type AnthropicContentBlock =
   | { type: "text"; text: string }
+  | { type: "image"; source: { type: "base64"; media_type: string; data: string } }
   | { type: "tool_use"; id: string; name: string; input: unknown }
   | { type: "tool_result"; tool_use_id: string; content: string }
   | { type: "thinking"; thinking: string };
@@ -122,10 +123,32 @@ export function encodeAnthropicMessages(input: ProtocolEncodeInput): AnthropicRe
     }
     flushToolResults();
     if (msg.role === "user") {
-      rawMessages.push({
-        role: "user",
-        content: [textBlock(msg.content ?? "")],
-      });
+      const blocks: AnthropicContentBlock[] = [];
+      if (msg.content) blocks.push(textBlock(msg.content));
+      for (const attachment of msg.attachments ?? []) {
+        if (attachment.mimeType.toLowerCase().startsWith("image/")) {
+          // 检查是否为 data URI (data:image/png;base64,...)
+          const dataUriMatch = /^data:([^;]+);base64,(.+)$/.exec(attachment.url);
+          if (dataUriMatch) {
+            // 提取 base64 数据
+            const base64Data = dataUriMatch[2];
+            blocks.push({ 
+              type: "image", 
+              source: { type: "base64", media_type: attachment.mimeType, data: base64Data } 
+            });
+          } else if (/^https?:\/\//i.test(attachment.url)) {
+            // HTTP URL：Anthropic API 不支持，提示需要预处理
+            blocks.push(textBlock(`[图片需要预处理] ${attachment.name} (${attachment.mimeType}): Anthropic API 要求 base64 格式，请先将图片转换为 data URI。URL: ${attachment.url}`));
+          } else {
+            // 其他情况（如本地文件路径）
+            blocks.push(textBlock(`[图片附件] ${attachment.name} (${attachment.mimeType}): ${attachment.url}`));
+          }
+        } else {
+          blocks.push(textBlock(`[文件附件] ${attachment.name} (${attachment.mimeType || "application/octet-stream"}): ${attachment.url}`));
+        }
+      }
+      if (blocks.length === 0) blocks.push(textBlock(""));
+      rawMessages.push({ role: "user", content: blocks });
       continue;
     }
     // assistant
@@ -504,8 +527,8 @@ export const anthropicMessagesCodec: ProtocolCodec = {
     return headers;
   },
 
-  encodeRequest(input: ProtocolEncodeInput): unknown {
-    return encodeAnthropicMessages(input);
+  async encodeRequest(input: ProtocolEncodeInput): Promise<unknown> {
+    return await encodeAnthropicMessages(input);
   },
 
   decodeResponse(json: unknown): ChatResponse {

@@ -39,7 +39,7 @@ export function registerSessionHandlers(ctx: IpcContext): void {
 
   ipcMain.handle(
     "session:setQueuedMessages",
-    (_e, messages: string[], sessionId?: string) => {
+    (_e, messages: Array<{ text: string; attachments?: import("@owncoder/llm").ChatAttachment[] }> | string[], sessionId?: string) => {
       session.setQueuedMessages(Array.isArray(messages) ? messages : [], sessionId);
       return session.getState(sessionId).queuedMessages ?? [];
     },

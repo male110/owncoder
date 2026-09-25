@@ -54,7 +54,7 @@ describe("openaiChatCodec", () => {
     }) as Record<string, unknown>;
 
     expect(body.model).toBe("gpt-4o");
-    expect(body.messages).toBe(messages);
+    expect(body.messages).toEqual(messages);
     expect(body.stream).toBe(true);
     expect(body.stream_options).toEqual({ include_usage: true });
     expect(body.temperature).toBe(0.2);
@@ -132,6 +132,43 @@ describe("openaiChatCodec", () => {
         function: { name: "read_file", arguments: '{"path":"a.ts"}' },
       },
     ]);
+  });
+
+  it("encodes multi-image attachments as image_url blocks and non-images as plain text", () => {
+    const body = openaiChatCodec.encodeRequest({
+      model: "gpt-4o",
+      messages: [
+        {
+          role: "user",
+          content: "look",
+          attachments: [
+            { name: "a.png", mimeType: "image/png", url: "https://cdn.example/a.png" },
+            { name: "b.jpg", mimeType: "image/jpeg", url: "https://cdn.example/b.jpg" },
+            { name: "notes.pdf", mimeType: "application/pdf", url: "https://cdn.example/notes.pdf" },
+          ],
+        },
+      ],
+      stream: false,
+    }) as { messages: Array<{ content: unknown }> };
+
+    expect(body.messages[0]?.content).toEqual([
+      { type: "text", text: "look" },
+      { type: "image_url", image_url: { url: "https://cdn.example/a.png" } },
+      { type: "image_url", image_url: { url: "https://cdn.example/b.jpg" } },
+      {
+        type: "text",
+        text: "[文件附件] notes.pdf (application/pdf): https://cdn.example/notes.pdf",
+      },
+    ]);
+  });
+
+  it("keeps plain text messages unchanged when there are no attachments", () => {
+    const body = openaiChatCodec.encodeRequest({
+      model: "gpt-4o",
+      messages: [{ role: "user", content: "hi only" }],
+      stream: false,
+    }) as { messages: ChatMessage[] };
+    expect(body.messages[0]).toEqual({ role: "user", content: "hi only" });
   });
 
   it("lists models with Bearer auth and OpenAI data[] shape", () => {

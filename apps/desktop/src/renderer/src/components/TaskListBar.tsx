@@ -1,5 +1,7 @@
 import { useState } from "react";
 import type { ActivePlanMetaDto, TaskStatusDto } from "../../../preload/index";
+import type { MsgId } from "../../../shared/i18n/core";
+import { useI18n } from "../i18n";
 
 interface Props {
   meta: ActivePlanMetaDto;
@@ -15,7 +17,7 @@ const STATUS_ICON: Record<TaskStatusDto, string> = {
   skipped: "⏭️",
 };
 
-const STATUS_LABEL: Record<TaskStatusDto, string> = {
+const STATUS_LABEL: Record<TaskStatusDto, MsgId> = {
   pending: "待执行",
   in_progress: "执行中",
   completed: "已完成",
@@ -25,6 +27,8 @@ const STATUS_LABEL: Record<TaskStatusDto, string> = {
 
 export function TaskListBar({ meta, busy, onUpdateTask }: Props) {
   const [open, setOpen] = useState(false);
+  // map 回调里 t 已是任务项，取词函数用别名 tr。
+  const { t: tr } = useI18n();
   if (!meta.tasks || meta.tasks.length === 0) return null;
   const done = meta.tasks.filter((t) => t.status === "completed" || t.status === "skipped").length;
   const total = meta.tasks.length;
@@ -35,12 +39,12 @@ export function TaskListBar({ meta, busy, onUpdateTask }: Props) {
     <section className={open ? "task-bar open" : "task-bar"}>
       <button type="button" className="task-bar-head" onClick={() => setOpen((v) => !v)}>
         <span className="activity-chev">{open ? "▾" : "▸"}</span>
-        <span className="task-bar-title">任务进度</span>
+        <span className="task-bar-title">{tr("任务进度")}</span>
         <span className="task-bar-count">{done}/{total}</span>
-        <div className="task-bar-progress" aria-label={`进度 ${pct}%`}>
+        <div className="task-bar-progress" aria-label={tr("进度 {{pct}}%", { pct })}>
           <div className="task-bar-progress-fill" style={{ width: `${pct}%` }} />
         </div>
-        {allDone ? <span className="task-bar-done">全部完成</span> : null}
+        {allDone ? <span className="task-bar-done">{tr("全部完成")}</span> : null}
       </button>
       {open ? (
         <ol className="task-list">
@@ -56,13 +60,13 @@ export function TaskListBar({ meta, busy, onUpdateTask }: Props) {
                   (t.status === "failed" ? " failed" : "")
                 }
               >
-                <span className="task-icon" aria-label={STATUS_LABEL[t.status]}>{STATUS_ICON[t.status]}</span>
+                <span className="task-icon" aria-label={tr(STATUS_LABEL[t.status])}>{STATUS_ICON[t.status]}</span>
                 <div className="task-body">
                   <div className="task-desc">
                     <span className="task-id">{t.id}</span>
                     {t.description}
                   </div>
-                  {t.acceptance ? <div className="task-acceptance">验收：{t.acceptance}</div> : null}
+                  {t.acceptance ? <div className="task-acceptance">{tr("验收：")}{t.acceptance}</div> : null}
                   {t.result ? <div className="task-result">{t.result}</div> : null}
                 </div>
                 <div className="task-actions">
@@ -72,9 +76,9 @@ export function TaskListBar({ meta, busy, onUpdateTask }: Props) {
                       className="ghost tiny"
                       disabled={busy}
                       onClick={(e) => { e.stopPropagation(); onUpdateTask(t.id, "skipped"); }}
-                      title="跳过此任务"
+                      title={tr("跳过此任务")}
                     >
-                      跳过
+                      {tr("跳过")}
                     </button>
                   ) : null}
                   {t.status === "failed" || t.status === "skipped" ? (
@@ -83,9 +87,9 @@ export function TaskListBar({ meta, busy, onUpdateTask }: Props) {
                       className="ghost tiny accent"
                       disabled={busy}
                       onClick={(e) => { e.stopPropagation(); onUpdateTask(t.id, "pending"); }}
-                      title="重置为待执行"
+                      title={tr("重置为待执行")}
                     >
-                      重置
+                      {tr("重置")}
                     </button>
                   ) : null}
                 </div>

@@ -19,7 +19,12 @@ import {
 } from "./termination.ts";
 import { getGlobalMetricsCollector } from "./termination-metrics.ts";
 import { normalizeUsage, type Tracer } from "../observability.ts";
-import { shouldInjectPostToolTextNudge } from "./continuation-intent.ts";
+import { modelNeedsLoopNudge, shouldInjectPostToolTextNudge } from "./continuation-intent.ts";
+import {
+  formatFinalTaskReports,
+  isolateMessagesForNextTask,
+  type TaskReport,
+} from "./task-reports.ts";
 
 // ── ReactSteps helpers ─────────────────────────────────────────────────────────
 /** Look up a single step's config from the node's reactSteps, falling back to defaults. */
@@ -130,8 +135,8 @@ function levenshtein(a: string, b: string): number {
 
 // ── ReAct Loop (Enhanced Tool-Calling Stage) ───────────────
 
-/** Max consecutive iterations with identical tool-call signatures (fed to termination). */
-const MAX_REPEAT_TOOL_CALLS = 3;
+/** Max identical tool+args+result calls before termination treats it as a loop. */
+const MAX_REPEAT_TOOL_CALLS = 2;
 /** Hard cap on total tool invocations across the entire loop (fed to termination). */
 const MAX_TOTAL_TOOL_CALLS = 100;
 const MAX_TOOL_HISTORY_CHARS = 4 * 1024;
@@ -363,7 +368,7 @@ function formatCurrentTaskContext(task: TaskItem): string {
     "### Execution flow",
     "1. Read the <task> block above. Note ID / Description / Information needs / Stop-exploration criteria / Confirmed refined evidence.",
     "2. Call tools as needed:",
-    "   - Exploration tools (read_file / grep / search_symbols / lsp_* / repo_map / read_symbol / read_outline, etc.) — use them only to fill unmet needs. Use the most specific available search anchor before broader exploration; preserve concrete text and avoid replacing known names, expressions, or signatures with guesses. Locate the relevant code before reading it, then inspect the smallest surrounding range that establishes the behavior and its conditions. Whole-file read_file is only for files under 10KB. Files 10KB or larger MUST call read_outline first; then use read_symbol only for one unique symbol, or read_file with both offset and limit from the outline's line range. Never retry a rejected large-file read without a range or fall back to reading the whole file. Successful read_file/read_symbol results stay in this turn's context automatically.",
+    "   - Exploration tools (read_file / grep / search_symbols / lsp_* / repo_map / read_symbol / read_outline, etc.) — use them only to fill unmet needs. When the user or task provides concrete identifiers, search those strings verbatim first; if both a container and a member are named, locate the container before the member. Do not start from a semantic rewrite or codemap_search while an exact name is available. Preserve concrete text and avoid replacing known names, expressions, or signatures with guesses. Locate the relevant code before reading it, then inspect the smallest surrounding range that establishes the behavior and its conditions. Whole-file read_file is only for files under 10KB. Files 10KB or larger MUST call read_outline first; then use read_symbol only for one unique symbol, or read_file with both offset and limit from the outline's line range. Never retry a rejected large-file read without a range or fall back to reading the whole file. Successful read_file/read_symbol results stay in this turn's context automatically.",
     "   - External knowledge (web_search / web_fetch) — required when a need cannot be answered from this repository: unknown APIs, docs, error messages, library behavior, version-specific details. Search before guessing. After web_search, web_fetch the best official/source URL. If the same local error or unknown remains after one retry, search instead of repeating the same edit.",
     "   - Implementation tools (apply_patch / write_file / append_file / type_check / bash) — use them only after every informationNeed and every stopReadingWhen.requiredEvidenceId is met.",
     "3. Termination — stop calling tools and produce the final answer only when ALL of the following hold:",
@@ -801,10 +806,15 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
   };
 
   // ── 弱模型容错：工具执行后模型返回纯文本（无新工具调用）时的 nudge 计数 ──
-  // 某些模型（如 Gemini Flash 2.5）在工具调用后会输出一段文本总结而不继续调用工具，
-  // 导致循环提前终止。此计数器在工具执行后注入一次 nudge 引导继续，超过上限才退出。
+  // 默认信任 LLM。仅当「特定小模型 allowlist + LLM 返回纯文本 + 所需信息未拿到」同时满足才 nudge。
+  // 「纯文本」= 本轮 LLM 响应无 tool_calls；用户输入不作为门槛。
   let postToolTextNudgeCount = 0;
   const maxPostToolTextNudges = 2;
+  // 弱模型检测（state_machine.weakModelDetection）关闭时全员不 nudge；
+  // 开启时仅 allowlist 小模型可引导；未知/强模型不引导。
+  // LLM 纯文本与信息缺失在各自 nudge 注入点再判定。
+  const weakModelDetection = stepBool(reactSteps, "state_machine", "weakModelDetection", true);
+  const loopNudgeEnabled = weakModelDetection && modelNeedsLoopNudge(model.model);
   // 上一轮是否执行了工具调用（用于判断本轮是否为"工具执行后的纯文本响应"）
   let prevIterHadToolCalls = false;
 
@@ -925,6 +935,10 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
   const taskDriven = opts.mode === "agent" && Array.isArray(opts.activeTasks) && opts.activeTasks.length > 0;
   let tasks: TaskItem[] = taskDriven ? opts.activeTasks!.map((t) => ({ ...t })) : [];
   let currentTask: TaskItem | null = null;
+  /** Stable messages prefix at loop entry (system/context/decompose/user). */
+  const messagePrefixLen = messages.length;
+  /** Per-task reports retained across switches; composed into the final report. */
+  const taskReports: TaskReport[] = [];
 
   // ═══════════════════════════════════════════════════════════════════════════
   // New Termination System (零 nudge, 3 层终止) - 完全集成
@@ -1024,6 +1038,31 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
   const syncLoopTask = (): void => {
     loopState.currentTask = activeInformationTask() ?? undefined;
   };
+  // 启动时同步一次：无 active task 时也要清掉/挂上 turn information task，
+  // 否则 termination 层拿不到正确的 currentTask，容易空转到硬上限。
+  syncLoopTask();
+
+  // task-driven 但没有任何可执行 pending/in_progress 任务：直接收尾，不要再进 LLM 循环。
+  if (taskDriven && !currentTask) {
+    await persistTaskUpdate(null);
+    const { done, total } = taskProgress(tasks);
+    const finalReport = formatFinalTaskReports(taskReports, { done, total });
+    if (finalReport.trim()) {
+      history.push({ role: "assistant", content: finalReport });
+      opts.onEvent?.({ type: "assistant_delta", text: finalReport });
+    }
+    writeEventLog({
+      category: "react_loop",
+      message: `ReAct loop 退出: 无 pending tasks (${done}/${total})，跳过循环`,
+      details: { stageId, done, total, taskDriven: true },
+    });
+    return finalizeSuccess({
+      lastAssistant: finalReport,
+      aborted: false,
+      correctionCount,
+      documentWorkflow: documentWorkflowUpdate,
+    });
+  }
 
   for (let i = 0; i < maxIter; i++) {
     // ═══════════════════════════════════════════════════════════════════════════
@@ -1373,17 +1412,24 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
         continue;
       }
 
-      // 弱模型：工具执行后只回纯文本时，按意图决定是否 nudge（上限 maxPostToolTextNudges）。
-      // 总结性报告不 nudge；行动宣言或探索未完成则 nudge。连续纯文本则尊重结束意图。
+      // 弱模型：LLM 本轮只回纯文本（无 tool_calls）时，仅在所需信息未拿到时 nudge（上限 maxPostToolTextNudges）。
+      // 三条件：allowlist 小模型（loopNudgeEnabled）+ LLM 纯文本（本分支）+ 信息缺失（hasPendingInfo）。
+      // 无 information task / 无 informationNeeds / 探索已完成 → 不引导，信任 LLM。
       const nudgeInfoTask = activeInformationTask();
-      const nudgeExplorationComplete = nudgeInfoTask ? isExplorationComplete(nudgeInfoTask) : false;
+      const hasPendingInfo =
+        !!nudgeInfoTask &&
+        nudgeInfoTask.informationNeeds.length > 0 &&
+        !isExplorationComplete(nudgeInfoTask);
       if (
+        loopNudgeEnabled &&
+        !taskDriven &&
         toolsRanLastIter &&
+        hasPendingInfo &&
         content.trim() &&
         !documentDelivered &&
         !handoffRequested &&
         postToolTextNudgeCount < maxPostToolTextNudges &&
-        shouldInjectPostToolTextNudge(content, nudgeExplorationComplete)
+        shouldInjectPostToolTextNudge(content, false)
       ) {
         postToolTextNudgeCount++;
         writeEventLog({
@@ -1394,7 +1440,8 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
             iteration: i,
             finishReason,
             content: content.slice(0, 200),
-            explorationComplete: nudgeExplorationComplete,
+            explorationComplete: false,
+            hasPendingInfo,
             postToolTextNudgeCount,
           },
         });
@@ -1422,43 +1469,6 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
         continue;
       }
 
-      // Information needs: do not treat a text-only reply as completion while
-      // unmet. Keep nudging exploration until needs are filled or a hard limit
-      // (max iterations / tool cap via checkTermination) fires — never force-block here.
-      const unmetInfoTask = activeInformationTask();
-      if (
-        unmetInfoTask &&
-        unmetInfoTask.informationNeeds.length > 0 &&
-        !isExplorationComplete(unmetInfoTask) &&
-        content.trim() &&
-        !documentDelivered &&
-        !handoffRequested
-      ) {
-        updateStateAfterResponse(loopState, {
-          content,
-          toolCalls: [],
-          finishReason: finishReason ?? "stop",
-          tokens: responseUsage.totalTokens,
-          cost: (responseUsage.promptTokens / 1000) * 0.002 + (responseUsage.completionTokens / 1000) * 0.01,
-        });
-        history.push({ role: "assistant", content });
-        const missingNeeds = pendingInformationNeeds(unmetInfoTask);
-        messages.push({
-          role: "system",
-          content:
-            `Information needs are not yet met: ${missingNeeds.join(", ") || "stop-exploration criteria unmet"}. ` +
-            "Call exploration tools that can fill these needs before giving a final answer. " +
-            "If a need is not in this repository, use web_search (then web_fetch) rather than guessing. " +
-            "Successful reads stay in this turn's context. Do not conclude while these needs are unmet.",
-        });
-        logReasoningStep(reasoningTrace, {
-          type: "observation",
-          content: `Information needs still unmet (${missingNeeds.join(", ") || "stop-exploration criteria unmet"}); continuing exploration instead of ending on a text-only reply.`,
-          timestamp: Date.now(),
-        });
-        continue;
-      }
-
       // ── Hard step-driver: model reported text ⇒ current task done/failed ⇒ advance ──
       if (taskDriven && currentTask && content.trim()) {
         updateStateAfterResponse(loopState, {
@@ -1472,6 +1482,12 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
         const failed = /incomplete|failed|unable|cannot|error|failed/i.test(content);
         currentTask.status = failed ? "failed" : "completed";
         currentTask.result = content.slice(0, 200);
+        taskReports.push({
+          taskId: currentTask.id,
+          description: currentTask.description,
+          status: currentTask.status,
+          report: content,
+        });
         logReasoningStep(reasoningTrace, {
           type: "reflection",
           content: `Task ${currentTask.id} → ${currentTask.status}: ${currentTask.result}`,
@@ -1486,17 +1502,36 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
           // Previous task's similar-output / stop / text-only counters must not
           // terminate the next task on the following iteration's checkTermination.
           resetOutputTrackingForNewTask(loopState);
+          // Isolate LLM context: drop previous task's assistant/tool turns so
+          // the next task starts from the stable prefix only (no prior report).
+          isolateMessagesForNextTask(messages, messagePrefixLen);
+          rawReadToolMessages.length = 0;
+          postToolTextNudgeCount = 0;
+          consecutiveReadonlyIters = 0;
+          prevIterHadToolCalls = false;
           next.status = "in_progress";
           await persistTaskUpdate(next.id);
-          messages.push({
-            role: "system",
-            content: `Task ${justDone.id} ${justDone.status === "completed" ? "completed" : "failed"}. Now starting task ${next.id}: ${next.description}`,
+          writeEventLog({
+            category: "react_loop",
+            message: `任务切换：已隔离上一任务 messages，开始 ${next.id}`,
+            details: {
+              stageId,
+              iteration: i,
+              completedTaskId: justDone.id,
+              completedStatus: justDone.status,
+              nextTaskId: next.id,
+              messagePrefixLen,
+              messagesLen: messages.length,
+              retainedReports: taskReports.length,
+            },
           });
           continue;
         }
         await persistTaskUpdate(null);
         const { done, total } = taskProgress(tasks);
-        history.push({ role: "assistant", content: `All tasks processed (${done}/${total} completed).` });
+        const finalReport = formatFinalTaskReports(taskReports, { done, total });
+        history.push({ role: "assistant", content: finalReport });
+        opts.onEvent?.({ type: "assistant_delta", text: finalReport });
         writeEventLog({
           category: "react_loop",
           message: `ReAct loop 退出: 全部任务已处理 (${done}/${total})，iteration ${i}`,
@@ -1505,11 +1540,17 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
             iteration: i,
             done,
             total,
-            lastTaskId: currentTask?.id ?? justDone.id,
+            lastTaskId: justDone.id,
             finishReason,
+            reportCount: taskReports.length,
           },
         });
-        return finalizeSuccess({ lastAssistant: content, aborted: false, correctionCount, documentWorkflow: documentWorkflowUpdate });
+        return finalizeSuccess({
+          lastAssistant: finalReport,
+          aborted: false,
+          correctionCount,
+          documentWorkflow: documentWorkflowUpdate,
+        });
       }
 
       if (content.trim()) {
@@ -1679,7 +1720,15 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
     // without transitioning to implementation. The nudge is injected AFTER
     // tool results are recorded (so the model has the facts) but BEFORE the
     // next LLM call, steering it toward producing output.
+    // 必要门槛：所需信息尚未拿到（无 information task / 探索已完成 → 信任 LLM，不引导）。
+    const readonlyNudgeInfoTask = activeInformationTask();
+    const readonlyNudgePendingInfo =
+      !!readonlyNudgeInfoTask &&
+      readonlyNudgeInfoTask.informationNeeds.length > 0 &&
+      !isExplorationComplete(readonlyNudgeInfoTask);
     if (
+      loopNudgeEnabled &&
+      readonlyNudgePendingInfo &&
       allReadonly &&
       consecutiveReadonlyIters >= READONLY_TRANSITION_THRESHOLD &&
       consecutiveReadonlyIters < maxConsecutiveReadonlyIters

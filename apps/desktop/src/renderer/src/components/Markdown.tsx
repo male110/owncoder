@@ -1,4 +1,5 @@
 import { memo, useMemo, useState, type ReactNode } from "react";
+import { useI18n } from "../i18n";
 
 type Block =
   | { kind: "p"; text: string }
@@ -170,6 +171,7 @@ interface Props {
 
 function CodeBlock({ lang, code, showCopy }: { lang: string; code: string; showCopy: boolean }) {
   const [copied, setCopied] = useState(false);
+  const { t } = useI18n();
 
   const onCopy = async () => {
     try {
@@ -189,9 +191,9 @@ function CodeBlock({ lang, code, showCopy }: { lang: string; code: string; showC
               type="button"
               className="md-code-copy-btn"
               onClick={() => void onCopy()}
-              title={copied ? "已复制" : "复制代码"}
+              title={copied ? t("已复制") : t("复制代码")}
             >
-              {copied ? "✓" : "复制"}
+              {copied ? "✓" : t("复制")}
             </button>
           ) : null}
         </div>

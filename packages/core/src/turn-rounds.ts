@@ -20,6 +20,7 @@ const MAX_USER_INPUT_CHARS = 8_000;
 const MAX_UNDERSTANDING_CHARS = 4_000;
 const MAX_STEP_DESCRIPTION_CHARS = 500;
 const MAX_NEED_QUESTION_CHARS = 400;
+const MAX_TASKS = 20;
 const MAX_STEPS = 20;
 const MAX_NEEDS_PER_STEP = 10;
 const MAX_EVIDENCE_PER_ROUND = 200;
@@ -84,41 +85,42 @@ export interface PersistedEvidence {
   fileEvidence?: FileEvidence;
 }
 
-export interface PersistedDecompose {
-  understanding: string;
-  relevantHistory?: string;
-  /** 原任务目标和范围必须显式保留，不能只依赖 understanding。 */
-  goal?: string;
-  scope?: string[];
-  relation?: TaskRelation;
-  completedSteps?: string[];
-  pendingSteps?: string[];
-  findings?: Finding[];
-  checkpoints?: Checkpoint[];
-  userConstraints: string[];
-  steps: Array<{
+export interface PersistedDecomposeStep {
+  id: string;
+  description: string;
+  dependsOn: string[];
+  informationNeeds: Array<{
     id: string;
-    description: string;
-    dependsOn: string[];
-    informationNeeds: Array<{
-      id: string;
-      question: string;
-      source?: "file" | "search" | "command";
-      priority?: "blocking" | "important" | "nice-to-have";
-      fallback?: string;
-    }>;
-    stopReadingWhen: Array<{ condition: string; requiredEvidenceIds: string[] }>;
-    verificationCriteria?: {
-      command: string;
-      expectedOutput: string;
-      exitCode?: number;
-    };
-    rollbackStrategy?: string;
-    estimatedComplexity?: "low" | "medium" | "high";
+    question: string;
+    source?: "file" | "search" | "command";
+    priority?: "blocking" | "important" | "nice-to-have";
+    fallback?: string;
   }>;
+  stopReadingWhen: Array<{ condition: string; requiredEvidenceIds: string[] }>;
+  verificationCriteria?: {
+    command: string;
+    expectedOutput: string;
+    exitCode?: number;
+  };
+  rollbackStrategy?: string;
+  estimatedComplexity?: "low" | "medium" | "high";
+  /** 本步可复用历史。 */
+  relevantHistory?: string;
+}
+
+export interface PersistedDecomposeTask {
+  id: string;
+  description: string;
+  steps: PersistedDecomposeStep[];
+}
+
+export interface PersistedDecompose {
+  /** 用户意图目的（旧格式 understanding 兜底映射）。 */
+  intent: string;
+  userConstraints: string[];
+  tasks: PersistedDecomposeTask[];
   progressStatus?: string;
-  /** 跨新任务共享，但不继承执行状态的证据池。 */
-  sharedEvidence?: FileEvidence[];
+  relevantHistory?: string;
 }
 
 export interface PersistedFileChange {
@@ -139,6 +141,8 @@ export interface TurnRoundRecord {
   createdAt: string;
   updatedAt: string;
   userInput: string;
+  /** 用户消息中图片附件的 URL，供后续任务分解历史复用。 */
+  attachmentUrls?: string[];
   taskDecompose?: PersistedDecompose;
   assistantReport?: string;
   evidence?: PersistedEvidence[];
@@ -199,8 +203,13 @@ function emptyFile(sessionId: string): TurnRoundsFile {
 function sanitizeDecompose(raw: unknown): PersistedDecompose | undefined {
   if (!raw || typeof raw !== "object") return undefined;
   const obj = raw as Record<string, unknown>;
-  const understanding =
-    typeof obj.understanding === "string" ? clip(obj.understanding.trim(), MAX_UNDERSTANDING_CHARS) : "";
+  // 兼容旧格式：understanding 兜底映射为 intent（被删的 8 个旧字段直接忽略）。
+  const intent =
+    typeof obj.intent === "string" && obj.intent.trim()
+      ? clip(obj.intent.trim(), MAX_UNDERSTANDING_CHARS)
+      : typeof obj.understanding === "string"
+        ? clip(obj.understanding.trim(), MAX_UNDERSTANDING_CHARS)
+        : "";
   const userConstraints = Array.isArray(obj.userConstraints)
     ? obj.userConstraints
         .filter((c): c is string => typeof c === "string")
@@ -208,8 +217,17 @@ function sanitizeDecompose(raw: unknown): PersistedDecompose | undefined {
         .filter(Boolean)
         .slice(0, 20)
     : [];
-  const rawSteps = Array.isArray(obj.steps) ? obj.steps.slice(0, MAX_STEPS) : [];
-  const steps: PersistedDecompose["steps"] = rawSteps.flatMap((step, i) => {
+  // 新格式 tasks[] 优先；旧格式顶层 steps 包成单个 task_1。
+  const rawTasks: unknown[] = Array.isArray(obj.tasks)
+    ? obj.tasks.slice(0, MAX_TASKS)
+    : Array.isArray(obj.steps)
+      ? [{ id: "task_1", description: "", steps: obj.steps }]
+      : [];
+  const tasks: PersistedDecomposeTask[] = rawTasks.flatMap((rawTask, ti) => {
+    if (!rawTask || typeof rawTask !== "object") return [];
+    const t = rawTask as Record<string, unknown>;
+    const rawSteps = Array.isArray(t.steps) ? t.steps.slice(0, MAX_STEPS) : [];
+    const steps: PersistedDecomposeStep[] = rawSteps.flatMap((step, i) => {
     if (!step || typeof step !== "object") return [];
     const s = step as Record<string, unknown>;
     const description = typeof s.description === "string" ? clip(s.description.trim(), MAX_STEP_DESCRIPTION_CHARS) : "";
@@ -218,7 +236,7 @@ function sanitizeDecompose(raw: unknown): PersistedDecompose | undefined {
       typeof s.relevantHistory === "string" && s.relevantHistory.trim()
         ? clip(s.relevantHistory.trim(), MAX_UNDERSTANDING_CHARS)
         : undefined;
-    const informationNeeds: PersistedDecompose["steps"][number]["informationNeeds"] = Array.isArray(s.informationNeeds)
+    const informationNeeds: PersistedDecomposeStep["informationNeeds"] = Array.isArray(s.informationNeeds)
       ? s.informationNeeds
           .slice(0, MAX_NEEDS_PER_STEP)
           .flatMap((need, ni) => {
@@ -282,27 +300,25 @@ function sanitizeDecompose(raw: unknown): PersistedDecompose | undefined {
         relevantHistory,
       },
     ];
+    });
+    return [{
+      id: typeof t.id === "string" && t.id.trim() ? t.id.trim() : `task_${ti + 1}`,
+      description: typeof t.description === "string" ? clip(t.description.trim(), MAX_STEP_DESCRIPTION_CHARS) : "",
+      steps,
+    }];
   });
-  if (!understanding && steps.length === 0) return undefined;
+  if (!intent && tasks.length === 0) return undefined;
   const progressStatus =
     typeof obj.progressStatus === "string" && obj.progressStatus.trim()
       ? clip(obj.progressStatus.trim(), 500)
       : undefined;
   return {
-    understanding,
+    intent,
     relevantHistory:
       typeof obj.relevantHistory === "string" && obj.relevantHistory.trim()
         ? clip(obj.relevantHistory.trim(), MAX_UNDERSTANDING_CHARS)
         : undefined,
-    userConstraints, steps, progressStatus,
-    goal: typeof obj.goal === "string" ? clip(obj.goal.trim(), MAX_UNDERSTANDING_CHARS) : undefined,
-    scope: Array.isArray(obj.scope) ? obj.scope.filter((x): x is string => typeof x === "string").map((x) => x.trim()).filter(Boolean).slice(0, 50) : undefined,
-    relation: obj.relation === "continue" ? "continue" : obj.relation === "new" ? "new" : undefined,
-    completedSteps: Array.isArray(obj.completedSteps) ? obj.completedSteps.filter((x): x is string => typeof x === "string") : undefined,
-    pendingSteps: Array.isArray(obj.pendingSteps) ? obj.pendingSteps.filter((x): x is string => typeof x === "string") : undefined,
-    findings: Array.isArray(obj.findings) ? obj.findings.filter((x): x is Finding => Boolean(x && typeof x === "object")) as Finding[] : undefined,
-    checkpoints: Array.isArray(obj.checkpoints) ? obj.checkpoints.filter((x): x is Checkpoint => Boolean(x && typeof x === "object")) as Checkpoint[] : undefined,
-    sharedEvidence: Array.isArray(obj.sharedEvidence) ? obj.sharedEvidence.map(sanitizeFileEvidence).filter((x): x is FileEvidence => Boolean(x)) : undefined,
+    userConstraints, tasks, progressStatus,
   };
 }
 
@@ -457,6 +473,9 @@ export function formatRoundBlock(
 ): string {
   const includeProcessInfo = options?.includeProcessInfo ?? true;
   const parts: string[] = [`## Round ${displayIndex}`, `[user] ${round.userInput}`];
+  if (round.attachmentUrls?.length) {
+    parts.push(`[user image URLs]\n${round.attachmentUrls.map((url) => `- ${url}`).join("\n")}`);
+  }
   if (round.taskDecompose) {
     parts.push(`[decompose] ${formatDecomposeSummary(round.taskDecompose)}`);
   }
@@ -727,6 +746,7 @@ export async function persistDecomposeRound(
   userInput: string,
   decompose: PersistedDecompose,
   toolCalls: PersistedToolCall[] = [],
+  attachmentUrls: string[] = [],
 ): Promise<TurnRoundRecord | null> {
   const input = userInput.trim();
   const cleaned = sanitizeDecompose(decompose);
@@ -739,6 +759,7 @@ export async function persistDecomposeRound(
     // Same user turn still open (decompose ran, report not written yet) → update in place.
     if (last && last.userInput === clip(input, MAX_USER_INPUT_CHARS) && !last.assistantReport) {
       last.taskDecompose = cleaned;
+      if (attachmentUrls.length > 0) last.attachmentUrls = [...new Set(attachmentUrls.filter(Boolean))];
       if (toolCalls.length > 0) last.toolCalls = sanitizeToolCalls(toolCalls);
       last.updatedAt = now;
       await writeFile(workspaceRoot, file);
@@ -749,6 +770,7 @@ export async function persistDecomposeRound(
       createdAt: now,
       updatedAt: now,
       userInput: clip(input, MAX_USER_INPUT_CHARS),
+      attachmentUrls: attachmentUrls.length > 0 ? [...new Set(attachmentUrls.filter(Boolean))] : undefined,
       taskDecompose: cleaned,
       toolCalls: toolCalls.length > 0 ? sanitizeToolCalls(toolCalls) : undefined,
     };

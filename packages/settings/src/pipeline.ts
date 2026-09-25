@@ -255,7 +255,7 @@ export function defaultReactSteps(): ReactStepConfig[] {
     { id: "budget_check", enabled: true, params: { startIter: 6, interval: 3, maxChars: 24000 } },
     { id: "llm_call", enabled: true, params: { maxRetries: 2 } },
     { id: "parse_response", enabled: true, params: {} },
-    { id: "stuck_detect", enabled: true, params: { maxRepeat: 6, maxReadCount: 3, maxReadonlyIters: 100 } },
+    { id: "stuck_detect", enabled: true, params: { maxRepeat: 2, maxReadCount: 3, maxReadonlyIters: 100 } },
     { id: "tool_cap", enabled: true, params: { maxTotal: 200 } },
     { id: "git_snapshot", enabled: true, params: {} },
     { id: "tool_exec", enabled: true, params: { parallel: true } },

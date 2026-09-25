@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChatSessionMetaDto } from "../../../preload/index";
+import { useI18n } from "../i18n";
 
 export type SearchResult =
   | { kind: "session"; id: string; title: string; subtitle: string }
@@ -42,6 +43,7 @@ export function CommandPalette({
   const [query, setQuery] = useState("");
   const [fileHits, setFileHits] = useState<string[]>([]);
   const [index, setIndex] = useState(0);
+  const { t } = useI18n();
 
   useEffect(() => {
     if (!open) {
@@ -86,8 +88,8 @@ export function CommandPalette({
     const out: SearchResult[] = [];
 
     if (!q) {
-      out.push({ kind: "action", id: "new", label: "新建对话", hint: "Ctrl+N" });
-      out.push({ kind: "action", id: "settings", label: "打开设置" });
+      out.push({ kind: "action", id: "new", label: t("新建对话"), hint: "Ctrl+N" });
+      out.push({ kind: "action", id: "settings", label: t("打开设置") });
     }
 
     for (const s of sessions) {
@@ -97,7 +99,7 @@ export function CommandPalette({
           kind: "session",
           id: s.id,
           title: s.title,
-          subtitle: s.pinned ? "已固定" : workspaceName ?? "会话",
+          subtitle: s.pinned ? t("已固定") : workspaceName ?? t("会话"),
         });
       }
     }
@@ -186,14 +188,14 @@ export function CommandPalette({
             ref={inputRef}
             className="palette-input"
             value={query}
-            placeholder="搜索会话、文件或操作…"
+            placeholder={t("搜索会话、文件或操作…")}
             onChange={(e) => setQuery(e.target.value)}
           />
           <kbd className="palette-kbd">Esc</kbd>
         </div>
         <ul className="palette-results" role="listbox">
           {results.length === 0 ? (
-            <li className="palette-empty">无匹配结果</li>
+            <li className="palette-empty">{t("无匹配结果")}</li>
           ) : (
             results.map((item, i) => {
               const selected = i === index;
@@ -231,7 +233,7 @@ export function CommandPalette({
                       <span className="palette-item-icon">📄</span>
                       <span className="palette-item-body">
                         <strong className="mono">{item.path}</strong>
-                        <small>引用到输入框</small>
+                        <small>{t("引用到输入框")}</small>
                       </span>
                     </button>
                   </li>

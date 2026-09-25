@@ -22,7 +22,7 @@ import { emitStage } from "../stages.ts";
 import { normalizeUsage } from "../../observability.ts";
 import type { StageHandler, SchedulerContext } from "./types.ts";
 import { pushCurrentUserMessageOnce } from "./history.ts";
-import { taskDecomposeHandler } from "./task-decompose.ts";
+import { flattenSteps, taskDecomposeHandler } from "./task-decompose.ts";
 import { exploreToolsHandler, executeToolsHandler } from "./tools.ts";
 import { verifyHandler, postVerifyHandler } from "./verify.ts";
 
@@ -44,10 +44,12 @@ export {
 
 export {
   parseDecomposeAnswer,
+  flattenSteps,
   injectStopConditions,
   runTaskDecompose,
   taskDecomposeHandler,
   extractStructuredHistory,
+  buildFallbackRawDecompose,
 } from "./task-decompose.ts";
 
 export {
@@ -77,6 +79,11 @@ export async function injectHistoryAndUserMessage(ctx: SchedulerContext): Promis
 
   const { opts, messages, history, state } = ctx;
   const { tagUserInput } = await import("../../message-tags.js");
+  const outboundUserMessage = opts.userMessage;
+  const sessionAttachments = history
+    .flatMap((turn) => turn.attachments ?? [])
+    .concat(opts.attachments ?? [])
+    .filter((attachment, index, all) => all.findIndex((item) => item.url === attachment.url) === index);
 
   let recentFileHints = "";
   if (opts.sessionId) {
@@ -87,10 +94,11 @@ export async function injectHistoryAndUserMessage(ctx: SchedulerContext): Promis
 
   // 优先当前子任务 relevantHistory → 整单 relevantHistory；都没有则只注入当前用户消息（不再拉历史）
   const currentTaskId = opts.currentTaskId;
+  const flatSteps = flattenSteps(state.rawDecompose);
   const stepHistory = currentTaskId
-    ? state.rawDecompose?.steps?.find((s) => s.id === currentTaskId)?.relevantHistory
+    ? flatSteps.find((s) => s.id === currentTaskId)?.relevantHistory
     : undefined;
-  const firstStepHistory = state.rawDecompose?.steps?.find((s) => (s.relevantHistory?.trim().length ?? 0) > 0)?.relevantHistory;
+  const firstStepHistory = flatSteps.find((s) => (s.relevantHistory?.trim().length ?? 0) > 0)?.relevantHistory;
   const relevantHistory = stepHistory
     ?? state.turnInformationTask?.relevantHistory
     ?? state.rawDecompose?.relevantHistory
@@ -101,7 +109,7 @@ export async function injectHistoryAndUserMessage(ctx: SchedulerContext): Promis
     const contextLines: string[] = [
       `## 当前任务`,
       ``,
-      opts.userMessage,
+      outboundUserMessage,
       ``,
       `## 可复用历史信息（来自分解阶段，勿重复读取；可含文件及其它相关内容）`,
       ``,
@@ -112,7 +120,11 @@ export async function injectHistoryAndUserMessage(ctx: SchedulerContext): Promis
       contextLines.push(``, recentFileHints);
     }
 
-    messages.push({ role: "user", content: tagUserInput(contextLines.join("\n")) });
+    messages.push({
+      role: "user",
+      content: tagUserInput(contextLines.join("\n")),
+      attachments: sessionAttachments,
+    });
 
     writeEventLog({
       category: "other",
@@ -128,9 +140,10 @@ export async function injectHistoryAndUserMessage(ctx: SchedulerContext): Promis
       role: "user",
       content: tagUserInput(
         recentFileHints
-          ? `## 当前任务\n\n${opts.userMessage}\n\n${recentFileHints}`
-          : `## 当前任务\n\n${opts.userMessage}`,
+          ? `## 当前任务\n\n${outboundUserMessage}\n\n${recentFileHints}`
+          : `## 当前任务\n\n${outboundUserMessage}`,
       ),
+      attachments: sessionAttachments,
     });
 
     writeEventLog({
@@ -142,7 +155,7 @@ export async function injectHistoryAndUserMessage(ctx: SchedulerContext): Promis
     });
   }
 
-  pushCurrentUserMessageOnce(history, opts.userMessage);
+  pushCurrentUserMessageOnce(history, opts.userMessage, sessionAttachments);
 }
 
 /**

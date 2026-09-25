@@ -17,11 +17,14 @@ export interface SettingsSnapshotDto {
   matchesBuiltin: boolean;
 }
 
+export interface ChatAttachmentDto { name: string; mimeType: string; url: string; size?: number }
+
 export type ChatTurnDto = {
   role: "user" | "assistant" | "tool" | "system";
   /** 会话内唯一 turn id（工具调用优先用 toolCallId；历史兼容可缺省） */
   id?: string;
   content: string;
+  attachments?: ChatAttachmentDto[];
   parts?: MessagePartDto[];
   metadata?: MessageMetadataDto;
   toolName?: string;
@@ -106,14 +109,18 @@ type ChatEventFields =
   | { type: "stage_done"; id: string; nodeType: string; label: string }
   | {
       type: "task_decomposition";
-      understanding: string;
+      intent: string;
       userConstraints: string[];
-      steps: Array<{
+      tasks: Array<{
         id: string;
         description: string;
-        dependsOn: string[];
-        informationNeeds: Array<{ id: string; question: string }>;
-        stopReadingWhen: Array<{ condition: string; requiredEvidenceIds: string[] }>;
+        steps: Array<{
+          id: string;
+          description: string;
+          dependsOn: string[];
+          informationNeeds: Array<{ id: string; question: string }>;
+          stopReadingWhen: Array<{ condition: string; requiredEvidenceIds: string[] }>;
+        }>;
       }>;
       fallback: boolean;
     }
@@ -277,7 +284,7 @@ export interface SessionStateDto {
   sessionRestored: boolean;
   activeSessionId: string | null;
   sessionTitle: string | null;
-  queuedMessages: string[];
+  queuedMessages: Array<{ text: string; attachments?: ChatAttachmentDto[] }>;
 }
 
 export interface ChatSessionMetaDto {
@@ -407,7 +414,7 @@ export interface DesktopApi {
   }>;
   setMode: (mode: AgentMode, sessionId?: string) => Promise<AgentMode>;
   /** Persist queued (not yet executed) messages for a session so they survive restarts. */
-  setQueuedMessages: (messages: string[], sessionId?: string) => Promise<string[]>;
+  setQueuedMessages: (messages: Array<{ text: string; attachments?: ChatAttachmentDto[] }>, sessionId?: string) => Promise<Array<{ text: string; attachments?: ChatAttachmentDto[] }>>;
   approvePlan: (opts?: {
     path?: string;
     content?: string;
@@ -481,7 +488,13 @@ export interface DesktopApi {
   getChatHistoryPage: (sessionId: string, beforeSeq?: number, limit?: number) => Promise<ChatHistoryPageDto>;
   clearChat: (sessionId?: string) => Promise<boolean>;
   cancelChat: (sessionId?: string) => Promise<boolean>;
-  sendChat: (text: string, sessionId?: string) => Promise<
+  uploadFile: (input: { name: string; type: string; data: Uint8Array; provider?: string }) => Promise<{
+    url: string;
+    name: string;
+    size: number;
+    provider: string;
+  }>;
+  sendChat: (text: string, sessionId?: string, attachments?: ChatAttachmentDto[]) => Promise<
     | {
         ok: true;
         assistantText: string;
@@ -536,6 +549,10 @@ export interface DesktopApi {
   setSettingsPanelOpen: (open: boolean) => void;
   /** Sync frameless window chrome (titleBarOverlay / background) with UI theme. */
   setChromeTheme: (theme: "dark" | "codex") => Promise<void>;
+  /** 界面语言信息：系统区域设置 + 用户偏好（"system" 跟随系统）。 */
+  getLocaleInfo: () => Promise<{ osLocale: string; pref: "system" | "zh" | "en" }>;
+  /** 设置界面语言偏好；主进程对话框文案同步生效。 */
+  setLocaleOverride: (pref: "system" | "zh" | "en") => Promise<void>;
   /** Ask the main process to focus and raise this window (restores OS focus). */
   focusWindow: () => void;
   /** Subscribe to a request from main to close the settings panel. */
@@ -644,13 +661,16 @@ const api: DesktopApi = {
     ipcRenderer.invoke("models:fetchList", baseUrl, apiKey, apiFormat),
   setSettingsPanelOpen: (open: boolean) => ipcRenderer.send("app:settingsPanelState", open),
   setChromeTheme: (theme) => ipcRenderer.invoke("app:setChromeTheme", theme),
+  getLocaleInfo: () => ipcRenderer.invoke("app:getLocaleInfo"),
+  setLocaleOverride: (pref) => ipcRenderer.invoke("app:setLocaleOverride", pref),
   focusWindow: () => ipcRenderer.send("app:focusWindow"),
   onCloseSettingsPanel: (callback: () => void) => {
     const handler = () => callback();
     ipcRenderer.on("app:closeSettingsPanel", handler);
     return () => ipcRenderer.removeListener("app:closeSettingsPanel", handler);
   },
-  sendChat: (text, sessionId) => ipcRenderer.invoke("chat:send", text, sessionId),
+  uploadFile: (input) => ipcRenderer.invoke("upload:file", input),
+  sendChat: (text, sessionId, attachments) => ipcRenderer.invoke("chat:send", text, attachments, sessionId),
   regenerateChat: (sessionId) => ipcRenderer.invoke("chat:regenerate", sessionId),
   onChatEvent: (handler) => {
     const listener = (_: Electron.IpcRendererEvent, payload: { sessionId: string | null; ev?: ChatEventDto; events?: ChatEventDto[] }) => {

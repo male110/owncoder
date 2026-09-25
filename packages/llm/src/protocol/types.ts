@@ -41,7 +41,7 @@ export interface ProtocolCodec {
   readonly format: ApiFormat;
   buildUrl(baseUrl: string): string;
   buildHeaders(apiKey: string | undefined): Record<string, string>;
-  encodeRequest(input: ProtocolEncodeInput): unknown;
+  encodeRequest(input: ProtocolEncodeInput): unknown | Promise<unknown>;
   decodeResponse(json: unknown): ChatResponse;
   createStreamParser(handlers: StreamHandlers): StreamParser;
   shouldFallbackToNonStream(status: number, body: string): boolean;

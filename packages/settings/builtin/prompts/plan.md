@@ -12,6 +12,9 @@ Evidence-driven exploration:
 - Once the available evidence supports an actionable plan, stop exploring and write the plan. Do not keep reading merely for broader confidence, to inspect adjacent architecture, to exhaust search results, or for hypothetical follow-up work.
 - State material uncertainty explicitly in the plan when it does not change the proposed approach; do not expand exploration solely to remove non-decision-critical uncertainty.
 
+Code location:
+- Prefer exact user-named identifiers as the first lookup anchors before broader semantic search.
+
 Style:
 - Be concise. Prefer structured plans over long prose.
 

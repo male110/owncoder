@@ -693,7 +693,7 @@ export function allEnhancedTools(opts?: {
       function: {
         name: "grep",
         description:
-          "Search file contents with a regex or plain string. Prefer the most specific available text as the pattern and preserve known names, expressions, and signatures instead of inventing alternatives. Skips dot-directories (.git, .next, .owncoder, …), generated directories (node_modules, dist, out, build, coverage, …), lockfiles, binaries, and files larger than 2MB. For symbol names prefer search_symbols.",
+          "Search file contents with a regex or plain string. When the user named a class/method/path/field, use that exact text as the pattern first — do not paraphrase into broader concepts. Prefer the most specific available text and preserve known names, expressions, and signatures. Skips dot-directories (.git, .next, .owncoder, …), generated directories (node_modules, dist, out, build, coverage, …), lockfiles, binaries, and files larger than 2MB. For symbol definitions prefer search_symbols; use grep to confirm strings, signatures, or content inside an already-found file.",
         parameters: {
           type: "object",
           properties: {
@@ -709,7 +709,8 @@ export function allEnhancedTools(opts?: {
       type: "function",
       function: {
         name: "search_symbols",
-        description: "Full-text search over indexed symbols using SQLite FTS5. Returns symbol definitions with locations, signatures, and documentation. Use this to find functions, classes, or variables by name when you don't know the exact file location. Prefer grep when searching for exact strings in file content.",
+        description:
+          "Full-text search over indexed symbols using SQLite FTS5. Returns symbol definitions with locations, signatures, and documentation. Prefer this when locating a named class, type, method, or function and the file is unknown — query with the user-provided identifier verbatim. Prefer grep for exact non-symbol strings in file content. Do not replace a known symbol name with a semantic paraphrase.",
         parameters: {
           type: "object",
           properties: {
@@ -741,7 +742,7 @@ export function allEnhancedTools(opts?: {
       function: {
         name: "codemap_search",
         description:
-          "Semantic search over the embedded Codemap to locate symbols/code concepts when you do NOT already know the file or line. Use this FIRST for 'where is X handled / find the Y logic' questions. Returns stable nodeId values — pass one to codemap_impact before editing a shared symbol. Prefer search_symbols for known symbol names or grep when you have an exact string to match.",
+          "Semantic search over the embedded Codemap to locate symbols/code concepts when you do NOT already know the file or line and have no exact class/method/file name. Use for vague 'where is X handled / find the Y logic' questions only. If the user already named a symbol, call search_symbols or grep with that exact name instead of this tool. Returns stable nodeId values — pass one to codemap_impact before editing a shared symbol.",
         parameters: {
           type: "object",
           properties: {

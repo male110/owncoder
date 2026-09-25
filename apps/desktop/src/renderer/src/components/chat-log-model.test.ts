@@ -48,7 +48,7 @@ describe("buildChatItems", () => {
     expect(items[0]?.key).toContain("u1");
   });
 
-  it("omits collapsed tools/process summary blocks from the list", () => {
+  it("includes process steps (collapsible) but omits live tools blocks", () => {
     const items = buildChatItems([
       { kind: "user", turn: userTurn("修 bug") },
       {
@@ -66,8 +66,15 @@ describe("buildChatItems", () => {
     ]);
     expect(items.map((it) => (it.kind === "block" ? it.block.kind : it.kind))).toEqual([
       "user",
+      "process",
       "assistant",
     ]);
+    const process = items[1];
+    if (process?.kind === "block" && process.block.kind === "process") {
+      expect(process.block.items).toHaveLength(2);
+    } else {
+      throw new Error("expected process block");
+    }
   });
 
   it("does not inject status/current rows into the virtual list", () => {

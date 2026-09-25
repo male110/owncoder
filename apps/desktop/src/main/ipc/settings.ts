@@ -23,6 +23,7 @@ import {
   type ApiFormat,
 } from "@owncoder/llm";
 import type { IpcContext } from "./types";
+import { mt } from "../i18n";
 
 function findRedactionRulePath(
   filePath: string,
@@ -103,7 +104,7 @@ export function registerSettingsHandlers(ctx: IpcContext): void {
 
   ipcMain.handle("security:pickAndPreview", async () => {
     const selection = await dialog.showOpenDialog({
-      title: "选择要测试脱敏的文件",
+      title: mt("选择要测试脱敏的文件"),
       properties: ["openFile"],
     });
     if (selection.canceled || selection.filePaths.length === 0) {
@@ -125,7 +126,7 @@ export function registerSettingsHandlers(ctx: IpcContext): void {
     if (!isRedactionEnabled(workflow)) {
       return {
         status: "error" as const,
-        message: "当前未启用敏感信息脱敏，请先启用后再测试。",
+        message: mt("当前未启用敏感信息脱敏，请先启用后再测试。"),
       };
     }
 
@@ -134,7 +135,7 @@ export function registerSettingsHandlers(ctx: IpcContext): void {
       if (fileInfo.size > MAX_REDACTION_TEST_BYTES) {
         return {
           status: "error" as const,
-          message: "文件过大，脱敏测试仅支持 10 MB 以内的文件。",
+          message: mt("文件过大，脱敏测试仅支持 10 MB 以内的文件。"),
         };
       }
       const source = await readFile(filePath, "utf8");
@@ -162,7 +163,7 @@ export function registerSettingsHandlers(ctx: IpcContext): void {
     } catch (e) {
       return {
         status: "error" as const,
-        message: `读取文件失败：${e instanceof Error ? e.message : String(e)}`,
+        message: mt("读取文件失败：{{msg}}", { msg: e instanceof Error ? e.message : String(e) }),
       };
     }
   });

@@ -1,7 +1,8 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { AgentMode } from "@owncoder/shared";
 import type { AvailableModel, Provider, ThinkingEffort } from "@owncoder/settings";
-import type { GitStatusDto, ProjectDto } from "../../../preload/index";
+import type { GitStatusDto, ProjectDto, ChatAttachmentDto } from "../../../preload/index";
+import { useI18n } from "../i18n";
 
 interface Props {
   mode: AgentMode;
@@ -22,7 +23,7 @@ interface Props {
   pendingNewSession: boolean;
   modeMenuOpen: boolean;
   onDraft: (v: string) => void;
-  onSend: () => void;
+  onSend: (attachments?: ChatAttachmentDto[]) => void;
   onCancel: () => void;
   onNewSession: () => void;
   onMode: (mode: AgentMode) => void;
@@ -72,7 +73,26 @@ function ComposerImpl({
   const thinkingMenuRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const prevSessionIdRef = useRef<string | null>(activeSessionId);
+  const autoResizeTextarea = useCallback(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+
+    // 先清除旧高度再读取 scrollHeight，确保删除内容后也能回缩。
+    el.style.height = "auto";
+    const minHeight = 72;
+    const maxHeight = 240;
+    const nextHeight = Math.min(Math.max(el.scrollHeight, minHeight), maxHeight);
+    el.style.height = `${nextHeight}px`;
+    el.style.overflowY = el.scrollHeight > maxHeight ? "auto" : "hidden";
+  }, []);
+
+  useLayoutEffect(() => {
+    autoResizeTextarea();
+    window.addEventListener("resize", autoResizeTextarea);
+    return () => window.removeEventListener("resize", autoResizeTextarea);
+  }, [autoResizeTextarea, draft]);
   const didMountRef = useRef(false);
+  const { t } = useI18n();
 
   // Re-focus the textarea whenever the active session changes (new / delete /
   // switch). Focusing on activeSessionId — instead of a one-shot window event
@@ -105,6 +125,62 @@ function ComposerImpl({
   const [mentionStart, setMentionStart] = useState(0);
   const [mentionHits, setMentionHits] = useState<string[]>([]);
   const [mentionIndex, setMentionIndex] = useState(0);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [attachments, setAttachments] = useState<Array<{ file: File; status: "uploading" | "error" | "success"; result?: ChatAttachmentDto; error?: string }>>([]);
+  const uploadStatus = attachments.some((item) => item.status === "uploading")
+    ? "uploading"
+    : attachments.some((item) => item.status === "error")
+      ? "error"
+      : attachments.length > 0
+        ? "success"
+        : "idle";
+
+  const uploadFile = useCallback(async (file: File) => {
+    setAttachments((items) => [...items, { file, status: "uploading" }]);
+    try {
+      // 获取当前选中模型的协议类型
+      const currentModel = availableModels[0];
+      const currentProvider = providers.find((p) => p.id === currentModel?.providerId);
+      const isAnthropicProtocol = currentProvider?.apiFormat === "anthropic-messages";
+
+      let attachment: ChatAttachmentDto;
+
+      if (isAnthropicProtocol) {
+        // Anthropic 协议：转 base64
+        const arrayBuffer = await file.arrayBuffer();
+        const base64 = btoa(
+          new Uint8Array(arrayBuffer).reduce((data, byte) => data + String.fromCharCode(byte), '')
+        );
+        const dataUrl = `data:${file.type || "application/octet-stream"};base64,${base64}`;
+        attachment = {
+          name: file.name,
+          mimeType: file.type || "application/octet-stream",
+          url: dataUrl,
+          size: file.size,
+        };
+      } else {
+        // 非 Anthropic 协议：上传图片
+        const data = new Uint8Array(await file.arrayBuffer());
+        const result = await window.owncoder.uploadFile({ name: file.name, type: file.type, data, provider: "uguu" });
+        attachment = {
+          name: result.name || file.name,
+          mimeType: file.type || "application/octet-stream",
+          url: result.url,
+          size: result.size,
+        };
+      }
+
+      setAttachments((items) => items.map((item) => item.file === file ? { ...item, status: "success", result: attachment } : item));
+    } catch (error) {
+      setAttachments((items) => items.map((item) => item.file === file ? { ...item, status: "error", error: error instanceof Error ? error.message : "上传失败，请重试" } : item));
+    }
+  }, [availableModels, providers]);
+
+  const onFileSelected = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = [...(e.target.files ?? [])];
+    e.target.value = "";
+    for (const file of files) void uploadFile(file);
+  }, [uploadFile]);
   
   // 超时保护：防止 projectSwitching 异常卡死导致 UI 永久禁用
   useEffect(() => {
@@ -333,13 +409,15 @@ function ComposerImpl({
       onSubmit={(e) => {
         e.preventDefault();
         console.log("[Composer] form submitted, projectSwitching=", projectSwitching, "draft=", JSON.stringify(draft));
-        if (projectSwitching) return;
+        if (projectSwitching || uploadStatus === "uploading") return;
         if (mentionQuery !== null && mentionHits.length > 0) {
           insertMention(mentionHits[mentionIndex]!);
           return;
         }
         console.log("[Composer] calling onSend()");
-        onSend();
+        const ready = attachments.filter((item) => item.status === "success").map((item) => item.result!);
+        onSend(ready);
+        setAttachments([]);
       }}
     >
       {(isEmptySession || pendingNewSession) ? (
@@ -349,12 +427,12 @@ function ComposerImpl({
             type="button"
             className="ws-trigger"
             onClick={() => setWsMenuOpen((v) => !v)}
-            title="切换工作区"
+            title={t("切换工作区")}
           >
             <span className="ws-icon" aria-hidden>
               📁
             </span>
-            {workspaceName ?? "未打开工作区"}
+            {workspaceName ?? t("未打开工作区")}
             <span className="mode-chevron" aria-hidden>
               ▾
             </span>
@@ -400,7 +478,7 @@ function ComposerImpl({
                     onAddProject();
                   }}
                 >
-                  <span className="ws-menu-name">＋ 打开新目录…</span>
+                  <span className="ws-menu-name">{t("＋ 打开新目录…")}</span>
                 </button>
               </li>
             </ul>
@@ -430,11 +508,12 @@ function ComposerImpl({
           onKeyUp={(e) => syncMention(draft, e.currentTarget.selectionStart)}
           placeholder={
             mode === "plan"
-              ? "提出一个问题或描述要规划的任务…"
-              : "提出一个问题或描述一个任务…"
+              ? t("提出一个问题或描述要规划的任务…")
+              : t("提出一个问题或描述一个任务…")
           }
           rows={3}
           disabled={projectSwitching}
+          aria-label={mode === "plan" ? t("提出一个问题或描述要规划的任务…") : t("提出一个问题或描述一个任务…")}
           onKeyDown={(e) => {
             if (mentionQuery !== null && mentionHits.length > 0) {
               if (e.key === "ArrowDown") {
@@ -500,20 +579,20 @@ function ComposerImpl({
             onContextMenu={(e) => e.preventDefault()}
           >
             <button type="button" role="menuitem" disabled={!ctxMenu.hasSelection} onClick={() => execCtxAction("cut")}>
-              <span>剪切</span>
+              <span>{t("剪切")}</span>
               <span className="ctx-menu-key">Ctrl+X</span>
             </button>
             <button type="button" role="menuitem" disabled={!ctxMenu.hasSelection} onClick={() => execCtxAction("copy")}>
-              <span>复制</span>
+              <span>{t("复制")}</span>
               <span className="ctx-menu-key">Ctrl+C</span>
             </button>
             <button type="button" role="menuitem" onClick={() => execCtxAction("paste")}>
-              <span>粘贴</span>
+              <span>{t("粘贴")}</span>
               <span className="ctx-menu-key">Ctrl+V</span>
             </button>
             <div className="ctx-menu-sep" aria-hidden />
             <button type="button" role="menuitem" disabled={!draft.length} onClick={() => execCtxAction("selectAll")}>
-              <span>全选</span>
+              <span>{t("全选")}</span>
               <span className="ctx-menu-key">Ctrl+A</span>
             </button>
           </div>
@@ -521,6 +600,18 @@ function ComposerImpl({
       </div>
 
       <div className="composer-bar">
+        <input ref={fileInputRef} className="composer-file-input" type="file" multiple onChange={onFileSelected} />
+        <button
+          type="button"
+          className="upload-trigger"
+          aria-label="上传文件"
+          title="上传图片或文件"
+          disabled={projectSwitching}
+          onClick={() => fileInputRef.current?.click()}
+        >
+          ＋ <span>上传</span>
+        </button>
+        {attachments.map((item) => <div key={`${item.file.name}-${item.file.lastModified}`} className={`upload-chip ${item.status === "error" ? "error" : ""}`} role="status"><span className="upload-chip-name">{item.status === "uploading" ? `上传中：${item.file.name}` : item.status === "error" ? `上传失败：${item.file.name}` : item.file.name}</span>{item.status === "error" ? <button type="button" onClick={() => void uploadFile(item.file)}>{t("重试")}</button> : null}<button type="button" aria-label="移除附件" onClick={() => setAttachments((xs) => xs.filter((x) => x !== item))}>×</button></div>)}
         <div className="mode-picker" ref={modeMenuRef}>
           <button
             type="button"
@@ -552,7 +643,7 @@ function ComposerImpl({
                   </span>
                   <span className="mode-meta">
                     <strong>Agent</strong>
-                    <small>可写 · 改代码与跑命令</small>
+                    <small>{t("可写 · 改代码与跑命令")}</small>
                   </span>
                   {mode === "agent" ? <span className="mode-check">✓</span> : null}
                 </button>
@@ -570,7 +661,7 @@ function ComposerImpl({
                   </span>
                   <span className="mode-meta">
                     <strong>Plan</strong>
-                    <small>只读 · 分析与出方案</small>
+                    <small>{t("只读 · 分析与出方案")}</small>
                   </span>
                   {mode === "plan" ? <span className="mode-check">✓</span> : null}
                 </button>
@@ -586,7 +677,7 @@ function ComposerImpl({
             aria-haspopup="listbox"
             aria-expanded={modelMenuOpen}
             onClick={() => setModelMenuOpen((v) => !v)}
-            title="切换模型"
+            title={t("切换模型")}
           >
             {modelLabel}
             <span className="mode-chevron" aria-hidden>
@@ -597,7 +688,7 @@ function ComposerImpl({
             <div className="model-menu" role="listbox">
               {availableModels.length === 0 ? (
                 <div className="model-menu-empty">
-                  <span>暂无可用模型</span>
+                  <span>{t("暂无可用模型")}</span>
                   <button
                     type="button"
                     className="model-menu-settings"
@@ -606,7 +697,7 @@ function ComposerImpl({
                       onOpenSettings();
                     }}
                   >
-                    去设置
+                    {t("去设置")}
                   </button>
                 </div>
               ) : (
@@ -616,7 +707,7 @@ function ComposerImpl({
                     高度互不拉伸；各自 height:auto / max-height 独立滚动。
                   */}
                   <div className="model-menu-body">
-                    <nav className="model-menu-providers" role="tablist" aria-label="模型平台">
+                    <nav className="model-menu-providers" role="tablist" aria-label={t("模型平台")}>
                       {groupedModels.map((group) => (
                         <button
                           key={group.providerId}
@@ -669,7 +760,7 @@ function ComposerImpl({
                       onOpenSettings();
                     }}
                   >
-                    ⚙ 模型设置…
+                    {t("⚙ 模型设置…")}
                   </button>
                 </>
               )}
@@ -684,10 +775,10 @@ function ComposerImpl({
             aria-haspopup="listbox"
             aria-expanded={thinkingMenuOpen}
             onClick={() => setThinkingMenuOpen((v) => !v)}
-            title="思考强度"
+            title={t("思考强度")}
           >
             <span className="thinking-icon">💭</span>
-            {thinkingEffort === "low" ? "低" : thinkingEffort === "medium" ? "中" : "高"}
+            {thinkingEffort === "low" ? t("低") : thinkingEffort === "medium" ? t("中") : t("高")}
             <span className="mode-chevron" aria-hidden>
               ▾
             </span>
@@ -705,7 +796,7 @@ function ComposerImpl({
                     onSelectThinkingEffort("high");
                   }}
                 >
-                  <span className="thinking-menu-name">高强度</span>
+                  <span className="thinking-menu-name">{t("高强度")}</span>
                   {thinkingEffort === "high" ? <span className="mode-check">✓</span> : null}
                 </button>
               </li>
@@ -720,7 +811,7 @@ function ComposerImpl({
                     onSelectThinkingEffort("medium");
                   }}
                 >
-                  <span className="thinking-menu-name">中强度</span>
+                  <span className="thinking-menu-name">{t("中强度")}</span>
                   {thinkingEffort === "medium" ? <span className="mode-check">✓</span> : null}
                 </button>
               </li>
@@ -735,7 +826,7 @@ function ComposerImpl({
                     onSelectThinkingEffort("low");
                   }}
                 >
-                  <span className="thinking-menu-name">低强度</span>
+                  <span className="thinking-menu-name">{t("低强度")}</span>
                   {thinkingEffort === "low" ? <span className="mode-check">✓</span> : null}
                 </button>
               </li>
@@ -746,12 +837,12 @@ function ComposerImpl({
         <div className="composer-actions">
           {queueCount > 0 ? (
             <div className="queue-badge">
-              <span className="queue-badge-text">待执行{queueCount}条</span>
+              <span className="queue-badge-text">{t("待执行{{count}}条", { count: queueCount })}</span>
               <button
                 type="button"
                 className="queue-badge-remove"
                 onClick={() => onRemoveQueueMessage(0)}
-                title="移除最早待执行消息"
+                title={t("移除最早待执行消息")}
               >
                 ✕
               </button>
@@ -759,20 +850,20 @@ function ComposerImpl({
           ) : null}
           {sending ? (
             <button type="button" className="stop-btn" onClick={onCancel}>
-              停止
+              {t("停止")}
             </button>
           ) : null}
           <button 
             type="submit" 
             className="send" 
             disabled={!draft.trim() || projectSwitching} 
-            aria-label="发送"
+            aria-label={t("发送")}
             title={
               projectSwitching 
-                ? "正在切换项目，请稍候..." 
+                ? t("正在切换项目，请稍候...") 
                 : !draft.trim() 
-                  ? "请输入消息" 
-                  : "发送消息"
+                  ? t("请输入消息") 
+                  : t("发送消息")
             }
           >
             ↑

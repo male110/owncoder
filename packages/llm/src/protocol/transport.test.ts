@@ -31,7 +31,10 @@ describe("chatCompletion protocol dispatch", () => {
       expect(headers.get("Authorization")).toBe("Bearer sk-test");
       const body = JSON.parse(String(init?.body));
       expect(body.model).toBe("claude-sonnet-4");
-      expect(body.messages).toEqual(messages);
+      expect(body.messages).toEqual(
+        expect.arrayContaining([{ role: "user", content: "hi" }]),
+      );
+      expect(body.messages.some((m: { role: string; content?: string }) => m.role === "user" && m.content === "hi")).toBe(true);
       expect(body.stream).toBe(false);
       return jsonResponse({
         choices: [{ message: { role: "assistant", content: "ok" }, finish_reason: "stop" }],

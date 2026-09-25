@@ -15,19 +15,43 @@ import type { ToolContext } from "./execute.ts";
 import { allEnhancedTools } from "./enhanced-tools.ts";
 import { OS_LOCALE } from "./tools/shared.ts";
 
-// ── Language directive: single source of truth for the OS-locale instruction ──
+// ── Language directive: single source of truth for reply-language instruction ──
 // All LLM calls within one task (main agent loop AND pre-loop stages such as
 // task_decompose) must prepend the same directive so a single turn never drifts
-// between languages across stages.
-export const OS_LOCALE_SYSTEM_PROMPT = `## Language\nAlways reply in ${OS_LOCALE}. Use this language for all explanations, comments, and output regardless of what language the user writes in.`;
-
-// ── OS-locale → prompt variant selector ──
-// Single authority that decides which of an "EN + _ZH" pair to feed the model.
-// Keyed off the OS locale (resolved once at module load via `OS_LOCALE`) so a
-// single task never picks mixed-language prompts across stages, regardless of
-// what language the user types in.
+// between languages across stages. Pref comes from settings (harness.locale);
+// "system" keeps the historical OS-locale behavior.
+export type LocaleSetting = "system" | "zh" | "en";
 export type PromptLocale = "zh" | "en";
-export function resolvePromptLocale(): PromptLocale {
+
+function replyLocaleLabel(pref: LocaleSetting | undefined): string {
+  if (pref === "zh") return "Chinese (zh-CN)";
+  if (pref === "en") return "English";
+  return OS_LOCALE;
+}
+
+export function localeSystemPrompt(pref: LocaleSetting | undefined = "system"): string {
+  return `## Language\nAlways reply in ${replyLocaleLabel(pref)}. Use this language for all explanations, comments, and output regardless of what language the user writes in.`;
+}
+
+/** 结构化 JSON 协议调用用：只约束 JSON 字符串字段语言，不要求整段用自然语言作答。 */
+export function localeJsonValuesPrompt(pref: LocaleSetting | undefined = "system"): string {
+  const lang = replyLocaleLabel(pref);
+  return [
+    "## Language",
+    `Write JSON string values (intent, descriptions, questions, progressStatus, relevantHistory, etc.) in ${lang}, regardless of the user's language.`,
+    "Do not write a free-form chat reply, explanation, or any text outside the JSON object.",
+  ].join("\n");
+}
+
+/** @deprecated Prefer localeSystemPrompt(workflow.harness.locale). Kept for callers that still assume OS-only. */
+export const OS_LOCALE_SYSTEM_PROMPT = localeSystemPrompt("system");
+
+// ── Locale → prompt variant selector ──
+// Single authority that decides which of an "EN + _ZH" pair to feed the model.
+// Honors the user language setting when set; otherwise falls back to OS locale
+// so a single task never picks mixed-language prompts across stages.
+export function resolvePromptLocale(pref: LocaleSetting | undefined = "system"): PromptLocale {
+  if (pref === "zh" || pref === "en") return pref;
   return OS_LOCALE.toLowerCase().startsWith("zh") ? "zh" : "en";
 }
 
@@ -203,10 +227,10 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
   const { tagSystemInstructions } = await import("./message-tags.js");
   const messages: ChatMessage[] = [{ role: "system", content: tagSystemInstructions(systemPrompt) }];
 
-  // ── Language: use OS locale ──
+  // ── Language: settings harness.locale (system → OS locale) ──
   messages.push({
     role: "system",
-    content: `## Language\nAlways reply in ${OS_LOCALE}. Use this language for all explanations, comments, and output regardless of what language the user writes in.`,
+    content: localeSystemPrompt(opts.workflow.harness.locale),
   });
 
   messages.push({
@@ -392,13 +416,17 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
           userInput: opts.userMessage,
           taskDecompose: state.rawDecompose
             ? {
-                understanding: state.rawDecompose.understanding,
+                intent: state.rawDecompose.intent,
                 userConstraints: state.rawDecompose.userConstraints ?? [],
-                steps: state.rawDecompose.steps.map((step) => ({
-                  id: step.id,
-                  description: step.description,
-                  dependsOn: step.dependsOn,
-                  informationNeeds: step.informationNeeds,
+                tasks: state.rawDecompose.tasks.map((task) => ({
+                  id: task.id,
+                  description: task.description,
+                  steps: task.steps.map((step) => ({
+                    id: step.id,
+                    description: step.description,
+                    dependsOn: step.dependsOn,
+                    informationNeeds: step.informationNeeds,
+                  })),
                 })),
               }
             : undefined,

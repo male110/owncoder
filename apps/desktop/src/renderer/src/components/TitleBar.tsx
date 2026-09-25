@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useUiStore } from "../store/ui-store";
 import type { UiTheme } from "../theme";
+import { useI18n } from "../i18n";
 
 interface Props {
   title?: string | null;
@@ -35,6 +36,7 @@ export function TitleBar({ title, gitSummary, gitDirty }: Props) {
   const [version, setVersion] = useState<string | null>(null);
   const theme = useUiStore((s) => s.theme);
   const setTheme = useUiStore((s) => s.setTheme);
+  const { t } = useI18n();
 
   useEffect(() => {
     let disposed = false;
@@ -84,13 +86,13 @@ export function TitleBar({ title, gitSummary, gitDirty }: Props) {
           </>
         ) : null}
       </div>
-      <div className="app-titlebar-actions" role="group" aria-label="界面风格">
+      <div className="app-titlebar-actions" role="group" aria-label={t("界面风格")}>
         <div className="app-theme-toggle">
           <button
             type="button"
             className={`app-theme-btn${theme === "dark" ? " active" : ""}`}
-            title="深色主题"
-            aria-label="切换到深色主题"
+            title={t("深色主题")}
+            aria-label={t("切换到深色主题")}
             aria-pressed={theme === "dark"}
             onClick={() => selectTheme("dark")}
           >
@@ -99,8 +101,8 @@ export function TitleBar({ title, gitSummary, gitDirty }: Props) {
           <button
             type="button"
             className={`app-theme-btn${theme === "codex" ? " active" : ""}`}
-            title="浅色主题"
-            aria-label="切换到浅色主题"
+            title={t("浅色主题")}
+            aria-label={t("切换到浅色主题")}
             aria-pressed={theme === "codex"}
             onClick={() => selectTheme("codex")}
           >

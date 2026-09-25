@@ -6,6 +6,7 @@ import { removeMessage } from "../hooks/queue-controller";
 import type { TabId } from "../SettingsPanel";
 import { ChatLog } from "./ChatLog";
 import { ErrorBanner } from "./ErrorBanner";
+import { useI18n } from "../i18n";
 
 
 interface Props {
@@ -48,15 +49,16 @@ export function SessionChatPanel({
   onOpenSettings,
   onSendQueuedMessage,
 }: Props) {
+  const { t } = useI18n();
   const greeting = useMemo(() => {
     const h = new Date().getHours();
-    if (h < 6) return "夜深了";
-    if (h < 12) return "早上好呀";
-    if (h < 14) return "中午好";
-    if (h < 18) return "下午好";
-    if (h < 22) return "晚上好呀，今天辛苦啦";
-    return "夜深了，注意休息";
-  }, []);
+    if (h < 6) return t("夜深了");
+    if (h < 12) return t("早上好呀");
+    if (h < 14) return t("中午好");
+    if (h < 18) return t("下午好");
+    if (h < 22) return t("晚上好呀，今天辛苦啦");
+    return t("夜深了，注意休息");
+  }, [t]);
 
   const rt = useSessionRuntime(sessionId);
   const {
@@ -205,7 +207,7 @@ export function SessionChatPanel({
           onClick={() => void onLoadOlder()}
           disabled={historyLoading || !historyHasMore}
         >
-          {historyLoading ? "加载中…" : "加载更早消息"}
+          {historyLoading ? t("加载中…") : t("加载更早消息")}
         </button>
       </div>
     );
@@ -222,11 +224,11 @@ export function SessionChatPanel({
           <div className="hero-watermark" aria-hidden>A</div>
           <h1>{greeting}</h1>
           <p className="hero-sub">
-            向 OwnCoder 描述任务，@ 引用文件，/ 使用命令，切换 Plan / Agent 模式
+            {t("向 OwnCoder 描述任务，@ 引用文件，/ 使用命令，切换 Plan / Agent 模式")}
           </p>
           {!llmConfigured ? (
             <ErrorBanner
-              error={{ code: "AUTH_MISSING_KEY", message: "模型 API Key 尚未配置，请先完成设置后再开始对话。" }}
+              error={{ code: "AUTH_MISSING_KEY", message: t("模型 API Key 尚未配置，请先完成设置后再开始对话。") }}
               onDismiss={() => useChatStore.getState().setErrorAlert(null, sessionId)}
               onOpenSettings={() => onOpenSettings("models")}
             />
@@ -271,13 +273,17 @@ export function SessionChatPanel({
         <div className="queued-messages-bar">
           <span className="queued-messages-icon" aria-hidden>⏳</span>
           <span className="queued-messages-label">
-            待执行 {queuedMessages.length} 条
+            {t("待执行 {{count}} 条", { count: queuedMessages.length })}
           </span>
           <ol className="queued-messages-list">
-            {queuedMessages.map((msg, i) => (
-              <li key={`${msg}-${i}`} className="queued-messages-item">
+            {queuedMessages.map((msg, i) => {
+              const label = msg.text.trim()
+                || (msg.attachments?.length ? msg.attachments.map((a) => a.name).join(", ") : "");
+              const preview = label.length > 80 ? `${label.slice(0, 80)}…` : label;
+              return (
+              <li key={`${msg.text}-${i}-${msg.attachments?.map((a) => a.url).join("|") ?? ""}`} className="queued-messages-item">
                 <span className="queued-messages-text">
-                  {msg.length > 80 ? `${msg.slice(0, 80)}…` : msg}
+                  {preview || "（附件）"}
                 </span>
                 <button
                   type="button"
@@ -285,18 +291,19 @@ export function SessionChatPanel({
                   onClick={() => onSendQueuedMessage(i)}
                   disabled={sending}
                 >
-                  发送
+                  {t("发送")}
                 </button>
                 <button
                   type="button"
                   className="queued-messages-remove"
                   onClick={() => onRemoveQueuedMessage(i)}
-                  title="删除该待执行消息"
+                  title={t("删除该待执行消息")}
                 >
-                  删除
+                  {t("删除")}
                 </button>
               </li>
-            ))}
+              );
+            })}
           </ol>
         </div>
       ) : null}

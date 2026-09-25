@@ -161,7 +161,7 @@ export const useUiStore = create<UiState & UiActions>()((set) => ({
   isSidebarDragging: false,
   sidebarCollapsed: false,
   settingsOpen: false,
-  settingsTab: "models",
+  settingsTab: "harness",
   searchOpen: false,
   modeMenuOpen: false,
   theme: readStoredTheme(),

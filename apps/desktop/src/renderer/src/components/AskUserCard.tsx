@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useChatStore } from "../store/chat-store";
 import { getFocusSessionId } from "../store/focus-session";
+import { useI18n } from "../i18n";
 
 /**
  * Inline ask-user card shown above the composer for each session.
@@ -16,6 +17,7 @@ export function AskUserCard() {
   const askRequests = useChatStore((s) => s.askRequests);
   const [freeText, setFreeText] = useState("");
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const { t } = useI18n();
 
   const current = askRequests[0] ?? null;
   const hasOptions = current ? current.options.length > 0 : false;
@@ -57,7 +59,7 @@ export function AskUserCard() {
       <div className="ask-user-card-header">
         <span className="ask-user-card-icon" aria-hidden>?</span>
         <div className="ask-user-card-title-wrap">
-          <p className="ask-user-card-eyebrow">Agent 需要你确认</p>
+          <p className="ask-user-card-eyebrow">{t("Agent 需要你确认")}</p>
           <p className="ask-user-card-question">{current.question}</p>
         </div>
       </div>
@@ -88,7 +90,7 @@ export function AskUserCard() {
         <>
           {hasOptions && (
             <div className="ask-user-card-divider">
-              <span>或</span>
+              <span>{t("或")}</span>
             </div>
           )}
           <form
@@ -102,13 +104,13 @@ export function AskUserCard() {
               ref={inputRef}
               type="text"
               className="ask-user-card-input"
-              placeholder={current.placeholder ?? "输入你的回答…"}
+              placeholder={current.placeholder ?? t("输入你的回答…")}
               value={freeText}
               onChange={(e) => setFreeText(e.target.value)}
               autoFocus={!hasOptions}
             />
             <button type="submit" className="ask-user-card-submit" disabled={!freeText.trim()}>
-              提交
+              {t("提交")}
             </button>
           </form>
         </>
@@ -116,10 +118,10 @@ export function AskUserCard() {
 
       <div className="ask-user-card-footer">
         <span className="ask-user-card-hint">
-          {queuedCount > 0 ? `还有 ${queuedCount} 个问题等待` : "按 Esc 取消（按未作答处理）"}
+          {queuedCount > 0 ? t("还有 {{count}} 个问题等待", { count: queuedCount }) : t("按 Esc 取消（按未作答处理）")}
         </span>
         <button type="button" className="ask-user-card-cancel" onClick={() => respond("")}>
-          取消
+          {t("取消")}
           <kbd>Esc</kbd>
         </button>
       </div>

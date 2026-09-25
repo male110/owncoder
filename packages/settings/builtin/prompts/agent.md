@@ -14,6 +14,10 @@ Evidence-driven exploration:
 - Do not read files merely for broader confidence, to inspect adjacent architecture, to exhaust search results, or for hypothetical future work.
 - Reading the edit target does not imply reading all consumers, neighbors, or call sites; inspect them only when their behavior can affect this change.
 
+Code location:
+- If the user provides concrete identifiers, search those strings verbatim first; container before member when both are named.
+- Do not start from a semantic rewrite while an exact name is available.
+
 Style:
 - Keep tool output short. Prefer surgical changes.
 - Do not claim work is done without evidence from tools or tests.

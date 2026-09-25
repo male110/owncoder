@@ -1,5 +1,7 @@
 import { useState, useMemo } from "react";
 import type { ChangeFileDto } from "../../../preload/index";
+import type { MsgId } from "../../../shared/i18n/core";
+import { useI18n } from "../i18n";
 
 interface Props {
   changes: ChangeFileDto[];
@@ -15,7 +17,7 @@ interface Props {
   onOpenFile?: (path: string) => void;
 }
 
-const KIND_LABEL: Record<ChangeFileDto["kind"], string> = {
+const KIND_LABEL: Record<ChangeFileDto["kind"], MsgId> = {
   added: "新增",
   modified: "修改",
   deleted: "删除",
@@ -80,6 +82,7 @@ export function ChangesBar({
   onOpenFile,
 }: Props) {
   const [open, setOpen] = useState(false);
+  const { t } = useI18n();
 
   // 计算每个文件的统计信息（使用 useMemo 避免重复计算）
   const fileStats = useMemo(() => {
@@ -124,7 +127,7 @@ export function ChangesBar({
       <div className="review-bar-head">
         <button type="button" className="review-bar-toggle" onClick={() => setOpen((v) => !v)}>
           <span className="activity-chev">{open ? "▾" : "▸"}</span>
-          <span className="review-bar-title">变更</span>
+          <span className="review-bar-title">{t("变更")}</span>
           <span className="review-bar-count">{changes.length}</span>
           {open && (stats.additions > 0 || stats.deletions > 0) ? (
             <span className="review-bar-stats">
@@ -135,10 +138,10 @@ export function ChangesBar({
         </button>
         <div className="review-bar-actions">
           <button type="button" className="ghost tiny" disabled={busy} onClick={onUndoAll}>
-            全部撤销
+            {t("全部撤销")}
           </button>
           <button type="button" className="ghost tiny accent" disabled={keepAllBusy} onClick={onKeepAll}>
-            全部保留
+            {t("全部保留")}
           </button>
         </div>
       </div>
@@ -154,7 +157,7 @@ export function ChangesBar({
               <div
                 key={c.path}
                 className="change-item"
-                title={c.kind !== "deleted" ? "双击打开文件" : undefined}
+                title={c.kind !== "deleted" ? t("双击打开文件") : undefined}
                 onDoubleClick={() => {
                   if (c.kind !== "deleted") onOpenFile?.(c.path);
                 }}
@@ -163,7 +166,7 @@ export function ChangesBar({
                 <div className="change-item-main">
                   <span className={`change-kind ${c.kind}`}>
                     <span className="change-kind-icon">{KIND_ICON[c.kind]}</span>
-                    <span className="change-kind-label">{KIND_LABEL[c.kind]}</span>
+                    <span className="change-kind-label">{t(KIND_LABEL[c.kind])}</span>
                   </span>
                   <span className="change-path" title={c.path}>{c.path}</span>
                   {(fileStat.additions > 0 || fileStat.deletions > 0) ? (
@@ -186,15 +189,15 @@ export function ChangesBar({
                         className="ghost tiny"
                         onClick={() => onViewDiff?.(c.path, c.before, c.after)}
                       >
-                        查看变更
+                        {t("查看变更")}
                       </button>
                       <button
                         type="button"
                         className="ghost tiny"
                         onClick={() => onOpenFile?.(c.path)}
-                        title="在编辑器中打开"
+                        title={t("在编辑器中打开")}
                       >
-                        打开
+                        {t("打开")}
                       </button>
                     </>
                   ) : null}
@@ -204,7 +207,7 @@ export function ChangesBar({
                     disabled={busy}
                     onClick={() => onUndoFile(c.path)}
                   >
-                    撤销
+                    {t("撤销")}
                   </button>
                   <button
                     type="button"
@@ -212,7 +215,7 @@ export function ChangesBar({
                     disabled={busy}
                     onClick={() => onKeepFile(c.path)}
                   >
-                    保留
+                    {t("保留")}
                   </button>
                 </div>
               </div>

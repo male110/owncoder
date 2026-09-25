@@ -3,6 +3,8 @@ import type { ChatSessionMetaDto, ProjectDto } from "../../../preload/index";
 import type { WorkspaceInfo } from "@owncoder/shared";
 import type { SessionStatus } from "../store/chat-store";
 import { ProjectFileTree } from "./ProjectFileTree";
+import { t } from "../../../shared/i18n/core";
+import { useI18n } from "../i18n";
 
 const SESSION_PAGE_SIZE = 5;
 
@@ -29,14 +31,15 @@ function parseProjectPath(root: string): { name: string; parent: string } {
 }
 
 function relativeTime(iso: string): string {
-  const t = Date.parse(iso);
-  if (!Number.isFinite(t)) return "";
-  const sec = Math.max(0, Math.floor((Date.now() - t) / 1000));
-  if (sec < 60) return "刚刚";
-  if (sec < 3600) return `${Math.floor(sec / 60)}分钟`;
-  if (sec < 86400) return `${Math.floor(sec / 3600)}小时`;
-  if (sec < 86400 * 30) return `${Math.floor(sec / 86400)}天`;
-  return `${Math.floor(sec / (86400 * 30))}月`;
+  // 注意：局部变量不能叫 t，会遮蔽 i18n 的 t()
+  const ms = Date.parse(iso);
+  if (!Number.isFinite(ms)) return "";
+  const sec = Math.max(0, Math.floor((Date.now() - ms) / 1000));
+  if (sec < 60) return t("刚刚");
+  if (sec < 3600) return t("{{n}}分钟", { n: Math.floor(sec / 60) });
+  if (sec < 86400) return t("{{n}}小时", { n: Math.floor(sec / 3600) });
+  if (sec < 86400 * 30) return t("{{n}}天", { n: Math.floor(sec / 86400) });
+  return t("{{n}}月", { n: Math.floor(sec / (86400 * 30)) });
 }
 
 interface Props {
@@ -92,6 +95,7 @@ export function AgentSidebar({
   onOpenFile,
 }: Props) {
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const { t } = useI18n();
   const [visibleCountByProject, setVisibleCountByProject] = useState<Record<string, number>>({});
   /** Per-project sidebar view; default is sessions. */
   const [viewModeByProject, setViewModeByProject] = useState<Record<string, ProjectViewMode>>({});
@@ -115,20 +119,20 @@ export function AgentSidebar({
       {collapsed ? (
         <>
           <div className="nav-header">
-            <button type="button" className="nav-item collapse-btn" onClick={onToggleCollapse} title="展开侧边栏">
+            <button type="button" className="nav-item collapse-btn" onClick={onToggleCollapse} title={t("展开侧边栏")}>
               <span className="nav-item-icon">«</span>
             </button>
           </div>
           <nav className="nav-menu">
-            <button type="button" className="nav-item primary" onClick={() => void onNewSession()} title="新建对话" disabled={disabled}>
+            <button type="button" className="nav-item primary" onClick={() => void onNewSession()} title={t("新建对话")} disabled={disabled}>
               <span className="nav-item-icon">＋</span>
             </button>
-            <button type="button" className="nav-item" onClick={() => void onAddProject()} title="添加项目" disabled={disabled}>
+            <button type="button" className="nav-item" onClick={() => void onAddProject()} title={t("添加项目")} disabled={disabled}>
               <span className="nav-item-icon">📁</span>
             </button>
           </nav>
           <div className="nav-footer">
-            <button type="button" className="nav-item settings" onClick={onOpenSettings} title="设置">
+            <button type="button" className="nav-item settings" onClick={onOpenSettings} title={t("设置")}>
               <span className="nav-item-icon">⚙</span>
             </button>
           </div>
@@ -136,27 +140,27 @@ export function AgentSidebar({
       ) : (
         <>
           <div className="nav-header">
-            <button type="button" className="nav-item collapse-btn" onClick={onToggleCollapse} title="收缩侧边栏">
+            <button type="button" className="nav-item collapse-btn" onClick={onToggleCollapse} title={t("收缩侧边栏")}>
               <span className="nav-item-icon">»</span>
             </button>
           </div>
           <nav className="nav-menu">
             <button type="button" className="nav-item primary" onClick={() => void onNewSession()} disabled={disabled}>
               <span className="nav-item-icon">＋</span>
-              <span className="nav-item-label">新建对话</span>
+              <span className="nav-item-label">{t("新建对话")}</span>
               <kbd>Ctrl+N</kbd>
             </button>
             <button type="button" className="nav-item" onClick={() => void onAddProject()} disabled={disabled}>
               <span className="nav-item-icon">📁</span>
-              <span className="nav-item-label">添加项目</span>
+              <span className="nav-item-label">{t("添加项目")}</span>
             </button>
           </nav>
 
-          <div className="nav-section-label">项目</div>
+          <div className="nav-section-label">{t("项目")}</div>
 
           <div className="project-tree">
             {projects.length === 0 ? (
-              <p className="nav-empty">内置 OwnCoderProject 将自动出现；也可点击「添加项目」打开本地仓库。</p>
+              <p className="nav-empty">{t("内置 OwnCoderProject 将自动出现；也可点击「添加项目」打开本地仓库。")}</p>
             ) : (
               projects.map((p) => {
                 const open = expanded[p.root] !== false;
@@ -180,7 +184,7 @@ export function AgentSidebar({
                       <button
                         type="button"
                         className="project-chevron"
-                        title={open ? "折叠" : "展开"}
+                        title={open ? t("折叠") : t("展开")}
                         onClick={() => onToggleExpand?.(p.root)}
                       >
                         <svg
@@ -214,11 +218,11 @@ export function AgentSidebar({
                           })()}
                         </span>
                       </button>
-                      <div className="project-view-toggle" role="group" aria-label="项目视图切换">
+                      <div className="project-view-toggle" role="group" aria-label={t("项目视图切换")}>
                         <button
                           type="button"
                           className={`project-view-btn${viewMode === "sessions" ? " active" : ""}`}
-                          title="会话列表"
+                          title={t("会话列表")}
                           aria-pressed={viewMode === "sessions"}
                           onClick={(e) => {
                             e.stopPropagation();
@@ -239,7 +243,7 @@ export function AgentSidebar({
                         <button
                           type="button"
                           className={`project-view-btn${viewMode === "files" ? " active" : ""}`}
-                          title="文件目录"
+                          title={t("文件目录")}
                           aria-pressed={viewMode === "files"}
                           onClick={(e) => {
                             e.stopPropagation();
@@ -261,7 +265,7 @@ export function AgentSidebar({
                       <button
                         type="button"
                         className="project-remove"
-                        title="移除项目"
+                        title={t("移除项目")}
                         onClick={(e) => {
                           e.stopPropagation();
                           void onRemoveProject(p.root);
@@ -293,7 +297,7 @@ export function AgentSidebar({
                     {open && viewMode === "sessions" ? (
                       <div className="session-list">
                         {projectSessions.length === 0 ? (
-                          <p className="nav-empty nested">暂无任务</p>
+                          <p className="nav-empty nested">{t("暂无任务")}</p>
                         ) : (
                           <>
                           {visibleSessions.map((s) => (
@@ -308,14 +312,14 @@ export function AgentSidebar({
                               {(() => {
                                 const st = getSessionStatus?.(s.id) ?? "idle";
                                 if (st === "running") {
-                                  return <span className="session-status-icon running" title="运行中" />;
+                                  return <span className="session-status-icon running" title={t("运行中")} />;
                                 }
                                 if (st === "completed" && s.id !== activeSessionId) {
                                   return (
                                     <button
                                       type="button"
                                       className="session-status-icon completed"
-                                      title="任务完成（点击清除）"
+                                      title={t("任务完成（点击清除）")}
                                       onClick={(e) => { e.stopPropagation(); onClearSessionStatus?.(s.id); }}
                                     />
                                   );
@@ -326,7 +330,7 @@ export function AgentSidebar({
                                     <button
                                       type="button"
                                       className="session-status-icon needs-confirmation"
-                                      title={running ? "需要确认命令（点击查看）" : "需要确认命令（点击清除）"}
+                                      title={running ? t("需要确认命令（点击查看）") : t("需要确认命令（点击清除）")}
                                       onClick={async (e) => {
                                         e.stopPropagation();
                                         // Cross-project session clicks must be one
@@ -360,7 +364,7 @@ export function AgentSidebar({
                                 }}
                                 disabled={disabled}
                               >
-                                <span className="session-title">{s.title}</span>
+                                <span className="session-title">{s.title === "新会话" ? t("新会话") : s.title}</span>
                                 <span className="session-time">{relativeTime(s.updatedAt)}</span>
                               </button>
 
@@ -369,32 +373,32 @@ export function AgentSidebar({
                                   <button
                                     type="button"
                                     className="session-delete-yes"
-                                    title="确认删除"
+                                    title={t("确认删除")}
                                     onClick={(e) => {
                                       e.stopPropagation();
                                       setConfirmDeleteId(null);
                                       void onDeleteSession(s.id, p.root);
                                     }}
                                   >
-                                    确认
+                                    {t("确认")}
                                   </button>
                                   <button
                                     type="button"
                                     className="session-delete-no"
-                                    title="取消"
+                                    title={t("取消")}
                                     onClick={(e) => {
                                       e.stopPropagation();
                                       setConfirmDeleteId(null);
                                     }}
                                   >
-                                    取消
+                                    {t("取消")}
                                   </button>
                                 </span>
                               ) : (
                                 <button
                                   type="button"
                                   className="session-delete"
-                                  title="删除任务"
+                                  title={t("删除任务")}
                                   disabled={isSessionRunning?.(s.id) ?? false}
                                   onClick={(e) => {
                                     e.stopPropagation();
@@ -417,7 +421,7 @@ export function AgentSidebar({
                                 }));
                               }}
                             >
-                              加载更多
+                              {t("加载更多")}
                             </button>
                           ) : null}
                           </>
@@ -433,7 +437,7 @@ export function AgentSidebar({
           <div className="nav-footer">
             <button type="button" className="nav-item settings" onClick={onOpenSettings}>
               <span className="nav-item-icon">⚙</span>
-              <span className="nav-item-label">设置</span>
+              <span className="nav-item-label">{t("设置")}</span>
             </button>
           </div>
         </>

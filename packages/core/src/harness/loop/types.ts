@@ -1,4 +1,4 @@
-import type { ChatMessage, ToolDef } from "@owncoder/llm";
+import type { ChatAttachment, ChatMessage, ToolDef } from "@owncoder/llm";
 import type { ModelRef, SystemWorkflowConfig } from "@owncoder/settings";
 import type { AgentMode } from "@owncoder/shared";
 import type { IndexClient } from "@owncoder/index";
@@ -41,23 +41,27 @@ type TurnEventFields =
   | { type: "stage_start"; id: string; nodeType: string; label: string }
   | { type: "stage_done"; id: string; nodeType: string; label: string }
   /**
-   * Result of the task_decompose stage: the understanding paragraph, the
-   * durable user constraints, and the ordered steps (with information needs
+   * Result of the task_decompose stage: the user's intent, the durable user
+   * constraints, and the tasks (each with its ordered steps, information needs
    * and stop-reading criteria). Emitted once per turn after the decomposition
    * call completes, so the user can review and judge the decomposition.
    */
   | {
       type: "task_decomposition";
-      understanding: string;
+      intent: string;
       /** 可恢复任务的显式状态快照。 */
       taskState?: import("../../turn-rounds.ts").TaskState;
       userConstraints: string[];
-      steps: Array<{
+      tasks: Array<{
         id: string;
         description: string;
-        dependsOn: string[];
-        informationNeeds: Array<{ id: string; question: string }>;
-        stopReadingWhen: Array<{ condition: string; requiredEvidenceIds: string[] }>;
+        steps: Array<{
+          id: string;
+          description: string;
+          dependsOn: string[];
+          informationNeeds: Array<{ id: string; question: string }>;
+          stopReadingWhen: Array<{ condition: string; requiredEvidenceIds: string[] }>;
+        }>;
       }>;
       /** True when the LLM call failed and the shown plan is a local heuristic fallback. */
       fallback: boolean;
@@ -238,6 +242,7 @@ export interface ChatTurn {
    * 当 parts 不存在时，这是完整内容
    */
   content: string;
+  attachments?: ChatAttachment[];
   toolName?: string;
   
   /**
@@ -308,6 +313,7 @@ export interface AgentLoopOpts {
   codemap?: ToolContext["codemap"];
   history: ChatTurn[];
   userMessage: string;
+  attachments?: ChatAttachment[];
   signal?: AbortSignal;
   onEvent?: (ev: TurnEventInput) => void;
   maxIterations?: number;
@@ -385,6 +391,8 @@ export interface AgentLoopOpts {
      */
     archive?: (turn: ChatTurn, sessionId: string) => void | Promise<void>;
     archiveRound?: (round: import("./history-vector.ts").HistoryRoundInput) => void | Promise<void>;
+    /** 删除某会话的待归档队列与已写入向量。 */
+    deleteSession?: (sessionId: string) => void;
     /** 释放归档存储及其 native 资源。 */
     close?: () => void;
   };

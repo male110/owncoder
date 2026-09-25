@@ -25,6 +25,7 @@ import {
   sendQueuedMessage,
 } from "./queue-controller";
 import type { ChatTurnDto, TaskStatusDto } from "../../../preload/index";
+import { t } from "../../../shared/i18n/core";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -86,8 +87,16 @@ function provisionalTitle(text: string): string {
 
 // 仅当会话仍持有默认标题（"新会话"或空）时，立即用首条用户消息更新侧栏标题，
 // 让"新建会话"在发送瞬间即反映主题，无需等待后端回合结束返回标题。
+// 标题一旦被设置为非"新会话"后，不再自动更新，保持稳定以便用户查找历史会话。
 function applyProvisionalTitleIfNeeded(sid: string, text: string) {
   const cur = useSessionStore.getState();
+  const curSessions = useSessionStore.getState().sessions;
+  const currentItem = curSessions.find((s) => s.id === sid);
+  
+  // 只在标题仍为"新会话"或空时更新，已设置的标题不再修改
+  const shouldUpdate = !currentItem?.title || currentItem.title === "新会话";
+  if (!shouldUpdate) return;
+
   const title = provisionalTitle(text);
   if (cur.activeSessionId === sid) cur.setSessionTitle(title);
 
@@ -96,9 +105,7 @@ function applyProvisionalTitleIfNeeded(sid: string, text: string) {
   // project B while the user has already switched. If the session belongs
   // to the current project it is already in the list (createPendingSession /
   // refreshSessions); update in place. Otherwise leave `sessions` alone.
-  const curSessions = useSessionStore.getState().sessions;
-  const currentItem = curSessions.find((s) => s.id === sid);
-  if (currentItem && (!currentItem.title || currentItem.title === "新会话")) {
+  if (currentItem) {
     cur.setSessions(curSessions.map((it) => (it.id === sid ? { ...it, title } : it)));
   }
 
@@ -110,10 +117,9 @@ function applyProvisionalTitleIfNeeded(sid: string, text: string) {
     let changed = false;
     const next = { ...projects };
     for (const [r, list] of Object.entries(projects)) {
-      if (list.some((s) => s.id === sid)) {
-        next[r] = list.map((it) =>
-          it.id === sid && (!it.title || it.title === "新会话") ? { ...it, title } : it,
-        );
+      const listItem = list.find((s) => s.id === sid);
+      if (listItem && (!listItem.title || listItem.title === "新会话")) {
+        next[r] = list.map((it) => (it.id === sid ? { ...it, title } : it));
         changed = true;
       }
     }
@@ -222,37 +228,46 @@ export function useChatActions(deps: {
     // The main process persists the title before returning. Apply that exact
     // session result immediately instead of waiting for slower list/project
     // refreshes, which may still contain the temporary "新会话" title.
+    // 标题固定策略：只在当前标题为"新会话"时才接受后端的标题更新
     if (res.sessionId && res.sessionTitle) {
       const current = useSessionStore.getState();
-      if (current.activeSessionId === res.sessionId) {
-        current.setSessionTitle(res.sessionTitle);
-      }
-      // Only rewrite the current-project mirror when this session already
-      // belongs there. Never insert a foreign session into `sessions`.
       const curSessions = useSessionStore.getState().sessions;
-      if (curSessions.some((item) => item.id === res.sessionId)) {
-        current.setSessions(
-          curSessions.map((item) =>
-            item.id === res.sessionId ? { ...item, title: res.sessionTitle! } : item,
-          ),
-        );
-      }
-      // Update every project cache that already owns this session. Using the
-      // current workspace root alone would miss the owning project after the
-      // user switches mid-turn, and could no-op the final title sync.
-      current.setSessionsByProject((projects) => {
-        let changed = false;
-        const next = { ...projects };
-        for (const [r, list] of Object.entries(projects)) {
-          if (list.some((item) => item.id === res.sessionId)) {
-            next[r] = list.map((item) =>
-              item.id === res.sessionId ? { ...item, title: res.sessionTitle! } : item,
-            );
-            changed = true;
-          }
+      const currentItem = curSessions.find((item) => item.id === res.sessionId);
+      
+      // 检查是否应该更新标题：仅当标题仍为"新会话"或空时
+      const shouldUpdateTitle = !currentItem?.title || currentItem.title === "新会话";
+      
+      if (shouldUpdateTitle) {
+        if (current.activeSessionId === res.sessionId) {
+          current.setSessionTitle(res.sessionTitle);
         }
-        return changed ? next : projects;
-      });
+        // Only rewrite the current-project mirror when this session already
+        // belongs there. Never insert a foreign session into `sessions`.
+        if (curSessions.some((item) => item.id === res.sessionId)) {
+          current.setSessions(
+            curSessions.map((item) =>
+              item.id === res.sessionId ? { ...item, title: res.sessionTitle! } : item,
+            ),
+          );
+        }
+        // Update every project cache that already owns this session. Using the
+        // current workspace root alone would miss the owning project after the
+        // user switches mid-turn, and could no-op the final title sync.
+        current.setSessionsByProject((projects) => {
+          let changed = false;
+          const next = { ...projects };
+          for (const [r, list] of Object.entries(projects)) {
+            const listItem = list.find((item) => item.id === res.sessionId);
+            if (listItem && (!listItem.title || listItem.title === "新会话")) {
+              next[r] = list.map((item) =>
+                item.id === res.sessionId ? { ...item, title: res.sessionTitle! } : item,
+              );
+              changed = true;
+            }
+          }
+          return changed ? next : projects;
+        });
+      }
     }
 
     // Fire-and-forget: refreshSessions runs in the background so it doesn't
@@ -280,13 +295,13 @@ export function useChatActions(deps: {
       const summary = preview.length < content.length ? `${preview}…` : preview;
       chat.setHistory((h) => [
         ...h,
-        { role: "assistant", content: `📋 **计划已生成：${fileName}**\n\n${summary}\n\n<!--plan_saved:${planPath}-->` },
+        { role: "assistant", content: `📋 **${t("计划已生成：{{name}}", { name: fileName })}**\n\n${summary}\n\n<!--plan_saved:${planPath}-->` },
       ], sid);
     } catch {
       const fileName = planPath.split("/").pop() ?? planPath;
       chat.setHistory((h) => [
         ...h,
-        { role: "assistant", content: `📋 计划已生成：${fileName}\n\n<!--plan_saved:${planPath}-->` },
+        { role: "assistant", content: `📋 ${t("计划已生成：{{name}}", { name: fileName })}\n\n<!--plan_saved:${planPath}-->` },
       ], sid);
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -297,7 +312,7 @@ export function useChatActions(deps: {
     const cmd = text.trim().toLowerCase();
     if (cmd === "/compact") {
       chat.setHistory(await window.owncoder.compactHistory(sid), sid);
-      chat.setLiveStatus("已保留原始历史；下次请求将由模型生成任务摘要", sid);
+      chat.setLiveStatus(t("已保留原始历史；下次请求将由模型生成任务摘要"), sid);
       ui.clearSentDrafts(sid);
       return true;
     }
@@ -313,13 +328,13 @@ export function useChatActions(deps: {
     if (cmd === "/plan") {
       session.setMode(await window.owncoder.setMode("plan", sid));
       ui.clearSentDrafts(sid);
-      chat.setLiveStatus("已切换到 Plan 模式", sid);
+      chat.setLiveStatus(t("已切换到 Plan 模式"), sid);
       return true;
     }
     if (cmd === "/agent") {
       session.setMode(await window.owncoder.setMode("agent", sid));
       ui.clearSentDrafts(sid);
-      chat.setLiveStatus("已切换到 Agent 模式", sid);
+      chat.setLiveStatus(t("已切换到 Agent 模式"), sid);
       return true;
     }
     if (cmd === "/undo") {
@@ -333,7 +348,7 @@ export function useChatActions(deps: {
         {
           role: "assistant",
           content:
-            "可用命令：\n/compact — 压缩历史\n/clear — 清空对话\n/plan — Plan 模式\n/agent — Agent 模式\n/undo — 撤销上次改动\n/help — 显示帮助",
+            t("可用命令：\n/compact — 压缩历史\n/clear — 清空对话\n/plan — Plan 模式\n/agent — Agent 模式\n/undo — 撤销上次改动\n/help — 显示帮助"),
         },
       ], sid);
       ui.clearSentDrafts(sid);
@@ -365,12 +380,22 @@ export function useChatActions(deps: {
         // emitted its first stage event yet. Subsequent `stage_start` /
         // `thinking_delta` / `tool_start` events will overwrite this with
         // more specific text via `setLiveStatus`.
-        chat.setLiveStatus("正在分解任务...", sid);
-        chat.setHistory((h) => [...h, { role: "user", content: next }], sid);
-        applyProvisionalTitleIfNeeded(sid, next);
+        chat.setLiveStatus(t("正在分解任务…"), sid);
+        chat.setHistory(
+          (h) => [
+            ...h,
+            {
+              role: "user",
+              content: next.text,
+              ...(next.attachments?.length ? { attachments: next.attachments } : {}),
+            },
+          ],
+          sid,
+        );
+        applyProvisionalTitleIfNeeded(sid, next.text);
         try {
           await new Promise((r) => setTimeout(r, 0));
-          const res = await window.owncoder.sendChat(next, sid);
+          const res = await window.owncoder.sendChat(next.text, sid, next.attachments);
           // Kick off refreshChanges IMMEDIATELY — don't wait for applyChatResult.
           // The backend has finished writing files by now, so the changes panel
           // can start populating while history/title updates settle.
@@ -410,7 +435,7 @@ export function useChatActions(deps: {
     return () => clearQueueRunner(owner);
   }, [runQueue]);
 
-  const onSend = useCallback(async () => {
+  const onSend = useCallback(async (attachments?: import("../../../preload/index").ChatAttachmentDto[]) => {
     try {
       console.log("[onSend] called");
       let sid = getFocusSessionId();
@@ -474,8 +499,10 @@ export function useChatActions(deps: {
       }
     }
 
+    const hasAttachments = Array.isArray(attachments) && attachments.length > 0;
+
     if (!sid) {
-      if (!text) { console.log("[onSend] no sid, no text → return"); return; }
+      if (!text && !hasAttachments) { console.log("[onSend] no sid, no text → return"); return; }
       await depsRef.current.onNewSession();
       // onNewSession detaches the active session and arms `pendingNewSessionRef`
       // (it deliberately leaves `activeSessionId` null so the new session's
@@ -495,7 +522,8 @@ export function useChatActions(deps: {
         depsRef.current.pendingNewSessionRef.current,
       );
     }
-    if (!text) { console.log("[onSend] text still empty after re-read → return"); return; }
+    if (!text && !hasAttachments) { console.log("[onSend] text still empty after re-read → return"); return; }
+    text = text ?? "";
 
     // 方案B: if a new-session click is pending, create the real session now.
     const currentSession = useSessionStore.getState();
@@ -532,12 +560,12 @@ export function useChatActions(deps: {
 
     console.log("[onSend] after sid check, text=", text?.substring(0, 50), "session=", session);
     // 只匹配单斜杠开头的命令（如 /clear），不匹配双斜杠（如 // 注释）
-    if (text.startsWith("/") && !text.startsWith("//")) { void runSlash(text, sid); return; }
+    if (text && text.startsWith("/") && !text.startsWith("//")) { void runSlash(text, sid); return; }
     console.log("[onSend] checking workspace...");
     const sendSession = useSessionStore.getState();
-    if (!sendSession.workspace) { console.log("[onSend] workspace not ready → return"); chat.setLiveStatus("工作区尚未就绪，请稍候…", sid); return; }
+    if (!sendSession.workspace) { console.log("[onSend] workspace not ready → return"); chat.setLiveStatus(t("工作区尚未就绪，请稍候…"), sid); return; }
     console.log("[onSend] checking llmConfigured...");
-    if (!sendSession.llmConfigured) { console.log("[onSend] LLM not configured → return"); showError("未配置 LLM API Key", sid); return; }
+    if (!sendSession.llmConfigured) { console.log("[onSend] LLM not configured → return"); showError(t("未配置 LLM API Key"), sid); return; }
 
     try {
       console.log("[onSend] past all checks, clearing draft...");
@@ -565,7 +593,7 @@ export function useChatActions(deps: {
       }
 
       console.log("[onSend] enqueueing message, sid=", sid);
-      enqueueMessage(sid, text);
+      enqueueMessage(sid, text, attachments);
       // 用户主动发送新消息，清除可能残留的停止标志，确保队列能正常执行。
       clearStopRequest(sid);
       console.log("[onSend] running queue...");
@@ -589,12 +617,12 @@ export function useChatActions(deps: {
     if (!sid) return;
     if (chat.isSessionSending(sid)) return;
     if (!currentSession.workspace) return;
-    if (!currentSession.llmConfigured) { showError("未配置 LLM API Key", sid); return; }
+    if (!currentSession.llmConfigured) { showError(t("未配置 LLM API Key"), sid); return; }
     chat.setSending(true, sid);
     chat.resetTurnState(sid);
     // Same immediate-feedback rationale as runQueue(): show something the
     // user can read while the IPC roundtrip + first stage event arrive.
-    chat.setLiveStatus("正在分解任务...", sid);
+    chat.setLiveStatus(t("正在分解任务…"), sid);
     chat.setErrorAlert(null, sid);
     chat.setHistory((h) => {
       let lastUser = -1;
@@ -658,11 +686,11 @@ export function useChatActions(deps: {
         // loop 会在同一轮内顺序执行完全部任务（无需用户再手动发消息）。
         const currentSession = useSessionStore.getState();
         if (!currentSession.workspace || !currentSession.llmConfigured) {
-          chat.setLiveStatus("计划已批准。请先配置 LLM，再发送消息开始执行。", sid);
+          chat.setLiveStatus(t("计划已批准。请先配置 LLM，再发送消息开始执行。"), sid);
         } else {
-          enqueueMessage(sid, "开始执行");
+          enqueueMessage(sid, t("开始执行"));
           clearStopRequest(sid);
-          chat.setLiveStatus(`计划已批准，自动开始执行 ${meta.tasks.length} 个任务…`, sid);
+          chat.setLiveStatus(t("计划已批准，自动开始执行 {{count}} 个任务…", { count: meta.tasks.length }), sid);
           void runQueue(sid);
         }
       }
@@ -693,7 +721,7 @@ export function useChatActions(deps: {
   const onRollback = useCallback(async (sidOverride?: string) => {
     const sid = sidOverride ?? getFocusSessionId();
     if (!sid) return;
-    if (!(await customConfirm("撤销上次 Agent 改动？将恢复文件与对话到检查点。"))) return;
+    if (!(await customConfirm(t("撤销上次 Agent 改动？将恢复文件与对话到检查点。")))) return;
     ui.setBusy(true);
     try {
       const res = await window.owncoder.undoAllChanges(sid);

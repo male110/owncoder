@@ -8,6 +8,7 @@
 
 import {
   writeEventLog,
+  type ChatAttachment,
   type ChatMessage,
 } from "@owncoder/llm";
 import type { ChatTurn } from "../types.ts";
@@ -81,13 +82,15 @@ export async function pushHistoryBlockToMessages(
  * it; pushing again would duplicate the message in both the transcript and the
  * LLM context. This guard keeps the injection idempotent.
  */
-export function pushCurrentUserMessageOnce(history: ChatTurn[], userMessage: string): void {
+export function pushCurrentUserMessageOnce(history: ChatTurn[], userMessage: string, attachments: ChatAttachment[] = []): void {
   const last = history[history.length - 1];
   const alreadyAppended =
     !!last && last.role === "user" && last.content === userMessage;
-  if (!alreadyAppended) {
-    history.push({ role: "user", content: userMessage });
+  if (alreadyAppended) {
+    if (attachments.length && !last.attachments?.length) last.attachments = attachments;
+    return;
   }
+  history.push({ role: "user", content: userMessage, attachments: attachments.length ? attachments : undefined });
 }
 
 // ── Stage Handler ──────────────────────────────────────────────────

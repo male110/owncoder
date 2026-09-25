@@ -62,7 +62,7 @@ export function registerChatHandlers(ctx: IpcContext): void {
     return true;
   });
 
-  ipcMain.handle("chat:send", async (_e, text: string, sessionId?: string) => {
+  ipcMain.handle("chat:send", async (_e, text: string, attachments: import("@owncoder/llm").ChatAttachment[] = [], sessionId?: string) => {
     const sid = sessionId ?? session.getState().activeSessionId ?? undefined;
     const t0 = Date.now();
     const ts = (label: string) => `[chat:send +${Date.now() - t0}ms] ${label}`;
@@ -72,6 +72,7 @@ export function registerChatHandlers(ctx: IpcContext): void {
         text,
         (ev: TurnEventInput) => emitChat(sid ?? null, ev),
         sid,
+        attachments,
       );
       console.log(ts(`ok historyLen=${result.history.length} planPath=${result.lastPlanPath ?? "null"}`));
       console.log(ts(`DETAILED history:`) + ' ' + result.history.map((h, i) => `[${i}] ${h.role}: ${h.content.substring(0, 50)}...`).join(' | '));

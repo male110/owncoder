@@ -1,5 +1,6 @@
 import { promises as fs } from "node:fs";
 import { join, resolve } from "node:path";
+import type { ChatAttachment } from "@owncoder/llm";
 import type { AgentMode } from "@owncoder/shared";
 import type { ChatTurn, DocumentWorkflowState } from "./harness/loop/types.ts";
 import type { TerminalEntry } from "./harness/terminal.ts";
@@ -36,7 +37,7 @@ export interface PersistedSession {
   /** Optional for backward compatibility with saved pre-document-workflow sessions. */
   documentWorkflow?: DocumentWorkflowState | null;
   /** Queued (sent while a turn was running) user messages, persisted so they survive restarts. */
-  queuedMessages?: string[];
+  queuedMessages?: QueuedMessage[];
   /** 统一任务运行状态；旧会话可能缺失，读取时兼容。 */
   taskRunState?: import("./task-run.ts").TaskRunState | null;
 }
@@ -45,6 +46,11 @@ interface SessionsIndex {
   version: 1;
   activeId: string | null;
   sessions: SessionMeta[];
+}
+
+export interface QueuedMessage {
+  text: string;
+  attachments?: ChatAttachment[];
 }
 
 export function sessionsDirAbs(workspaceRoot: string): string {
@@ -314,6 +320,16 @@ export async function deleteSessionFile(workspaceRoot: string, id: string): Prom
   return index.activeId;
 }
 
+/** Drop session-owned sidecar files that live next to `{id}.json`. */
+export async function deleteSessionSidecars(workspaceRoot: string, id: string): Promise<void> {
+  const { deleteSessionRounds } = await import("./turn-rounds.ts");
+  const { deleteConversationStore } = await import("./conversation-store.ts");
+  await Promise.all([
+    deleteSessionRounds(workspaceRoot, id),
+    deleteConversationStore(workspaceRoot, id),
+  ]);
+}
+
 
 export async function savePersistedSession(
   workspaceRoot: string,
@@ -370,9 +386,39 @@ function sanitizeSession(data: PersistedSession): PersistedSession {
   };
 }
 
-function sanitizeQueuedMessages(value: unknown): string[] {
+function sanitizeAttachment(value: unknown): ChatAttachment | null {
+  if (!value || typeof value !== "object") return null;
+  const row = value as Partial<ChatAttachment>;
+  if (typeof row.name !== "string" || !row.name) return null;
+  if (typeof row.mimeType !== "string" || !row.mimeType) return null;
+  if (typeof row.url !== "string" || !row.url) return null;
+  const attachment: ChatAttachment = { name: row.name, mimeType: row.mimeType, url: row.url };
+  if (typeof row.size === "number") attachment.size = row.size;
+  return attachment;
+}
+
+function sanitizeAttachments(value: unknown): ChatAttachment[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const attachments = value.map(sanitizeAttachment).filter((item): item is ChatAttachment => item !== null);
+  return attachments.length ? attachments : undefined;
+}
+
+export function sanitizeQueuedMessages(value: unknown): QueuedMessage[] {
   if (!Array.isArray(value)) return [];
-  return value.filter((m): m is string => typeof m === "string" && m.length > 0);
+  const out: QueuedMessage[] = [];
+  for (const item of value) {
+    if (typeof item === "string") {
+      if (item.length > 0) out.push({ text: item });
+      continue;
+    }
+    if (!item || typeof item !== "object") continue;
+    const row = item as { text?: unknown; attachments?: unknown };
+    const text = typeof row.text === "string" ? row.text : "";
+    const attachments = sanitizeAttachments(row.attachments);
+    if (!text && !attachments?.length) continue;
+    out.push(attachments?.length ? { text, attachments } : { text });
+  }
+  return out;
 }
 
 function sanitizeDocumentWorkflow(value: unknown): DocumentWorkflowState | null {
@@ -443,11 +489,18 @@ function sanitizeHistory(history: ChatTurn[]): ChatTurn[] {
     ) {
       continue;
     }
-    out.push({
+    // Match conversation-store durable policy / Cursor transcripts: keep tool
+    // call identity for timeline reconstruction, but never persist tool bodies
+    // into session.json (they are the main source of multi-100MB sessions).
+    const row: ChatTurn = {
       role: h.role,
-      content: h.content,
-      toolName: typeof h.toolName === "string" ? h.toolName : undefined,
-    });
+      content: h.role === "tool" ? "" : h.content,
+    };
+    if (typeof h.id === "string" && h.id) row.id = h.id;
+    if (typeof h.toolName === "string") row.toolName = h.toolName;
+    const attachments = sanitizeAttachments(h.attachments);
+    if (attachments) row.attachments = attachments;
+    out.push(row);
   }
   return out;
 }

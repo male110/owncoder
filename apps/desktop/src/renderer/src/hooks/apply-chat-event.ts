@@ -17,6 +17,7 @@ import {
 } from "../store/chat-store";
 import type { useSessionStore } from "../store/session-store";
 import type { ChatEventDto } from "../../../preload/index";
+import { t } from "../../../shared/i18n/core";
 
 type ChatStore = ReturnType<typeof useChatStore.getState>;
 type SessionStore = ReturnType<typeof useSessionStore.getState>;
@@ -34,19 +35,19 @@ export function toolStatusLabel(
         : name === "bash" || name === "run_command"
           ? ` → ${String(args?.command ?? "").slice(0, 60)}`
           : "";
-    return `工具调用：${name}${hint}`;
+    return t("工具调用：{{name}}{{hint}}", { name, hint });
   }
-  if (status === "done") return `已完成：${name}`;
-  if (status === "skipped") return `已跳过：${name}`;
-  return `失败：${name}`;
+  if (status === "done") return t("已完成：{{name}}", { name });
+  if (status === "skipped") return t("已跳过：{{name}}", { name });
+  return t("失败：{{name}}", { name });
 }
 
 function isDecomposing(chat: ChatStore, sid: string | undefined): boolean {
   // Prefer the target session runtime so multi-session apply stays correct.
   if (sid && sid !== chat.activeSessionId) {
-    return chat.bySession[sid]?.liveStatus === "正在分解任务…";
+    return chat.bySession[sid]?.liveStatus === t("正在分解任务…");
   }
-  return chat.liveStatus === "正在分解任务…";
+  return chat.liveStatus === t("正在分解任务…");
 }
 
 /** Apply one ChatEventDto to the chat (and optionally session) store. */
@@ -113,9 +114,9 @@ export function applyChatEvent(
     if (import.meta.env.DEV) {
       chat.pushDecompose(
         {
-          understanding: ev.understanding,
+          intent: ev.intent,
           userConstraints: ev.userConstraints,
-          steps: ev.steps,
+          tasks: ev.tasks,
           fallback: ev.fallback,
         },
         sid,
@@ -127,9 +128,9 @@ export function applyChatEvent(
   // ── stage_start / stage_done ──────────────────────────────────────────
   if (ev.type === "stage_start") {
     if (ev.nodeType === "task_decompose") {
-      chat.setLiveStatus("正在分解任务…", sid);
+      chat.setLiveStatus(t("正在分解任务…"), sid);
     } else {
-      chat.setLiveStatus(`阶段：${ev.label}`, sid);
+      chat.setLiveStatus(t("阶段：{{label}}", { label: ev.label }), sid);
     }
     return;
   }

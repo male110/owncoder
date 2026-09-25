@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type { UpdateDownloadStatusDto, UpdateInfoDto } from "../../../preload/index";
+import { useI18n } from "../i18n";
 
 /**
  * 新版本提示条。
@@ -35,6 +36,7 @@ export function UpdateBanner() {
   const [info, setInfo] = useState<UpdateInfoDto | null>(null);
   const [dismissed, setDismissed] = useState(false);
   const [status, setStatus] = useState<UpdateDownloadStatusDto | null>(null);
+  const { t } = useI18n();
 
   useEffect(() => {
     let disposed = false;
@@ -97,9 +99,9 @@ export function UpdateBanner() {
   const failed = status?.state === "failed";
 
   return (
-    <div className="update-banner" role="note" aria-label="发现新版本">
+    <div className="update-banner" role="note" aria-label={t("发现新版本")}>
       <div className="update-banner-body">
-        <strong>发现新版本 v{info.version}</strong>
+        <strong>{t("发现新版本 v{{version}}", { version: info.version })}</strong>
         {notesPreview ? <p className="update-banner-notes">{notesPreview}</p> : null}
         {downloading ? (
           <div className="update-banner-progress" aria-hidden>
@@ -109,15 +111,15 @@ export function UpdateBanner() {
             />
           </div>
         ) : null}
-        {downloaded ? <p className="update-banner-hint">已下载完成，安装后自动重启</p> : null}
+        {downloaded ? <p className="update-banner-hint">{t("已下载完成，安装后自动重启")}</p> : null}
         {failed ? (
-          <p className="update-banner-hint warn">自动下载失败，可手动下载安装包</p>
+          <p className="update-banner-hint warn">{t("自动下载失败，可手动下载安装包")}</p>
         ) : null}
       </div>
       <div className="update-banner-actions">
         {downloading ? (
           <button type="button" className="ghost" disabled>
-            {status.percent < 0 ? "下载中…" : `下载中 ${status.percent}%`}
+            {status.percent < 0 ? t("下载中…") : t("下载中 {{percent}}%", { percent: status.percent })}
           </button>
         ) : downloaded ? (
           <button
@@ -125,7 +127,7 @@ export function UpdateBanner() {
             className="ghost accent"
             onClick={() => window.owncoder.installUpdate()}
           >
-            安装并重启
+            {t("安装并重启")}
           </button>
         ) : failed ? (
           <button
@@ -136,16 +138,16 @@ export function UpdateBanner() {
               setDismissed(true);
             }}
           >
-            下载安装包
+            {t("下载安装包")}
           </button>
         ) : (
           <button type="button" className="ghost accent" onClick={handleDownload}>
-            {info.canAutoUpdate ? "立即更新" : "打开下载页"}
+            {info.canAutoUpdate ? t("立即更新") : t("打开下载页")}
           </button>
         )}
         {!downloading ? (
           <button type="button" className="ghost" onClick={() => setDismissed(true)}>
-            稍后
+            {t("稍后")}
           </button>
         ) : null}
       </div>

@@ -40,9 +40,9 @@
   --user-bubble-border: #2a3d52;
   --code-inline-bg: #1a1e28;
   --table-head-bg: #141820;
-  /* Quieter active session highlight (less blue punch) */
-  --session-active: #161c24;
-  --session-active-hover: #1a222c;
+  /* Active session: readable at a glance, still restrained */
+  --session-active: #1a2530;
+  --session-active-hover: #1e2b38;
   --danger-btn-bg: #2a1818;
   --danger-btn-border: #5a3030;
   --surface-tint: #11151b;
@@ -122,8 +122,8 @@
   --user-bubble-border: #c4d3d7;
   --code-inline-bg: #e9e7e2;
   --table-head-bg: #eeece7;
-  --session-active: #dfe8e9;
-  --session-active-hover: #d5e1e3;
+  --session-active: #d2e0e4;
+  --session-active-hover: #c6d7dc;
   --danger-btn-bg: #f9e8e6;
   --danger-btn-border: #dfb5b0;
   --surface-tint: #eeece7;
@@ -811,10 +811,10 @@ body,
   border-radius: 8px;
 }
 
-/* 高亮整块 session-wrap，使状态图标落在边框/背景内（暗色下去掉刺眼加粗/粗竖条） */
+/* 高亮整块 session-wrap，使状态图标落在边框/背景内；选中态需一眼可辨但仍克制 */
 .session-wrap.active {
   background: var(--session-active);
-  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--accent) 55%, transparent);
+  box-shadow: inset 3px 0 0 var(--accent);
 }
 
 .session-wrap.active:hover {
@@ -827,7 +827,8 @@ body,
 }
 
 .session-wrap.active .session-title {
-  font-weight: 400;
+  font-weight: 560;
+  color: var(--text);
 }
 
 /* ── Session status icons (leftmost in sidebar) ── */
@@ -2435,6 +2436,86 @@ button.ghost.accent {
   display: none;
 }
 
+/* ── Process steps (collapsed tool/intermediate chain, completed rounds) ── */
+.process-block {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+
+.process-head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  padding: 6px 10px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+}
+
+.process-head:hover {
+  background: var(--glass-bg);
+}
+
+.process-icon {
+  font-size: 13px;
+  flex-shrink: 0;
+}
+
+.process-title {
+  flex: 1;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.process-body {
+  border-top: 1px solid var(--overlay-03);
+  padding: 6px 10px;
+  max-height: 320px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.process-step {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.process-step-arg {
+  color: var(--muted);
+  opacity: 0.8;
+  font-family: monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 60%;
+}
+
+.process-step-text {
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+
+.process-step-text .md-body {
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.process-step-text .md-code-copy-btn {
+  display: none;
+}
+
 /* ── Decompose card (task_decompose result) ──────────────────────────────── */
 .decompose-card {
   border: 1px solid rgba(120, 200, 160, 0.18);
@@ -2508,7 +2589,20 @@ button.ghost.accent {
   margin-bottom: 2px;
 }
 
-.decompose-understanding {
+.decompose-task {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.decompose-task-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-weight: 600;
+}
+
+.decompose-intent {
   color: var(--text);
   white-space: pre-wrap;
 }
@@ -3737,6 +3831,71 @@ button.ghost.accent {
   font-size: 14px;
   line-height: 1.45;
   min-height: 72px;
+  max-height: 240px;
+  overflow-y: hidden;
+  transition: height 120ms ease;
+}
+
+.composer-file-input {
+  display: none;
+}
+
+.upload-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 6px 10px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.upload-trigger:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.upload-trigger:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.upload-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: min(320px, 45vw);
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.upload-chip.error {
+  border-color: var(--danger-btn-border);
+  color: var(--danger-text);
+}
+
+.upload-chip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.upload-chip button {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.upload-error {
+  color: var(--danger-text);
+  font-size: 12px;
 }
 
 .composer-bar {
@@ -6730,12 +6889,12 @@ button.ghost.tiny.danger:hover {
 }
 
 :root[data-theme="codex"] .session-wrap.active {
-  background: rgba(63, 97, 114, 0.11);
-  box-shadow: inset 2px 0 0 var(--accent);
+  background: rgba(63, 97, 114, 0.18);
+  box-shadow: inset 3px 0 0 var(--accent);
 }
 
 :root[data-theme="codex"] .session-wrap.active:hover {
-  background: rgba(63, 97, 114, 0.15);
+  background: rgba(63, 97, 114, 0.24);
 }
 
 :root[data-theme="codex"] .agent-body {
@@ -7007,4 +7166,22 @@ button.ghost.tiny.danger:hover {
 :root[data-theme="codex"] .error-banner-actions .ghost.accent:hover {
   border-color: #8d302d;
   background: #8d302d;
+}
+
+/* ── i18n：标题栏界面语言选择器 ─────────────────────────────────────────── */
+.app-locale-select {
+  height: 24px;
+  margin-right: 8px;
+  padding: 0 6px;
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.14));
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font-size: 12px;
+  line-height: 22px;
+  cursor: pointer;
+}
+
+:root[data-theme="codex"] .app-locale-select {
+  border-color: rgba(0, 0, 0, 0.18);
 }

@@ -11,7 +11,12 @@
  */
 import { create } from "zustand";
 import type { AppError } from "@owncoder/shared";
-import type { ChatTurnDto, DangerousCommandRequestDto, AskUserRequestDto, TerminalEntryDto } from "../../../preload/index";
+import type { ChatTurnDto, ChatAttachmentDto, DangerousCommandRequestDto, AskUserRequestDto, TerminalEntryDto } from "../../../preload/index";
+
+export interface QueuedMessageDto {
+  text: string;
+  attachments?: ChatAttachmentDto[];
+}
 
 // ── Live-event types ──────────────────────────────────────────────────────────
 
@@ -62,14 +67,18 @@ export type LiveEvent =
   | { kind: "structured"; id: string; parts: MessagePart[]; metadata: MessageMetadata };
 
 export interface DecompositionSnapshot {
-  understanding: string;
+  intent: string;
   userConstraints: string[];
-  steps: Array<{
+  tasks: Array<{
     id: string;
     description: string;
-    dependsOn: string[];
-    informationNeeds: Array<{ id: string; question: string }>;
-    stopReadingWhen: Array<{ condition: string; requiredEvidenceIds: string[] }>;
+    steps: Array<{
+      id: string;
+      description: string;
+      dependsOn: string[];
+      informationNeeds: Array<{ id: string; question: string }>;
+      stopReadingWhen: Array<{ condition: string; requiredEvidenceIds: string[] }>;
+    }>;
   }>;
   fallback: boolean;
 }
@@ -123,7 +132,7 @@ export interface ChatSessionRuntime {
   historyHasMore: boolean;
   historyLoading: boolean;
   sending: boolean;
-  queuedMessages: string[];
+  queuedMessages: QueuedMessageDto[];
   liveEvents: LiveEvent[];
   terminal: TerminalEntryDto[];
   liveStatus: string;
@@ -284,7 +293,7 @@ export interface ChatState {
   historyHasMore: boolean;
   historyLoading: boolean;
   sending: boolean;
-  queuedMessages: string[];
+  queuedMessages: QueuedMessageDto[];
   liveEvents: LiveEvent[];
   terminal: TerminalEntryDto[];
   liveStatus: string;
@@ -317,7 +326,7 @@ export interface ChatActions {
   prependHistory: (turns: ChatTurnDto[], beforeSeq: number | null, hasMore: boolean, sessionId?: string) => void;
   setHistoryPageState: (patch: Partial<Pick<ChatSessionRuntime, "historyBeforeSeq" | "historyHasMore" | "historyLoading">>, sessionId?: string) => void;
   setSending: (v: boolean, sessionId?: string) => void;
-  setQueuedMessages: (msgs: string[], sessionId?: string) => void;
+  setQueuedMessages: (msgs: QueuedMessageDto[], sessionId?: string) => void;
 
   setLiveEvents: (events: LiveEvent[] | ((prev: LiveEvent[]) => LiveEvent[]), sessionId?: string) => void;
   /** Apply multiple live-turn fields in one Zustand transaction. */

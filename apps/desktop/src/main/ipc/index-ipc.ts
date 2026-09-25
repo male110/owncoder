@@ -3,6 +3,7 @@
  */
 import { ipcMain, shell } from "electron";
 import type { IpcContext } from "./types";
+import { mt } from "../i18n";
 
 export function registerIndexHandlers(ctx: IpcContext): void {
   const { session } = ctx;
@@ -18,7 +19,7 @@ export function registerIndexHandlers(ctx: IpcContext): void {
     const status = session.getIndex().status();
     return {
       ...status,
-      message: "索引仅在项目打开时初始化，后续由文件监听增量更新；手动重建已禁用。",
+      message: mt("索引仅在项目打开时初始化，后续由文件监听增量更新；手动重建已禁用。"),
     };
   });
 
@@ -29,18 +30,18 @@ export function registerIndexHandlers(ctx: IpcContext): void {
     const status = await (await session.getCodemap()).status();
     return {
       ...status,
-      message: "Codemap 仅在项目打开时初始化，后续由文件监听增量更新；手动重建已禁用。",
+      message: mt("Codemap 仅在项目打开时初始化，后续由文件监听增量更新；手动重建已禁用。"),
     };
   });
   ipcMain.handle("index:codemapSearch", async (_e, query: unknown, limit?: unknown) => {
     const text = typeof query === "string" ? query.trim().slice(0, 512) : "";
-    if (!text) throw new Error("请输入要搜索的符号或描述");
+    if (!text) throw new Error(mt("请输入要搜索的符号或描述"));
     const count = typeof limit === "number" && Number.isFinite(limit) ? Math.trunc(limit) : 20;
     return (await session.getCodemap()).search(text, Math.max(1, Math.min(count, 50)));
   });
   ipcMain.handle("index:codemapImpact", async (_e, query: unknown, depth?: unknown) => {
     const text = typeof query === "string" ? query.trim().slice(0, 512) : "";
-    if (!text) throw new Error("请输入要分析的符号");
+    if (!text) throw new Error(mt("请输入要分析的符号"));
     const hops = typeof depth === "number" && Number.isFinite(depth) ? Math.trunc(depth) : 3;
     return (await session.getCodemap()).impact(text, Math.max(1, Math.min(hops, 6)));
   });
