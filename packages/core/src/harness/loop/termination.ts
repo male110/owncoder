@@ -687,22 +687,27 @@ export function updateStateAfterResponse(
   // retained for history/debugging and is one additional turn behind.
   const hasPreviousContent = state.lastContent.trim().length > 0;
   
-  if (hasCurrentContent && hasPreviousContent) {
-    const similarity = calculateSimilarity(state.lastContent, response.content);
-    
-    if (similarity >= OUTPUT_SIMILARITY_THRESHOLD) {
-      // High similarity (>= 80%) → increment counter
-      state.consecutiveSimilarOutputs += 1;
-    } else if (similarity < OUTPUT_SIMILARITY_RESET_THRESHOLD) {
-      // Low similarity (< 50%) → reset counter
+  // Only perform similarity check for pure text output (no tool calls)
+  const hasToolCalls = response.toolCalls && response.toolCalls.length > 0;
+  
+  if (!hasToolCalls) {
+    if (hasCurrentContent && hasPreviousContent) {
+      const similarity = calculateSimilarity(state.lastContent, response.content);
+      
+      if (similarity >= OUTPUT_SIMILARITY_THRESHOLD) {
+        // High similarity (>= 80%) → increment counter
+        state.consecutiveSimilarOutputs += 1;
+      } else if (similarity < OUTPUT_SIMILARITY_RESET_THRESHOLD) {
+        // Low similarity (< 50%) → reset counter
+        state.consecutiveSimilarOutputs = 0;
+      }
+      // else: Medium similarity (50-80%) → keep counter unchanged (transition content)
+    } else if (hasCurrentContent || hasPreviousContent) {
+      // One side empty, other non-empty → reset
       state.consecutiveSimilarOutputs = 0;
     }
-    // else: Medium similarity (50-80%) → keep counter unchanged (transition content)
-  } else if (hasCurrentContent || hasPreviousContent) {
-    // One side empty, other non-empty → reset
-    state.consecutiveSimilarOutputs = 0;
+    // else: both empty → keep counter unchanged (consecutive empty responses)
   }
-  // else: both empty → keep counter unchanged (consecutive empty responses)
   
   // Move current content to previous before updating
   state.previousContent = state.lastContent;

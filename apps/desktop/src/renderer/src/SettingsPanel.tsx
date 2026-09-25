@@ -483,6 +483,59 @@ export function SettingsPanel({ open, onClose, onSaved, initialTab }: Props) {
                   }
                 />
               </label>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={draft.harness.separateStageModels ?? false}
+                  onChange={(e) =>
+                    patch((d) => {
+                      d.harness.separateStageModels = e.target.checked;
+                    })
+                  }
+                />
+                {tr("分阶段模型设置")}
+              </label>
+              <p className="hint">{tr("建议任务分解用较好的模型，React 用中等的模型。React 循环比较费 token。")}</p>
+              {draft.harness.separateStageModels && (
+                <>
+                  <label>
+                    {tr("任务分解模型")}
+                    <select
+                      value={draft.harness.decomposerModel ?? ""}
+                      onChange={(e) =>
+                        patch((d) => {
+                          d.harness.decomposerModel = e.target.value || undefined;
+                        })
+                      }
+                    >
+                      <option value="">{tr("使用默认模型")}</option>
+                      {(draft.selectedModels ?? []).map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    {tr("React 循环模型")}
+                    <select
+                      value={draft.harness.reactModel ?? ""}
+                      onChange={(e) =>
+                        patch((d) => {
+                          d.harness.reactModel = e.target.value || undefined;
+                        })
+                      }
+                    >
+                      <option value="">{tr("使用默认模型")}</option>
+                      {(draft.selectedModels ?? []).map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </>
+              )}
             </div>
           )}
 

@@ -87,8 +87,16 @@ function provisionalTitle(text: string): string {
 
 // 仅当会话仍持有默认标题（"新会话"或空）时，立即用首条用户消息更新侧栏标题，
 // 让"新建会话"在发送瞬间即反映主题，无需等待后端回合结束返回标题。
+// 标题一旦被设置为非"新会话"后，不再自动更新，保持稳定以便用户查找历史会话。
 function applyProvisionalTitleIfNeeded(sid: string, text: string) {
   const cur = useSessionStore.getState();
+  const curSessions = useSessionStore.getState().sessions;
+  const currentItem = curSessions.find((s) => s.id === sid);
+  
+  // 只在标题仍为"新会话"或空时更新，已设置的标题不再修改
+  const shouldUpdate = !currentItem?.title || currentItem.title === "新会话";
+  if (!shouldUpdate) return;
+
   const title = provisionalTitle(text);
   if (cur.activeSessionId === sid) cur.setSessionTitle(title);
 
@@ -97,9 +105,7 @@ function applyProvisionalTitleIfNeeded(sid: string, text: string) {
   // project B while the user has already switched. If the session belongs
   // to the current project it is already in the list (createPendingSession /
   // refreshSessions); update in place. Otherwise leave `sessions` alone.
-  const curSessions = useSessionStore.getState().sessions;
-  const currentItem = curSessions.find((s) => s.id === sid);
-  if (currentItem && (!currentItem.title || currentItem.title === "新会话")) {
+  if (currentItem) {
     cur.setSessions(curSessions.map((it) => (it.id === sid ? { ...it, title } : it)));
   }
 
@@ -111,10 +117,9 @@ function applyProvisionalTitleIfNeeded(sid: string, text: string) {
     let changed = false;
     const next = { ...projects };
     for (const [r, list] of Object.entries(projects)) {
-      if (list.some((s) => s.id === sid)) {
-        next[r] = list.map((it) =>
-          it.id === sid && (!it.title || it.title === "新会话") ? { ...it, title } : it,
-        );
+      const listItem = list.find((s) => s.id === sid);
+      if (listItem && (!listItem.title || listItem.title === "新会话")) {
+        next[r] = list.map((it) => (it.id === sid ? { ...it, title } : it));
         changed = true;
       }
     }
@@ -223,37 +228,46 @@ export function useChatActions(deps: {
     // The main process persists the title before returning. Apply that exact
     // session result immediately instead of waiting for slower list/project
     // refreshes, which may still contain the temporary "新会话" title.
+    // 标题固定策略：只在当前标题为"新会话"时才接受后端的标题更新
     if (res.sessionId && res.sessionTitle) {
       const current = useSessionStore.getState();
-      if (current.activeSessionId === res.sessionId) {
-        current.setSessionTitle(res.sessionTitle);
-      }
-      // Only rewrite the current-project mirror when this session already
-      // belongs there. Never insert a foreign session into `sessions`.
       const curSessions = useSessionStore.getState().sessions;
-      if (curSessions.some((item) => item.id === res.sessionId)) {
-        current.setSessions(
-          curSessions.map((item) =>
-            item.id === res.sessionId ? { ...item, title: res.sessionTitle! } : item,
-          ),
-        );
-      }
-      // Update every project cache that already owns this session. Using the
-      // current workspace root alone would miss the owning project after the
-      // user switches mid-turn, and could no-op the final title sync.
-      current.setSessionsByProject((projects) => {
-        let changed = false;
-        const next = { ...projects };
-        for (const [r, list] of Object.entries(projects)) {
-          if (list.some((item) => item.id === res.sessionId)) {
-            next[r] = list.map((item) =>
-              item.id === res.sessionId ? { ...item, title: res.sessionTitle! } : item,
-            );
-            changed = true;
-          }
+      const currentItem = curSessions.find((item) => item.id === res.sessionId);
+      
+      // 检查是否应该更新标题：仅当标题仍为"新会话"或空时
+      const shouldUpdateTitle = !currentItem?.title || currentItem.title === "新会话";
+      
+      if (shouldUpdateTitle) {
+        if (current.activeSessionId === res.sessionId) {
+          current.setSessionTitle(res.sessionTitle);
         }
-        return changed ? next : projects;
-      });
+        // Only rewrite the current-project mirror when this session already
+        // belongs there. Never insert a foreign session into `sessions`.
+        if (curSessions.some((item) => item.id === res.sessionId)) {
+          current.setSessions(
+            curSessions.map((item) =>
+              item.id === res.sessionId ? { ...item, title: res.sessionTitle! } : item,
+            ),
+          );
+        }
+        // Update every project cache that already owns this session. Using the
+        // current workspace root alone would miss the owning project after the
+        // user switches mid-turn, and could no-op the final title sync.
+        current.setSessionsByProject((projects) => {
+          let changed = false;
+          const next = { ...projects };
+          for (const [r, list] of Object.entries(projects)) {
+            const listItem = list.find((item) => item.id === res.sessionId);
+            if (listItem && (!listItem.title || listItem.title === "新会话")) {
+              next[r] = list.map((item) =>
+                item.id === res.sessionId ? { ...item, title: res.sessionTitle! } : item,
+              );
+              changed = true;
+            }
+          }
+          return changed ? next : projects;
+        });
+      }
     }
 
     // Fire-and-forget: refreshSessions runs in the background so it doesn't

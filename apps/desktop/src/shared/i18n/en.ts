@@ -427,6 +427,8 @@ export const en = {
   "上下文": "Context",
   "常规设置": "General",
   "语言": "Language",
+  "建议任务分解用较好的模型，React 用中等的模型。React 循环比较费 token。": "Recommend using a better model for task decomposition and a medium model for React loop. React loop consumes more tokens.",
+  "使用默认模型": "Use Default Model",
   "同时作用于界面显示语言与 LLM 回复语言。":
     "Applies to both the UI language and the LLM reply language.",
   "MCP": "MCP",
@@ -587,6 +589,11 @@ export const en = {
   "中文, 语言, 回复": "Chinese, language, reply",
   "全局偏好": "Global memories",
   "当前项目偏好": "Current project memories",
+  "分阶段模型设置": "Separate stage models",
+  "任务分解模型": "Decomposer model",
+  "React 循环模型": "React loop model",
+  "开启后，任务分解和 React 循环使用不同模型": "When enabled, task decomposition and React loop use different models",
+  "建议任务分解用较好模型，React 循环用中等模型（循环更费 token）": "Recommend a stronger model for decomposition, medium for React loop (loops consume more tokens)",
 
   // ── 主进程对话框 / 错误 ───────────────────────────────────────────────────
   "OwnCoder 需要你确认": "OwnCoder needs your confirmation",

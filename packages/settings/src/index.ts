@@ -201,6 +201,12 @@ export const SystemWorkflowConfigSchema = z.object({
     checkpoint: z.boolean().default(true),
     /** UI + LLM reply language: follow OS, Chinese, or English. */
     locale: z.enum(["system", "zh", "en"]).default("system"),
+    /** 分阶段模型设置：开启后任务分解和 React 循环使用不同模型 */
+    separateStageModels: z.boolean().default(false),
+    /** 任务分解阶段模型（开启 separateStageModels 时生效，否则使用 model） */
+    decomposerModel: z.string().optional(),
+    /** React 循环阶段模型（开启 separateStageModels 时生效，否则使用 model） */
+    reactModel: z.string().optional(),
   }),
   mcp: z
     .object({

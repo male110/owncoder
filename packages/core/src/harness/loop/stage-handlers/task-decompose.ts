@@ -29,7 +29,7 @@ import {
 import { MemoryManager } from "../../memory.ts";
 import { withRetry } from "../../model-coordinator.ts";
 import { jsonrepair } from "jsonrepair";
-import { emitStage } from "../stages.ts";
+import { emitStage, resolveStageModel } from "../stages.ts";
 import type { AgentLoopOpts, ChatTurn } from "../types.ts";
 import { normalizeRelevantHistory, type TaskItem, type TaskRelevantHistory } from "../../../plans.ts";
 import { documentIntentContext } from "../document-workflow.ts";
@@ -1298,7 +1298,7 @@ export async function runTaskDecompose(
         taskId: opts.sessionId,
         thinking: { effort: "low" },
       }),
-      { maxRetries: 1, baseDelay: 1000, signal: opts.signal },
+      { maxRetries: 1, baseDelay: 3000, signal: opts.signal },
     );
 
     const planText = (planResult.result as { choices: Array<{ message: { content?: string } }>; usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } }).choices[0]!.message.content ?? "";
@@ -1559,8 +1559,10 @@ export async function runTaskDecompose(
  */
 export const taskDecomposeHandler: StageHandler = {
   async run(ctx) {
-    const { opts, model, tracer, memory, reasoningTrace, node } = ctx;
+    const { opts, tracer, memory, reasoningTrace, node } = ctx;
     emitStage(opts.onEvent, "start", node);
+    // 使用分阶段模型配置（如果启用）
+    const model = resolveStageModel(opts.workflow, opts.mode, node, "decomposer");
     const result = await runTaskDecompose(
       opts, model, tracer, memory, reasoningTrace, ctx.budgets, node.prompt, ctx.messages,
     );

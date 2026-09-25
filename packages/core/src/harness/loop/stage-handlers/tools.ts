@@ -33,7 +33,8 @@ async function runToolLoop(ctx: StageHandlerContext): Promise<void> {
     reasoningTrace, state, node, taskClassification,
   } = ctx;
 
-  const stageModel = resolveStageModel(opts.workflow, opts.mode, node);
+  // 使用分阶段模型配置（如果启用）
+  const stageModel = resolveStageModel(opts.workflow, opts.mode, node, "react");
   assertLlmAuth(stageModel, opts.llmApiKey);
   const maxIter = opts.maxIterations ?? node.params?.maxIterations ?? 200;
   emitStage(opts.onEvent, "start", node);

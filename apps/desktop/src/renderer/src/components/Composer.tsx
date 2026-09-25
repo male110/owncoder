@@ -138,14 +138,43 @@ function ComposerImpl({
   const uploadFile = useCallback(async (file: File) => {
     setAttachments((items) => [...items, { file, status: "uploading" }]);
     try {
-      const data = new Uint8Array(await file.arrayBuffer());
-      const result = await window.owncoder.uploadFile({ name: file.name, type: file.type, data, provider: "uguu" });
-      const attachment = { name: result.name || file.name, mimeType: file.type || "application/octet-stream", url: result.url, size: result.size };
+      // 获取当前选中模型的协议类型
+      const currentModel = availableModels[0];
+      const currentProvider = providers.find((p) => p.id === currentModel?.providerId);
+      const isAnthropicProtocol = currentProvider?.apiFormat === "anthropic-messages";
+
+      let attachment: ChatAttachmentDto;
+
+      if (isAnthropicProtocol) {
+        // Anthropic 协议：转 base64
+        const arrayBuffer = await file.arrayBuffer();
+        const base64 = btoa(
+          new Uint8Array(arrayBuffer).reduce((data, byte) => data + String.fromCharCode(byte), '')
+        );
+        const dataUrl = `data:${file.type || "application/octet-stream"};base64,${base64}`;
+        attachment = {
+          name: file.name,
+          mimeType: file.type || "application/octet-stream",
+          url: dataUrl,
+          size: file.size,
+        };
+      } else {
+        // 非 Anthropic 协议：上传图片
+        const data = new Uint8Array(await file.arrayBuffer());
+        const result = await window.owncoder.uploadFile({ name: file.name, type: file.type, data, provider: "uguu" });
+        attachment = {
+          name: result.name || file.name,
+          mimeType: file.type || "application/octet-stream",
+          url: result.url,
+          size: result.size,
+        };
+      }
+
       setAttachments((items) => items.map((item) => item.file === file ? { ...item, status: "success", result: attachment } : item));
     } catch (error) {
       setAttachments((items) => items.map((item) => item.file === file ? { ...item, status: "error", error: error instanceof Error ? error.message : "上传失败，请重试" } : item));
     }
-  }, []);
+  }, [availableModels, providers]);
 
   const onFileSelected = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const files = [...(e.target.files ?? [])];

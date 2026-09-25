@@ -54,7 +54,7 @@ describe("anthropicMessagesCodec encode", () => {
     );
   });
 
-  it("lifts system messages and maps tools / tool_calls / tool results", () => {
+  it("lifts system messages and maps tools / tool_calls / tool results", async () => {
     const messages: ChatMessage[] = [
       { role: "system", content: "Be careful." },
       { role: "system", content: "Use tools." },
@@ -72,14 +72,14 @@ describe("anthropicMessagesCodec encode", () => {
       },
       { role: "tool", tool_call_id: "call/1!", content: "file body" },
     ];
-    const body = encodeAnthropicMessages({
+    const body = await encodeAnthropicMessages({
       model: "claude-sonnet-4",
       messages,
       tools,
       stream: false,
       temperature: 0.2,
       maxTokens: 16384,
-    }) as Record<string, unknown> & ReturnType<typeof encodeAnthropicMessages>;
+    }) as Record<string, unknown> & Awaited<ReturnType<typeof encodeAnthropicMessages>>;
 
     expect(body.system).toBe("Be careful.\n\nUse tools.");
     expect(body.model).toBe("claude-sonnet-4");
@@ -112,16 +112,16 @@ describe("anthropicMessagesCodec encode", () => {
     expect(body.messages.at(-1)?.role).toBe("user");
   });
 
-  it("encodes multi-image attachments as source.url blocks and non-images as plain text", () => {
-    const body = encodeAnthropicMessages({
+  it("encodes multi-image attachments as source.base64 blocks and non-images as plain text", async () => {
+    const body = await encodeAnthropicMessages({
       model: "claude-sonnet-4",
       messages: [
         {
           role: "user",
           content: "look",
           attachments: [
-            { name: "a.png", mimeType: "image/png", url: "https://cdn.example/a.png" },
-            { name: "b.jpg", mimeType: "image/jpeg", url: "https://cdn.example/b.jpg" },
+            { name: "a.png", mimeType: "image/png", url: "data:image/png;base64,iVBORw0KGgo=" },
+            { name: "b.jpg", mimeType: "image/jpeg", url: "data:image/jpeg;base64,/9j/4AAQ=" },
             { name: "notes.pdf", mimeType: "application/pdf", url: "https://cdn.example/notes.pdf" },
           ],
         },
