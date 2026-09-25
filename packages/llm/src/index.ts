@@ -285,6 +285,8 @@ async function writeLlmResponseLog(entry: {
   durationMs: number;
   error?: string;
   taskId?: string;
+  /** 原始 HTTP 响应文本（JSON 解析前），用于排查解析失败等问题 */
+  rawResponse?: string;
 }): Promise<void> {
   if (!fileLogEnabled) return;
   
@@ -305,6 +307,17 @@ async function writeLlmResponseLog(entry: {
   out.push(
     `${ts} [${category}] ${purposeLabel}LLM 请求 #${entry.seq} ${footerStatus} (耗时 ${entry.durationMs}ms)`,
   );
+
+  // 先记录原始返回（JSON 解析前），再记录解码后的内容
+  if (entry.rawResponse) {
+    out.push(`${indent}─── 原始返回 ───`);
+    const rawPreview = entry.rawResponse.length > MAX_LOG_ENTRY_CHARS
+      ? entry.rawResponse.slice(0, MAX_LOG_ENTRY_CHARS) + `\n${indent}[... 截断: 超出 ${MAX_LOG_ENTRY_CHARS} 字符限制 ...]`
+      : entry.rawResponse;
+    for (const line of rawPreview.split("\n")) {
+      out.push(`${indent}  ${line}`);
+    }
+  }
 
   if (entry.error) {
     out.push(`${indent}ERROR: ${entry.error}`);
@@ -373,6 +386,8 @@ async function writeLlmLog(entry: {
   durationMs: number;
   error?: string;
   taskId?: string;
+  /** 原始 HTTP 响应文本（JSON 解析前） */
+  rawResponse?: string;
 }): Promise<void> {
   // 向后兼容：先写请求，再写响应
   await writeLlmRequestLog({
@@ -392,6 +407,7 @@ async function writeLlmLog(entry: {
     durationMs: entry.durationMs,
     error: entry.error,
     taskId: entry.taskId,
+    rawResponse: entry.rawResponse,
   });
 }
 
@@ -779,6 +795,8 @@ function writeCallLog(entry: {
   durationMs: number;
   error?: string;
   taskId?: string;
+  /** 原始 HTTP 响应文本（JSON 解析前） */
+  rawResponse?: string;
 }): void {
   writeLlmLog(entry).catch(() => {});
 }
@@ -844,7 +862,32 @@ export async function chatCompletion(
           throw err;
         }
 
-        const json = await res.json();
+        // 先获取原始返回文本，记录日志后再解析 JSON
+        const rawText = await res.text();
+        let json: unknown;
+        try {
+          json = JSON.parse(rawText);
+        } catch (parseErr) {
+          const err = parseErr instanceof Error ? parseErr : new Error(String(parseErr));
+          writeCallLog({
+            seq,
+            timestamp: timestampStr(),
+            purpose: opts?.purpose ?? "unknown",
+            model: logModel(ref),
+            messages,
+            tools: opts?.tools,
+            temperature: opts?.temperature,
+            maxTokens: opts?.maxTokens,
+            response: null,
+            streaming: false,
+            durationMs: Date.now() - startTime,
+            error: `JSON parse error: ${err.message}`,
+            taskId: opts?.taskId,
+            rawResponse: rawText,
+          });
+          throw err;
+        }
+
         let decoded: ChatResponse;
         try {
           decoded = codec.decodeResponse(json);
@@ -864,6 +907,7 @@ export async function chatCompletion(
             durationMs: Date.now() - startTime,
             error: err.message,
             taskId: opts?.taskId,
+            rawResponse: rawText,
           });
           throw err;
         }
@@ -881,6 +925,7 @@ export async function chatCompletion(
           streaming: false,
           durationMs: Date.now() - startTime,
           taskId: opts?.taskId,
+          rawResponse: rawText,
         });
 
         return decoded;

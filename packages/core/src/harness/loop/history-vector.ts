@@ -76,7 +76,7 @@ export interface HistoryRoundInput {
   sessionId: string;
   roundIndex?: number;
   userInput: string;
-  taskDecompose?: unknown;
+  // taskDecompose 已移除：不再索引任务分解结果，避免历史信息膨胀
   assistantReport?: string;
   /**
    * 凭证信息（精简）：只保留定位元数据，不写入 excerpt / fileEvidence 全文，

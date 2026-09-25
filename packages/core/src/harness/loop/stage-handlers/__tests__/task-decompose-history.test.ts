@@ -1452,6 +1452,7 @@ describe("分解历史：最近5轮 + 按用户输入向量召回（同容器不
           countBySession() {
             return 1;
           },
+          deleteBySession() {},
         },
       },
     });
@@ -1528,6 +1529,7 @@ describe("分解历史：最近5轮 + 按用户输入向量召回（同容器不
           countBySession() {
             return 5;
           },
+          deleteBySession() {},
         },
       },
     });
@@ -1583,6 +1585,7 @@ describe("分解历史：最近5轮 + 按用户输入向量召回（同容器不
           countBySession() {
             return 2;
           },
+          deleteBySession() {},
         },
       },
     });
@@ -1643,6 +1646,7 @@ describe("分解历史：最近5轮 + 按用户输入向量召回（同容器不
           countBySession() {
             return 3;
           },
+          deleteBySession() {},
         },
       },
     });

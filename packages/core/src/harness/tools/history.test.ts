@@ -65,6 +65,7 @@ function makeCtx(hits: HistorySearchHit[]): ToolContext {
         countBySession() {
           return hits.length;
         },
+        deleteBySession() {},
       },
     },
   };

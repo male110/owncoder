@@ -414,22 +414,6 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
           sessionId: sid,
           roundIndex: state.roundIndex,
           userInput: opts.userMessage,
-          taskDecompose: state.rawDecompose
-            ? {
-                intent: state.rawDecompose.intent,
-                userConstraints: state.rawDecompose.userConstraints ?? [],
-                tasks: state.rawDecompose.tasks.map((task) => ({
-                  id: task.id,
-                  description: task.description,
-                  steps: task.steps.map((step) => ({
-                    id: step.id,
-                    description: step.description,
-                    dependsOn: step.dependsOn,
-                    informationNeeds: step.informationNeeds,
-                  })),
-                })),
-              }
-            : undefined,
           assistantReport: assistantText,
           // 凭证只归档定位元数据，不写入 excerpt / fileEvidence 全文。
           evidence: roundEvidence.map((item) => ({

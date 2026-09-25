@@ -469,14 +469,15 @@ export function formatDecomposeSummary(d: PersistedDecompose): string {
 export function formatRoundBlock(
   round: TurnRoundRecord,
   displayIndex: number,
-  options?: { includeProcessInfo?: boolean },
+  options?: { includeProcessInfo?: boolean; includeDecompose?: boolean },
 ): string {
   const includeProcessInfo = options?.includeProcessInfo ?? true;
+  const includeDecompose = options?.includeDecompose ?? true;
   const parts: string[] = [`## Round ${displayIndex}`, `[user] ${round.userInput}`];
   if (round.attachmentUrls?.length) {
     parts.push(`[user image URLs]\n${round.attachmentUrls.map((url) => `- ${url}`).join("\n")}`);
   }
-  if (round.taskDecompose) {
+  if (includeDecompose && round.taskDecompose) {
     parts.push(`[decompose] ${formatDecomposeSummary(round.taskDecompose)}`);
   }
   if (includeProcessInfo && round.evidence && round.evidence.length > 0) {
@@ -523,17 +524,32 @@ export function formatRoundBlock(
  * that round and all older ones omit evidence/fileChanges (user + decompose +
  * report only). No per-round truncation — callers already limit how many
  * rounds are loaded.
+ *
+ * 分解结果只保留最近一次（前一轮）：从最新轮向前查找第一个有分解结果的轮次，
+ * 只有该轮保留分解信息，其余轮次省略分解结果。
  */
 export function formatRoundsForDecomposeHistory(roundsOldestFirst: TurnRoundRecord[]): string[] {
   const newestFirst = roundsOldestFirst.slice().reverse();
   let stillInInterruptedSuffix = true;
+  
+  // 找到最近一次有分解结果的轮次索引（从新到旧查找）
+  let lastDecomposeIndex = -1;
+  for (let i = 0; i < newestFirst.length; i++) {
+    if (newestFirst[i].taskDecompose) {
+      lastDecomposeIndex = i;
+      break;
+    }
+  }
+  
   return newestFirst.map((round, idx) => {
     const includeProcessInfo =
       idx === 0 || (stillInInterruptedSuffix && !round.assistantReport);
     if (round.assistantReport) {
       stillInInterruptedSuffix = false;
     }
-    return formatRoundBlock(round, idx + 1, { includeProcessInfo });
+    // 只有最近一次有分解结果的轮次才保留分解信息
+    const includeDecompose = lastDecomposeIndex !== -1 && idx === lastDecomposeIndex;
+    return formatRoundBlock(round, idx + 1, { includeProcessInfo, includeDecompose });
   });
 }
 
