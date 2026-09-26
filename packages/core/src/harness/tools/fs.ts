@@ -6,11 +6,13 @@ import { isPlanPath, writePlanFile, extractTitle, classifyPlanKind } from "../..
 import { getGitStatus } from "../../git.ts";
 import { snapshotFileBeforeWrite } from "../checkpoint.ts";
 import { applyUnifiedDiff } from "./unified-diff.ts";
+import { resolvePatchTarget } from "./patch-target.ts";
 import { applySearchReplace } from "./search-replace.ts";
 import { isReadonlyBash, looksDangerous } from "../terminal.ts";
 import { checkWritable } from "../writable.ts";
 import { fromMarkdown } from "mdast-util-from-markdown";
 import { redactSecrets, isRedactionEnabled } from "../redact.ts";
+import { redactCommandReadOutput } from "../command-redaction.ts";
 import type { ToolContext, ToolResult } from "./types.ts";
 import {
   assertInside,
@@ -958,11 +960,9 @@ function resolvePathFromReadSet(
 }
 
 export async function toolPatch(ctx: ToolContext, path: string, patch: string): Promise<ToolResult> {
-  if (!path || !path.trim()) {
-    const resolved = resolvePathFromReadSet(ctx.readSet, "apply_patch");
-    if ("error" in resolved) return fail(resolved.error);
-    path = resolved.path;
-  }
+  const target = resolvePatchTarget(path, patch);
+  if ("error" in target) return fail(target.error);
+  path = target.path;
   const check = checkWritable(ctx.workspaceRoot, path, ctx.workflow.context.writePolicy);
   if (!check.ok) return fail(check.reason ?? "not writable");
   const planBlock = assertPlanMutationAllowed(ctx, check.relPath);
@@ -1057,8 +1057,8 @@ export async function toolPatch(ctx: ToolContext, path: string, patch: string): 
     }
   }
 
-  if (!editResult || !editResult.success || !editResult.content) {
-    return fail(editResult.error ?? "patch failed");
+  if (!editResult || !editResult.success || editResult.content === undefined) {
+    return fail(editResult?.error ?? "patch failed");
   }
 
   // Snapshot and write
@@ -1482,25 +1482,30 @@ export async function toolBash(ctx: ToolContext, command: string): Promise<ToolR
     at: new Date().toISOString(),
   });
   const { stdout, stderr, code } = await runCommand(command, ctx.workspaceRoot, 300_000, ctx.signal);
+  const safeOutput = isRedactionEnabled(ctx.workflow)
+    ? await redactCommandReadOutput(command, ctx.workspaceRoot, stdout, stderr, {
+        sensitiveFiles: ctx.workflow.secrets?.sensitiveFiles,
+        patterns: ctx.workflow.secrets?.patterns,
+      })
+    : { stdout, stderr };
   ctx.onTerminal?.({
     id,
     command,
     cwd: ctx.workspaceRoot,
     exitCode: code,
-    stdout: stdout.slice(0, ctx.bashMaxChars),
-    stderr: stderr.slice(0, Math.floor(ctx.bashMaxChars / 2)),
+    stdout: safeOutput.stdout.slice(0, ctx.bashMaxChars),
+    stderr: safeOutput.stderr.slice(0, Math.floor(ctx.bashMaxChars / 2)),
     status: code === 0 ? "ok" : "error",
     at: new Date().toISOString(),
   });
-  const body = [`exit ${code}`, stdout && `stdout:\n${stdout}`, stderr && `stderr:\n${stderr}`]
+  const body = [
+    `exit ${code}`,
+    safeOutput.stdout && `stdout:\n${safeOutput.stdout}`,
+    safeOutput.stderr && `stderr:\n${safeOutput.stderr}`,
+  ]
     .filter(Boolean)
     .join("\n");
-  const safeBody = isRedactionEnabled(ctx.workflow)
-    ? redactSecrets(body || "(no output)", "", {
-        sensitiveFiles: ctx.workflow.secrets?.sensitiveFiles,
-        patterns: ctx.workflow.secrets?.patterns,
-      }).text
-    : body || "(no output)";
+  const safeBody = body || "(no output)";
   return ok(cap(safeBody, ctx.bashMaxChars));
 }
 

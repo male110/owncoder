@@ -20,10 +20,8 @@ const MAX_USER_INPUT_CHARS = 8_000;
 const MAX_REPORT_CHARS = 16_000;
 const MAX_UNDERSTANDING_CHARS = 4_000;
 const MAX_STEP_DESCRIPTION_CHARS = 500;
-const MAX_NEED_QUESTION_CHARS = 400;
 const MAX_TASKS = 20;
 const MAX_STEPS = 20;
-const MAX_NEEDS_PER_STEP = 10;
 const MAX_EVIDENCE_PER_ROUND = 200;
 const MAX_FILE_CHANGES_PER_ROUND = 30;
 const MAX_TOOL_CALLS_PER_ROUND = 100;
@@ -90,7 +88,6 @@ export interface PersistedDecomposeStep {
   id: string;
   description: string;
   dependsOn: string[];
-  stopReadingWhen: Array<{ condition: string; satisfied?: boolean }>;
   verificationCriteria?: {
     command: string;
     expectedOutput: string;
@@ -98,8 +95,6 @@ export interface PersistedDecomposeStep {
   };
   rollbackStrategy?: string;
   estimatedComplexity?: "low" | "medium" | "high";
-  /** 本步可复用历史。 */
-  relevantHistory?: string;
 }
 
 export interface PersistedDecomposeTask {
@@ -113,8 +108,6 @@ export interface PersistedDecompose {
   intent: string;
   userConstraints: string[];
   tasks: PersistedDecomposeTask[];
-  progressStatus?: string;
-  relevantHistory?: string;
 }
 
 export interface PersistedFileChange {
@@ -230,16 +223,6 @@ function sanitizeDecompose(raw: unknown): PersistedDecompose | undefined {
       typeof s.relevantHistory === "string" && s.relevantHistory.trim()
         ? clip(s.relevantHistory.trim(), MAX_UNDERSTANDING_CHARS)
         : undefined;
-    const stopReadingWhen = Array.isArray(s.stopReadingWhen)
-      ? s.stopReadingWhen.flatMap((item) => {
-          if (!item || typeof item !== "object") return [];
-          const c = item as Record<string, unknown>;
-          const condition = typeof c.condition === "string" ? c.condition.trim() : "";
-          const satisfied = typeof c.satisfied === "boolean" ? c.satisfied : false;
-          if (!condition) return [];
-          return [{ condition, satisfied }];
-        })
-      : [];
     return [
       {
         id: typeof s.id === "string" && s.id.trim() ? s.id.trim() : `step_${i + 1}`,
@@ -247,7 +230,6 @@ function sanitizeDecompose(raw: unknown): PersistedDecompose | undefined {
         dependsOn: Array.isArray(s.dependsOn)
           ? s.dependsOn.filter((d): d is string => typeof d === "string")
           : [],
-        stopReadingWhen,
         verificationCriteria: (() => {
           if (!s.verificationCriteria || typeof s.verificationCriteria !== "object") return undefined;
           const vc = s.verificationCriteria as Record<string, unknown>;
@@ -278,17 +260,10 @@ function sanitizeDecompose(raw: unknown): PersistedDecompose | undefined {
     }];
   });
   if (!intent && tasks.length === 0) return undefined;
-  const progressStatus =
-    typeof obj.progressStatus === "string" && obj.progressStatus.trim()
-      ? clip(obj.progressStatus.trim(), 500)
-      : undefined;
   return {
     intent,
-    relevantHistory:
-      typeof obj.relevantHistory === "string" && obj.relevantHistory.trim()
-        ? clip(obj.relevantHistory.trim(), MAX_UNDERSTANDING_CHARS)
-        : undefined,
-    userConstraints, tasks, progressStatus,
+    userConstraints,
+    tasks,
   };
 }
 
@@ -431,8 +406,7 @@ function nextIndex(rounds: TurnRoundRecord[]): number {
 
 export function formatDecomposeSummary(d: PersistedDecompose): string {
   // Output the full decomposition result as JSON so the next decompose call
-  // can see understanding, userConstraints, steps with informationNeeds and
-  // stopReadingWhen — not just a lossy text summary.
+  // can see understanding, userConstraints, steps with informationNeeds.
   return JSON.stringify(d, null, 2);
 }
 

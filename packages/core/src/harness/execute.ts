@@ -47,7 +47,13 @@ import {
   toolListSessionChanges,
   toolUndoSessionChange,
 } from "./tools/session-changes.ts";
-import { historyRecallQuery, toolRecallHistory } from "./tools/history.ts";
+import {
+  historyRecallBeforeTurn,
+  historyRecallQuery,
+  toolRecallHistory,
+  toolRecallHistoryBefore,
+  toolRecallHistoryForTaskDecompose,
+} from "./tools/history.ts";
 
 export type { ToolContext, ToolResult, ToolEventSink } from "./tools/types.ts";
 
@@ -270,6 +276,10 @@ async function runTool(ctx: ToolContext, call: ParsedToolCall): Promise<ToolResu
         return await toolProjectDeps(ctx);
       case "recall_history":
         return await toolRecallHistory(ctx, historyRecallQuery(args));
+      case "recall_history_before":
+        return await toolRecallHistoryBefore(ctx, historyRecallQuery(args), historyRecallBeforeTurn(args));
+      case "recall_history_for_task_decompose":
+        return await toolRecallHistoryForTaskDecompose(ctx, historyRecallQuery(args), historyRecallBeforeTurn(args) ?? 0);
       case "save_experience":
         return await toolSaveExperience(
           ctx,

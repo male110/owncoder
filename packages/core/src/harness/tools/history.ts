@@ -1,9 +1,21 @@
 import type { ToolContext, ToolResult } from "./types.ts";
 import { fail, ok, str } from "./shared.ts";
+import { searchHistory } from "../loop/history-vector.ts";
 
 const HISTORY_TOP_K = 5;
 const HISTORY_MIN_SCORE = 0.6;
 const HISTORY_FIELD_MAX_CHARS = 4_000;
+
+export interface HistoryRecallOptions {
+  query: string;
+  beforeTurnIndex?: number;
+}
+
+export interface HistoryRecallSource {
+  embedding: NonNullable<ToolContext["historyVector"]>["embedding"];
+  store: NonNullable<ToolContext["historyVector"]>["store"];
+  sessionId?: string;
+}
 
 function compactField(value: unknown): string {
   const text = typeof value === "string"
@@ -13,18 +25,26 @@ function compactField(value: unknown): string {
   return `${text.slice(0, HISTORY_FIELD_MAX_CHARS)}\n…[truncated]`;
 }
 
-/** Retrieve the most relevant archived history for the current session. */
-export async function toolRecallHistory(ctx: ToolContext, query: string): Promise<ToolResult> {
-  const text = query.trim();
+/**
+ * Shared boundary implementation. Callers choose the boundary; this function
+ * owns validation, vector retrieval, relevance filtering, and formatting.
+ */
+export async function recallHistoryBefore(
+  source: HistoryRecallSource,
+  options: HistoryRecallOptions,
+): Promise<ToolResult> {
+  const text = options.query.trim();
   if (!text) return fail("query must not be empty");
-  if (!ctx.historyVector || !ctx.sessionId) {
-    return ok("No searchable session history is available.");
-  }
+  if (!source.sessionId) return ok("No searchable session history is available.");
 
-  const queryVector = await ctx.historyVector.embedding.embed(text);
-  const hits = ctx.historyVector.store
-    .search(queryVector, 1000, ctx.sessionId)
-    .filter((hit) => hit.turnId.startsWith(`round:${ctx.sessionId}:`))
+  const hits = (await searchHistory(
+    source.embedding,
+    source.store,
+    text,
+    source.sessionId,
+    1000,
+    options.beforeTurnIndex,
+  ))
     .slice(0, HISTORY_TOP_K)
     .filter((hit) => hit.score >= HISTORY_MIN_SCORE);
 
@@ -60,6 +80,51 @@ export async function toolRecallHistory(ctx: ToolContext, query: string): Promis
   return ok(output);
 }
 
+/** Ordinary recall delegates to the shared boundary implementation. */
+export async function recallHistory(ctx: ToolContext, options: HistoryRecallOptions): Promise<ToolResult> {
+  if (!ctx.historyVector) return ok("No searchable session history is available.");
+  return recallHistoryBefore(ctx.historyVector && {
+    ...ctx.historyVector,
+    sessionId: ctx.sessionId,
+  }, options);
+}
+
+export async function toolRecallHistory(ctx: ToolContext, query: string): Promise<ToolResult> {
+  return recallHistory(ctx, { query });
+}
+
+export async function toolRecallHistoryBefore(
+  ctx: ToolContext,
+  query: string,
+  beforeTurnIndex?: number,
+): Promise<ToolResult> {
+  if (!ctx.historyVector) return ok("No searchable session history is available.");
+  return recallHistoryBefore({ ...ctx.historyVector, sessionId: ctx.sessionId }, { query, beforeTurnIndex });
+}
+
+/** Task decomposition entry point; the caller supplies its fixed five-round boundary. */
+export async function recallHistoryForTaskDecompose(
+  source: HistoryRecallSource,
+  query: string,
+  beforeTurnIndex: number,
+): Promise<ToolResult> {
+  return recallHistoryBefore(source, { query, beforeTurnIndex });
+}
+
+export async function toolRecallHistoryForTaskDecompose(
+  ctx: ToolContext,
+  query: string,
+  beforeTurnIndex: number,
+): Promise<ToolResult> {
+  if (!ctx.historyVector) return ok("No searchable session history is available.");
+  return recallHistoryForTaskDecompose({ ...ctx.historyVector, sessionId: ctx.sessionId }, query, beforeTurnIndex);
+}
+
 export function historyRecallQuery(args: Record<string, unknown>): string {
   return str(args.query ?? args.keyword);
+}
+
+export function historyRecallBeforeTurn(args: Record<string, unknown>): number | undefined {
+  const value = Number(args.beforeTurnIndex);
+  return Number.isFinite(value) ? Math.max(0, Math.floor(value)) : undefined;
 }

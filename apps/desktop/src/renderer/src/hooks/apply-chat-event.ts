@@ -66,7 +66,7 @@ export function applyChatEvent(
     if (isDecomposing(chat, sid)) return;
     // Atomic upsert — judgment and mutation happen inside one Zustand setter.
     chat.patchLiveState((rt) => ({
-      liveEvents: upsertThinkingFn(rt.liveEvents, ev.text),
+      liveEvents: upsertThinkingFn(rt.liveEvents, ev.text, rt.currentStage || undefined),
       liveStatus: "",
     }), sid);
     return;
@@ -127,15 +127,18 @@ export function applyChatEvent(
 
   // ── stage_start / stage_done ──────────────────────────────────────────
   if (ev.type === "stage_start") {
+    const stage = ev.nodeType === "task_decompose" ? "decompose" : "react";
     if (ev.nodeType === "task_decompose") {
       chat.setLiveStatus(t("正在分解任务…"), sid);
     } else {
       chat.setLiveStatus(t("阶段：{{label}}", { label: ev.label }), sid);
     }
+    chat.patchLiveState((rt) => ({ currentStage: stage }), sid);
     return;
   }
   if (ev.type === "stage_done") {
     chat.setLiveStatus("", sid);
+    chat.patchLiveState((rt) => ({ currentStage: null }), sid);
     return;
   }
 

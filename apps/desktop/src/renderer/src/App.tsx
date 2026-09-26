@@ -58,6 +58,7 @@ export function App() {
     workspace, projects, sessions, sessionsByProject, activeSessionId, sessionTitle,
     expanded, mode, modelLabel, availableModels, providers, llmConfigured,
     activePlanPathBySession, activePlanMetaBySession, plansBySession, gitStatus, changesBySession, thinkingEffort,
+    separateStageModels, reactModelId, reactThinkingEffort,
   } = useSessionStore();
 
   // Derive changes for the active session (session-scoped isolation)
@@ -121,7 +122,7 @@ export function App() {
     onSend, onRegenerate,
     onApprovePlan, onUpdateTask,
     onRollback, onKeepAll, onKeepFile, onUndoFile,
-    onSelectModel, onMode, onSelectThinkingEffort, onRemoveQueueMessage, sendQueued,
+    onSelectModel, onMode, onSelectThinkingEffort, onSelectReactThinkingEffort, onRemoveQueueMessage, sendQueued,
   } = useChatActions({
     applySessionState,
     refreshChanges,
@@ -364,7 +365,16 @@ export function App() {
   const handleNewSession = useCallback(() => { void onNewSession(); }, [onNewSession]);
   const handleMode = useCallback((m: import("@owncoder/shared").AgentMode) => { void onMode(m); }, [onMode]);
   const handleSelectModel = useCallback((id: string) => { void onSelectModel(id); }, [onSelectModel]);
+  const handleSelectReactModel = useCallback(async (name: string) => {
+    const snap = await window.owncoder.getSettings();
+    const config = { ...snap.effective };
+    if (!config.harness) config.harness = {} as any;
+    config.harness.reactModel = name;
+    await window.owncoder.saveSettings(config);
+    useSessionStore.getState().setReactModelId(name);
+  }, []);
   const handleSelectThinkingEffort = useCallback((effort: import("@owncoder/settings").ThinkingEffort) => { void onSelectThinkingEffort(effort); }, [onSelectThinkingEffort]);
+  const handleSelectReactThinkingEffort = useCallback((effort: import("@owncoder/settings").ThinkingEffort) => { void onSelectReactThinkingEffort(effort); }, [onSelectReactThinkingEffort]);
   const handleOpenSettings = useCallback(() => { openSettings("models"); }, [openSettings]);
   const handleSelectProject = useCallback((root: string) => onSelectProject(root), [onSelectProject]);
   const handleAddProject = useCallback(() => { void onAddProject(); }, [onAddProject]);
@@ -437,6 +447,9 @@ export function App() {
         availableModels={availableModels}
         providers={providers}
         thinkingEffort={thinkingEffort}
+        separateStageModels={separateStageModels}
+        reactModelId={reactModelId}
+        reactThinkingEffort={reactThinkingEffort}
         workspaceName={workspace?.name ?? null}
         workspaceRoot={workspace?.root ?? null}
         projects={projects}
@@ -456,6 +469,8 @@ export function App() {
         onSelectProject={handleSelectProject}
         onAddProject={handleAddProject}
         onRemoveQueueMessage={onRemoveQueueMessage}
+        onSelectReactModel={handleSelectReactModel}
+        onSelectReactThinkingEffort={handleSelectReactThinkingEffort}
       />
     </>
   );

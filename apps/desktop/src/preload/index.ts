@@ -119,7 +119,6 @@ type ChatEventFields =
           description: string;
           dependsOn: string[];
           informationNeeds: Array<{ id: string; question: string }>;
-          stopReadingWhen: Array<{ condition: string; requiredEvidenceIds: string[] }>;
         }>;
       }>;
       fallback: boolean;
@@ -469,6 +468,7 @@ export interface DesktopApi {
   getRepoMap: () => Promise<string>;
   rebuildIndex: () => Promise<IndexStatus>;
   openPath: (path: string) => Promise<string>;
+  openWorkspaceFile: (href: string) => Promise<string>;
   getSettings: () => Promise<SettingsSnapshotDto>;
   saveSettings: (config: SystemWorkflowConfig) => Promise<SettingsSnapshotDto>;
   restoreFactorySettings: () => Promise<SettingsSnapshotDto>;
@@ -640,6 +640,7 @@ const api: DesktopApi = {
   getRepoMap: () => ipcRenderer.invoke("index:repoMap"),
   rebuildIndex: () => ipcRenderer.invoke("index:rebuild"),
   openPath: (path) => ipcRenderer.invoke("shell:openPath", path),
+  openWorkspaceFile: (href) => ipcRenderer.invoke("workspace:openFile", href),
   getSettings: () => ipcRenderer.invoke("settings:get"),
   saveSettings: (config) => ipcRenderer.invoke("settings:save", config),
   restoreFactorySettings: () => ipcRenderer.invoke("settings:restoreFactory"),

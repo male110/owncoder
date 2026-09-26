@@ -64,6 +64,8 @@ export interface SchedulerState {
   tokenBudget?: ContextBudget;
   /** Token count of the task decomposition output (set by task_decompose). */
   decomposeTokens: number;
+  /** 任务分解重试次数（用于控制历史召回工具提供次数：前两次提供，第三次不提供）。 */
+  decomposeCount: number;
   /** Index of this turn in `.owncoder/sessions/{id}.rounds.json` after decompose persist. */
   roundIndex?: number;
   /** Raw task decomposition result (for history recall). */
@@ -78,7 +80,6 @@ export interface SchedulerState {
         id: string;
         description: string;
         dependsOn: string[];
-        stopReadingWhen: Array<{ condition: string; requiredEvidenceIds: string[] }>;
         verificationCriteria?: {
           command: string;
           expectedOutput: string;

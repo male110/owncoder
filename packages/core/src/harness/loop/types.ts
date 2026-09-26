@@ -59,7 +59,6 @@ type TurnEventFields =
           id: string;
           description: string;
           dependsOn: string[];
-          stopReadingWhen: Array<{ condition: string; requiredEvidenceIds: string[] }>;
         }>;
       }>;
       /** True when the LLM call failed and the shown plan is a local heuristic fallback. */

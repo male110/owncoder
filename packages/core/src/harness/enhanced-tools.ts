@@ -565,7 +565,7 @@ const appendFileParams = () => ({
 const applyPatchParams = () => ({
   type: "object" as const,
   properties: {
-    path: { type: "string", description: "Relative path from workspace root" },
+    path: { type: "string", description: "必填。要编辑的工作区相对路径；目标始终只取自此参数。" },
     patch: { 
       type: "string", 
       description: 
@@ -582,8 +582,10 @@ const applyPatchParams = () => ({
         "- SEARCH must match the text, indentation, and whitespace shown by read_file; LF and CRLF line endings are treated as equivalent\n" +
         "- Replacement line endings follow the target file, preventing mixed LF/CRLF files\n" +
         "- Markers (<<<<<<< =======  >>>>>>>) must be on their own lines\n" +
-        "- Can include multiple blocks in one patch\n" +
-        "- Alternative: Unified Diff format (git diff style) also supported"
+        "- Can include multiple blocks in one patch, all targeting the same file\n" +
+        "- 必须提供 path 参数；补丁正文中的文件名或文件头不会决定目标文件\n" +
+        "- Alternative: single-file Unified Diff；---/+++ 文件头仅作为补丁内容处理\n" +
+        "- 不支持多文件、重命名或 Codex *** Begin Patch 格式；请拆分为独立调用"
     },
   },
   required: ["path", "patch"] as string[],
@@ -799,6 +801,39 @@ export function allEnhancedTools(opts?: {
               type: "string",
               description: "Keyword or focused question describing the history to retrieve",
             },
+          },
+          required: ["query"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "recall_history_before",
+        description:
+          "Retrieve relevant archived history strictly before a specified session turn index. " +
+          "Use this to search older history without repeating recently injected rounds. Returns up to five matches with relevance of at least 60%.",
+        parameters: {
+          type: "object",
+          properties: {
+            query: { type: "string", description: "Keyword or focused question describing the history to retrieve" },
+            beforeTurnIndex: { type: "integer", minimum: 0, description: "Only return archived chunks with turnIndex less than this value" },
+          },
+          required: ["query", "beforeTurnIndex"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "recall_history_for_task_decompose",
+        description:
+          "Retrieve relevant archived history before the fixed recent five-round boundary. " +
+          "This entry point is reserved for task decomposition and accepts only a query.",
+        parameters: {
+          type: "object",
+          properties: {
+            query: { type: "string", description: "Keyword or focused question describing the history to retrieve" },
           },
           required: ["query"],
         },

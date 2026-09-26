@@ -664,6 +664,9 @@ export function resetOutputTrackingForNewTask(state: LoopState): void {
   state.lastToolCalls = [];
   state.explorationSkipCount = 0;
   state.lastIterationHadExplorationSkip = false;
+  // 重置迭代计数器：每个子任务独立享有完整的 maxIterations 预算，
+  // 而不是在多个子任务之间平分。
+  state.iteration = 0;
 }
 
 /**

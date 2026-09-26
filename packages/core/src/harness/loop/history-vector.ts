@@ -49,6 +49,36 @@ export interface EmbeddingService {
 }
 
 /** 向量存储：写入去重归档 + 余弦相似度 top-K 召回。 */
+export interface HistoryRecallHit {
+  turnIndex: number;
+  role: ChatTurn["role"];
+  content: string;
+  score: number;
+}
+
+export async function searchHistory(
+  embedding: EmbeddingService,
+  store: HistoryVectorStore,
+  query: string,
+  sessionId: string | null | undefined,
+  topK: number,
+  beforeTurnIndex?: number,
+): Promise<HistoryRecallHit[]> {
+  const text = query.trim();
+  if (!text || !sessionId) return [];
+  const queryVector = await embedding.embed(text);
+  const candidateLimit = beforeTurnIndex === undefined ? topK : Math.max(topK, 1000);
+  return store.search(queryVector, candidateLimit, sessionId, beforeTurnIndex)
+    .filter((hit) => hit.turnId.startsWith(`round:${sessionId}:`))
+    .slice(0, topK)
+    .map((hit) => ({
+      turnIndex: hit.turnIndex,
+      role: hit.role,
+      content: hit.content,
+      score: hit.score,
+    }));
+}
+
 export interface HistoryVectorStore {
   /**
    * 归档一个 chunk 及其向量；实现侧按 contentHash 去重（相同则跳过）。
@@ -61,7 +91,12 @@ export interface HistoryVectorStore {
    * 余弦相似度 top-K 召回。sessionId 可选（null 表示不限会话）；
    * 返回按 score 降序（等价于 distance ASC）；score = clamp(1 - distance, 0, 1)。
    */
-  search(queryVector: Float32Array, topK: number, sessionId?: string | null): HistorySearchHit[];
+  search(
+    queryVector: Float32Array,
+    topK: number,
+    sessionId?: string | null,
+    beforeTurnIndex?: number,
+  ): HistorySearchHit[];
   /**
    * 该会话已归档的 chunk 数量。用于「归档覆盖率检测」：升级前的历史轮次
    * 未归档时，向量召回只能覆盖极少量片段，此时应回退到「最近 N 轮 → LLM 过滤」。

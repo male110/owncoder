@@ -25,12 +25,12 @@ import type { HistoryChunk } from "../../history-vector.ts";
 import {
   extractStructuredHistory,
   parseDecomposeAnswer,
-  packFallbackRelevantHistory,
+  // packFallbackRelevantHistory, // 已移除
   buildFallbackRawDecompose,
   isCurrentCodeBehaviorInquiry,
   recoverEmptyDecomposeSteps,
   formatRecalledHistoryChunks,
-  recallHistoryByUserInput,
+
   buildDecomposeContext,
   rankAndFilterByRelevance,
   estimateTextRelevance,
@@ -159,7 +159,7 @@ describe("extractStructuredHistory (旧格式 fallback)", () => {
     const decomposeObj = {
       intent: "理解用户需求",
       userConstraints: ["不能修改配置"],
-      tasks: [{ id: "task_1", description: "任务1", steps: [{ id: "s1", description: "步骤1", dependsOn: [], stopReadingWhen: [] }] }],
+      tasks: [{ id: "task_1", description: "任务1", steps: [{ id: "s1", description: "步骤1", dependsOn: [] }] }],
     };
     const history: ChatTurn[] = [
       mkTurn("user", "分析需求"),
@@ -178,7 +178,7 @@ describe("extractStructuredHistory (旧格式 fallback)", () => {
   it("fenced JSON 也可识别为 decompose", () => {
     const decomposeObj = {
       intent: "fenced 解析",
-      tasks: [{ id: "task_1", description: "任务", steps: [{ id: "s1", description: "步骤", dependsOn: [], stopReadingWhen: [] }] }],
+      tasks: [{ id: "task_1", description: "任务", steps: [{ id: "s1", description: "步骤", dependsOn: [] }] }],
     };
     const history: ChatTurn[] = [
       mkTurn("user", "请求"),
@@ -263,7 +263,7 @@ describe("decompose→report/evidence 同轮持久化", () => {
             description: "扫描目录结构",
             dependsOn: [],
 
-            stopReadingWhen: [{ condition: "知道所有顶层目录", requiredEvidenceIds: [] }],
+
           },
         ],
       },
@@ -680,7 +680,7 @@ describe("parseDecomposeAnswer / fallback：intent 用原话，纯文本收成 t
             id: "step_1",
             description: "定位 AuthService.login",
             dependsOn: [],
-            stopReadingWhen: [],
+
           }],
         }],
         progressStatus: "开始定位",
@@ -708,7 +708,7 @@ describe("parseDecomposeAnswer / fallback：intent 用原话，纯文本收成 t
     expect(fallback.tasks[0].description).toBe(modelProse);
     expect(fallback.tasks[0].steps).toHaveLength(1);
     expect(fallback.tasks[0].steps[0].description).toBe(modelProse);
-    expect(fallback.progressStatus).toMatch(/plain text|fallback/i);
+    // progressStatus 字段已移除
   });
 
   it("fallback 无模型纯文本时仍用用户原话生成本地 plan", () => {
@@ -716,7 +716,7 @@ describe("parseDecomposeAnswer / fallback：intent 用原话，纯文本收成 t
     const fallback = buildFallbackRawDecompose(userMessage);
     expect(fallback.intent).toBe(userMessage);
     expect(fallback.tasks[0].description).toBe(userMessage);
-    expect(fallback.progressStatus).toMatch(/fallback/i);
+    // progressStatus 字段已移除
   });
 });
 
@@ -750,12 +750,7 @@ describe("parseDecomposeAnswer 保留 prompt 约定字段", () => {
 
     expect(answer).not.toBeNull();
     expect(answer!.tasks[0].steps).toHaveLength(1);
-    expect(answer!.tasks[0].steps[0].stopReadingWhen).toEqual([
-      {
-        condition: "Found AuthService.login implementation",
-        satisfied: false,
-      },
-    ]);
+    // stopReadingWhen 字段已从 schema 中移除
     expect(answer!.tasks[0].steps[0].verificationCriteria).toEqual({
       command: "pnpm test",
       expectedOutput: "passed",
@@ -774,7 +769,6 @@ describe("parseDecomposeAnswer 保留 prompt 约定字段", () => {
           id: "step_1",
           description: "Inspect current login path",
           dependsOn: [],
-          stopReadingWhen: [],
           verificationCriteria: { command: "", expectedOutput: "ok" },
           estimatedComplexity: "extreme",
         },
@@ -782,7 +776,7 @@ describe("parseDecomposeAnswer 保留 prompt 约定字段", () => {
     }));
 
     expect(answer).not.toBeNull();
-    expect(answer!.tasks[0].steps[0].stopReadingWhen).toEqual([]);
+    // stopReadingWhen 字段已从 schema 中移除
     expect(answer!.tasks[0].steps[0].verificationCriteria).toBeUndefined();
     expect(answer!.tasks[0].steps[0].estimatedComplexity).toBeUndefined();
   });
@@ -799,9 +793,7 @@ describe("parseDecomposeAnswer 保留 prompt 约定字段", () => {
           id: "step_1",
           description: "接入 Redis 缓存",
           dependsOn: [],
-          stopReadingWhen: [
-            { condition: "已定位 login 实现", satisfied: false },
-          ],
+
           verificationCriteria: {
             command: "pnpm test",
             expectedOutput: "passed",
@@ -814,10 +806,7 @@ describe("parseDecomposeAnswer 保留 prompt 约定字段", () => {
     });
 
     expect(record).not.toBeNull();
-    expect(record!.taskDecompose?.tasks[0].steps[0].stopReadingWhen[0]).toEqual({
-      condition: "已定位 login 实现",
-      satisfied: false,
-    });
+    // stopReadingWhen 字段已从 schema 中移除
     expect(record!.taskDecompose?.tasks[0].steps[0].verificationCriteria).toEqual({
       command: "pnpm test",
       expectedOutput: "passed",
@@ -835,12 +824,12 @@ describe("parseDecomposeAnswer 保留 prompt 约定字段", () => {
         {
           id: "task_1",
           description: "任务一描述",
-          steps: [{ id: "s1", description: "步骤一", dependsOn: [], stopReadingWhen: [] }],
+          steps: [{ id: "s1", description: "步骤一", dependsOn: [] }],
         },
         {
           id: "task_2",
           description: "任务二描述",
-          steps: [{ id: "s2", description: "步骤二", dependsOn: ["s1"], stopReadingWhen: [] }],
+          steps: [{ id: "s2", description: "步骤二", dependsOn: ["s1"] }],
         },
       ],
       progressStatus: "进行中",
@@ -863,13 +852,13 @@ describe("parseDecomposeAnswer 保留 prompt 约定字段", () => {
           id: "task_1",
           description: "任务一",
           dependsOn: ["task_0"],
-          steps: [{ id: "s1", description: "步骤一", dependsOn: [], stopReadingWhen: [] }],
+          steps: [{ id: "s1", description: "步骤一", dependsOn: [] }],
         },
         {
           id: "task_2",
           description: "任务二",
           dependsOn: ["task_1"],
-          steps: [{ id: "s2", description: "步骤二", dependsOn: ["s1"], stopReadingWhen: [] }],
+          steps: [{ id: "s2", description: "步骤二", dependsOn: ["s1"] }],
         },
       ],
     }));
@@ -887,7 +876,7 @@ describe("parseDecomposeAnswer 保留 prompt 约定字段", () => {
     const answer = parseDecomposeAnswer(JSON.stringify({
       understanding: "旧格式理解段",
       userConstraints: ["旧约束"],
-      steps: [{ id: "s1", description: "旧步骤", dependsOn: [], stopReadingWhen: [] }],
+      steps: [{ id: "s1", description: "旧步骤", dependsOn: [] }],
       goal: "旧目标",
       scope: ["旧范围"],
       relation: "continue",
@@ -1031,174 +1020,26 @@ describe("per-task 环检与全局唯一 step id", () => {
   });
 });
 
-describe("relevantHistory 为可承载全部相关历史的字符串", () => {
+// relevantHistory 字段已移除 - 以下测试已过时，暂时注释
+describe.skip("relevantHistory 为可承载全部相关历史的字符串 (已废弃)", () => {
   it("解析步骤级与整单 string relevantHistory", () => {
-    const historyText = [
-      "### src/auth/login.ts L1-40",
-      "note: 上一轮已读，直接复用",
-      "export class AuthService {}",
-      "",
-      "先前结论：登录慢是因为每次都打 DB。",
-    ].join("\n");
-    const answer = parseDecomposeAnswer(JSON.stringify({
-      intent: "Continue Redis caching.",
-      userConstraints: [],
-      tasks: [{ id: "task_1", description: "Add Redis caching", steps: [
-        {
-          id: "step_1",
-          description: "Add Redis caching",
-          dependsOn: [],
-          stopReadingWhen: [],
-          relevantHistory: historyText,
-        },
-      ] }],
-      relevantHistory: historyText,
-    }));
-
-    expect(answer).not.toBeNull();
-    expect(typeof answer!.relevantHistory).toBe("string");
-    expect(answer!.relevantHistory).toBe(historyText);
-    expect(answer!.tasks[0].steps[0].relevantHistory).toBe(historyText);
+    // 此测试已过时 - relevantHistory 字段已从 schema 中移除
   });
 
   it("兼容旧 { files } 对象并转成同等文本", () => {
-    const answer = parseDecomposeAnswer(JSON.stringify({
-      intent: "Continue.",
-      userConstraints: [],
-      tasks: [{ id: "task_1", description: "Reuse prior login.ts read", steps: [
-        {
-          id: "step_1",
-          description: "Reuse prior login.ts read",
-          dependsOn: [],
-          stopReadingWhen: [],
-          relevantHistory: {
-            files: [
-              {
-                path: "src/auth/login.ts",
-                content: "export class AuthService {}",
-                startLine: 1,
-                endLine: 40,
-                note: "Already read",
-              },
-            ],
-          },
-        },
-      ] }],
-      relevantHistory: {
-        files: [
-          {
-            path: "src/auth/login.ts",
-            content: "export class AuthService {}",
-            startLine: 1,
-            endLine: 40,
-            note: "Already read",
-          },
-        ],
-      },
-    }));
-
-    expect(answer).not.toBeNull();
-    expect(typeof answer!.relevantHistory).toBe("string");
-    expect(answer!.relevantHistory).toContain("### src/auth/login.ts L1-40");
-    expect(answer!.relevantHistory).toContain("export class AuthService {}");
-    expect(answer!.tasks[0].steps[0].relevantHistory).toBe(answer!.relevantHistory);
+    // 此测试已过时 - relevantHistory 字段已从 schema 中移除
   });
 
   it("步骤缺省时透传整单 relevantHistory", () => {
-    const shared = "先前结论：只改登录页。\n约束：必须用 Redis。";
-    const answer = parseDecomposeAnswer(JSON.stringify({
-      intent: "Continue.",
-      userConstraints: [],
-      tasks: [{ id: "task_1", description: "Add Redis caching", steps: [
-        {
-          id: "step_1",
-          description: "Add Redis caching",
-          dependsOn: [],
-          stopReadingWhen: [],
-        },
-        {
-          id: "step_2",
-          description: "Verify login latency",
-          dependsOn: ["step_1"],
-          stopReadingWhen: [],
-          relevantHistory: "step-local notes",
-        },
-      ] }],
-      relevantHistory: shared,
-    }));
-
-    expect(answer).not.toBeNull();
-    expect(answer!.tasks[0].steps[0].relevantHistory).toBeUndefined();
-    expect(answer!.tasks[0].steps[1].relevantHistory).toBe("step-local notes");
-    expect(answer!.relevantHistory).toBe(shared);
+    // 此测试已过时 - relevantHistory 字段已从 schema 中移除
   });
 
   it("fallback 打包已读文件与非文件对话要点", () => {
-    const excerptBody = [
-      "[lines 1-3 of 3]",
-      "   1|export class AuthService {}",
-    ].join("\n");
-    const packed = packFallbackRelevantHistory({
-      userMessage: "登录页太慢，给 login 加 Redis 缓存",
-      history: [
-        { role: "user", content: "登录页太慢，加 Redis 缓存" },
-        {
-          role: "tool",
-          toolName: "read_file",
-          content: `Read src/auth/login.ts (lines 1-3 of 3)\n${excerptBody}`,
-        },
-        { role: "assistant", content: "已确认 login 每次打 DB，准备加缓存。" },
-        { role: "user", content: "继续" },
-      ],
-    });
-
-    expect(packed).toBeDefined();
-    expect(typeof packed).toBe("string");
-    expect(packed).toContain("src/auth/login.ts");
-    expect(packed).toContain("export class AuthService {}");
-    expect(packed).toContain("## 近期对话要点");
-    expect(packed).toContain("登录页太慢，加 Redis 缓存");
-    expect(packed).toContain("已确认 login 每次打 DB");
+    // 此测试已过时 - packFallbackRelevantHistory 功能已移除
   });
 
   it("fallback 按相关度排序并丢弃 <60% 的块", () => {
-    const packed = packFallbackRelevantHistory({
-      userMessage: "修复 auth login Redis 缓存",
-      history: [
-        { role: "user", content: "给 auth login 加 Redis 缓存" },
-        {
-          role: "tool",
-          toolName: "read_file",
-          content: [
-            "Read src/auth/login.ts (lines 1-2 of 2)",
-            "[lines 1-2 of 2]",
-            "   1|export class AuthService {}",
-            "   2|// redis cache",
-          ].join("\n"),
-        },
-        { role: "assistant", content: "auth login 将使用 Redis 缓存。" },
-        { role: "user", content: "顺便看看天气 UI 配色" },
-        {
-          role: "tool",
-          toolName: "read_file",
-          content: [
-            "Read src/ui/weather-theme.css (lines 1-2 of 2)",
-            "[lines 1-2 of 2]",
-            "   1|body { color: blue }",
-            "   2|/* theme only */",
-          ].join("\n"),
-        },
-        { role: "assistant", content: "天气主题配色已调整为蓝色。" },
-        { role: "user", content: "继续修 login 缓存" },
-      ],
-    });
-
-    expect(packed).toBeDefined();
-    expect(packed).toContain("src/auth/login.ts");
-    expect(packed).toContain("Redis");
-    // 与 login/redis 无关的天气主题应被 <0.6 过滤掉
-    expect(packed).not.toContain("weather-theme.css");
-    expect(packed).not.toContain("天气主题配色");
+    // 此测试已过时 - packFallbackRelevantHistory 功能已移除
   });
 });
 
@@ -1246,8 +1087,7 @@ describe("当前代码/当前步骤行为询问不得空 steps", () => {
     const recovered = recoverEmptyDecomposeSteps(misclassified!, originalQuestion);
     expect(recovered.tasks[0].steps.length).toBeGreaterThan(0);
     expect(recovered.tasks[0].steps[0].description).toMatch(/定位|阅读|实现|历史信息/);
-    expect(recovered.tasks[0].steps[0].stopReadingWhen.length).toBeGreaterThan(0);
-    expect(recovered.progressStatus).toMatch(/定位并阅读/);
+    // stopReadingWhen 和 progressStatus 字段已从 schema 中移除
   });
 
   it("真正的进度询问仍保持空 steps", () => {
@@ -1263,7 +1103,7 @@ describe("当前代码/当前步骤行为询问不得空 steps", () => {
   });
 });
 
-describe("分解历史：最近5轮 + 按用户输入向量召回（同容器不截断）", () => {
+describe("分解历史：仅注入最近5轮，历史召回由工具主动触发", () => {
   const SESSION_ID = "sess-vector-recall";
   const budgets = contextBudgets(BUILTIN_WORKFLOW);
 
@@ -1305,67 +1145,13 @@ describe("分解历史：最近5轮 + 按用户输入向量召回（同容器不
     expect(text).not.toContain("…(截断)");
   });
 
-  it("无 historyVector 时召回为空", async () => {
-    const recalled = await recallHistoryByUserInput({
-      userMessage: "任意输入",
-      sessionId: SESSION_ID,
-    });
-    expect(recalled).toEqual([]);
-  });
-
-  it("有 historyVector 时按当前用户输入 embed + search，并按相关度排序过滤", async () => {
-    const query = "按用户输入做向量召回";
-    const embedCalls: string[] = [];
-    const searchCalls: Array<{ topK: number; sessionId: string | null | undefined }> = [];
-    const recalledChunks = [
-      { ...makeChunk({ turnIndex: 9, role: "user", content: "更早相关：向量召回接线讨论" }), score: 0.82 },
-      { ...makeChunk({ turnIndex: 2, role: "assistant", content: "更早相关：已确认同容器不截断" }), score: 0.91 },
-      { ...makeChunk({ turnIndex: 1, role: "user", content: "无关闲聊" }), score: 0.3 },
-    ];
-
-    const recalled = await recallHistoryByUserInput({
-      userMessage: query,
-      sessionId: SESSION_ID,
-      historyVector: {
-        embedding: {
-          async embed(text: string) {
-            embedCalls.push(text);
-            return new Float32Array([0.1, 0.2, 0.3]);
-          },
-        },
-        store: {
-          archive() {},
-          hasContentHash() {
-            return false;
-          },
-          search(queryVector, topK, sessionId) {
-            expect(queryVector).toBeInstanceOf(Float32Array);
-            searchCalls.push({ topK, sessionId });
-            return recalledChunks;
-          },
-          countBySession() {
-            return recalledChunks.length;
-          },
-          deleteBySession() {},
-        },
-      },
-    });
-
-    expect(embedCalls).toEqual([query]);
-    expect(searchCalls).toEqual([{ topK: 5, sessionId: SESSION_ID }]);
-    // score 降序，且 <0.6 丢弃
-    expect(recalled).toEqual([
-      { turnIndex: 2, role: "assistant", content: "更早相关：已确认同容器不截断", score: 0.91 },
-      { turnIndex: 9, role: "user", content: "更早相关：向量召回接线讨论", score: 0.82 },
-    ]);
-  });
 
   it("buildDecomposeContext：无注入时仅最近轮，不含召回段", async () => {
     const userInput = "上一轮用户输入";
     await persistDecomposeRound(tmpDir, SESSION_ID, userInput, {
       intent: "最近一轮理解",
       userConstraints: [],
-      tasks: [{ id: "task_1", description: "最近一轮任务", steps: [{ id: "s1", description: "做点事", dependsOn: [], stopReadingWhen: [] }] }],
+      tasks: [{ id: "task_1", description: "最近一轮任务", steps: [{ id: "s1", description: "做点事", dependsOn: [] }] }],
     });
     await persistRoundReport(tmpDir, SESSION_ID, userInput, "最近一轮报告");
 
@@ -1375,23 +1161,23 @@ describe("分解历史：最近5轮 + 按用户输入向量召回（同容器不
     expect(ctx).not.toContain("Vector-recalled history");
   });
 
-  it("buildDecomposeContext：有 historyVector 时同容器含最近轮 + 召回，且不截断", async () => {
+  it("buildDecomposeContext：有 historyVector 时也不自动召回，仅注入最近轮", async () => {
     const userInput = "上一轮用户输入-完整保留";
     await persistDecomposeRound(tmpDir, SESSION_ID, userInput, {
       intent: "最近一轮理解-完整保留",
       userConstraints: [],
-      tasks: [{ id: "task_1", description: "接线召回任务", steps: [{ id: "s1", description: "接线召回", dependsOn: [], stopReadingWhen: [] }] }],
+      tasks: [{ id: "task_1", description: "接线召回任务", steps: [{ id: "s1", description: "接线召回", dependsOn: [] }] }],
     });
     await persistRoundReport(tmpDir, SESSION_ID, userInput, "最近一轮完整报告");
 
-    const longRecalled = `召回全文-${"B".repeat(900)}`;
+    let searchCalled = false;
     const ctx = await buildDecomposeContext(
       makeOpts({
         userMessage: "把向量召回加进任务分解历史拼装",
         historyVector: {
           embedding: {
             async embed() {
-              return new Float32Array([1, 0, 0]);
+              throw new Error("任务分解上下文不应自动 embed 历史");
             },
           },
           store: {
@@ -1400,19 +1186,11 @@ describe("分解历史：最近5轮 + 按用户输入向量召回（同容器不
               return false;
             },
             search() {
-              return [
-                {
-                  ...makeChunk({
-                    turnIndex: 4,
-                    role: "user",
-                    content: longRecalled,
-                  }),
-                  score: 0.88,
-                },
-              ];
+              searchCalled = true;
+              return [];
             },
             countBySession() {
-              return 1;
+              return 0;
             },
             deleteBySession() {},
           },
@@ -1424,13 +1202,8 @@ describe("分解历史：最近5轮 + 按用户输入向量召回（同容器不
     expect(ctx).toContain("<conversation_history>");
     expect(ctx).toContain("Recent conversation rounds");
     expect(ctx).toContain("最近一轮理解-完整保留");
-    expect(ctx).toContain("Vector-recalled history");
-    expect(ctx).toContain(longRecalled);
+    expect(ctx).not.toContain("Vector-recalled history");
     expect(ctx).not.toContain("…(截断)");
-    // 同一 conversation_history 容器内同时出现最近轮与召回
-    const historyBlock = ctx.match(/<conversation_history>[\s\S]*?<\/conversation_history>/)?.[0] ?? "";
-    expect(historyBlock).toContain("Recent conversation rounds");
-    expect(historyBlock).toContain("Vector-recalled history");
-    expect(historyBlock).toContain(longRecalled);
+    expect(searchCalled).toBe(false);
   });
 });

@@ -39,17 +39,15 @@ export function resolveStageModel(
     return { ...base, model: node.model.trim() };
   }
   
-  // 2. Stage-specific model override (if separateStageModels enabled)
-  if (workflow.harness.separateStageModels && stageType) {
-    const stageModel = stageType === "decomposer"
-      ? workflow.harness.decomposerModel
-      : workflow.harness.reactModel;
-    if (stageModel?.trim()) {
-      return { ...base, model: stageModel.trim() };
+  // 2. React stage model override (if separateStageModels enabled)
+  if (workflow.harness.separateStageModels && stageType === "react") {
+    const reactModel = workflow.harness.reactModel;
+    if (reactModel?.trim()) {
+      return { ...base, model: reactModel.trim() };
     }
   }
   
-  // 3. Default workflow model
+  // 3. Default workflow model (用于所有其他阶段，包括 decomposer)
   return base;
 }
 

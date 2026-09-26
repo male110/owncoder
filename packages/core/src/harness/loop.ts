@@ -416,7 +416,6 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
                     id: step.id,
                     description: step.description,
                     dependsOn: step.dependsOn,
-                    informationNeeds: step.informationNeeds,
                   })),
                 })),
               }
@@ -503,6 +502,7 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
     turnInformationTask: null,
     userMessageInjected: false,
     budgetUsed: 0,
+    decomposeCount: 0,
     aborted: false,
     awaitingUserConfirmation: false,
     handoffRequested: false,

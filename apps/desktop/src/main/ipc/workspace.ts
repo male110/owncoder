@@ -1,9 +1,9 @@
 /**
  * IPC handlers: workspace / project / file operations.
  */
-import { dialog, ipcMain } from "electron";
+import { dialog, ipcMain, shell } from "electron";
 import { promises as fs } from "node:fs";
-import { dirname, join, relative } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { checkWritable } from "@owncoder/core";
 import { searchWorkspaceFiles } from "../workspace-search";
 import type { IpcContext } from "./types";
@@ -25,6 +25,30 @@ export type WorkspaceDirEntryDto = {
   path: string;
   kind: "file" | "dir";
 };
+
+/** Resolve a Markdown link to a file in the current workspace. */
+export function resolveWorkspaceFileLink(workspaceRoot: string, href: string): string | null {
+  const raw = String(href || "").trim();
+  if (!raw || raw.startsWith("#") || (/^[a-z][a-z\d+.-]*:/i.test(raw) && !/^file:/i.test(raw))) {
+    return null;
+  }
+
+  let input = raw;
+  try {
+    input = decodeURIComponent(/^file:\/\//i.test(input) ? new URL(input).pathname : input);
+  } catch {
+    return null;
+  }
+
+  // Chromium represents a Windows absolute path as /C:/path in an href.
+  if (/^\/[a-z]:[\\/]/i.test(input)) input = input.slice(1);
+  input = input.replace(/\\/g, "/");
+  const root = resolve(workspaceRoot);
+  const abs = isAbsolute(input) ? resolve(input) : resolve(root, input);
+  const rel = relative(root, abs);
+  if (rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) return null;
+  return abs;
+}
 
 export function registerWorkspaceHandlers(ctx: IpcContext): void {
   const { session, settingsStore, recentStore, openWorkspaceRoot, switchWorkspaceRoot, resolveWorkspacePath } = ctx;
@@ -56,6 +80,23 @@ export function registerWorkspaceHandlers(ctx: IpcContext): void {
   ipcMain.handle("workspace:switchPath", (_e, root: string) => switchWorkspaceRoot(root));
 
   ipcMain.handle("workspace:get", () => session.getState().workspace);
+
+  ipcMain.handle("workspace:openFile", async (_e, href: unknown) => {
+    const ws = session.getState().workspace;
+    if (!ws || typeof href !== "string") return "No workspace open";
+    const abs = resolveWorkspaceFileLink(ws.root, href);
+    if (!abs) return "Invalid workspace file link";
+    try {
+      const [rootReal, fileReal] = await Promise.all([fs.realpath(ws.root), fs.realpath(abs)]);
+      const rel = relative(rootReal, fileReal);
+      if (rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) return "Invalid workspace file link";
+      const stat = await fs.stat(fileReal);
+      if (!stat.isFile()) return "Workspace path is not a file";
+      return shell.openPath(fileReal);
+    } catch {
+      return "Workspace file does not exist";
+    }
+  });
 
   ipcMain.handle("workspace:searchFiles", async (_e, query: string) => {
     const ws = session.getState().workspace;

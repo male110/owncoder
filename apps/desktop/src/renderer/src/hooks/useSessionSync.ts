@@ -267,6 +267,20 @@ export function useSessionSync() {
     session.setProviders(snap.effective.providers ?? []);
     session.setModelLabel(sel.length > 0 ? sel[0]!.name : t("未配置"));
     session.setThinkingEffort(snap.effective.thinking?.defaultEffort ?? "high");
+    
+    // 同步执行阶段单独配置（向后兼容旧配置）
+    const separateEnabled = snap.effective.harness?.separateStageModels ?? false;
+    session.setSeparateStageModels(separateEnabled);
+    
+    // 向后兼容：如果启用执行阶段单独配置但字段为空，从统一配置回退
+    const unifiedModelName = sel.length > 0 ? sel[0]!.name : null;
+    const unifiedEffort = snap.effective.thinking?.defaultEffort ?? "high";
+    
+    const reactModel = snap.effective.harness?.reactModel ?? (separateEnabled ? unifiedModelName : null);
+    const reactEffort = snap.effective.harness?.reactThinkingEffort ?? (separateEnabled ? unifiedEffort : "medium");
+    
+    session.setReactModelId(reactModel);
+    session.setReactThinkingEffort(reactEffort);
 
     const auth = await window.owncoder.getLlmAuthStatus();
     if (navigationVersion !== undefined && !isNavigationCurrent(navigationVersion)) return null;

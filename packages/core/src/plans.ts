@@ -40,13 +40,6 @@ export interface TaskEvidence {
   sourceHash?: string;
 }
 
-export interface TaskStopCriterion {
-  /** Human-readable, observable condition for ending repository exploration. */
-  condition: string;
-  /** When true, this criterion is considered satisfied. */
-  satisfied?: boolean;
-}
-
 /**
  * 当前子任务可直接复用的相关历史（自由文本）。
  * 可承载已读文件摘录、先前结论、约束、对话事实等，不限于 files 对象。
@@ -106,8 +99,6 @@ export interface TaskItem {
   status: TaskStatus;
   acceptance?: string;
   dependsOn: string[];
-  /** Optional conditions that signal exploration is complete. */
-  stopReadingWhen: TaskStopCriterion[];
   result?: string;
   retryCount: number;
   maxRetries: number;
@@ -440,18 +431,6 @@ export function normalizeActiveMeta(meta: Partial<ActivePlanMeta>): ActivePlanMe
   };
 }
 
-function normalizeStopCriteria(value: unknown): TaskStopCriterion[] {
-  if (!Array.isArray(value)) return [];
-  return value.flatMap((item) => {
-    const raw = typeof item === "string" ? { condition: item } : (item ?? {}) as Record<string, unknown>;
-    const condition = typeof raw.condition === "string" ? raw.condition.trim().slice(0, 800) : "";
-    if (!condition) return [];
-    return [{
-      condition,
-      satisfied: typeof raw.satisfied === "boolean" ? raw.satisfied : false,
-    }];
-  });
-}
 
 function normalizeTask(t: Partial<TaskItem>): TaskItem {
   // Parse verification criteria
@@ -490,7 +469,6 @@ function normalizeTask(t: Partial<TaskItem>): TaskItem {
       : "pending",
     acceptance: typeof t.acceptance === "string" ? t.acceptance : undefined,
     dependsOn: Array.isArray(t.dependsOn) ? t.dependsOn.filter((d) => typeof d === "string") : [],
-    stopReadingWhen: normalizeStopCriteria(t.stopReadingWhen),
     result: typeof t.result === "string" ? t.result : undefined,
     retryCount: typeof t.retryCount === "number" ? t.retryCount : 0,
     maxRetries: typeof t.maxRetries === "number" ? t.maxRetries : 2,
@@ -621,7 +599,6 @@ export function parseTasksFromMarkdown(content: string): TaskItem[] {
   const push = (
     description: string,
     acceptance?: string,
-    stopReadingWhen: string[] = [],
   ) => {
     const d = description.trim();
     if (!d) return;
@@ -632,24 +609,9 @@ export function parseTasksFromMarkdown(content: string): TaskItem[] {
       status: "pending",
       acceptance: acceptance?.trim() || undefined,
       dependsOn: idx > 1 ? [`task_${idx - 1}`] : [],
-      stopReadingWhen: stopReadingWhen.map((condition) => ({
-        condition,
-        satisfied: false,
-      })),
       retryCount: 0,
       maxRetries: 2,
     });
-  };
-
-  const metadataAfter = (index: number) => {
-    const stopReadingWhen: string[] = [];
-    for (let cursor = index + 1; cursor < lines.length; cursor++) {
-      const candidate = lines[cursor] ?? "";
-      if (/^\s*(?:[-*]\s+\[[ xX]\]|\d+[.、)])/u.test(candidate)) break;
-      const stop = candidate.match(/^\s*[>/*-]?\s*(?:停止阅读|停止探索|stop\s*(?:reading|exploring)\s*when)[:：]\s*(.+)$/i)?.[1];
-      if (stop) stopReadingWhen.push(...stop.split(/[；;]+/).map((part) => part.trim()).filter(Boolean));
-    }
-    return { stopReadingWhen };
   };
 
   for (let i = 0; i < lines.length; i++) {
@@ -658,16 +620,14 @@ export function parseTasksFromMarkdown(content: string): TaskItem[] {
     if (box) {
       const desc = box[1]!.replace(/\s*[—–-]\s*$/, "");
       const acc = lines[i + 1]?.match(/^\s*[>/*]?\s*(?:验收|acceptance|验证)[:：]\s*(.+)$/i)?.[1];
-      const metadata = metadataAfter(i);
-      push(desc, acc, metadata.stopReadingWhen);
+      push(desc, acc);
       continue;
     }
     const ord = line.match(/^\s*(\d+)[.、)]\s+(.+)$/);
     if (ord) {
       const desc = ord[2]!;
       const acc = lines[i + 1]?.match(/^\s*[>/*]?\s*(?:验收|acceptance|验证)[:：]\s*(.+)$/i)?.[1];
-      const metadata = metadataAfter(i);
-      push(desc, acc, metadata.stopReadingWhen);
+      push(desc, acc);
       continue;
     }
   }
@@ -680,7 +640,6 @@ export function parseTasksFromMarkdown(content: string): TaskItem[] {
         description: compact,
         status: "pending",
         dependsOn: [],
-        stopReadingWhen: [],
         retryCount: 0,
         maxRetries: 2,
       });

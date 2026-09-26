@@ -48,6 +48,10 @@ export const en = {
   "干净": "Clean",
   "已改": "Modified",
   "未跟踪": "Untracked",
+  "分阶段模型": "Staged Models",
+  "任务分解": "Task Decomposition",
+  "循环执行": "React Loop",
+  "选择模型": "Select Model",
   "有改动": "Changes",
   "Git 状态获取失败": "Failed to get Git status",
   "加载更多": "Load more",
@@ -589,11 +593,11 @@ export const en = {
   "中文, 语言, 回复": "Chinese, language, reply",
   "全局偏好": "Global memories",
   "当前项目偏好": "Current project memories",
-  "分阶段模型设置": "Separate stage models",
-  "任务分解模型": "Decomposer model",
+  "执行阶段单独配置": "Separate React stage model",
+  "循环执行模型": "React loop model",
   "React 循环模型": "React loop model",
-  "开启后，任务分解和 React 循环使用不同模型": "When enabled, task decomposition and React loop use different models",
-  "建议任务分解用较好模型，React 循环用中等模型（循环更费 token）": "Recommend a stronger model for decomposition, medium for React loop (loops consume more tokens)",
+  "开启后，React 循环使用单独的模型和思考强度": "When enabled, React loop uses a separate model and thinking effort",
+  "默认配置用于任务分解和不分阶段模式，执行阶段可选单独配置": "Default config is used for decomposition and non-staged mode; React stage can optionally use separate settings",
 
   // ── 主进程对话框 / 错误 ───────────────────────────────────────────────────
   "OwnCoder 需要你确认": "OwnCoder needs your confirmation",
@@ -612,6 +616,8 @@ export const en = {
     "Codemap is initialized when a project opens and then updated incrementally by file watching; manual rebuild is disabled.",
   "请输入要搜索的符号或描述": "Enter a symbol or description to search",
   "请输入要分析的符号": "Enter a symbol to analyze",
+  "模型和思考强度选择在输入框下方：": "Model and thinking effort selectors are below the input box:",
+  "循环执行思考强度": "React loop thinking effort",
 } as const;
 
 /** msgid 全集（key 即中文文案源）；t() 的合法入参类型。 */

@@ -58,7 +58,7 @@ function newLiveEventId(prefix = "le"): string {
 
 /** A single unit in the current-turn activity stream. */
 export type LiveEvent =
-  | { kind: "thinking"; id: string; text: string; streaming: boolean }
+  | { kind: "thinking"; id: string; text: string; streaming: boolean; stage?: "decompose" | "react" }
   | { kind: "tool";     tool: PendingTool }
   | { kind: "text";     id: string; text: string; streaming: boolean }
   /** Task-decomposition result from the task_decompose stage (one per turn). */
@@ -77,7 +77,6 @@ export interface DecompositionSnapshot {
       description: string;
       dependsOn: string[];
       informationNeeds: Array<{ id: string; question: string }>;
-      stopReadingWhen: Array<{ condition: string; requiredEvidenceIds: string[] }>;
     }>;
   }>;
   fallback: boolean;
@@ -146,6 +145,8 @@ export interface ChatSessionRuntime {
   /** Sidebar status icon state. `running` mirrors `sending` but is kept as a
    * separate field so the sidebar can read it without coupling to turn lifecycle. */
   status: SessionStatus;
+  /** Current stage (task_decompose or react loop) for coloring thinking blocks. */
+  currentStage: "decompose" | "react" | null;
 }
 
 function emptyRuntime(): ChatSessionRuntime {
@@ -164,13 +165,14 @@ function emptyRuntime(): ChatSessionRuntime {
     dangerousConfirmations: [],
     askRequests: [],
     status: "idle",
+    currentStage: null,
   };
 }
 
 // ── Pure live-event helpers (operate on a LiveEvent[]) ────────────────────────
 
-function pushThinkingFn(events: LiveEvent[]): LiveEvent[] {
-  return [...events, { kind: "thinking", id: newLiveEventId("think"), text: "", streaming: true }];
+function pushThinkingFn(events: LiveEvent[], stage?: "decompose" | "react"): LiveEvent[] {
+  return [...events, { kind: "thinking", id: newLiveEventId("think"), text: "", streaming: true, stage }];
 }
 
 function updateThinkingFn(events: LiveEvent[], text: string): LiveEvent[] {
@@ -178,7 +180,7 @@ function updateThinkingFn(events: LiveEvent[], text: string): LiveEvent[] {
   for (let i = out.length - 1; i >= 0; i--) {
     if (out[i]!.kind === "thinking") {
       const prev = out[i] as Extract<LiveEvent, { kind: "thinking" }>;
-      out[i] = { kind: "thinking", id: prev.id, text, streaming: true };
+      out[i] = { kind: "thinking", id: prev.id, text, streaming: true, stage: prev.stage };
       return out;
     }
   }
@@ -197,11 +199,11 @@ export function sealThinkingFn(events: LiveEvent[]): LiveEvent[] {
   return out;
 }
 
-export function upsertThinkingFn(events: LiveEvent[], text: string): LiveEvent[] {
+export function upsertThinkingFn(events: LiveEvent[], text: string, stage?: "decompose" | "react"): LiveEvent[] {
   const out = events.slice();
   const last = out[out.length - 1];
   if (last?.kind === "thinking") {
-    out[out.length - 1] = { kind: "thinking", id: last.id, text, streaming: true };
+    out[out.length - 1] = { kind: "thinking", id: last.id, text, streaming: true, stage: last.stage || stage };
     return out;
   }
   for (let i = out.length - 1; i >= 0; i--) {
@@ -211,7 +213,7 @@ export function upsertThinkingFn(events: LiveEvent[], text: string): LiveEvent[]
       break;
     }
   }
-  out.push({ kind: "thinking", id: newLiveEventId("think"), text, streaming: true });
+  out.push({ kind: "thinking", id: newLiveEventId("think"), text, streaming: true, stage });
   return out;
 }
 
@@ -330,7 +332,7 @@ export interface ChatActions {
 
   setLiveEvents: (events: LiveEvent[] | ((prev: LiveEvent[]) => LiveEvent[]), sessionId?: string) => void;
   /** Apply multiple live-turn fields in one Zustand transaction. */
-  patchLiveState: (patch: Partial<Pick<ChatSessionRuntime, "liveEvents" | "liveStatus" | "terminal">> | ((prev: ChatSessionRuntime) => Partial<Pick<ChatSessionRuntime, "liveEvents" | "liveStatus" | "terminal">>), sessionId?: string) => void;
+  patchLiveState: (patch: Partial<Pick<ChatSessionRuntime, "liveEvents" | "liveStatus" | "terminal" | "currentStage">> | ((prev: ChatSessionRuntime) => Partial<Pick<ChatSessionRuntime, "liveEvents" | "liveStatus" | "terminal" | "currentStage">>), sessionId?: string) => void;
 
   /** Append structured message from turn_complete event (阶段三). */
   pushStructuredMessage: (parts: MessagePart[], metadata: MessageMetadata, sessionId?: string) => void;

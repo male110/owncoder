@@ -1,6 +1,4 @@
-import { platform } from "node:os";
 import upath from "upath";
-import { relative, resolve } from "node:path";
 import { assertLlmAuth, chatCompletionStream, writeEventLog, type ChatMessage, type ToolCall } from "@owncoder/llm";
 import { defaultReactSteps, type PipelineNode, type ReactStepConfig } from "@owncoder/settings";
 import { clampText } from "../budget.ts";
@@ -50,6 +48,22 @@ function stepEnabled(steps: ReactStepConfig[], id: string): boolean {
   const step = steps.find((s) => s.id === id);
   return step?.enabled !== false;
 }
+
+/**
+ * Check if exploration is complete for a given task.
+ * A task's exploration is considered complete when it has reached a terminal status
+ * (completed, failed, or skipped) or when sufficient evidence has been gathered.
+ * Returns true if no further exploration is needed for this task.
+ */
+function isExplorationComplete(task: TaskItem): boolean {
+  // Task is complete if it has reached a terminal status
+  if (task.status === "completed" || task.status === "failed" || task.status === "skipped") {
+    return true;
+  }
+  // For in-progress or pending tasks, exploration is not complete
+  return false;
+}
+
 import { executeTool } from "../execute.ts";
 import { parseToolCallsFromAssistant, normalizeToolName } from "../parser.ts";
 import {
@@ -89,7 +103,6 @@ import {
   isPlanPath,
   type TaskItem,
 } from "../../plans.ts";
-import { MemoryManager } from "../memory.ts";
 
 /**
  * Find the closest known tool name via simple edit-distance so we can give
@@ -146,7 +159,6 @@ const MAX_CONSECUTIVE_READONLY_ITERS = 6;
  *  This directly addresses the "总中断" bug where the agent keeps exploring
  *  without transitioning to implementation. */
 const READONLY_TRANSITION_THRESHOLD = 3;
-const CASE_INSENSITIVE_PATHS = platform() === "win32";
 
 /** Read-only tool names that indicate exploration/browsing (not productive output). */
 const READONLY_TOOLS = new Set([
@@ -185,12 +197,6 @@ function summarizeToolActionForUser(
   return null;
 }
 
-function isExplorationComplete(task: TaskItem): boolean {
-  // 新逻辑: 基于 stopReadingWhen 条件判定探索是否完成
-  if (!task.stopReadingWhen.length) return false;
-  return task.stopReadingWhen.every((criterion) => criterion.satisfied === true);
-}
-
 function formatPackedHistory(task: TaskItem): string {
   const text = task.relevantHistory?.trim() ?? "";
   return text
@@ -200,21 +206,6 @@ function formatPackedHistory(task: TaskItem): string {
 
 
 
-function formatStopReadingWhen(task: TaskItem): string {
-  if (!task.stopReadingWhen.length) return "";
-  return `Stop-exploration criteria:\n${task.stopReadingWhen.map((criterion) =>
-    `- [${criterion.satisfied ? "met" : "unmet"}] ${criterion.condition}`
-  ).join("\n")}`;
-}
-
-
-
-function explorationStatusGuidance(task: TaskItem, whenNoStopCriteria: string): string {
-  if (!task.stopReadingWhen.length) return whenNoStopCriteria;
-  return isExplorationComplete(task)
-    ? "All stop-exploration criteria are satisfied. Do not call read_file, grep, search_symbols, web_search, or other exploration tools; only edit, verify, report a blocker, or give the final result."
-    : "Call exploration tools only to satisfy the stop-exploration criteria above. For needs that are not in this repository (errors, APIs, docs, library behavior), use web_search (then web_fetch) instead of guessing. Whole-file reads are only for files under 10KB. Files 10KB or larger: use read_outline first, then read_symbol or a bounded read_file(offset+limit); never request the complete file. Successful reads stay in this turn's context; continue with an edit, verification, blocker, or final result when the criteria are met.";
-}
 
 function formatCurrentTaskContext(task: TaskItem): string {
   return [
@@ -225,17 +216,13 @@ function formatCurrentTaskContext(task: TaskItem): string {
     "   - Exploration tools (read_file / grep / search_symbols / lsp_* / repo_map / read_symbol / read_outline, etc.) — use to understand the codebase. When the user or task provides concrete identifiers, search those strings verbatim first. Locate the relevant code before reading it, then inspect the smallest surrounding range that establishes the behavior. Whole-file read_file is only for files under 10KB. Files 10KB or larger MUST call read_outline first; then use read_symbol only for one unique symbol, or read_file with both offset and limit from the outline's line range.",
     "   - External knowledge (web_search / web_fetch) — required for unknown APIs, docs, error messages, library behavior, version-specific details. Search before guessing.",
     "   - Implementation tools (apply_patch / write_file / append_file / type_check / bash) — use when ready to make changes.",
-    "3. Termination — stop calling tools and produce the final answer when the goal is achieved and stop-exploration criteria are met.",
+    "3. Termination — stop calling tools and produce the final answer when the goal is achieved.",
     "4. Tool failure: read the error and correct it first; if the same action fails twice, switch path or switch tool. If the failure is an unexplained error or missing external knowledge, call web_search before more local retries.",
     `ID: ${task.id}`,
     `Description: ${task.description}`,
     task.acceptance ? `Acceptance criteria: ${task.acceptance}` : "",
     formatPackedHistory(task),
-    formatStopReadingWhen(task),
-    explorationStatusGuidance(
-      task,
-      "Use tools to execute this task. Report the result in one sentence when done; do not keep calling tools.",
-    ),
+    "Use tools to execute this task. Report the result in one sentence when done; do not keep calling tools.",
   ].filter(Boolean).join("\n");
 }
 
@@ -245,8 +232,6 @@ function formatTurnInformationContext(task: TaskItem): string {
     "This comes from this turn's task_decompose. Successful read_file/read_symbol results stay in this turn's context automatically.",
     `This turn's goal: ${task.description}`,
     formatPackedHistory(task),
-    formatStopReadingWhen(task),
-    explorationStatusGuidance(task, ""),
   ].filter(Boolean).join("\n");
 }
 
@@ -332,12 +317,6 @@ function lastAssistantSummaryFromHistory(history: ChatTurn[]): string | null {
     if (h.role === "assistant" && h.content.trim()) return h.content;
   }
   return null;
-}
-
-function canonicalReadPath(workspaceRoot: string, inputPath: string): string {
-  const rel = upath.normalize(relative(workspaceRoot, resolve(workspaceRoot, inputPath || ".")))
-    .replace(/^\.\//, "");
-  return CASE_INSENSITIVE_PATHS ? rel.toLowerCase() : rel;
 }
 
 
@@ -643,7 +622,10 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
     });
   }
 
-  for (let i = 0; i < maxIter; i++) {
+  // task-driven 模式下，每个子任务独立享有 maxIter 次迭代预算，
+  // 因此全局循环上限 = maxIter × 子任务数量。
+  const totalIterBound = taskDriven ? maxIter * Math.max(tasks.length, 1) : maxIter;
+  for (let i = 0; i < totalIterBound; i++) {
     // ═══════════════════════════════════════════════════════════════════════════
     // New Termination Check (在迭代开始时检查)
     // ═══════════════════════════════════════════════════════════════════════════
