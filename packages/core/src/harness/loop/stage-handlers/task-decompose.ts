@@ -1112,7 +1112,7 @@ export async function runTaskDecompose(
                 query,
                 recentHistoryBoundary,
               );
-              toolResult = result.content;
+              toolResult = result.output;
             }
           } catch (err) {
             toolResult = `Tool execution failed: ${err instanceof Error ? err.message : String(err)}`;

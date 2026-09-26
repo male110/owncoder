@@ -19,7 +19,6 @@ import {
   type PersistedDecompose,
 } from "../../../../turn-rounds.ts";
 import type { AgentLoopOpts, ChatTurn } from "../../types.ts";
-import type { HistoryChunk } from "../../history-vector.ts";
 
 // extractStructuredHistory 已从 task-decompose.ts 导出
 import {
@@ -1107,18 +1106,6 @@ describe("分解历史：仅注入最近5轮，历史召回由工具主动触发
   const SESSION_ID = "sess-vector-recall";
   const budgets = contextBudgets(BUILTIN_WORKFLOW);
 
-  function makeChunk(partial: Partial<HistoryChunk> & Pick<HistoryChunk, "content" | "turnIndex" | "role">): HistoryChunk {
-    return {
-      id: partial.id ?? `id-${partial.turnIndex}`,
-      turnId: partial.turnId ?? `turn-${partial.turnIndex}`,
-      sessionId: partial.sessionId ?? SESSION_ID,
-      role: partial.role,
-      content: partial.content,
-      contentHash: partial.contentHash ?? `hash-${partial.turnIndex}`,
-      createdAt: partial.createdAt ?? new Date().toISOString(),
-      turnIndex: partial.turnIndex,
-    };
-  }
 
   function makeOpts(overrides: Partial<AgentLoopOpts> = {}): AgentLoopOpts {
     return {
