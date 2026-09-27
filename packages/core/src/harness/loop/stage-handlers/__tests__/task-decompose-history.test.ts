@@ -1034,26 +1034,53 @@ describe("per-task 环检与全局唯一 step id", () => {
   });
 });
 
-// relevantHistory 字段已移除 - 以下测试已过时，暂时注释
-describe.skip("relevantHistory 为可承载全部相关历史的字符串 (已废弃)", () => {
-  it("解析步骤级与整单 string relevantHistory", () => {
-    // 此测试已过时 - relevantHistory 字段已从 schema 中移除
+describe("relevantHistory 持久化与 ID 归一化", () => {
+  it("解析重复 task/step id，并将依赖保留到归一化后的步骤", () => {
+    const answer = parseDecomposeAnswer(JSON.stringify({
+      intent: "测试",
+      tasks: [
+        { id: "task", description: "一", steps: [
+          { id: "step", description: "A", dependsOn: [] },
+          { id: "step", description: "B", dependsOn: ["step"] },
+        ] },
+        { id: "task", description: "二", steps: [
+          { id: "step", description: "C", dependsOn: [] },
+        ] },
+      ],
+    }));
+    expect(answer).not.toBeNull();
+    expect(answer!.tasks.map((task) => task.id)).toEqual(["task", "task_2"]);
+    expect(flattenSteps(answer!).map((step) => step.id)).toEqual(["step", "step_2", "step_3"]);
+    expect(answer!.tasks[0].steps[1].dependsOn).toEqual(["step"]);
   });
 
-  it("兼容旧 { files } 对象并转成同等文本", () => {
-    // 此测试已过时 - relevantHistory 字段已从 schema 中移除
+  it("保留步骤级和任务级 relevantHistory", () => {
+    const answer = parseDecomposeAnswer(JSON.stringify({
+      intent: "测试",
+      tasks: [{ id: "task", description: "任务", relevantHistory: "task history", steps: [
+        { id: "step", description: "步骤", relevantHistory: "step history", dependsOn: [] },
+      ] }],
+    }));
+    expect(answer!.tasks[0].relevantHistory).toBe("task history");
+    expect(answer!.tasks[0].steps[0].relevantHistory).toBe("step history");
   });
 
-  it("步骤缺省时透传整单 relevantHistory", () => {
-    // 此测试已过时 - relevantHistory 字段已从 schema 中移除
-  });
-
-  it("fallback 打包已读文件与非文件对话要点", () => {
-    // 此测试已过时 - packFallbackRelevantHistory 功能已移除
-  });
-
-  it("fallback 按相关度排序并丢弃 <60% 的块", () => {
-    // 此测试已过时 - packFallbackRelevantHistory 功能已移除
+  it("持久化往返保留步骤级 relevantHistory", async () => {
+    const record = await persistDecomposeRound(tmpDir, "step-history-session", "请求", {
+      intent: "测试",
+      userConstraints: [],
+      tasks: [{
+        id: "task",
+        description: "任务",
+        userConstraints: [],
+        relevantHistory: "task history",
+        progressStatus: "pending",
+        steps: [{ id: "step", description: "步骤", dependsOn: [], relevantHistory: "step history" }],
+      }],
+    });
+    expect(record!.taskDecompose?.tasks[0].steps[0].relevantHistory).toBe("step history");
+    const rounds = await loadRecentRounds(tmpDir, "step-history-session", 1);
+    expect(rounds[0].taskDecompose?.tasks[0].steps[0].relevantHistory).toBe("step history");
   });
 });
 

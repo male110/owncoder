@@ -19,17 +19,58 @@ function isLocalFileLink(href: string): boolean {
   );
 }
 
-function openLink(href: string): void {
-  if (isLocalFileLink(href) && window.owncoder?.openWorkspaceFile) {
-    void window.owncoder.openWorkspaceFile(href);
+function workspaceLinkPath(href: string, workspaceRoot?: string): string {
+  let value = href.trim();
+  try {
+    if (/^file:\/\//i.test(value)) value = new URL(value).pathname;
+    value = decodeURIComponent(value);
+  } catch {
+    return href;
+  }
+  if (/^\/[a-z]:[\\/]/i.test(value)) value = value.slice(1);
+  value = value.replace(/\\/g, "/");
+  const root = workspaceRoot?.replace(/\\/g, "/").replace(/\/$/, "");
+  if (root && /^[a-z]:\//i.test(value) && value.toLowerCase().startsWith(`${root.toLowerCase()}/`)) {
+    return value.slice(root.length + 1);
+  }
+  return value;
+}
+
+function openLink(href: string, onOpenFile?: (path: string) => void, workspaceRoot?: string): void {
+  if (isLocalFileLink(href) && onOpenFile) {
+    onOpenFile(workspaceLinkPath(href, workspaceRoot));
     return;
   }
   window.open(href, "_blank", "noopener,noreferrer");
 }
 
-function inlineFormat(text: string): ReactNode[] {
+function renderLink(
+  href: string,
+  label: string,
+  key: number,
+  onOpenFile?: (path: string) => void,
+  workspaceRoot?: string,
+): ReactNode {
+  return (
+    <a
+      key={key}
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      onClick={(event) => {
+        if (!isLocalFileLink(href)) return;
+        event.preventDefault();
+        openLink(href, onOpenFile, workspaceRoot);
+      }}
+    >
+      {label}
+    </a>
+  );
+}
+
+function inlineFormat(text: string, onOpenFile?: (path: string) => void, workspaceRoot?: string): ReactNode[] {
   const parts: ReactNode[] = [];
-  const re = /(`[^`]+`|\*\*[^*]+\*\*|\*[^*\n]+\*|\[[^\]]+\]\([^)]+\))/g;
+  const re = /(`[^`]+`|\*\*[^*]+\*\*|\*[^*\n]+\*|\[[^\]]+\]\([^)]+\)|<a\s+[^>]*\bhref\s*=\s*(?:"[^"]*"|'[^']*')[^>]*>[\s\S]*?<\/a>)/gi;
   let last = 0;
   let m: RegExpExecArray | null;
 
@@ -49,23 +90,15 @@ function inlineFormat(text: string): ReactNode[] {
     } else {
       const linkMatch = token.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
       if (linkMatch) {
-        parts.push(
-          <a
-            key={m.index}
-            href={linkMatch[2]}
-            target="_blank"
-            rel="noreferrer"
-            onClick={(event) => {
-              if (!isLocalFileLink(linkMatch[2]!)) return;
-              event.preventDefault();
-              openLink(linkMatch[2]!);
-            }}
-          >
-            {linkMatch[1]}
-          </a>,
-        );
+        parts.push(renderLink(linkMatch[2]!, linkMatch[1]!, m.index, onOpenFile, workspaceRoot));
       } else {
-        parts.push(token);
+        const htmlLinkMatch = token.match(/^<a\s+[^>]*\bhref\s*=\s*(["'])(.*?)\1[^>]*>([\s\S]*?)<\/a>$/i);
+        if (htmlLinkMatch) {
+          const label = htmlLinkMatch[3]!;
+          parts.push(renderLink(htmlLinkMatch[2]!, label.replace(/^`([^`]+)`$/, "$1"), m.index, onOpenFile, workspaceRoot));
+        } else {
+          parts.push(token);
+        }
       }
     }
     last = m.index + token.length;
@@ -151,6 +184,19 @@ function parseBlocks(src: string): Block[] {
       continue;
     }
 
+    const htmlListItem = line.match(/^\s*<li>([\s\S]*?)<\/li>\s*$/i);
+    if (htmlListItem) {
+      const items: string[] = [];
+      while (i < lines.length) {
+        const item = (lines[i] ?? "").match(/^\s*<li>([\s\S]*?)<\/li>\s*$/i);
+        if (!item) break;
+        items.push(item[1]!);
+        i++;
+      }
+      blocks.push({ kind: "ul", items });
+      continue;
+    }
+
     if (/^\d+\.\s+/.test(line)) {
       const items: string[] = [];
       while (i < lines.length && /^\d+\.\s+/.test(lines[i] ?? "")) {
@@ -192,6 +238,8 @@ function parseBlocks(src: string): Block[] {
 interface Props {
   content: string;
   className?: string;
+  onOpenFile?: (path: string) => void;
+  workspaceRoot?: string;
   /** 代码块是否显示复制按钮；思考内容应关闭。默认开启。 */
   showCopy?: boolean;
 }
@@ -232,7 +280,7 @@ function CodeBlock({ lang, code, showCopy }: { lang: string; code: string; showC
   );
 }
 
-function MarkdownImpl({ content, className, showCopy = true }: Props) {
+function MarkdownImpl({ content, className, onOpenFile, workspaceRoot, showCopy = true }: Props) {
   const blocks = useMemo(() => parseBlocks(content.trim()), [content]);
 
   if (!content.trim()) return null;
@@ -248,7 +296,7 @@ function MarkdownImpl({ content, className, showCopy = true }: Props) {
           const Tag = (`h${b.level}` as "h1" | "h2" | "h3");
           return (
             <Tag key={i} className={`md-h md-h${b.level}`}>
-              {inlineFormat(b.text)}
+              {inlineFormat(b.text, onOpenFile, workspaceRoot)}
             </Tag>
           );
         }
@@ -256,7 +304,7 @@ function MarkdownImpl({ content, className, showCopy = true }: Props) {
           return (
             <ul key={i} className="md-ul">
               {b.items.map((item, j) => (
-                <li key={j}>{inlineFormat(item)}</li>
+                <li key={j}>{inlineFormat(item, onOpenFile, workspaceRoot)}</li>
               ))}
             </ul>
           );
@@ -265,7 +313,7 @@ function MarkdownImpl({ content, className, showCopy = true }: Props) {
           return (
             <ol key={i} className="md-ol">
               {b.items.map((item, j) => (
-                <li key={j}>{inlineFormat(item)}</li>
+                <li key={j}>{inlineFormat(item, onOpenFile, workspaceRoot)}</li>
               ))}
             </ol>
           );
@@ -276,7 +324,7 @@ function MarkdownImpl({ content, className, showCopy = true }: Props) {
         if (b.kind === "quote") {
           return (
             <blockquote key={i} className="md-quote">
-              {inlineFormat(b.text)}
+              {inlineFormat(b.text, onOpenFile, workspaceRoot)}
             </blockquote>
           );
         }
@@ -287,7 +335,7 @@ function MarkdownImpl({ content, className, showCopy = true }: Props) {
                 <thead>
                   <tr>
                     {b.headers.map((h, j) => (
-                      <th key={j}>{inlineFormat(h)}</th>
+                      <th key={j}>{inlineFormat(h, onOpenFile, workspaceRoot)}</th>
                     ))}
                   </tr>
                 </thead>
@@ -295,7 +343,7 @@ function MarkdownImpl({ content, className, showCopy = true }: Props) {
                   {b.rows.map((row, r) => (
                     <tr key={r}>
                       {row.map((cell, c) => (
-                        <td key={c}>{inlineFormat(cell)}</td>
+                        <td key={c}>{inlineFormat(cell, onOpenFile, workspaceRoot)}</td>
                       ))}
                     </tr>
                   ))}
@@ -306,7 +354,7 @@ function MarkdownImpl({ content, className, showCopy = true }: Props) {
         }
         return (
           <p key={i} className="md-p">
-            {inlineFormat(b.text)}
+            {inlineFormat(b.text, onOpenFile, workspaceRoot)}
           </p>
         );
       })}
@@ -319,10 +367,12 @@ const MarkdownMemo = memo(
   (prev, next) =>
     prev.content === next.content &&
     prev.className === next.className &&
+    prev.onOpenFile === next.onOpenFile &&
+    prev.workspaceRoot === next.workspaceRoot &&
     prev.showCopy === next.showCopy,
 );
 
 /** Public API kept as `export function` for stable call sites / type exports. */
-export function Markdown({ content, className, showCopy }: Props) {
-  return <MarkdownMemo content={content} className={className} showCopy={showCopy} />;
+export function Markdown({ content, className, onOpenFile, workspaceRoot, showCopy }: Props) {
+  return <MarkdownMemo content={content} className={className} onOpenFile={onOpenFile} workspaceRoot={workspaceRoot} showCopy={showCopy} />;
 }

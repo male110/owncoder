@@ -61,7 +61,8 @@ describe("task decompose prompt JSON contract", () => {
     expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(/## Historical Context/);
     expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(/current context is insufficient/);
     expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(/relevant to planning/);
-    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(/recall_history/);
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(/functions\.recall_history_for_task_decompose/);
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).not.toMatch(/(?<!functions\.)`recall_history`/);
     expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(/Prefer the supplied context whenever it is sufficient/);
     expect(BUILTIN_TASK_DECOMPOSE_PROMPT).not.toMatch(/## Available Tools/);
     expect(BUILTIN_TASK_DECOMPOSE_PROMPT).not.toMatch(/web_search|search_symbols|code-map|file reading|file modification|testing/);
@@ -82,7 +83,25 @@ describe("task decompose prompt JSON contract", () => {
     expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(/execution happens later/);
   });
 
-  it("要求任务级上下文，并将无需拆分的请求放入一个任务", () => {
+  it("要求 relevantHistory 精简但完整，覆盖当前任务所需上下文", () => {
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(/Extract concise but complete task-relevant context/);
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(/into the `relevantHistory` field/);
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(/all information that may be needed to execute or verify this task/);
+    for (const item of [
+      "confirmed requirements and constraints",
+      "decisions",
+      "assumptions",
+      "prior instructions",
+      "progress",
+      "reusable results",
+      "outstanding questions",
+      "blockers",
+      "dependencies",
+      "relevant files",
+    ]) {
+      expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain(item);
+    }
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(/not only these examples/);
     expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(/tasks\[\]\.userConstraints/);
     expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(/tasks\[\]\.relevantHistory/);
     expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(/tasks\[\]\.progressStatus/);

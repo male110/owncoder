@@ -29,11 +29,15 @@ import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = resolve(fileURLToPath(import.meta.url), "..");
-const RELEASE_ROOT = resolve(__dirname, "..", "release");
+const RELEASE_ROOT = process.env.OWNCODER_RELEASE_ROOT
+  ? resolve(process.env.OWNCODER_RELEASE_ROOT)
+  : resolve(__dirname, "..", "release");
 // nsis-web 目标写入 release/nsis-web
 const RELEASE_DIR = join(RELEASE_ROOT, "nsis-web");
 // 整理后的上传目录
-const PUBLISH_DIR = join(RELEASE_ROOT, "publish");
+const PUBLISH_DIR = process.env.OWNCODER_PUBLISH_DIR
+  ? resolve(process.env.OWNCODER_PUBLISH_DIR)
+  : join(RELEASE_ROOT, "publish");
 
 async function listReleaseFiles() {
   try {
@@ -237,7 +241,7 @@ function findMissingArtifacts(yml, version, versionDir) {
     ) {
       value = value.slice(1, -1);
     }
-    // 期望 "0.1.16/filename"
+    // 期望 "0.1.19/filename"
     const prefix = `${version}/`;
     if (!value.startsWith(prefix)) {
       missing.push(`${value} (缺少 ${prefix} 前缀)`);

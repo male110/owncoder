@@ -94,6 +94,8 @@ export interface PersistedDecomposeStep {
   };
   rollbackStrategy?: string;
   estimatedComplexity?: "low" | "medium" | "high";
+  /** 当前步骤可复用的完整相关历史。 */
+  relevantHistory?: string;
 }
 
 export interface PersistedDecomposeTask {
@@ -212,26 +214,42 @@ function sanitizeDecompose(raw: unknown): PersistedDecompose | undefined {
     : Array.isArray(obj.steps)
       ? [{ id: "task_1", description: "", steps: obj.steps }]
       : [];
+  const usedTaskIds = new Set<string>();
+  const usedStepIds = new Set<string>();
+  const uniqueId = (base: string, used: Set<string>, fallback: string): string => {
+    const seed = base.trim() || fallback;
+    if (!used.has(seed)) {
+      used.add(seed);
+      return seed;
+    }
+    let suffix = 2;
+    while (used.has(`${seed}_${suffix}`)) suffix++;
+    const id = `${seed}_${suffix}`;
+    used.add(id);
+    return id;
+  };
   const tasks: PersistedDecomposeTask[] = rawTasks.flatMap((rawTask, ti) => {
     if (!rawTask || typeof rawTask !== "object") return [];
     const t = rawTask as Record<string, unknown>;
     const rawSteps = Array.isArray(t.steps) ? t.steps.slice(0, MAX_STEPS) : [];
-    const steps: PersistedDecomposeStep[] = rawSteps.flatMap((step, i) => {
-    if (!step || typeof step !== "object") return [];
-    const s = step as Record<string, unknown>;
-    const description = typeof s.description === "string" ? clip(s.description.trim(), MAX_STEP_DESCRIPTION_CHARS) : "";
-    if (!description) return [];
-    const relevantHistory =
-      typeof s.relevantHistory === "string" && s.relevantHistory.trim()
-        ? clip(s.relevantHistory.trim(), MAX_UNDERSTANDING_CHARS)
-        : undefined;
-    return [
-      {
-        id: typeof s.id === "string" && s.id.trim() ? s.id.trim() : `step_${i + 1}`,
-        description,
-        dependsOn: Array.isArray(s.dependsOn)
-          ? s.dependsOn.filter((d): d is string => typeof d === "string")
-          : [],
+    const localStepIds = new Set<string>();
+    const pendingSteps: Array<{ step: PersistedDecomposeStep; rawDependsOn: string[] }> = [];
+    rawSteps.forEach((step, i) => {
+      if (!step || typeof step !== "object") return;
+      const s = step as Record<string, unknown>;
+      const description = typeof s.description === "string" ? clip(s.description.trim(), MAX_STEP_DESCRIPTION_CHARS) : "";
+      if (!description) return;
+      const id = uniqueId(typeof s.id === "string" ? s.id : "", usedStepIds, `step_${i + 1}`);
+      localStepIds.add(id);
+      const relevantHistory =
+        typeof s.relevantHistory === "string" && s.relevantHistory.trim()
+          ? clip(s.relevantHistory.trim(), MAX_UNDERSTANDING_CHARS)
+          : undefined;
+      pendingSteps.push({
+        step: {
+          id,
+          description,
+          dependsOn: [],
         verificationCriteria: (() => {
           if (!s.verificationCriteria || typeof s.verificationCriteria !== "object") return undefined;
           const vc = s.verificationCriteria as Record<string, unknown>;
@@ -251,10 +269,17 @@ function sanitizeDecompose(raw: unknown): PersistedDecompose | undefined {
         estimatedComplexity: s.estimatedComplexity === "low" || s.estimatedComplexity === "medium" || s.estimatedComplexity === "high"
           ? s.estimatedComplexity
           : undefined,
-        relevantHistory,
-      },
-    ];
+          relevantHistory,
+        },
+        rawDependsOn: Array.isArray(s.dependsOn)
+          ? s.dependsOn.filter((d): d is string => typeof d === "string")
+          : [],
+      });
     });
+    const steps: PersistedDecomposeStep[] = pendingSteps.map(({ step, rawDependsOn }) => ({
+      ...step,
+      dependsOn: rawDependsOn.filter((dependency) => localStepIds.has(dependency)),
+    }));
     const taskConstraints = Array.isArray(t.userConstraints)
       ? t.userConstraints.filter((value): value is string => typeof value === "string")
         .map((value) => value.trim()).filter(Boolean).slice(0, 20)
@@ -266,7 +291,7 @@ function sanitizeDecompose(raw: unknown): PersistedDecompose | undefined {
       ? clip(t.progressStatus.trim(), 200)
       : undefined;
     return [{
-      id: typeof t.id === "string" && t.id.trim() ? t.id.trim() : `task_${ti + 1}`,
+      id: uniqueId(typeof t.id === "string" ? t.id : "", usedTaskIds, `task_${ti + 1}`),
       description: typeof t.description === "string" ? clip(t.description.trim(), MAX_STEP_DESCRIPTION_CHARS) : "",
       userConstraints: taskConstraints.length > 0 ? taskConstraints : userConstraints,
       relevantHistory,

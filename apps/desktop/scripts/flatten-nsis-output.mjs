@@ -7,15 +7,15 @@ import { join } from 'node:path';
  * 
  * 打包后默认结构：
  *   nsis-web/
- *     ├── 0.1.18/
- *     │   └── OwnCoder Web Setup 0.1.18.exe
- *     ├── @owncoderdesktop-0.1.18-x64.nsis.7z
+ *     ├── 0.1.19/
+ *     │   └── OwnCoder Web Setup 0.1.19.exe
+ *     ├── @owncoderdesktop-0.1.19-x64.nsis.7z
  *     └── latest.yml
  * 
  * 扁平化后结构：
  *   nsis-web/
- *     ├── OwnCoder Web Setup 0.1.18.exe
- *     ├── @owncoderdesktop-0.1.18-x64.nsis.7z
+ *     ├── OwnCoder Web Setup 0.1.19.exe
+ *     ├── @owncoderdesktop-0.1.19-x64.nsis.7z
  *     └── latest.yml
  */
 export default async function flattenNsisOutput(buildResult) {

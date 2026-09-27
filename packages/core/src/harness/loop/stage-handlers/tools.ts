@@ -10,25 +10,26 @@ import { resolveStageModel, emitStage } from "../stages.ts";
 import { resolveLoopStrategy } from "../loop-strategy.ts";
 import type { AgentLoopOpts } from "../types.ts";
 import type { SchedulerState, StageHandler, StageHandlerContext } from "./types.ts";
-import { flattenSteps } from "./task-decompose.ts";
 
 /** 把分解结果中的可复用历史合并进 activeTasks，供 ReAct 循环直接使用。 */
 function withDecomposeHistory(opts: AgentLoopOpts, state: SchedulerState): AgentLoopOpts {
-  const steps = flattenSteps(state.rawDecompose);
-  if (!steps.length || !opts.activeTasks?.length) return opts;
-  const byId = new Map(steps.map((s) => [s.id, s.relevantHistory]));
-  const taskById = new Map((state.rawDecompose?.tasks ?? []).map((task) => [task.id, task]));
+  const decomposedTasks = state.rawDecompose?.tasks ?? [];
+  if (!decomposedTasks.length || !opts.activeTasks?.length) return opts;
+  const taskById = new Map(decomposedTasks.map((task) => [task.id, task]));
   const shared = state.rawDecompose?.relevantHistory;
   const activeTasks = opts.activeTasks.map((task) => {
     const source = taskById.get(task.id);
-    const fromStep = byId.get(task.id);
+    const stepHistory = source?.steps
+      .map((step) => step.relevantHistory?.trim())
+      .filter((history): history is string => Boolean(history));
+    const combinedStepHistory = stepHistory?.length ? stepHistory.join("\n\n") : undefined;
     return {
       ...task,
       userConstraints: task.userConstraints?.length ? task.userConstraints : source?.userConstraints,
       progressStatus: task.progressStatus ?? source?.progressStatus,
       relevantHistory: task.relevantHistory?.trim()
         ? task.relevantHistory
-        : source?.relevantHistory ?? fromStep ?? shared,
+        : source?.relevantHistory ?? combinedStepHistory ?? shared,
     };
   });
   return { ...opts, activeTasks };

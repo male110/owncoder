@@ -43,7 +43,7 @@ describe("applyChatEvent task_run_state", () => {
       verificationSummary: "typecheck failed",
       repairAttempts: 1,
       maxRepairAttempts: 3,
-      label: "自动修复中�?,
+      label: "自动修复中",
       totalDurationMs: 1200,
       metrics: {
         startedAt: "2020-01-01T00:00:00.000Z",
@@ -62,13 +62,13 @@ describe("applyChatEvent task_run_state", () => {
     });
 
     const next = useChatStore.getState();
-    expect(next.liveStatus).toBe("自动修复中�?);
+    expect(next.liveStatus).toBe("自动修复中");
     expect(next.taskRun).toMatchObject({
       phase: "repairing",
       taskId: "s1",
       verificationStatus: "failed",
       repairAttempts: 1,
-      label: "自动修复中�?,
+      label: "自动修复中",
       totalDurationMs: 1200,
       metrics: {
         modelSampleCount: 3,
@@ -90,7 +90,7 @@ describe("applyChatEvent task_run_state", () => {
       verificationSummary: "尚未验证",
       repairAttempts: 0,
       maxRepairAttempts: 3,
-      label: "执行中�?,
+      label: "执行中",
     });
     apply({
       type: "task_run_state",
@@ -115,13 +115,13 @@ describe("applyChatEvent streaming / turn_complete", () => {
   beforeEach(() => resetChat());
 
   it("atomically upserts thinking and seals before text", () => {
-    apply({ type: "thinking_delta", sessionId: "s1", text: "想�? });
-    apply({ type: "thinking_delta", sessionId: "s1", text: "想一�? });
+    apply({ type: "thinking_delta", sessionId: "s1", text: "想" });
+    apply({ type: "thinking_delta", sessionId: "s1", text: "想一下" });
     apply({ type: "assistant_delta", sessionId: "s1", text: "你好" });
 
     const events = useChatStore.getState().liveEvents;
     expect(events).toHaveLength(2);
-    expect(events[0]).toMatchObject({ kind: "thinking", text: "想一�?, streaming: false });
+    expect(events[0]).toMatchObject({ kind: "thinking", text: "想一下", streaming: false });
     expect(events[1]).toMatchObject({ kind: "text", text: "你好", streaming: true });
   });
 
@@ -137,7 +137,7 @@ describe("applyChatEvent streaming / turn_complete", () => {
     apply({ type: "assistant_delta", sessionId: "s1", text: "leak" });
 
     const next = useChatStore.getState();
-    expect(next.liveStatus).toBe("正在分解任务�?);
+    expect(next.liveStatus).toBe("正在分解任务…");
     expect(next.liveEvents).toEqual([]);
   });
 
@@ -148,7 +148,7 @@ describe("applyChatEvent streaming / turn_complete", () => {
       type: "task_decomposition",
       sessionId: "s1",
       intent: "理解任务",
-      userConstraints: ["仅开发模式显�?],
+      userConstraints: ["仅开发模式显示"],
       tasks: [
         {
           id: "task_1",
@@ -172,7 +172,7 @@ describe("applyChatEvent streaming / turn_complete", () => {
       kind: "decompose",
       decomposition: {
         intent: "理解任务",
-        userConstraints: ["仅开发模式显�?],
+        userConstraints: ["仅开发模式显示"],
         fallback: false,
       },
     });
@@ -182,7 +182,7 @@ describe("applyChatEvent streaming / turn_complete", () => {
     apply({
       type: "warning",
       sessionId: "s1",
-      message: "无法报告成功：验证门禁未通过（phase=failed, verification=failed�?,
+      message: "无法报告成功：验证门禁未通过（phase=failed, verification=failed）",
     });
     expect(useChatStore.getState().errorAlert).toBeNull();
 
@@ -209,7 +209,7 @@ describe("applyChatEvent streaming / turn_complete", () => {
     apply({
       type: "error",
       sessionId: "s1",
-      message: "无法报告成功：验证门禁未通过（phase=failed, verification=failed�?,
+      message: "无法报告成功：验证门禁未通过（phase=failed, verification=failed）",
     });
     expect(useChatStore.getState().errorAlert).toBeNull();
     expect(useChatStore.getState().liveStatus).toBe("");
@@ -221,7 +221,7 @@ describe("applyChatEvent streaming / turn_complete", () => {
       sessionId: "s1",
       message: JSON.stringify({
         code: "UNKNOWN",
-        message: "无法报告成功：验证门禁未通过（phase=failed, verification=failed, checks=2, repairAttempts=3/3�?,
+        message: "无法报告成功：验证门禁未通过（phase=failed, verification=failed, checks=2, repairAttempts=3/3）",
       }),
     });
     expect(useChatStore.getState().errorAlert).toBeNull();

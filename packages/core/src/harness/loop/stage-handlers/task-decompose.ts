@@ -382,6 +382,7 @@ interface DecomposeStep {
   id: string;
   description: string;
   dependsOn: string[];
+  relevantHistory?: string;
   verificationCriteria?: TaskItem["verificationCriteria"];
   rollbackStrategy?: string;
   estimatedComplexity?: TaskItem["estimatedComplexity"];
@@ -832,7 +833,23 @@ export function parseDecomposeAnswer(text: string): DecomposeAnswer | null {
         progressStatus: "pending",
       }];
 
+  const usedStepIds = new Set<string>();
+  const usedTaskIds = new Set<string>();
+  const uniqueId = (base: string, used: Set<string>): string => {
+    const seed = base || "step";
+    if (!used.has(seed)) {
+      used.add(seed);
+      return seed;
+    }
+    let suffix = 2;
+    while (used.has(`${seed}_${suffix}`)) suffix++;
+    const id = `${seed}_${suffix}`;
+    used.add(id);
+    return id;
+  };
+
   const parseTaskSteps = (rawSteps: unknown[]): DecomposeStep[] => {
+    const localStepIds = new Set<string>();
     // 限制步骤数量，防止无限循环
     const limitedRawSteps = rawSteps.slice(0, MAX_STEPS);
   
@@ -868,13 +885,16 @@ export function parseDecomposeAnswer(text: string): DecomposeAnswer | null {
         const description = typeof step.description === "string" ? step.description.trim() : "";
         if (!description) return null;
 
-        const stepId = typeof step.id === "string" && step.id.trim() ? step.id.trim() : `step_${i + 1}`;
+        const requestedId = typeof step.id === "string" && step.id.trim() ? step.id.trim() : `step_${i + 1}`;
+        const normalizedId = uniqueId(requestedId, usedStepIds);
+        localStepIds.add(normalizedId);
         return {
-          id: stepId,
+          id: normalizedId,
           description,
           dependsOn: Array.isArray(step.dependsOn)
             ? step.dependsOn.filter((d): d is string => typeof d === "string")
             : [],
+          relevantHistory: typeof step.relevantHistory === "string" ? step.relevantHistory.trim() : undefined,
           verificationCriteria: parseVerificationCriteria(step.verificationCriteria),
           rollbackStrategy: typeof step.rollbackStrategy === "string"
             ? step.rollbackStrategy.trim() || undefined
@@ -885,10 +905,10 @@ export function parseDecomposeAnswer(text: string): DecomposeAnswer | null {
       .filter((s): s is NonNullable<typeof s> => s !== null);
 
     // dependsOn is task-local: discard unknown and cross-task references during normalization.
-    const stepIds = new Set(steps.map((step) => step.id));
     return steps.map((step) => ({
       ...step,
-      dependsOn: step.dependsOn.filter((dependency) => stepIds.has(dependency)),
+      dependsOn: step.dependsOn
+        .filter((dependency): dependency is string => localStepIds.has(dependency)),
     }));
   };
 
@@ -913,7 +933,7 @@ export function parseDecomposeAnswer(text: string): DecomposeAnswer | null {
     const progressStatus = typeof taskObj.progressStatus === "string" && taskObj.progressStatus.trim()
       ? taskObj.progressStatus.trim()
       : "pending";
-    return [{ id, description, userConstraints, steps, relevantHistory, progressStatus }];
+    return [{ id: uniqueId(id || `task_${usedTaskIds.size + 1}`, usedTaskIds), description, userConstraints, steps, relevantHistory, progressStatus }];
   });
 
   // 兼容旧格式：understanding 兜底填充 intent。
@@ -984,6 +1004,7 @@ export async function runTaskDecompose(
         id: string;
         description: string;
         dependsOn: string[];
+        relevantHistory?: string;
         verificationCriteria?: TaskItem["verificationCriteria"];
         rollbackStrategy?: string;
         estimatedComplexity?: TaskItem["estimatedComplexity"];
@@ -1304,6 +1325,7 @@ export async function runTaskDecompose(
           verificationCriteria: s.verificationCriteria,
           rollbackStrategy: s.rollbackStrategy,
           estimatedComplexity: s.estimatedComplexity,
+          relevantHistory: s.relevantHistory,
         })),
       })),
     };
@@ -1460,6 +1482,7 @@ export const taskDecomposeHandler: StageHandler = {
             id: step.id,
             description: step.description,
             dependsOn: step.dependsOn,
+            relevantHistory: step.relevantHistory ?? "",
           })),
         })),
         fallback: result.fallback === true,
@@ -1488,6 +1511,7 @@ export const taskDecomposeHandler: StageHandler = {
             verificationCriteria: step.verificationCriteria,
             rollbackStrategy: step.rollbackStrategy,
             estimatedComplexity: step.estimatedComplexity,
+            relevantHistory: step.relevantHistory,
           })),
         })),
       };

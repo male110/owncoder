@@ -101,7 +101,16 @@ export type {
   EmbeddingService,
   HistoryVectorStore,
 } from "./loop/history-vector.ts";
-export { archiveTurn, computeContentHash } from "./loop/history-vector.ts";
+export {
+  archiveTurn,
+  computeContentHash,
+  comparableHistoryText,
+  historyTextSimilarity,
+  dedupeSimilarHistoryHits,
+  finalizeRecalledHistoryHits,
+  HISTORY_MIN_RELEVANCE_SCORE,
+  HISTORY_NEAR_DUPLICATE_THRESHOLD,
+} from "./loop/history-vector.ts";
 
 // ── Main Entry Point ───────────────────────────────────────
 
@@ -419,6 +428,7 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
                     id: step.id,
                     description: step.description,
                     dependsOn: step.dependsOn,
+                    relevantHistory: step.relevantHistory ?? "",
                   })),
                 })),
               }

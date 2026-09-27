@@ -60,6 +60,9 @@ export default defineConfig({
   },
   renderer: {
     root: resolve("src/renderer"),
+    worker: {
+      format: "es",
+    },
     build: {
       rollupOptions: {
         input: {

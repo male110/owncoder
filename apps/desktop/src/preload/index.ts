@@ -3,6 +3,7 @@ import type {
   AgentMode,
   IndexStatus,
   TaskDecompositionDto,
+  ToolEndMetadataDto,
   WorkspaceInfo,
 } from "@owncoder/shared";
 import type { SystemWorkflowConfig, WorkflowOverlay, ModelSettingsOverlay } from "@owncoder/settings";
@@ -107,7 +108,7 @@ type ChatEventFields =
   | { type: "assistant_delta"; text: string }
   | { type: "thinking_delta"; text: string }
   | { type: "tool_start"; id: string; name: string; args: Record<string, unknown> }
-  | { type: "tool_end"; id: string; name: string; ok: boolean; output: string; skipped?: boolean }
+  | { type: "tool_end"; id: string; name: string; ok: boolean; output: string; metadata?: ToolEndMetadataDto; skipped?: boolean }
   | { type: "turn_complete"; parts: MessagePartDto[]; metadata: MessageMetadataDto }
   | { type: "terminal"; entry: TerminalEntryDto }
   | { type: "stage_start"; id: string; nodeType: string; label: string }
@@ -458,7 +459,6 @@ export interface DesktopApi {
   getRepoMap: () => Promise<string>;
   rebuildIndex: () => Promise<IndexStatus>;
   openPath: (path: string) => Promise<string>;
-  openWorkspaceFile: (href: string) => Promise<string>;
   getSettings: () => Promise<SettingsSnapshotDto>;
   saveSettings: (config: SystemWorkflowConfig) => Promise<SettingsSnapshotDto>;
   restoreFactorySettings: () => Promise<SettingsSnapshotDto>;
@@ -630,7 +630,6 @@ const api: DesktopApi = {
   getRepoMap: () => ipcRenderer.invoke("index:repoMap"),
   rebuildIndex: () => ipcRenderer.invoke("index:rebuild"),
   openPath: (path) => ipcRenderer.invoke("shell:openPath", path),
-  openWorkspaceFile: (href) => ipcRenderer.invoke("workspace:openFile", href),
   getSettings: () => ipcRenderer.invoke("settings:get"),
   saveSettings: (config) => ipcRenderer.invoke("settings:save", config),
   restoreFactorySettings: () => ipcRenderer.invoke("settings:restoreFactory"),

@@ -394,6 +394,7 @@ export function App() {
           llmConfigured={llmConfigured}
           onRegenerate={() => void onRegenerate()}
           onOpenFile={openEditorFile}
+          workspaceRoot={workspace?.root}
           onOpenSettings={openSettings}
           onSendQueuedMessage={(index) => sendQueued(sid, index)}
         />

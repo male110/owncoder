@@ -111,7 +111,23 @@ export interface HistoryRoundInput {
   sessionId: string;
   roundIndex?: number;
   userInput: string;
-  // taskDecompose 已移除：不再索引任务分解结果，避免历史信息膨胀
+  /** 精简的任务分解结果，用于历史召回上下文。 */
+  taskDecompose?: {
+    intent: string;
+    userConstraints: ReadonlyArray<string>;
+    tasks: ReadonlyArray<{
+      id: string;
+      description: string;
+      userConstraints: ReadonlyArray<string>;
+      relevantHistory: string;
+      progressStatus: string;
+      steps: ReadonlyArray<{
+        id: string;
+        description: string;
+        dependsOn: ReadonlyArray<string>;
+      }>;
+    }>;
+  };
   assistantReport?: string;
   /**
    * 凭证信息（精简）：只保留定位元数据，不写入 excerpt / fileEvidence 全文，

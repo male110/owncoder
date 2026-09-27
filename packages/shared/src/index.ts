@@ -144,7 +144,11 @@ export interface TaskDecompositionStepDto {
   id: string;
   description: string;
   dependsOn: string[];
+  relevantHistory?: string;
 }
+
+/** Structured metadata attached to a completed tool event. */
+export type ToolEndMetadataDto = Record<string, unknown>;
 
 export interface TaskDecompositionDto {
   intent: string;

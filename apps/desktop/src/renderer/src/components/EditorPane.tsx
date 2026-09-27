@@ -2,8 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { createPortal } from "react-dom";
 import Editor, { DiffEditor, loader } from "@monaco-editor/react";
 import * as monaco from "monaco-editor";
-import editorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker";
-import tsWorker from "monaco-editor/esm/vs/language/typescript/ts.worker?worker";
+import editorWorker from "./monaco-editor.worker?worker";
+import tsWorker from "./monaco-typescript.worker?worker";
 import { useUiStore } from "../store/ui-store";
 import { Markdown } from "./Markdown";
 import { useI18n } from "../i18n";
@@ -36,7 +36,8 @@ function IconSave({ size = 14 }: { size?: number }) {
   );
 }
 
-// 必须在 Monaco 加载前配置 worker 环境，否则 FileAccess 的 toUrl 未定义
+// worker 入口会在加载 Monaco ESM 模块前设置资源根路径，避免 FileAccess.toUri
+// 在语言服务加载 foreign module 时调用未初始化的 moduleIdToUrl。
 self.MonacoEnvironment = {
   getWorker(_, label) {
     if (label === "typescript" || label === "javascript") {

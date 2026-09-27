@@ -15,6 +15,7 @@ interface Props {
   llmConfigured: boolean;
   onRegenerate: () => void;
   onOpenFile: (path: string) => void;
+  workspaceRoot?: string;
   onOpenSettings: (tab: TabId) => void;
   onSendQueuedMessage: (index: number) => void;
 }
@@ -47,6 +48,7 @@ export function SessionChatPanel({
   llmConfigured,
   onRegenerate,
   onOpenFile,
+  workspaceRoot,
   onOpenSettings,
   onSendQueuedMessage,
 }: Props) {
@@ -261,6 +263,7 @@ export function SessionChatPanel({
             scrollerRef={scrollerRef}
             onRegenerate={() => void onRegenerate()}
             onOpenFile={onOpenFile}
+            workspaceRoot={workspaceRoot}
             header={historyHeader}
             onStartReached={() => {
               if (historyHasMore && !historyLoading) void onLoadOlder();

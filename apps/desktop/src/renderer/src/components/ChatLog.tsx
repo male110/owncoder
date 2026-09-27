@@ -425,12 +425,14 @@ function AssistantBubbleImpl({
   regenerating,
   onRegenerate,
   onOpenFile,
+  workspaceRoot,
 }: {
   turn: ChatTurnDto;
   canRegenerate: boolean;
   regenerating: boolean;
   onRegenerate?: () => void;
   onOpenFile?: (path: string) => void;
+  workspaceRoot?: string;
 }) {
   const { t } = useI18n();
   const [copied, setCopied] = useState(false);
@@ -487,7 +489,7 @@ function AssistantBubbleImpl({
           )}
         </div>
       )}
-      <Markdown content={displayContent} />
+      <Markdown content={displayContent} onOpenFile={onOpenFile} workspaceRoot={workspaceRoot} />
       {planPath ? <PlanCard planPath={planPath} onOpen={(p) => onOpenFile?.(p)} /> : null}
       <div className="msg-actions">
         <button type="button" className="msg-action-btn" onClick={() => void onCopy()} title={t("复制")}>
@@ -546,7 +548,8 @@ const AssistantBubble = memo(AssistantBubbleImpl, (prev, next) =>
   prev.canRegenerate === next.canRegenerate &&
   prev.regenerating === next.regenerating &&
   prev.onRegenerate === next.onRegenerate &&
-  prev.onOpenFile === next.onOpenFile
+  prev.onOpenFile === next.onOpenFile &&
+  prev.workspaceRoot === next.workspaceRoot
 );
 
 // ── ProcessSteps: 已完成轮次的过程步骤（工具链 + 中间过程文本）折叠控件 ──────
@@ -602,6 +605,7 @@ interface Props {
   virtuosoRef?: React.RefObject<VirtuosoHandle | null>;
   onRegenerate?: () => void;
   onOpenFile?: (path: string) => void;
+  workspaceRoot?: string;
   /** Rendered above the first message inside the scroll viewport. */
   header?: React.ReactNode;
   onStartReached?: () => void;
@@ -617,6 +621,7 @@ export function ChatLog({
   virtuosoRef,
   onRegenerate,
   onOpenFile,
+  workspaceRoot,
   header,
   onStartReached,
   scrollerRef,
@@ -702,6 +707,7 @@ export function ChatLog({
           regenerating={sending}
           onRegenerate={onRegenerate}
           onOpenFile={onOpenFile}
+          workspaceRoot={workspaceRoot}
         />
       );
     }

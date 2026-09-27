@@ -1,7 +1,7 @@
 /**
  * IPC handlers: workspace / project / file operations.
  */
-import { dialog, ipcMain, shell } from "electron";
+import { dialog, ipcMain } from "electron";
 import { promises as fs } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { checkWritable } from "@owncoder/core";
@@ -29,7 +29,12 @@ export type WorkspaceDirEntryDto = {
 /** Resolve a Markdown link to a file in the current workspace. */
 export function resolveWorkspaceFileLink(workspaceRoot: string, href: string): string | null {
   const raw = String(href || "").trim();
-  if (!raw || raw.startsWith("#") || (/^[a-z][a-z\d+.-]*:/i.test(raw) && !/^file:/i.test(raw))) {
+  const isWindowsAbsolute = /^[a-z]:[\\/]/i.test(raw);
+  if (
+    !raw ||
+    raw.startsWith("#") ||
+    (!isWindowsAbsolute && /^[a-z][a-z\d+.-]*:/i.test(raw) && !/^file:/i.test(raw))
+  ) {
     return null;
   }
 
@@ -81,22 +86,6 @@ export function registerWorkspaceHandlers(ctx: IpcContext): void {
 
   ipcMain.handle("workspace:get", () => session.getState().workspace);
 
-  ipcMain.handle("workspace:openFile", async (_e, href: unknown) => {
-    const ws = session.getState().workspace;
-    if (!ws || typeof href !== "string") return "No workspace open";
-    const abs = resolveWorkspaceFileLink(ws.root, href);
-    if (!abs) return "Invalid workspace file link";
-    try {
-      const [rootReal, fileReal] = await Promise.all([fs.realpath(ws.root), fs.realpath(abs)]);
-      const rel = relative(rootReal, fileReal);
-      if (rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) return "Invalid workspace file link";
-      const stat = await fs.stat(fileReal);
-      if (!stat.isFile()) return "Workspace path is not a file";
-      return shell.openPath(fileReal);
-    } catch {
-      return "Workspace file does not exist";
-    }
-  });
 
   ipcMain.handle("workspace:searchFiles", async (_e, query: string) => {
     const ws = session.getState().workspace;
