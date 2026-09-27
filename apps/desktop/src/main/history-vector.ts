@@ -231,6 +231,7 @@ class SqliteVecHistoryStore implements HistoryVectorStore {
   private insertVecStmt: Database.Statement;
   private insertMetaStmt: Database.Statement;
   private searchStmt: Database.Statement;
+  private searchBeforeTurnStmt: Database.Statement;
   private existsStmt: Database.Statement;
   private countStmt: Database.Statement;
   private nextTurnIndexStmt: Database.Statement;
@@ -286,6 +287,18 @@ class SqliteVecHistoryStore implements HistoryVectorStore {
       ) k
       JOIN history_chunks_meta m ON m.rowid = k.rowid
       WHERE (? IS NULL OR m.session_id = ?)
+      ORDER BY k.distance ASC
+    `);
+    this.searchBeforeTurnStmt = this.db.prepare(`
+      SELECT m.id, m.turn_id, m.session_id, m.role, m.content, m.content_hash, m.created_at, m.turn_index, k.distance
+      FROM (
+        SELECT rowid, distance
+        FROM history_chunks_vec
+        WHERE embedding MATCH ? AND k = ?
+      ) k
+      JOIN history_chunks_meta m ON m.rowid = k.rowid
+      WHERE (? IS NULL OR m.session_id = ?)
+        AND m.turn_index < ?
       ORDER BY k.distance ASC
     `);
     this.existsStmt = this.db.prepare(
@@ -361,8 +374,13 @@ class SqliteVecHistoryStore implements HistoryVectorStore {
     insert();
   }
 
-  search(queryVector: Float32Array, topK: number, sessionId?: string | null): HistorySearchHit[] {
-    const rows = this.searchStmt.all(queryVector, topK, sessionId ?? null, sessionId ?? null) as Array<{
+  search(queryVector: Float32Array, topK: number, sessionId?: string | null, beforeTurnIndex?: number): HistorySearchHit[] {
+    const stmt = typeof beforeTurnIndex === "number" && Number.isFinite(beforeTurnIndex)
+      ? this.searchBeforeTurnStmt
+      : this.searchStmt;
+    const rows = (typeof beforeTurnIndex === "number" && Number.isFinite(beforeTurnIndex)
+      ? stmt.all(queryVector, topK, sessionId ?? null, sessionId ?? null, Math.max(0, Math.floor(beforeTurnIndex)))
+      : stmt.all(queryVector, topK, sessionId ?? null, sessionId ?? null)) as Array<{
       id: string;
       turn_id: string;
       session_id: string;

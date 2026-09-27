@@ -1,6 +1,7 @@
 import {
   getActiveModelRef,
   modePipeline,
+  resolveApiFormat,
   walkLinearNodes,
   type ModelRef,
   type PipelineNode,
@@ -33,23 +34,44 @@ export function resolveStageModel(
   stageType?: "decomposer" | "react",
 ): ModelRef {
   const base = getActiveModelRef(workflow);
-  
-  // 1. Node-level model override (highest priority)
+
+  // 1. Node-level model override (highest priority). A node currently stores
+  // only the model name, so preserve the selected provider for compatibility.
   if (node?.model?.trim()) {
     return { ...base, model: node.model.trim() };
   }
-  
-  // 2. Stage-specific model override (if separateStageModels enabled)
-  if (workflow.harness.separateStageModels && stageType) {
-    const stageModel = stageType === "decomposer"
-      ? workflow.harness.decomposerModel
-      : workflow.harness.reactModel;
-    if (stageModel?.trim()) {
-      return { ...base, model: stageModel.trim() };
+
+  // 2. React stage model override. Resolve the complete model reference from
+  // the selected model's provider; changing only `model` would send the React
+  // model to the decomposition provider/account and can yield model_not_found.
+  if (workflow.harness.separateStageModels && stageType === "react") {
+    const reactModel = workflow.harness.reactModel?.trim();
+    if (reactModel) {
+      const providerId = workflow.harness.reactProviderId;
+      const selected = workflow.selectedModels.find((item) =>
+        (providerId ? item.providerId === providerId : true) &&
+        (item.id === reactModel || item.name === reactModel),
+      ) ?? workflow.selectedModels.find((item) =>
+        item.id === reactModel || item.name === reactModel,
+      );
+      const resolvedProviderId = providerId ?? selected?.providerId;
+      const provider = workflow.providers.find((item) => item.id === resolvedProviderId);
+      if (provider && selected) {
+        return {
+          baseUrl: provider.baseUrl,
+          model: selected.name,
+          providerId: provider.id,
+          apiKey: provider.apiKey,
+          apiFormat: resolveApiFormat({ apiFormat: provider.apiFormat, baseUrl: provider.baseUrl }),
+        };
+      }
+      // Keep old configurations working when the saved value is a model name
+      // but no matching selectedModels entry remains.
+      return { ...base, model: reactModel };
     }
   }
-  
-  // 3. Default workflow model
+
+  // 3. Default workflow model (including the decomposer).
   return base;
 }
 

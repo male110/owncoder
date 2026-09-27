@@ -19,10 +19,8 @@ const MAX_ROUNDS = 50;
 const MAX_USER_INPUT_CHARS = 8_000;
 const MAX_UNDERSTANDING_CHARS = 4_000;
 const MAX_STEP_DESCRIPTION_CHARS = 500;
-const MAX_NEED_QUESTION_CHARS = 400;
 const MAX_TASKS = 20;
 const MAX_STEPS = 20;
-const MAX_NEEDS_PER_STEP = 10;
 const MAX_EVIDENCE_PER_ROUND = 200;
 const MAX_FILE_CHANGES_PER_ROUND = 30;
 const MAX_TOOL_CALLS_PER_ROUND = 100;
@@ -89,14 +87,6 @@ export interface PersistedDecomposeStep {
   id: string;
   description: string;
   dependsOn: string[];
-  informationNeeds: Array<{
-    id: string;
-    question: string;
-    source?: "file" | "search" | "command";
-    priority?: "blocking" | "important" | "nice-to-have";
-    fallback?: string;
-  }>;
-  stopReadingWhen: Array<{ condition: string; requiredEvidenceIds: string[] }>;
   verificationCriteria?: {
     command: string;
     expectedOutput: string;
@@ -104,13 +94,14 @@ export interface PersistedDecomposeStep {
   };
   rollbackStrategy?: string;
   estimatedComplexity?: "low" | "medium" | "high";
-  /** 本步可复用历史。 */
-  relevantHistory?: string;
 }
 
 export interface PersistedDecomposeTask {
   id: string;
   description: string;
+  userConstraints?: string[];
+  relevantHistory?: string;
+  progressStatus?: string;
   steps: PersistedDecomposeStep[];
 }
 
@@ -119,8 +110,6 @@ export interface PersistedDecompose {
   intent: string;
   userConstraints: string[];
   tasks: PersistedDecomposeTask[];
-  progressStatus?: string;
-  relevantHistory?: string;
 }
 
 export interface PersistedFileChange {
@@ -236,39 +225,6 @@ function sanitizeDecompose(raw: unknown): PersistedDecompose | undefined {
       typeof s.relevantHistory === "string" && s.relevantHistory.trim()
         ? clip(s.relevantHistory.trim(), MAX_UNDERSTANDING_CHARS)
         : undefined;
-    const informationNeeds: PersistedDecomposeStep["informationNeeds"] = Array.isArray(s.informationNeeds)
-      ? s.informationNeeds
-          .slice(0, MAX_NEEDS_PER_STEP)
-          .flatMap((need, ni) => {
-            if (!need || typeof need !== "object") return [];
-            const n = need as Record<string, unknown>;
-            const question = typeof n.question === "string" ? clip(n.question.trim(), MAX_NEED_QUESTION_CHARS) : "";
-            if (!question) return [];
-            const id = typeof n.id === "string" && n.id.trim() ? n.id.trim() : `need_${ni + 1}`;
-            const source = n.source === "file" ? "file" : n.source === "search" ? "search" : n.source === "command" ? "command" : undefined;
-            const priority = n.priority === "blocking" ? "blocking" : n.priority === "important" ? "important" : n.priority === "nice-to-have" ? "nice-to-have" : undefined;
-            const fallback = typeof n.fallback === "string" ? n.fallback.trim() : "";
-            return [{
-              id,
-              question,
-              source,
-              priority,
-              fallback: fallback || undefined,
-            }];
-          })
-      : [];
-    const stopReadingWhen = Array.isArray(s.stopReadingWhen)
-      ? s.stopReadingWhen.flatMap((item) => {
-          if (!item || typeof item !== "object") return [];
-          const c = item as Record<string, unknown>;
-          const condition = typeof c.condition === "string" ? c.condition.trim() : "";
-          const requiredEvidenceIds = Array.isArray(c.requiredEvidenceIds)
-            ? c.requiredEvidenceIds.filter((id): id is string => typeof id === "string" && id.trim().length > 0)
-            : [];
-          if (!condition || !requiredEvidenceIds.length) return [];
-          return [{ condition, requiredEvidenceIds: [...new Set(requiredEvidenceIds)] }];
-        })
-      : [];
     return [
       {
         id: typeof s.id === "string" && s.id.trim() ? s.id.trim() : `step_${i + 1}`,
@@ -276,8 +232,6 @@ function sanitizeDecompose(raw: unknown): PersistedDecompose | undefined {
         dependsOn: Array.isArray(s.dependsOn)
           ? s.dependsOn.filter((d): d is string => typeof d === "string")
           : [],
-        informationNeeds,
-        stopReadingWhen,
         verificationCriteria: (() => {
           if (!s.verificationCriteria || typeof s.verificationCriteria !== "object") return undefined;
           const vc = s.verificationCriteria as Record<string, unknown>;
@@ -301,24 +255,30 @@ function sanitizeDecompose(raw: unknown): PersistedDecompose | undefined {
       },
     ];
     });
+    const taskConstraints = Array.isArray(t.userConstraints)
+      ? t.userConstraints.filter((value): value is string => typeof value === "string")
+        .map((value) => value.trim()).filter(Boolean).slice(0, 20)
+      : [];
+    const relevantHistory = typeof t.relevantHistory === "string" && t.relevantHistory.trim()
+      ? clip(t.relevantHistory.trim(), MAX_UNDERSTANDING_CHARS)
+      : undefined;
+    const progressStatus = typeof t.progressStatus === "string" && t.progressStatus.trim()
+      ? clip(t.progressStatus.trim(), 200)
+      : undefined;
     return [{
       id: typeof t.id === "string" && t.id.trim() ? t.id.trim() : `task_${ti + 1}`,
       description: typeof t.description === "string" ? clip(t.description.trim(), MAX_STEP_DESCRIPTION_CHARS) : "",
+      userConstraints: taskConstraints.length > 0 ? taskConstraints : userConstraints,
+      relevantHistory,
+      progressStatus,
       steps,
     }];
   });
   if (!intent && tasks.length === 0) return undefined;
-  const progressStatus =
-    typeof obj.progressStatus === "string" && obj.progressStatus.trim()
-      ? clip(obj.progressStatus.trim(), 500)
-      : undefined;
   return {
     intent,
-    relevantHistory:
-      typeof obj.relevantHistory === "string" && obj.relevantHistory.trim()
-        ? clip(obj.relevantHistory.trim(), MAX_UNDERSTANDING_CHARS)
-        : undefined,
-    userConstraints, tasks, progressStatus,
+    userConstraints,
+    tasks,
   };
 }
 
@@ -461,8 +421,7 @@ function nextIndex(rounds: TurnRoundRecord[]): number {
 
 export function formatDecomposeSummary(d: PersistedDecompose): string {
   // Output the full decomposition result as JSON so the next decompose call
-  // can see understanding, userConstraints, steps with informationNeeds and
-  // stopReadingWhen — not just a lossy text summary.
+  // can see understanding, userConstraints, steps with informationNeeds.
   return JSON.stringify(d, null, 2);
 }
 

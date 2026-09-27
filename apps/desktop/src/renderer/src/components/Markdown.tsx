@@ -10,6 +10,23 @@ type Block =
   | { kind: "table"; headers: string[]; rows: string[][] }
   | { kind: "code"; lang: string; code: string };
 
+function isLocalFileLink(href: string): boolean {
+  const value = href.trim();
+  return (
+    /^\/?[a-z]:[\\/]/i.test(value) ||
+    /^file:\/\//i.test(value) ||
+    (!/^[a-z][a-z\d+.-]*:/i.test(value) && !value.startsWith("#"))
+  );
+}
+
+function openLink(href: string): void {
+  if (isLocalFileLink(href) && window.owncoder?.openWorkspaceFile) {
+    void window.owncoder.openWorkspaceFile(href);
+    return;
+  }
+  window.open(href, "_blank", "noopener,noreferrer");
+}
+
 function inlineFormat(text: string): ReactNode[] {
   const parts: ReactNode[] = [];
   const re = /(`[^`]+`|\*\*[^*]+\*\*|\*[^*\n]+\*|\[[^\]]+\]\([^)]+\))/g;
@@ -33,7 +50,17 @@ function inlineFormat(text: string): ReactNode[] {
       const linkMatch = token.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
       if (linkMatch) {
         parts.push(
-          <a key={m.index} href={linkMatch[2]} target="_blank" rel="noreferrer">
+          <a
+            key={m.index}
+            href={linkMatch[2]}
+            target="_blank"
+            rel="noreferrer"
+            onClick={(event) => {
+              if (!isLocalFileLink(linkMatch[2]!)) return;
+              event.preventDefault();
+              openLink(linkMatch[2]!);
+            }}
+          >
             {linkMatch[1]}
           </a>,
         );

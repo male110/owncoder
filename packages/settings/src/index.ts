@@ -201,12 +201,14 @@ export const SystemWorkflowConfigSchema = z.object({
     checkpoint: z.boolean().default(true),
     /** UI + LLM reply language: follow OS, Chinese, or English. */
     locale: z.enum(["system", "zh", "en"]).default("system"),
-    /** 分阶段模型设置：开启后任务分解和 React 循环使用不同模型 */
+    /** 执行阶段单独配置：开启后 React 循环使用单独的模型和思考强度 */
     separateStageModels: z.boolean().default(false),
-    /** 任务分解阶段模型（开启 separateStageModels 时生效，否则使用 model） */
-    decomposerModel: z.string().optional(),
-    /** React 循环阶段模型（开启 separateStageModels 时生效，否则使用 model） */
+    /** React 循环阶段模型名称（开启 separateStageModels 时生效，否则使用 selectedModels[0]） */
     reactModel: z.string().optional(),
+    /** React 循环阶段模型所属 provider；旧配置缺失时按模型 id/name 自动推断。 */
+    reactProviderId: z.string().optional(),
+    /** React 循环阶段思考强度（开启 separateStageModels 时生效，否则使用 thinking.defaultEffort） */
+    reactThinkingEffort: z.enum(["none", "off", "disabled", "low", "minimal", "medium", "high", "max"]).optional(),
   }),
   mcp: z
     .object({

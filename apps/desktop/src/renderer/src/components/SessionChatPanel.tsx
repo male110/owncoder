@@ -34,6 +34,7 @@ const EMPTY_RUNTIME: ChatSessionRuntime = {
   dangerousConfirmations: [],
   askRequests: [],
   status: "idle",
+  currentStage: null,
 };
 
 function useSessionRuntime(sessionId: string) {

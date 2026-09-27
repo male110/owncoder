@@ -474,10 +474,10 @@ function createWindow(): void {
 
   if (process.env.ELECTRON_RENDERER_URL) {
     void mainWindow.loadURL(process.env.ELECTRON_RENDERER_URL);
-    // Detached DevTools + software rendering has hard-crashed Electron on this
-    // Windows GPU path (exit 4294930435 / crashpad "not connected"). Keep the
-    // default off; opt in with OWNCODER_OPEN_DEVTOOLS=1 when needed.
-    if (process.env.OWNCODER_OPEN_DEVTOOLS === "1") {
+    // 开发模式下默认打开 DevTools
+    // 注意: Detached DevTools + software rendering 在某些 Windows GPU 环境下可能崩溃
+    // 如需禁用，设置环境变量 OWNCODER_OPEN_DEVTOOLS=0
+    if (process.env.OWNCODER_OPEN_DEVTOOLS !== "0") {
       mainWindow.webContents.openDevTools({ mode: "detach" });
     }
   } else {

@@ -101,16 +101,7 @@ export type {
   EmbeddingService,
   HistoryVectorStore,
 } from "./loop/history-vector.ts";
-export {
-  archiveTurn,
-  computeContentHash,
-  comparableHistoryText,
-  historyTextSimilarity,
-  dedupeSimilarHistoryHits,
-  finalizeRecalledHistoryHits,
-  HISTORY_MIN_RELEVANCE_SCORE,
-  HISTORY_NEAR_DUPLICATE_THRESHOLD,
-} from "./loop/history-vector.ts";
+export { archiveTurn, computeContentHash } from "./loop/history-vector.ts";
 
 // ── Main Entry Point ───────────────────────────────────────
 
@@ -414,6 +405,24 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
           sessionId: sid,
           roundIndex: state.roundIndex,
           userInput: opts.userMessage,
+          taskDecompose: state.rawDecompose
+            ? {
+                intent: state.rawDecompose.intent,
+                userConstraints: state.rawDecompose.userConstraints ?? [],
+                tasks: state.rawDecompose.tasks.map((task) => ({
+                  id: task.id,
+                  description: task.description,
+                  userConstraints: task.userConstraints ?? [],
+                  relevantHistory: task.relevantHistory ?? "",
+                  progressStatus: task.progressStatus ?? "pending",
+                  steps: task.steps.map((step) => ({
+                    id: step.id,
+                    description: step.description,
+                    dependsOn: step.dependsOn,
+                  })),
+                })),
+              }
+            : undefined,
           assistantReport: assistantText,
           // 凭证只归档定位元数据，不写入 excerpt / fileEvidence 全文。
           evidence: roundEvidence.map((item) => ({
@@ -496,6 +505,7 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
     turnInformationTask: null,
     userMessageInjected: false,
     budgetUsed: 0,
+    decomposeCount: 0,
     aborted: false,
     awaitingUserConfirmation: false,
     handoffRequested: false,

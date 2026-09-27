@@ -70,7 +70,7 @@ describe("conversation store", () => {
       {
         type: "task_decomposition",
         intent: "意图",
-        tasks: [{ id: "task_1", description: "任务", steps: [{ id: "s1", description: "one", dependsOn: [], informationNeeds: [], stopReadingWhen: [] }] }],
+        tasks: [{ id: "task_1", description: "任务", steps: [{ id: "s1", description: "one", dependsOn: [], informationNeeds: [] }] }],
       },
       { eventType: "task_decomposition" },
     );
@@ -81,7 +81,7 @@ describe("conversation store", () => {
       user: user("input"),
       taskDecomposition: {
         intent: "意图",
-        tasks: [{ id: "task_1", description: "任务", steps: [{ id: "s1", description: "one", dependsOn: [], informationNeeds: [], stopReadingWhen: [] }] }],
+        tasks: [{ id: "task_1", description: "任务", steps: [{ id: "s1", description: "one", dependsOn: [], informationNeeds: [] }] }],
       },
       report: { summary: "done" },
     });

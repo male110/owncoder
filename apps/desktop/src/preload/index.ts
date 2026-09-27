@@ -1,5 +1,10 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { AgentMode, IndexStatus, WorkspaceInfo } from "@owncoder/shared";
+import type {
+  AgentMode,
+  IndexStatus,
+  TaskDecompositionDto,
+  WorkspaceInfo,
+} from "@owncoder/shared";
 import type { SystemWorkflowConfig, WorkflowOverlay, ModelSettingsOverlay } from "@owncoder/settings";
 
 export interface SettingsSnapshotDto {
@@ -107,23 +112,7 @@ type ChatEventFields =
   | { type: "terminal"; entry: TerminalEntryDto }
   | { type: "stage_start"; id: string; nodeType: string; label: string }
   | { type: "stage_done"; id: string; nodeType: string; label: string }
-  | {
-      type: "task_decomposition";
-      intent: string;
-      userConstraints: string[];
-      tasks: Array<{
-        id: string;
-        description: string;
-        steps: Array<{
-          id: string;
-          description: string;
-          dependsOn: string[];
-          informationNeeds: Array<{ id: string; question: string }>;
-          stopReadingWhen: Array<{ condition: string; requiredEvidenceIds: string[] }>;
-        }>;
-      }>;
-      fallback: boolean;
-    }
+  | ({ type: "task_decomposition" } & TaskDecompositionDto)
   | { type: "error"; message: string }
   | { type: "warning"; message: string }
   | { type: "done"; assistantText: string }
@@ -469,6 +458,7 @@ export interface DesktopApi {
   getRepoMap: () => Promise<string>;
   rebuildIndex: () => Promise<IndexStatus>;
   openPath: (path: string) => Promise<string>;
+  openWorkspaceFile: (href: string) => Promise<string>;
   getSettings: () => Promise<SettingsSnapshotDto>;
   saveSettings: (config: SystemWorkflowConfig) => Promise<SettingsSnapshotDto>;
   restoreFactorySettings: () => Promise<SettingsSnapshotDto>;
@@ -640,6 +630,7 @@ const api: DesktopApi = {
   getRepoMap: () => ipcRenderer.invoke("index:repoMap"),
   rebuildIndex: () => ipcRenderer.invoke("index:rebuild"),
   openPath: (path) => ipcRenderer.invoke("shell:openPath", path),
+  openWorkspaceFile: (href) => ipcRenderer.invoke("workspace:openFile", href),
   getSettings: () => ipcRenderer.invoke("settings:get"),
   saveSettings: (config) => ipcRenderer.invoke("settings:save", config),
   restoreFactorySettings: () => ipcRenderer.invoke("settings:restoreFactory"),

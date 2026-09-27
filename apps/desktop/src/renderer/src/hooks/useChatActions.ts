@@ -795,6 +795,17 @@ export function useChatActions(deps: {
     session.setThinkingEffort(effort);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const onSelectReactThinkingEffort = useCallback(async (effort: import("@owncoder/settings").ThinkingEffort) => {
+    const snap = await window.owncoder.getSettings();
+    const config = { ...snap.effective };
+    config.harness = {
+      ...config.harness,
+      reactThinkingEffort: effort
+    };
+    await window.owncoder.saveSettings(config);
+    session.setReactThinkingEffort(effort);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const onRemoveQueueMessage = useCallback((index: number) => {
     const sid = getFocusSessionId();
     if (!sid) return;
@@ -814,6 +825,7 @@ export function useChatActions(deps: {
     onSelectModel,
     onMode,
     onSelectThinkingEffort,
+    onSelectReactThinkingEffort,
     onRemoveQueueMessage,
     sendQueued,
     showError,

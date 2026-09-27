@@ -146,8 +146,19 @@ function finalJsonSelectExpr(): string {
 export function sanitizeOversizedFinalJson(root: string, sessionId: string): number {
   const path = conversationStorePath(root, sessionId);
   const existing = connections.get(path);
+  // Skip if database doesn't exist yet or connection isn't initialized - no legacy data to repair
+  if (!existing) {
+    const fs = require("fs");
+    if (!fs.existsSync(path)) return 0;
+  }
   const db = existing ?? new Database(path);
   try {
+    // Check if turns table exists before attempting UPDATE
+    const tableExists = db.prepare(
+      `SELECT name FROM sqlite_master WHERE type='table' AND name='turns'`
+    ).get();
+    if (!tableExists) return 0;
+
     const stub = json({ omitted: true, reason: "final_json_too_large" });
     const result = db
       .prepare(
@@ -268,8 +279,19 @@ function eventPayloadSelectExpr(): string {
 export function sanitizeOversizedEventPayloads(root: string, sessionId: string): number {
   const path = conversationStorePath(root, sessionId);
   const existing = connections.get(path);
+  // Skip if database doesn't exist yet or connection isn't initialized - no legacy data to repair
+  if (!existing) {
+    const fs = require("fs");
+    if (!fs.existsSync(path)) return 0;
+  }
   const db = existing ?? new Database(path);
   try {
+    // Check if events table exists before attempting UPDATE
+    const tableExists = db.prepare(
+      `SELECT name FROM sqlite_master WHERE type='table' AND name='events'`
+    ).get();
+    if (!tableExists) return 0;
+
     const stub = json({ omitted: true, reason: "event_payload_too_large" });
     const result = db
       .prepare(

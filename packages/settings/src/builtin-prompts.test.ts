@@ -57,24 +57,14 @@ describe("task decompose prompt JSON contract", () => {
     expect(BUILTIN_TASK_DECOMPOSE_PROMPT).not.toMatch(/Always reply/);
   });
 
-  it("要求从上下文提取 relevantHistory，并区分整单与步骤级", () => {
-    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(/## Relevant History/);
-    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(/Extract task-relevant history into `relevantHistory`/);
-    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(/original goal and scope/);
-    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(/user requirements and prohibitions/);
-    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(/key decisions and their reasons/);
-    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(/files \/ symbols \/ modules \/ docs already inspected or modified/);
-    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(/conclusions from prior code reading/);
-    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(/failed attempts and known errors/);
-    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(/Distinguish confirmed facts from assumptions/);
-    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(/do not copy conversation or source code/);
-    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(
-      /Top-level `relevantHistory` stores history reusable across the whole plan/,
-    );
-    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(
-      /step-level `relevantHistory` stores history needed only by that step/,
-    );
-    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(/Empty string when there is no relevant task history/);
+  it("仅在上下文不足且需要历史信息时允许检索历史", () => {
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(/## Historical Context/);
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(/current context is insufficient/);
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(/relevant to planning/);
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(/recall_history/);
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(/Prefer the supplied context whenever it is sufficient/);
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).not.toMatch(/## Available Tools/);
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).not.toMatch(/web_search|search_symbols|code-map|file reading|file modification|testing/);
   });
 
   it("把 continue/继续 理解为完成最近一次任务分解的全部剩余任务，而不是只完成某个 step", () => {
@@ -84,6 +74,20 @@ describe("task decompose prompt JSON contract", () => {
     expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(
       /the work needed this turn is every remaining task from the most recent task decomposition — include all of those tasks in `tasks`, not a single leftover step/,
     );
+  });
+
+  it("把 task 定义为独立目标，并要求步骤保持抽象且不提前写入探索结果", () => {
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(/`tasks` represents one or more independent, user-deliverable goals/);
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(/Steps are abstract, ordered actions or phases/);
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(/execution happens later/);
+  });
+
+  it("要求任务级上下文，并将无需拆分的请求放入一个任务", () => {
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(/tasks\[\]\.userConstraints/);
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(/tasks\[\]\.relevantHistory/);
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(/tasks\[\]\.progressStatus/);
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(/return exactly one task/);
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).not.toMatch(/"intent": string/);
   });
 });
 

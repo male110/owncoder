@@ -36,6 +36,11 @@ export interface SessionState {
   providers: Provider[];
   llmConfigured: boolean;
   thinkingEffort: ThinkingEffort;
+  
+  // 执行阶段单独配置
+  separateStageModels: boolean;
+  reactModelId: string | null;
+  reactThinkingEffort: ThinkingEffort;
 
   // Plan & tasks
   /** Focused-session mirror of the approved plan path. */
@@ -74,6 +79,11 @@ export interface SessionActions {
   setProviders: (providers: Provider[]) => void;
   setLlmConfigured: (v: boolean) => void;
   setThinkingEffort: (effort: ThinkingEffort) => void;
+  
+  // 执行阶段单独配置
+  setSeparateStageModels: (enabled: boolean) => void;
+  setReactModelId: (id: string | null) => void;
+  setReactThinkingEffort: (effort: ThinkingEffort) => void;
   setActivePlanPath: (path: string | null, sessionId?: string | null) => void;
   getActivePlanPathForSession: (sessionId?: string | null) => string | null;
   setActivePlanMeta: (meta: ActivePlanMetaDto | null) => void;
@@ -106,6 +116,10 @@ const initialState: SessionState = {
   providers: [],
   llmConfigured: true,
   thinkingEffort: "high",
+  
+  separateStageModels: false,
+  reactModelId: null,
+  reactThinkingEffort: "medium",
   activePlanPath: null,
   activePlanPathBySession: {},
   activePlanMeta: null,
@@ -171,6 +185,10 @@ export const useSessionStore = create<SessionState & SessionActions>()((set, get
   setProviders: (providers) => set({ providers }),
   setLlmConfigured: (llmConfigured) => set({ llmConfigured }),
   setThinkingEffort: (thinkingEffort) => set({ thinkingEffort }),
+  
+  setSeparateStageModels: (separateStageModels) => set({ separateStageModels }),
+  setReactModelId: (reactModelId) => set({ reactModelId }),
+  setReactThinkingEffort: (reactThinkingEffort) => set({ reactThinkingEffort }),
   setActivePlanPath: (path, sessionId) => {
     const sid = sessionId ?? get().activeSessionId;
     set((s) => {

@@ -220,7 +220,7 @@ export function checkTermination(
   // ═══════════════════════════════════════════════════════════════════════════
   // Layer 2: Loop Detection (Prevent Infinite Loops)
   // ═══════════════════════════════════════════════════════════════════════════
-  
+
   // 2.1 Tool loop detection (same tool + args + result repeated; at most twice)
   //     → Catches stuck patterns like: read → read → read
   if (config.enableStuckDetection) {
@@ -236,6 +236,18 @@ export function checkTermination(
     }
   }
   
+  // An action announcement must not be consumed by output similarity. Keep
+  // exploration convergence above intact; this guard only protects the
+  // repeated-text termination path.
+  if (
+    state.lastToolCalls.length === 0 &&
+    state.lastContent.trim() &&
+    state.consecutiveSimilarOutputs >= 1 &&
+    isActionAnnouncement(state.lastContent)
+  ) {
+    return { shouldTerminate: false };
+  }
+
   // 2.2 Output similarity detection (model keeps saying the same thing)
   //     → Catches stuck patterns like: "I need X" → "I need X" → "I need X"
   //     → consecutiveSimilarOutputs >= 1 means 2 similar outputs detected
@@ -442,9 +454,19 @@ function tokenizeForSimilarity(text: string): Set<string> {
   const tokens = new Set<string>();
   const words = text.toLowerCase().split(/\s+/).filter((w) => w.length > 0);
 
+  const hasWhitespace = /\s/.test(text);
   for (const word of words) {
+    // Some model outputs contain CJK text without CJK code points (for
+    // example, UTF-8 mojibake). Character bigrams preserve useful overlap for
+    // those reports while leaving normal whitespace-tokenized English intact.
     if (!HAS_CJK.test(word)) {
-      tokens.add(word);
+      if (!hasWhitespace && word.length > 1) {
+        for (let i = 0; i < word.length - 1; i++) {
+          tokens.add(word.slice(i, i + 2));
+        }
+      } else {
+        tokens.add(word);
+      }
       continue;
     }
 
@@ -522,7 +544,29 @@ function calculateSimilarity(text1: string, text2: string): number {
   // Union size = |A| + |B| - |A ∩ B|
   const unionSize = words1.size + words2.size - intersectionSize;
   
-  return intersectionSize / unionSize;
+  const jaccardSimilarity = intersectionSize / unionSize;
+  if (HAS_CJK.test(text1) && HAS_CJK.test(text2)) {
+    return Math.max(jaccardSimilarity, characterEditSimilarity(text1, text2));
+  }
+  return jaccardSimilarity;
+}
+
+function characterEditSimilarity(text1: string, text2: string): number {
+  const shorter = text1.length <= text2.length ? text1 : text2;
+  const longer = text1.length <= text2.length ? text2 : text1;
+  let previous = Array.from({ length: shorter.length + 1 }, (_, i) => i);
+
+  for (let j = 1; j <= longer.length; j++) {
+    const current = [j];
+    for (let i = 1; i <= shorter.length; i++) {
+      current[i] = longer[j - 1] === shorter[i - 1]
+        ? previous[i - 1]
+        : Math.min(previous[i - 1], previous[i], current[i - 1]) + 1;
+    }
+    previous = current;
+  }
+
+  return 1 - previous[shorter.length] / longer.length;
 }
 
 /**
@@ -664,6 +708,9 @@ export function resetOutputTrackingForNewTask(state: LoopState): void {
   state.lastToolCalls = [];
   state.explorationSkipCount = 0;
   state.lastIterationHadExplorationSkip = false;
+  // 重置迭代计数器：每个子任务独立享有完整的 maxIterations 预算，
+  // 而不是在多个子任务之间平分。
+  state.iteration = 0;
 }
 
 /**

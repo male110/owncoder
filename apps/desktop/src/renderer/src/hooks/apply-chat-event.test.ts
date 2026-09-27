@@ -43,7 +43,7 @@ describe("applyChatEvent task_run_state", () => {
       verificationSummary: "typecheck failed",
       repairAttempts: 1,
       maxRepairAttempts: 3,
-      label: "自动修复中…",
+      label: "自动修复中�?,
       totalDurationMs: 1200,
       metrics: {
         startedAt: "2020-01-01T00:00:00.000Z",
@@ -62,13 +62,13 @@ describe("applyChatEvent task_run_state", () => {
     });
 
     const next = useChatStore.getState();
-    expect(next.liveStatus).toBe("自动修复中…");
+    expect(next.liveStatus).toBe("自动修复中�?);
     expect(next.taskRun).toMatchObject({
       phase: "repairing",
       taskId: "s1",
       verificationStatus: "failed",
       repairAttempts: 1,
-      label: "自动修复中…",
+      label: "自动修复中�?,
       totalDurationMs: 1200,
       metrics: {
         modelSampleCount: 3,
@@ -90,7 +90,7 @@ describe("applyChatEvent task_run_state", () => {
       verificationSummary: "尚未验证",
       repairAttempts: 0,
       maxRepairAttempts: 3,
-      label: "执行中…",
+      label: "执行中�?,
     });
     apply({
       type: "task_run_state",
@@ -115,13 +115,13 @@ describe("applyChatEvent streaming / turn_complete", () => {
   beforeEach(() => resetChat());
 
   it("atomically upserts thinking and seals before text", () => {
-    apply({ type: "thinking_delta", sessionId: "s1", text: "想…" });
-    apply({ type: "thinking_delta", sessionId: "s1", text: "想一下" });
+    apply({ type: "thinking_delta", sessionId: "s1", text: "想�? });
+    apply({ type: "thinking_delta", sessionId: "s1", text: "想一�? });
     apply({ type: "assistant_delta", sessionId: "s1", text: "你好" });
 
     const events = useChatStore.getState().liveEvents;
     expect(events).toHaveLength(2);
-    expect(events[0]).toMatchObject({ kind: "thinking", text: "想一下", streaming: false });
+    expect(events[0]).toMatchObject({ kind: "thinking", text: "想一�?, streaming: false });
     expect(events[1]).toMatchObject({ kind: "text", text: "你好", streaming: true });
   });
 
@@ -137,18 +137,18 @@ describe("applyChatEvent streaming / turn_complete", () => {
     apply({ type: "assistant_delta", sessionId: "s1", text: "leak" });
 
     const next = useChatStore.getState();
-    expect(next.liveStatus).toBe("正在分解任务…");
+    expect(next.liveStatus).toBe("正在分解任务�?);
     expect(next.liveEvents).toEqual([]);
   });
 
   it("pushes decompose snapshot in DEV after task_decomposition", () => {
-    // vitest/vite 默认 MODE=test 时 import.meta.env.DEV 为 true
+    // vitest/vite 默认 MODE=test �?import.meta.env.DEV �?true
     expect(import.meta.env.DEV).toBe(true);
     apply({
       type: "task_decomposition",
       sessionId: "s1",
       intent: "理解任务",
-      userConstraints: ["仅开发模式显示"],
+      userConstraints: ["仅开发模式显�?],
       tasks: [
         {
           id: "task_1",
@@ -158,8 +158,6 @@ describe("applyChatEvent streaming / turn_complete", () => {
               id: "s1",
               description: "定位",
               dependsOn: [],
-              informationNeeds: [],
-              stopReadingWhen: [],
             },
           ],
         },
@@ -174,7 +172,7 @@ describe("applyChatEvent streaming / turn_complete", () => {
       kind: "decompose",
       decomposition: {
         intent: "理解任务",
-        userConstraints: ["仅开发模式显示"],
+        userConstraints: ["仅开发模式显�?],
         fallback: false,
       },
     });
@@ -184,21 +182,21 @@ describe("applyChatEvent streaming / turn_complete", () => {
     apply({
       type: "warning",
       sessionId: "s1",
-      message: "无法报告成功：验证门禁未通过（phase=failed, verification=failed）",
+      message: "无法报告成功：验证门禁未通过（phase=failed, verification=failed�?,
     });
     expect(useChatStore.getState().errorAlert).toBeNull();
 
     apply({
       type: "warning",
       sessionId: "s1",
-      message: "自动修复达到上限（3 次）：### semantic_diff (semantic_diff) ⚠️ packages/core/src/harness/loop/context.ts: 移除了导出: export function isMeaningfulRepoMap",
+      message: "自动修复达到上限�? 次）�?## semantic_diff (semantic_diff) ⚠️ packages/core/src/harness/loop/context.ts: 移除了导�? export function isMeaningfulRepoMap",
     });
     expect(useChatStore.getState().errorAlert).toBeNull();
 
     apply({
       type: "warning",
       sessionId: "s1",
-      message: "自动修复达到上限（3 次）：### semantic_diff (semantic_diff) ⚠️ packages/core/src/harness/loop/context.ts: 移除了导出: export function isMeaningfulRepoMap",
+      message: "自动修复达到上限�? 次）�?## semantic_diff (semantic_diff) ⚠️ packages/core/src/harness/loop/context.ts: 移除了导�? export function isMeaningfulRepoMap",
     });
     expect(useChatStore.getState().errorAlert).toBeNull();
 
@@ -211,7 +209,7 @@ describe("applyChatEvent streaming / turn_complete", () => {
     apply({
       type: "error",
       sessionId: "s1",
-      message: "无法报告成功：验证门禁未通过（phase=failed, verification=failed）",
+      message: "无法报告成功：验证门禁未通过（phase=failed, verification=failed�?,
     });
     expect(useChatStore.getState().errorAlert).toBeNull();
     expect(useChatStore.getState().liveStatus).toBe("");
@@ -223,7 +221,7 @@ describe("applyChatEvent streaming / turn_complete", () => {
       sessionId: "s1",
       message: JSON.stringify({
         code: "UNKNOWN",
-        message: "无法报告成功：验证门禁未通过（phase=failed, verification=failed, checks=2, repairAttempts=3/3）",
+        message: "无法报告成功：验证门禁未通过（phase=failed, verification=failed, checks=2, repairAttempts=3/3�?,
       }),
     });
     expect(useChatStore.getState().errorAlert).toBeNull();
@@ -263,10 +261,10 @@ describe("applyChatEvent streaming / turn_complete", () => {
 
 /**
  * Closest-to-E2E path available without Electron Playwright:
- * simulate agent file edit → verification failure → UI taskRun/liveStatus
+ * simulate agent file edit �?verification failure �?UI taskRun/liveStatus
  * (failed / repairing) via the same applyChatEvent entry the hook uses.
  */
-describe("E2E-ish: agent edit → verification fail → UI failed/repairing", () => {
+describe("E2E-ish: agent edit �?verification fail �?UI failed/repairing", () => {
   beforeEach(() => {
     resetChat("s-e2e");
     useChatStore.getState().setSending(true, "s-e2e");
@@ -287,7 +285,7 @@ describe("E2E-ish: agent edit → verification fail → UI failed/repairing", ()
         verificationSummary: "尚未验证",
         repairAttempts: 0,
         maxRepairAttempts: 3,
-        label: "执行中…",
+        label: "执行中�?,
       },
       sid,
     );
@@ -328,17 +326,17 @@ describe("E2E-ish: agent edit → verification fail → UI failed/repairing", ()
         taskId: sid,
         verificationStatus: "not_run",
         verificationPassed: false,
-        verificationSummary: "运行验证…",
+        verificationSummary: "运行验证�?,
         repairAttempts: 0,
         maxRepairAttempts: 3,
-        label: "验证中…",
+        label: "验证中�?,
       },
       sid,
     );
     expect(useChatStore.getState().taskRun?.phase).toBe("verifying");
-    expect(useChatStore.getState().liveStatus).toBe("验证中…");
+    expect(useChatStore.getState().liveStatus).toBe("验证中�?);
 
-    // Verification failed → auto-repair
+    // Verification failed �?auto-repair
     apply(
       {
         type: "task_run_state",
@@ -350,7 +348,7 @@ describe("E2E-ish: agent edit → verification fail → UI failed/repairing", ()
         verificationSummary: "typecheck failed: Cannot find name 'x'",
         repairAttempts: 1,
         maxRepairAttempts: 3,
-        label: "自动修复中…",
+        label: "自动修复中�?,
       },
       sid,
     );
@@ -362,13 +360,13 @@ describe("E2E-ish: agent edit → verification fail → UI failed/repairing", ()
       verificationPassed: false,
       verificationSummary: "typecheck failed: Cannot find name 'x'",
       repairAttempts: 1,
-      label: "自动修复中…",
+      label: "自动修复中�?,
     });
-    expect(ui.liveStatus).toBe("自动修复中…");
+    expect(ui.liveStatus).toBe("自动修复中�?);
     // File-modifying tool still visible in the live stream
     expect(ui.liveEvents.some((e) => e.kind === "tool" && e.tool.name === "apply_patch")).toBe(true);
 
-    // Exhausted repairs → failed (UI must show 失败)
+    // Exhausted repairs �?failed (UI must show 失败)
     apply(
       {
         type: "task_run_state",

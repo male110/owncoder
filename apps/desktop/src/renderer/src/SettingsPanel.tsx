@@ -489,52 +489,60 @@ export function SettingsPanel({ open, onClose, onSaved, initialTab }: Props) {
                   checked={draft.harness.separateStageModels ?? false}
                   onChange={(e) =>
                     patch((d) => {
-                      d.harness.separateStageModels = e.target.checked;
+                      const enabling = e.target.checked;
+                      d.harness.separateStageModels = enabling;
+                      
+                      if (enabling) {
+                        // 启用执行阶段单独配置：从统一配置迁移
+                        const unifiedModel = draft.selectedModels?.[0]?.id;
+                        const unifiedEffort = draft.thinking?.defaultEffort ?? "high";
+                        
+                        // 只在 reactModel 为空时才迁移
+                        if (!d.harness.reactModel && unifiedModel) {
+                          d.harness.reactModel = unifiedModel;
+                        }
+                        if (!d.harness.reactThinkingEffort) {
+                          d.harness.reactThinkingEffort = unifiedEffort;
+                        }
+                      } else {
+                        // 禁用执行阶段单独配置：回退到统一配置
+                        const fallbackModel = d.harness.reactModel;
+                        const fallbackEffort = d.harness.reactThinkingEffort || "high";
+                        
+                        if (fallbackModel && draft.selectedModels?.length) {
+                          // 查找对应的模型对象
+                          const targetModel = draft.selectedModels.find(m => m.id === fallbackModel);
+                          if (targetModel) {
+                            // 将选中的模型移到数组第一位
+                            d.selectedModels = [targetModel, ...draft.selectedModels.filter(m => m.id !== fallbackModel)];
+                          }
+                        }
+                        
+                        if (!d.thinking) {
+                          d.thinking = { defaultEffort: fallbackEffort };
+                        } else {
+                          d.thinking.defaultEffort = fallbackEffort;
+                        }
+                      }
                     })
                   }
                 />
-                {tr("分阶段模型设置")}
+                {tr("执行阶段单独配置")}
               </label>
-              <p className="hint">{tr("建议任务分解用较好的模型，React 用中等的模型。React 循环比较费 token。")}</p>
+              <p className="hint">{tr("开启后，React 循环使用单独的模型和思考强度")}。{tr("建议任务分解用较好的模型，React 用中等的模型。React 循环比较费 token。")}。</p>
               {draft.harness.separateStageModels && (
-                <>
-                  <label>
-                    {tr("任务分解模型")}
-                    <select
-                      value={draft.harness.decomposerModel ?? ""}
-                      onChange={(e) =>
-                        patch((d) => {
-                          d.harness.decomposerModel = e.target.value || undefined;
-                        })
-                      }
-                    >
-                      <option value="">{tr("使用默认模型")}</option>
-                      {(draft.selectedModels ?? []).map((m) => (
-                        <option key={m.id} value={m.id}>
-                          {m.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
-                    {tr("React 循环模型")}
-                    <select
-                      value={draft.harness.reactModel ?? ""}
-                      onChange={(e) =>
-                        patch((d) => {
-                          d.harness.reactModel = e.target.value || undefined;
-                        })
-                      }
-                    >
-                      <option value="">{tr("使用默认模型")}</option>
-                      {(draft.selectedModels ?? []).map((m) => (
-                        <option key={m.id} value={m.id}>
-                          {m.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                </>
+                <div style={{ marginLeft: "1.5rem", marginTop: "0.5rem" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                      <div style={{ width: "3px", height: "20px", backgroundColor: "#3b82f6" }} />
+                      <span>任务分解 蓝色</span>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+                      <div style={{ width: "3px", height: "20px", backgroundColor: "#10b981" }} />
+                      <span>执行 绿色</span>
+                    </div>
+                  </div>
+                </div>
               )}
             </div>
           )}
@@ -1053,8 +1061,9 @@ function ProviderDetail({
         return;
       }
       const models = (result.models ?? []).map((m: { id: string; name: string }) => ({
-        id: `${provider.id}_${m.id}`,
+        id: m.id,
         name: m.name || m.id,
+        providerId: provider.id,
       }));
       patch((d) => {
         const idx = (d.providers ?? []).findIndex((p) => p.id === provider.id);
@@ -1090,7 +1099,7 @@ function ProviderDetail({
   const addManualModel = useCallback(() => {
     const raw = manualModelId.trim();
     if (!raw) return;
-    const modelId = `${provider.id}_${raw}`;
+    const modelId = `model_${provider.id}_${raw}`;
     patch((d) => {
       const idx = (d.providers ?? []).findIndex((p) => p.id === provider.id);
       if (idx < 0) return;
@@ -1342,8 +1351,9 @@ function NewProviderForm({
         return;
       }
       const models = (result.models ?? []).map((m: { id: string; name: string }) => ({
-        id: `${providerId}_${m.id}`,
+        id: m.id,
         name: m.name || m.id,
+        providerId: providerId,
       }));
       onDone({
         id: providerId,

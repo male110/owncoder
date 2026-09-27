@@ -14,6 +14,11 @@ interface Props {
   availableModels: AvailableModel[];
   providers: Provider[];
   thinkingEffort: ThinkingEffort;
+  
+  /** 执行阶段单独配置 */
+  separateStageModels: boolean;
+  reactModelId: string | null;
+  reactThinkingEffort: ThinkingEffort;
 
   workspaceName: string | null;
   workspaceRoot: string | null;
@@ -34,6 +39,8 @@ interface Props {
   onSelectProject: (root: string, focusSessionId?: string) => Promise<void>;
   onAddProject: () => void;
   onRemoveQueueMessage: (index: number) => void;
+  onSelectReactModel: (modelName: string, providerId: string) => void;
+  onSelectReactThinkingEffort: (effort: ThinkingEffort) => void;
 }
 
 function ComposerImpl({
@@ -46,6 +53,10 @@ function ComposerImpl({
   availableModels,
   providers,
   thinkingEffort,
+  
+  separateStageModels,
+  reactModelId,
+  reactThinkingEffort,
 
   workspaceName,
   workspaceRoot,
@@ -66,11 +77,15 @@ function ComposerImpl({
   onSelectProject,
   onAddProject,
   onRemoveQueueMessage,
+  onSelectReactModel,
+  onSelectReactThinkingEffort,
 }: Props) {
   const modeMenuRef = useRef<HTMLDivElement | null>(null);
   const wsMenuRef = useRef<HTMLDivElement | null>(null);
   const modelMenuRef = useRef<HTMLDivElement | null>(null);
+  const reactMenuRef = useRef<HTMLDivElement | null>(null);
   const thinkingMenuRef = useRef<HTMLDivElement | null>(null);
+  const reactThinkingMenuRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const prevSessionIdRef = useRef<string | null>(activeSessionId);
   const autoResizeTextarea = useCallback(() => {
@@ -116,8 +131,11 @@ function ComposerImpl({
   }, [activeSessionId]);
   const [wsMenuOpen, setWsMenuOpen] = useState(false);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
+  const [reactMenuOpen, setReactMenuOpen] = useState(false);
   const [selectedProviderId, setSelectedProviderId] = useState<string | null>(null);
+  const [selectedReactProviderId, setSelectedReactProviderId] = useState<string | null>(null);
   const [thinkingMenuOpen, setThinkingMenuOpen] = useState(false);
+  const [reactThinkingMenuOpen, setReactThinkingMenuOpen] = useState(false);
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; hasSelection: boolean } | null>(null);
   const ctxMenuRef = useRef<HTMLDivElement | null>(null);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
@@ -670,167 +688,294 @@ function ComposerImpl({
           ) : null}
         </div>
 
-        <div className="model-picker" ref={modelMenuRef}>
-          <button
-            type="button"
-            className="model-chip"
-            aria-haspopup="listbox"
-            aria-expanded={modelMenuOpen}
-            onClick={() => setModelMenuOpen((v) => !v)}
-            title={t("切换模型")}
-          >
-            {modelLabel}
-            <span className="mode-chevron" aria-hidden>
-              ▾
-            </span>
-          </button>
-          {modelMenuOpen ? (
-            <div className="model-menu" role="listbox">
-              {availableModels.length === 0 ? (
-                <div className="model-menu-empty">
-                  <span>{t("暂无可用模型")}</span>
-                  <button
-                    type="button"
-                    className="model-menu-settings"
-                    onClick={() => {
-                      setModelMenuOpen(false);
-                      onOpenSettings();
-                    }}
-                  >
-                    {t("去设置")}
-                  </button>
-                </div>
-              ) : (
-                <>
-                  {/*
-                    经典二级菜单：两列同在文档流 + align-items:flex-start，
-                    高度互不拉伸；各自 height:auto / max-height 独立滚动。
-                  */}
-                  <div className="model-menu-body">
-                    <nav className="model-menu-providers" role="tablist" aria-label={t("模型平台")}>
-                      {groupedModels.map((group) => (
-                        <button
-                          key={group.providerId}
-                          type="button"
-                          role="tab"
-                          aria-selected={selectedProviderId === group.providerId}
-                          className={`model-menu-provider-item ${selectedProviderId === group.providerId ? "active" : ""}`}
-                          onMouseEnter={() => setSelectedProviderId(group.providerId)}
-                          onFocus={() => setSelectedProviderId(group.providerId)}
-                          onClick={() => setSelectedProviderId(group.providerId)}
-                        >
-                          <span className="model-menu-provider-label">
-                            {group.providerName}
-                            <span className="model-menu-provider-count">{group.models.length}</span>
-                          </span>
-                        </button>
-                      ))}
-                    </nav>
-                    <ul className="model-menu-models" role="group">
-                      {(groupedModels.find((g) => g.providerId === selectedProviderId)?.models ?? []).map((m) => (
-                        <li key={m.id}>
-                          <button
-                            type="button"
-                            role="option"
-                            aria-selected={m.id === availableModels[0]?.id}
-                            className={`${m.id === availableModels[0]?.id ? "selected" : ""} ${
-                              (groupedModels.find((g) => g.providerId === selectedProviderId)?.models.length ?? 0) === 1
-                                ? "single-model"
-                                : ""
-                            }`}
-                            onClick={() => {
-                              setModelMenuOpen(false);
-                              setSelectedProviderId(null);
-                              onSelectModel(m.id);
-                            }}
-                          >
-                            <span className="model-menu-name">{m.name}</span>
-                            {m.id === availableModels[0]?.id ? <span className="mode-check">✓</span> : null}
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
+        {/* 所有设置项在同一行 */}
+        <div className="composer-settings-row">
+          {/* 任务分解模型选择器 - 分阶段和非分阶段都显示 */}
+          <div className={`model-picker ${separateStageModels ? "model-picker-decomposer" : ""}`} ref={modelMenuRef}>
+            <button
+              type="button"
+              className={`model-chip ${separateStageModels ? "model-chip-decomposer" : ""}`}
+              aria-haspopup="listbox"
+              aria-expanded={modelMenuOpen}
+              onClick={() => setModelMenuOpen((v) => !v)}
+              title={separateStageModels ? "任务分解模型" : t("切换模型")}
+            >
+              {separateStageModels ? <span className="model-stage-indicator">📋</span> : null}
+              {modelLabel}
+              <span className="mode-chevron" aria-hidden>
+                ▾
+              </span>
+            </button>
+            {modelMenuOpen ? (
+              <div className="model-menu" role="listbox">
+                {availableModels.length === 0 ? (
+                  <div className="model-menu-empty">
+                    <span>{t("暂无可用模型")}</span>
+                    <button
+                      type="button"
+                      className="model-menu-settings"
+                      onClick={() => {
+                        setModelMenuOpen(false);
+                        onOpenSettings();
+                      }}
+                    >
+                      {t("去设置")}
+                    </button>
                   </div>
-                  <div className="ws-menu-sep" aria-hidden />
+                ) : (
+                  <>
+                    {/*
+                      经典二级菜单：两列同在文档流 + align-items:flex-start，
+                      高度互不拉伸；各自 height:auto / max-height 独立滚动。
+                    */}
+                    <div className="model-menu-body">
+                      <nav className="model-menu-providers" role="tablist" aria-label={t("模型平台")}>
+                        {groupedModels.map((group) => (
+                          <button
+                            key={group.providerId}
+                            type="button"
+                            role="tab"
+                            aria-selected={selectedProviderId === group.providerId}
+                            className={`model-menu-provider-item ${selectedProviderId === group.providerId ? "active" : ""}`}
+                            onMouseEnter={() => setSelectedProviderId(group.providerId)}
+                            onFocus={() => setSelectedProviderId(group.providerId)}
+                            onClick={() => setSelectedProviderId(group.providerId)}
+                          >
+                            <span className="model-menu-provider-label">
+                              {group.providerName}
+                              <span className="model-menu-provider-count">{group.models.length}</span>
+                            </span>
+                          </button>
+                        ))}
+                      </nav>
+                      <ul className="model-menu-models" role="group">
+                        {(groupedModels.find((g) => g.providerId === selectedProviderId)?.models ?? []).map((m) => (
+                          <li key={m.id}>
+                            <button
+                              type="button"
+                              role="option"
+                              aria-selected={m.id === availableModels[0]?.id}
+                              className={`${m.id === availableModels[0]?.id ? "selected" : ""} ${
+                                (groupedModels.find((g) => g.providerId === selectedProviderId)?.models.length ?? 0) === 1
+                                  ? "single-model"
+                                  : ""
+                              }`}
+                              onClick={() => {
+                                setModelMenuOpen(false);
+                                setSelectedProviderId(null);
+                                onSelectModel(m.id);
+                              }}
+                            >
+                              <span className="model-menu-name">{m.name}</span>
+                              {m.id === availableModels[0]?.id ? <span className="mode-check">✓</span> : null}
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                    <div className="ws-menu-sep" aria-hidden />
+                    <button
+                      type="button"
+                      className="model-menu-settings"
+                      onClick={() => {
+                        setModelMenuOpen(false);
+                        onOpenSettings();
+                      }}
+                    >
+                      {t("⚙ 模型设置…")}
+                    </button>
+                  </>
+                )}
+              </div>
+            ) : null}
+          </div>
+
+          {/* 任务分解思考强度选择器 - 分阶段和非分阶段都显示 */}
+          <div className="thinking-picker" ref={thinkingMenuRef}>
+            <button
+              type="button"
+              className="thinking-chip"
+              aria-haspopup="listbox"
+              aria-expanded={thinkingMenuOpen}
+              onClick={() => setThinkingMenuOpen((v) => !v)}
+              title={separateStageModels ? "任务分解思考强度" : t("思考强度")}
+            >
+              {separateStageModels ? <span className="thinking-icon">📋</span> : <span className="thinking-icon">💭</span>}
+              {thinkingEffort === "low" ? t("低") : thinkingEffort === "medium" ? t("中") : t("高")}
+              <span className="mode-chevron" aria-hidden>
+                ▾
+              </span>
+            </button>
+            {thinkingMenuOpen ? (
+              <ul className="thinking-menu" role="listbox">
+                <li>
                   <button
                     type="button"
-                    className="model-menu-settings"
+                    role="option"
+                    aria-selected={thinkingEffort === "high"}
+                    className={thinkingEffort === "high" ? "selected" : ""}
                     onClick={() => {
-                      setModelMenuOpen(false);
-                      onOpenSettings();
+                      setThinkingMenuOpen(false);
+                      onSelectThinkingEffort("high");
                     }}
                   >
-                    {t("⚙ 模型设置…")}
+                    <span className="thinking-menu-name">{t("高强度")}</span>
+                    {thinkingEffort === "high" ? <span className="mode-check">✓</span> : null}
                   </button>
-                </>
-              )}
-            </div>
-          ) : null}
-        </div>
+                </li>
+                <li>
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected={thinkingEffort === "medium"}
+                    className={thinkingEffort === "medium" ? "selected" : ""}
+                    onClick={() => {
+                      setThinkingMenuOpen(false);
+                      onSelectThinkingEffort("medium");
+                    }}
+                  >
+                    <span className="thinking-menu-name">{t("中强度")}</span>
+                    {thinkingEffort === "medium" ? <span className="mode-check">✓</span> : null}
+                  </button>
+                </li>
+                <li>
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected={thinkingEffort === "low"}
+                    className={thinkingEffort === "low" ? "selected" : ""}
+                    onClick={() => {
+                      setThinkingMenuOpen(false);
+                      onSelectThinkingEffort("low");
+                    }}
+                  >
+                    <span className="thinking-menu-name">{t("低强度")}</span>
+                    {thinkingEffort === "low" ? <span className="mode-check">✓</span> : null}
+                  </button>
+                </li>
+              </ul>
+            ) : null}
+          </div>
 
-        <div className="thinking-picker" ref={thinkingMenuRef}>
-          <button
-            type="button"
-            className="thinking-chip"
-            aria-haspopup="listbox"
-            aria-expanded={thinkingMenuOpen}
-            onClick={() => setThinkingMenuOpen((v) => !v)}
-            title={t("思考强度")}
-          >
-            <span className="thinking-icon">💭</span>
-            {thinkingEffort === "low" ? t("低") : thinkingEffort === "medium" ? t("中") : t("高")}
-            <span className="mode-chevron" aria-hidden>
-              ▾
-            </span>
-          </button>
-          {thinkingMenuOpen ? (
-            <ul className="thinking-menu" role="listbox">
-              <li>
+          {/* 循环执行模型选择器（仅分阶段模式显示） */}
+          {separateStageModels ? (
+            <div className="composer-settings-row">
+              <div className="model-picker model-picker-react" ref={reactMenuRef}>
                 <button
                   type="button"
-                  role="option"
-                  aria-selected={thinkingEffort === "high"}
-                  className={thinkingEffort === "high" ? "selected" : ""}
-                  onClick={() => {
-                    setThinkingMenuOpen(false);
-                    onSelectThinkingEffort("high");
-                  }}
+                  className="model-chip model-chip-react"
+                  aria-haspopup="listbox"
+                  aria-expanded={reactMenuOpen}
+                  onClick={() => setReactMenuOpen((v) => !v)}
+                  title={t("循环执行模型")}
                 >
-                  <span className="thinking-menu-name">{t("高强度")}</span>
-                  {thinkingEffort === "high" ? <span className="mode-check">✓</span> : null}
+                  <span className="model-stage-indicator">🔄</span>
+                  {availableModels.find(m => m.name === reactModelId)?.name || t("选择模型")}
+                  <span className="mode-chevron" aria-hidden>▾</span>
                 </button>
-              </li>
-              <li>
+                {reactMenuOpen ? (
+                  <div className="model-menu" role="listbox">
+                    {availableModels.length === 0 ? (
+                      <div className="model-menu-empty">
+                        <span>{t("暂无可用模型")}</span>
+                        <button type="button" className="model-menu-settings" onClick={() => { setReactMenuOpen(false); onOpenSettings(); }}>
+                          {t("去设置")}
+                        </button>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="model-menu-body">
+                          <nav className="model-menu-providers" role="tablist" aria-label={t("模型平台")}>
+                            {groupedModels.map((group) => (
+                              <button key={group.providerId} type="button" role="tab" aria-selected={selectedReactProviderId === group.providerId} className={`model-menu-provider-item ${selectedReactProviderId === group.providerId ? "active" : ""}`} onMouseEnter={() => setSelectedReactProviderId(group.providerId)} onFocus={() => setSelectedReactProviderId(group.providerId)} onClick={() => setSelectedReactProviderId(group.providerId)}>
+                                <span className="model-menu-provider-label">{group.providerName}<span className="model-menu-provider-count">{group.models.length}</span></span>
+                              </button>
+                            ))}
+                          </nav>
+                          <ul className="model-menu-models" role="group">
+                            {(groupedModels.find((g) => g.providerId === selectedReactProviderId)?.models ?? []).map((m) => (
+                              <li key={m.id}>
+                                <button type="button" role="option" aria-selected={m.name === reactModelId} className={`${m.name === reactModelId ? "selected" : ""}`} onClick={() => { setReactMenuOpen(false); setSelectedReactProviderId(null); onSelectReactModel(m.name, m.providerId); }}>
+                                  <span className="model-menu-name">{m.name}</span>
+                                  {m.name === reactModelId ? <span className="mode-check">✓</span> : null}
+                                </button>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                        <div className="ws-menu-sep" aria-hidden />
+                        <button type="button" className="model-menu-settings" onClick={() => { setReactMenuOpen(false); onOpenSettings(); }}>{t("⚙ 模型设置…")}</button>
+                      </>
+                    )}
+                  </div>
+                ) : null}
+              </div>
+
+              {/* 循环执行思考强度选择器 */}
+              <div className="thinking-picker thinking-picker-react" ref={reactThinkingMenuRef}>
                 <button
                   type="button"
-                  role="option"
-                  aria-selected={thinkingEffort === "medium"}
-                  className={thinkingEffort === "medium" ? "selected" : ""}
-                  onClick={() => {
-                    setThinkingMenuOpen(false);
-                    onSelectThinkingEffort("medium");
-                  }}
+                  className="thinking-chip thinking-chip-react"
+                  aria-haspopup="listbox"
+                  aria-expanded={reactThinkingMenuOpen}
+                  onClick={() => setReactThinkingMenuOpen((v) => !v)}
+                  title={t("循环执行思考强度")}
                 >
-                  <span className="thinking-menu-name">{t("中强度")}</span>
-                  {thinkingEffort === "medium" ? <span className="mode-check">✓</span> : null}
+                  <span className="thinking-icon">💭</span>
+                  {reactThinkingEffort === "low" ? t("低") : reactThinkingEffort === "medium" ? t("中") : t("高")}
+                  <span className="mode-chevron" aria-hidden>▾</span>
                 </button>
-              </li>
-              <li>
-                <button
-                  type="button"
-                  role="option"
-                  aria-selected={thinkingEffort === "low"}
-                  className={thinkingEffort === "low" ? "selected" : ""}
-                  onClick={() => {
-                    setThinkingMenuOpen(false);
-                    onSelectThinkingEffort("low");
-                  }}
-                >
-                  <span className="thinking-menu-name">{t("低强度")}</span>
-                  {thinkingEffort === "low" ? <span className="mode-check">✓</span> : null}
-                </button>
-              </li>
-            </ul>
+                {reactThinkingMenuOpen ? (
+                  <ul className="thinking-menu" role="listbox">
+                    <li>
+                      <button
+                        type="button"
+                        role="option"
+                        aria-selected={reactThinkingEffort === "high"}
+                        className={reactThinkingEffort === "high" ? "selected" : ""}
+                        onClick={() => {
+                          setReactThinkingMenuOpen(false);
+                          onSelectReactThinkingEffort("high");
+                        }}
+                      >
+                        <span className="thinking-menu-name">{t("高强度")}</span>
+                        {reactThinkingEffort === "high" ? <span className="mode-check">✓</span> : null}
+                      </button>
+                    </li>
+                    <li>
+                      <button
+                        type="button"
+                        role="option"
+                        aria-selected={reactThinkingEffort === "medium"}
+                        className={reactThinkingEffort === "medium" ? "selected" : ""}
+                        onClick={() => {
+                          setReactThinkingMenuOpen(false);
+                          onSelectReactThinkingEffort("medium");
+                        }}
+                      >
+                        <span className="thinking-menu-name">{t("中强度")}</span>
+                        {reactThinkingEffort === "medium" ? <span className="mode-check">✓</span> : null}
+                      </button>
+                    </li>
+                    <li>
+                      <button
+                        type="button"
+                        role="option"
+                        aria-selected={reactThinkingEffort === "low"}
+                        className={reactThinkingEffort === "low" ? "selected" : ""}
+                        onClick={() => {
+                          setReactThinkingMenuOpen(false);
+                          onSelectReactThinkingEffort("low");
+                        }}
+                      >
+                        <span className="thinking-menu-name">{t("低强度")}</span>
+                        {reactThinkingEffort === "low" ? <span className="mode-check">✓</span> : null}
+                      </button>
+                    </li>
+                  </ul>
+                ) : null}
+              </div>
+            </div>
           ) : null}
         </div>
 

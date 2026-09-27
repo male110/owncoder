@@ -184,7 +184,7 @@ function LiveToolCardImpl({ tool }: { tool: PendingTool }) {
 
 // ── ThinkingBlock ─────────────────────────────────────────────────────────────
 
-function ThinkingBlockImpl({ content, streaming }: { content: string; streaming: boolean }) {
+function ThinkingBlockImpl({ content, streaming, stage }: { content: string; streaming: boolean; stage?: "decompose" | "react" }) {
   const [open, setOpen] = useState(streaming);
   const { t } = useI18n();
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -205,8 +205,10 @@ function ThinkingBlockImpl({ content, streaming }: { content: string; streaming:
 
   if (!content) return null;
 
+  const stageClass = stage === "decompose" ? "stage-decompose" : stage === "react" ? "stage-react" : "";
+
   return (
-    <div className={`thinking-block ${streaming ? "streaming" : ""}`}>
+    <div className={`thinking-block ${streaming ? "streaming" : ""} ${stageClass}`}>
       <button type="button" className="thinking-head" onClick={() => setOpen((v) => !v)}>
         <span className="thinking-icon">⊗</span>
         <span className="thinking-label">{streaming ? t("思考中…") : t("思考过程")}</span>
@@ -235,6 +237,7 @@ function LiveEventStreamImpl({ events }: { events: LiveEvent[] }) {
               key={ev.id}
               content={ev.text}
               streaming={ev.streaming}
+              stage={ev.stage}
             />
           );
         }
@@ -265,7 +268,7 @@ function DecomposeCard({ decomposition }: { decomposition: DecompositionSnapshot
   const [open, setOpen] = useState(true);
   const { t } = useI18n();
   const { intent, userConstraints, tasks, fallback } = decomposition;
-  const taskCount = tasks.length;
+  const taskCount = tasks?.length ?? 0;
 
   const title = fallback
     ? t("任务分解（本地回退）")
@@ -288,7 +291,7 @@ function DecomposeCard({ decomposition }: { decomposition: DecompositionSnapshot
               <div className="decompose-intent">{intent}</div>
             </div>
           ) : null}
-          {userConstraints.length > 0 ? (
+          {userConstraints?.length > 0 ? (
             <div className="decompose-section">
               <div className="decompose-section-label">{t("用户约束")}</div>
               <ul className="decompose-constraints">
@@ -298,7 +301,7 @@ function DecomposeCard({ decomposition }: { decomposition: DecompositionSnapshot
               </ul>
             </div>
           ) : null}
-          {tasks.length > 0 ? (
+          {tasks?.length > 0 ? (
             <div className="decompose-section">
               <div className="decompose-section-label">{t("任务")}</div>
               {tasks.map((task) => (
@@ -315,27 +318,13 @@ function DecomposeCard({ decomposition }: { decomposition: DecompositionSnapshot
                         <div className="decompose-step-head">
                           <span className="decompose-step-id">{s.id}</span>
                           <span className="decompose-step-desc">{s.description}</span>
-                          {s.dependsOn.length > 0 ? (
+                          {s.dependsOn?.length > 0 ? (
                             <span className="decompose-step-deps" title={t("依赖的前序步骤")}>
                               ⇦ {s.dependsOn.join(", ")}
                             </span>
                           ) : null}
                         </div>
-                        {s.informationNeeds.length > 0 ? (
-                          <ul className="decompose-needs">
-                            {s.informationNeeds.map((need) => (
-                              <li key={need.id}>
-                                <span className="decompose-need-id">{need.id}</span>
-                                {need.question}
-                              </li>
-                            ))}
-                          </ul>
-                        ) : null}
-                        {s.stopReadingWhen.length > 0 ? (
-                          <div className="decompose-stop">
-                            {t("停读条件：")}{s.stopReadingWhen.map((c) => c.condition).join("；")}
-                          </div>
-                        ) : null}
+
                       </li>
                     ))}
                   </ol>

@@ -2365,9 +2365,33 @@ button.ghost.accent {
   animation: pulseGlow 2s ease-in-out infinite;
 }
 
+/* 蓝色思考块 - 任务分解阶段 */
+.thinking-block.stage-decompose.streaming {
+  border-color: color-mix(in srgb, #4a9eff 22%, var(--border));
+  background: linear-gradient(135deg, var(--surface-3) 0%, color-mix(in srgb, #4a9eff 6%, transparent) 100%);
+  animation: pulseGlowBlue 2s ease-in-out infinite;
+}
+
+/* 绿色思考块 - 循环执行阶段 */
+.thinking-block.stage-react.streaming {
+  border-color: color-mix(in srgb, #10b981 22%, var(--border));
+  background: linear-gradient(135deg, var(--surface-3) 0%, color-mix(in srgb, #10b981 6%, transparent) 100%);
+  animation: pulseGlowGreen 2s ease-in-out infinite;
+}
+
 @keyframes pulseGlow {
   0%, 100% { box-shadow: 0 0 0 0 transparent; }
   50% { box-shadow: 0 0 10px 0 color-mix(in srgb, var(--accent) 12%, transparent); }
+}
+
+@keyframes pulseGlowBlue {
+  0%, 100% { box-shadow: 0 0 0 0 transparent; }
+  50% { box-shadow: 0 0 10px 0 color-mix(in srgb, #4a9eff 12%, transparent); }
+}
+
+@keyframes pulseGlowGreen {
+  0%, 100% { box-shadow: 0 0 0 0 transparent; }
+  50% { box-shadow: 0 0 10px 0 color-mix(in srgb, #10b981 12%, transparent); }
 }
 
 .thinking-head {
@@ -2407,6 +2431,14 @@ button.ghost.accent {
   color: var(--accent);
 }
 
+.thinking-block.stage-decompose.streaming .thinking-label {
+  color: #4a9eff;
+}
+
+.thinking-block.stage-react.streaming .thinking-label {
+  color: #10b981;
+}
+
 .thinking-block.streaming .thinking-label::after {
   content: "";
   display: inline-block;
@@ -2415,6 +2447,14 @@ button.ghost.accent {
   background: var(--accent);
   border-radius: 50%;
   animation: thinkingDot 1.4s infinite;
+}
+
+.thinking-block.stage-decompose.streaming .thinking-label::after {
+  background: #4a9eff;
+}
+
+.thinking-block.stage-react.streaming .thinking-label::after {
+  background: #10b981;
 }
 
 .thinking-body {
@@ -3900,10 +3940,17 @@ button.ghost.accent {
 
 .composer-bar {
   display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.composer-settings-row {
+  display: flex;
   align-items: center;
   gap: 6px;
-  margin-top: 8px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
 }
 
 .composer-bar .mode-picker {
@@ -3912,6 +3959,76 @@ button.ghost.accent {
 
 .composer-bar .model-chip {
   flex-shrink: 0;
+}
+
+/* 分阶段模型选择框样式 */
+.model-picker-decomposer,
+.model-picker-react {
+  position: relative;
+  z-index: 5;
+}
+
+.model-chip-decomposer {
+  border-left: 3px solid #3b82f6;
+}
+
+.model-chip-react {
+  border-left: 3px solid #10b981;
+}
+
+.model-stage-indicator {
+  font-size: 14px;
+  line-height: 1;
+}
+
+/* 设置界面的分阶段模型开关和说明 */
+.model-staged-toggle {
+  padding: 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-tint);
+}
+
+.model-staged-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-weight: 500;
+  margin-bottom: 8px;
+}
+
+.model-staged-label input[type="checkbox"] {
+  cursor: pointer;
+}
+
+.model-staged-hint {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-left: 28px;
+}
+
+.model-stage-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.model-stage-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.model-stage-dot.decomposer {
+  background: #4a9eff;
+}
+
+.model-stage-dot.react {
+  background: #10b981;
 }
 
 .composer-actions {

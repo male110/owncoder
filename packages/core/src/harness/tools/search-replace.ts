@@ -38,6 +38,24 @@ interface TextMatch {
   end: number;
 }
 
+/**
+ * Detailed line-by-line difference information for diagnostic purposes.
+ */
+interface LineDiffDetail {
+  lineNumber: number;       // 1-based line number in SEARCH text
+  expected: string;         // Line from SEARCH block
+  actual: string | null;    // Corresponding line from file (null if not found)
+  diffType: 'exact' | 'content' | 'whitespace' | 'lineEnding' | 'missing';
+}
+
+interface LineDiffResult {
+  matchedLines: number;      // Number of lines that matched
+  totalLines: number;        // Total lines in SEARCH block
+  firstMismatchLine: number | null;  // 1-based line number of first mismatch
+  details: LineDiffDetail[];
+  suggestedPattern?: string; // Detected common pattern (e.g., "indent-offset")
+}
+
 // --- marker patterns (line-level; a divider must occupy its own line) ---
 const HEAD_RE = /^<{5,9}\s*SEARCH\s*$/i;
 const DIVIDER_RE = /^={5,9}\s*$/;
@@ -394,6 +412,222 @@ function findSimilarLines(search: string, content: string, threshold = 0.6): str
   return contentLines.slice(start, end).join("\n");
 }
 
+/**
+ * Generate detailed line-by-line diff diagnostic for a failed SEARCH block.
+ * Finds the most similar location and analyzes each line's difference.
+ */
+function generateLineDiff(search: string, content: string): LineDiffResult {
+  const searchLines = splitLinesKeepEnds(search);
+  const contentLines = splitLinesKeepEnds(content);
+  const m = searchLines.length;
+
+  if (m === 0) {
+    return {
+      matchedLines: 0,
+      totalLines: 0,
+      firstMismatchLine: null,
+      details: [],
+    };
+  }
+
+  // Find the most similar location (same algorithm as findSimilarLines)
+  const searchLinesStripped = searchLines.map(stripEol);
+  const contentLinesStripped = contentLines.map(stripEol);
+  let bestRatio = 0;
+  let bestI = -1;
+  for (let i = 0; i + m <= contentLines.length; i++) {
+    const chunk = contentLinesStripped.slice(i, i + m);
+    const ratio = lineRatio(searchLinesStripped, chunk);
+    if (ratio > bestRatio) {
+      bestRatio = ratio;
+      bestI = i;
+    }
+  }
+
+  const details: LineDiffDetail[] = [];
+  let matchedLines = 0;
+  let firstMismatchLine: number | null = null;
+
+  if (bestI >= 0) {
+    // Compare line by line at the best matching location
+    for (let k = 0; k < m; k++) {
+      const searchLine = searchLines[k];
+      const actualLine = contentLines[bestI + k];
+      const lineNumber = k + 1;
+
+      // Check various levels of matching
+      if (searchLine === actualLine) {
+        details.push({
+          lineNumber,
+          expected: stripEol(searchLine),
+          actual: stripEol(actualLine),
+          diffType: 'exact',
+        });
+        matchedLines++;
+      } else if (stripEol(searchLine) === stripEol(actualLine)) {
+        details.push({
+          lineNumber,
+          expected: stripEol(searchLine),
+          actual: stripEol(actualLine),
+          diffType: 'lineEnding',
+        });
+        if (firstMismatchLine === null) firstMismatchLine = lineNumber;
+      } else if (stripEol(searchLine).replace(/[ \t]+$/, '') === stripEol(actualLine).replace(/[ \t]+$/, '')) {
+        details.push({
+          lineNumber,
+          expected: stripEol(searchLine),
+          actual: stripEol(actualLine),
+          diffType: 'whitespace',
+        });
+        if (firstMismatchLine === null) firstMismatchLine = lineNumber;
+      } else {
+        details.push({
+          lineNumber,
+          expected: stripEol(searchLine),
+          actual: stripEol(actualLine),
+          diffType: 'content',
+        });
+        if (firstMismatchLine === null) firstMismatchLine = lineNumber;
+      }
+    }
+  } else {
+    // No similar location found - just list the expected lines
+    for (let k = 0; k < m; k++) {
+      details.push({
+        lineNumber: k + 1,
+        expected: stripEol(searchLines[k]),
+        actual: null,
+        diffType: 'missing',
+      });
+    }
+    firstMismatchLine = 1;
+  }
+
+  // Detect common patterns
+  const suggestedPattern = detectDiffPattern(details);
+
+  return {
+    matchedLines,
+    totalLines: m,
+    firstMismatchLine,
+    details,
+    suggestedPattern,
+  };
+}
+
+/**
+ * Detect common difference patterns to provide actionable hints.
+ */
+function detectDiffPattern(details: LineDiffDetail[]): string | undefined {
+  if (details.length === 0) return undefined;
+
+  // Check if all non-exact lines have only whitespace differences
+  const nonExact = details.filter((d) => d.diffType !== 'exact');
+  if (nonExact.length === 0) return undefined;
+
+  const allWhitespace = nonExact.every((d) => d.diffType === 'whitespace' || d.diffType === 'lineEnding');
+  if (allWhitespace) {
+    const hasLineEnding = nonExact.some((d) => d.diffType === 'lineEnding');
+    const hasWhitespace = nonExact.some((d) => d.diffType === 'whitespace');
+    if (hasLineEnding && hasWhitespace) return 'mixed-whitespace';
+    if (hasLineEnding) return 'line-ending';
+    if (hasWhitespace) return 'trailing-whitespace';
+  }
+
+  // Check for consistent leading whitespace offset
+  const indentOffsets: number[] = [];
+  for (const detail of details) {
+    if (detail.diffType === 'content' && detail.actual !== null) {
+      const expectedIndent = leadingWhitespaceOf(detail.expected + '\n');
+      const actualIndent = leadingWhitespaceOf(detail.actual + '\n');
+      if (detail.expected.trimStart() === detail.actual.trimStart()) {
+        indentOffsets.push(actualIndent - expectedIndent);
+      }
+    }
+  }
+
+  if (indentOffsets.length > 0 && indentOffsets.every((off) => off === indentOffsets[0])) {
+    const offset = indentOffsets[0];
+    if (offset !== 0) return `indent-offset-${offset > 0 ? 'more' : 'less'}-${Math.abs(offset)}`;
+  }
+
+  return undefined;
+}
+
+/**
+ * Format line diff result into a human-readable diagnostic message.
+ */
+function formatLineDiff(diff: LineDiffResult): string {
+  const { matchedLines, totalLines, firstMismatchLine, details, suggestedPattern } = diff;
+
+  let msg = '';
+
+  if (matchedLines > 0) {
+    msg += `Matched ${matchedLines} out of ${totalLines} lines.`;
+    if (firstMismatchLine !== null) {
+      msg += ` First mismatch at line ${firstMismatchLine}:\n\n`;
+    }
+  } else {
+    msg += `No lines matched.\n\n`;
+  }
+
+  // Show first few mismatches
+  const mismatches = details.filter((d) => d.diffType !== 'exact').slice(0, 3);
+  for (const detail of mismatches) {
+    msg += `Line ${detail.lineNumber}:\n`;
+    msg += `  Expected: │${detail.expected}│\n`;
+    if (detail.actual !== null) {
+      msg += `  Actual:   │${detail.actual}│\n`;
+      switch (detail.diffType) {
+        case 'lineEnding':
+          msg += `  Issue: Line ending differs (CRLF vs LF)\n`;
+          break;
+        case 'whitespace':
+          msg += `  Issue: Trailing whitespace differs\n`;
+          break;
+        case 'content':
+          const expIndent = leadingWhitespaceOf(detail.expected + '\n');
+          const actIndent = leadingWhitespaceOf(detail.actual + '\n');
+          if (expIndent !== actIndent) {
+            msg += `  Issue: Leading whitespace (expected ${expIndent} spaces, actual ${actIndent} spaces)\n`;
+          } else {
+            msg += `  Issue: Content differs\n`;
+          }
+          break;
+      }
+    } else {
+      msg += `  Actual:   (not found in file)\n`;
+    }
+    msg += '\n';
+  }
+
+  // Add pattern-specific hint
+  if (suggestedPattern) {
+    switch (suggestedPattern) {
+      case 'line-ending':
+        msg += `Pattern detected: Line endings differ (CRLF vs LF). This should be handled automatically.\n`;
+        break;
+      case 'trailing-whitespace':
+        msg += `Pattern detected: Trailing whitespace differs. This should be handled automatically.\n`;
+        break;
+      case 'mixed-whitespace':
+        msg += `Pattern detected: Mixed whitespace issues (line endings and trailing spaces).\n`;
+        break;
+      default:
+        if (suggestedPattern.startsWith('indent-offset-')) {
+          const match = suggestedPattern.match(/indent-offset-(more|less)-(\d+)/);
+          if (match) {
+            const dir = match[1] === 'more' ? 'more indented' : 'less indented';
+            const amount = match[2];
+            msg += `Pattern detected: All lines in file are ${dir} by ${amount} spaces.\n`;
+          }
+        }
+    }
+  }
+
+  return msg;
+}
+
 /** Normalise the replacement's line endings to the matched region's style. */
 function buildReplacement(content: string, match: TextMatch, replace: string): string {
   const lineEnding = lineEndingForReplacement(content, match);
@@ -482,19 +716,25 @@ function applyBlock(
     };
   }
 
-  // 5. Fail with a "Did you mean?" hint — do NOT fuzzy-replace.
-  const suggestion = findSimilarLines(search, content);
+  // 5. Fail with enhanced diagnostic — do NOT fuzzy-replace.
+  const lineDiff = generateLineDiff(search, content);
+  const diffDiagnostic = formatLineDiff(lineDiff);
+  
   let error =
     `Block #${blockIndex + 1}: Could not find SEARCH text in file.\n\n` +
-    `SEARCH text (first 200 chars):\n${search.slice(0, 200)}\n\n` +
-    `This usually means:\n` +
+    diffDiagnostic +
+    `\nThis usually means:\n` +
     `1. The file content has changed since you read it\n` +
     `2. The SEARCH text has typos or doesn't match exactly\n` +
     `3. You're editing the wrong file\n\n` +
     `TIP: Use read_file first to see current content, then copy exact text for SEARCH.`;
+  
+  // Add similar lines suggestion (always show to help locate the intended match)
+  const suggestion = findSimilarLines(search, content);
   if (suggestion) {
-    error += `\n\nDid you mean to match these actual lines?\n\n${suggestion}\n`;
+    error += `\n\nSimilar content found in file:\n\n${suggestion}\n`;
   }
+  
   return { success: false, error, replacements: 0 };
 }
 

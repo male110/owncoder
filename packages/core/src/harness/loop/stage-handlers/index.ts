@@ -22,7 +22,7 @@ import { emitStage } from "../stages.ts";
 import { normalizeUsage } from "../../observability.ts";
 import type { StageHandler, SchedulerContext } from "./types.ts";
 import { pushCurrentUserMessageOnce } from "./history.ts";
-import { flattenSteps, taskDecomposeHandler } from "./task-decompose.ts";
+import { taskDecomposeHandler } from "./task-decompose.ts";
 import { exploreToolsHandler, executeToolsHandler } from "./tools.ts";
 import { verifyHandler, postVerifyHandler } from "./verify.ts";
 
@@ -44,7 +44,7 @@ export {
 
 export {
   parseDecomposeAnswer,
-  flattenSteps,
+
   injectStopConditions,
   runTaskDecompose,
   taskDecomposeHandler,
@@ -92,17 +92,14 @@ export async function injectHistoryAndUserMessage(ctx: SchedulerContext): Promis
     recentFileHints = formatRecentFileHints(rounds);
   }
 
-  // 优先当前子任务 relevantHistory → 整单 relevantHistory；都没有则只注入当前用户消息（不再拉历史）
+  // currentTaskId 是任务 ID，必须从 task 级字段读取，不能按扁平 step 查找。
   const currentTaskId = opts.currentTaskId;
-  const flatSteps = flattenSteps(state.rawDecompose);
-  const stepHistory = currentTaskId
-    ? flatSteps.find((s) => s.id === currentTaskId)?.relevantHistory
+  const currentTask = currentTaskId
+    ? state.rawDecompose?.tasks.find((task) => task.id === currentTaskId)
     : undefined;
-  const firstStepHistory = flatSteps.find((s) => (s.relevantHistory?.trim().length ?? 0) > 0)?.relevantHistory;
-  const relevantHistory = stepHistory
+  const relevantHistory = currentTask?.relevantHistory
     ?? state.turnInformationTask?.relevantHistory
-    ?? state.rawDecompose?.relevantHistory
-    ?? firstStepHistory;
+    ?? state.rawDecompose?.relevantHistory;
 
   const packedHistory = relevantHistory?.trim() ?? "";
   if (packedHistory) {
@@ -131,7 +128,7 @@ export async function injectHistoryAndUserMessage(ctx: SchedulerContext): Promis
       message: "使用任务分解带回的可复用历史，跳过完整历史注入",
       details: {
         historyChars: packedHistory.length,
-        source: stepHistory ? "step" : state.turnInformationTask?.relevantHistory ? "turn_task" : "shared",
+        source: currentTask?.relevantHistory ? "task" : state.turnInformationTask?.relevantHistory ? "turn_task" : "shared",
       },
     });
   } else {
