@@ -129,3 +129,26 @@ export interface WorkspaceInfo {
   root: string;
   name: string;
 }
+
+/** Task decomposition snapshot shared by Core, preload, and renderer. */
+export interface TaskDecompositionTaskDto {
+  id: string;
+  description: string;
+  userConstraints: string[];
+  relevantHistory: string;
+  progressStatus: string;
+  steps: TaskDecompositionStepDto[];
+}
+
+export interface TaskDecompositionStepDto {
+  id: string;
+  description: string;
+  dependsOn: string[];
+}
+
+export interface TaskDecompositionDto {
+  intent: string;
+  userConstraints: string[];
+  tasks: TaskDecompositionTaskDto[];
+  fallback: boolean;
+}

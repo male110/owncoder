@@ -10,7 +10,7 @@
  * view untouched.
  */
 import { create } from "zustand";
-import type { AppError } from "@owncoder/shared";
+import type { AppError, TaskDecompositionDto } from "@owncoder/shared";
 import type { ChatTurnDto, ChatAttachmentDto, DangerousCommandRequestDto, AskUserRequestDto, TerminalEntryDto } from "../../../preload/index";
 
 export interface QueuedMessageDto {
@@ -66,21 +66,7 @@ export type LiveEvent =
   /** Complete structured message from turn_complete event (阶段三). */
   | { kind: "structured"; id: string; parts: MessagePart[]; metadata: MessageMetadata };
 
-export interface DecompositionSnapshot {
-  intent: string;
-  userConstraints: string[];
-  tasks: Array<{
-    id: string;
-    description: string;
-    steps: Array<{
-      id: string;
-      description: string;
-      dependsOn: string[];
-      informationNeeds: Array<{ id: string; question: string }>;
-    }>;
-  }>;
-  fallback: boolean;
-}
+export type DecompositionSnapshot = TaskDecompositionDto;
 
 // ── Per-session runtime ───────────────────────────────────────────────────────
 
@@ -303,6 +289,7 @@ export interface ChatState {
   taskRun: TaskRunSnapshot | null;
   dangerousConfirmations: DangerousCommandRequestDto[];
   askRequests: AskUserRequestDto[];
+  currentStage: "decompose" | "react" | null;
   status: SessionStatus;
 
   // Per-session storage + focus pointer
@@ -408,6 +395,7 @@ function readRuntime(s: ChatState & ChatActions, sid?: string): ChatSessionRunti
       taskRun: s.taskRun,
       dangerousConfirmations: s.dangerousConfirmations,
       askRequests: s.askRequests,
+      currentStage: s.currentStage,
       status: s.status,
     };
   }
@@ -443,6 +431,7 @@ export const useChatStore = create<ChatState & ChatActions>()((set, get) => ({
   taskRun: null,
   dangerousConfirmations: [],
   askRequests: [],
+  currentStage: null,
   status: "idle",
 
   activeSessionId: null,

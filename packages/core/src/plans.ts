@@ -112,6 +112,10 @@ export interface TaskItem {
   rollbackStrategy?: string;
   /** Estimated complexity level (optional). */
   estimatedComplexity?: "low" | "medium" | "high";
+  /** 当前子任务明确适用的用户约束（由任务分解写入）。 */
+  userConstraints?: string[];
+  /** 当前子任务在任务分解时的进度状态。 */
+  progressStatus?: string;
   /**
    * 当前子任务可复用的全部相关历史（由任务分解写入的自由文本）。
    * React 循环应直接使用，避免对同一内容重复探索。
@@ -458,6 +462,13 @@ function normalizeTask(t: Partial<TaskItem>): TaskItem {
     ? t.estimatedComplexity
     : undefined;
 
+  const userConstraints = Array.isArray(t.userConstraints)
+    ? t.userConstraints.filter((value): value is string => typeof value === "string")
+      .map((value) => value.trim()).filter(Boolean)
+    : [];
+  const progressStatus = typeof t.progressStatus === "string" && t.progressStatus.trim()
+    ? t.progressStatus.trim()
+    : undefined;
   // 保留子任务可复用的相关历史（字符串；兼容旧 files 对象）
   const relevantHistory = normalizeRelevantHistory(t.relevantHistory);
 
@@ -475,6 +486,8 @@ function normalizeTask(t: Partial<TaskItem>): TaskItem {
     verificationCriteria,
     rollbackStrategy,
     estimatedComplexity,
+    userConstraints,
+    progressStatus,
     relevantHistory,
   };
 }

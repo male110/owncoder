@@ -324,16 +324,7 @@ function DecomposeCard({ decomposition }: { decomposition: DecompositionSnapshot
                             </span>
                           ) : null}
                         </div>
-                        {s.informationNeeds?.length > 0 ? (
-                          <ul className="decompose-needs">
-                            {s.informationNeeds.map((need) => (
-                              <li key={need.id}>
-                                <span className="decompose-need-id">{need.id}</span>
-                                {need.question}
-                              </li>
-                            ))}
-                          </ul>
-                        ) : null}
+
                       </li>
                     ))}
                   </ol>

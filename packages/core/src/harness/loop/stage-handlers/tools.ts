@@ -17,11 +17,19 @@ function withDecomposeHistory(opts: AgentLoopOpts, state: SchedulerState): Agent
   const steps = flattenSteps(state.rawDecompose);
   if (!steps.length || !opts.activeTasks?.length) return opts;
   const byId = new Map(steps.map((s) => [s.id, s.relevantHistory]));
+  const taskById = new Map((state.rawDecompose?.tasks ?? []).map((task) => [task.id, task]));
   const shared = state.rawDecompose?.relevantHistory;
   const activeTasks = opts.activeTasks.map((task) => {
-    if (task.relevantHistory?.trim()) return task;
-    const fromStep = byId.get(task.id) ?? shared;
-    return fromStep ? { ...task, relevantHistory: fromStep } : task;
+    const source = taskById.get(task.id);
+    const fromStep = byId.get(task.id);
+    return {
+      ...task,
+      userConstraints: task.userConstraints?.length ? task.userConstraints : source?.userConstraints,
+      progressStatus: task.progressStatus ?? source?.progressStatus,
+      relevantHistory: task.relevantHistory?.trim()
+        ? task.relevantHistory
+        : source?.relevantHistory ?? fromStep ?? shared,
+    };
   });
   return { ...opts, activeTasks };
 }

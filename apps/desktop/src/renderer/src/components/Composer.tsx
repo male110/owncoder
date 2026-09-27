@@ -39,7 +39,7 @@ interface Props {
   onSelectProject: (root: string, focusSessionId?: string) => Promise<void>;
   onAddProject: () => void;
   onRemoveQueueMessage: (index: number) => void;
-  onSelectReactModel: (modelName: string) => void;
+  onSelectReactModel: (modelName: string, providerId: string) => void;
   onSelectReactThinkingEffort: (effort: ThinkingEffort) => void;
 }
 
@@ -895,7 +895,7 @@ function ComposerImpl({
                           <ul className="model-menu-models" role="group">
                             {(groupedModels.find((g) => g.providerId === selectedReactProviderId)?.models ?? []).map((m) => (
                               <li key={m.id}>
-                                <button type="button" role="option" aria-selected={m.name === reactModelId} className={`${m.name === reactModelId ? "selected" : ""}`} onClick={() => { setReactMenuOpen(false); setSelectedReactProviderId(null); onSelectReactModel(m.name); }}>
+                                <button type="button" role="option" aria-selected={m.name === reactModelId} className={`${m.name === reactModelId ? "selected" : ""}`} onClick={() => { setReactMenuOpen(false); setSelectedReactProviderId(null); onSelectReactModel(m.name, m.providerId); }}>
                                   <span className="model-menu-name">{m.name}</span>
                                   {m.name === reactModelId ? <span className="mode-check">✓</span> : null}
                                 </button>

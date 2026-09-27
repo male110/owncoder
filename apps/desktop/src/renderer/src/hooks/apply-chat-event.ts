@@ -133,12 +133,12 @@ export function applyChatEvent(
     } else {
       chat.setLiveStatus(t("阶段：{{label}}", { label: ev.label }), sid);
     }
-    chat.patchLiveState((rt) => ({ currentStage: stage }), sid);
+    chat.patchLiveState(() => ({ currentStage: stage }), sid);
     return;
   }
   if (ev.type === "stage_done") {
     chat.setLiveStatus("", sid);
-    chat.patchLiveState((rt) => ({ currentStage: null }), sid);
+    chat.patchLiveState(() => ({ currentStage: null }), sid);
     return;
   }
 

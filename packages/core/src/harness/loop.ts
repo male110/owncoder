@@ -412,6 +412,9 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
                 tasks: state.rawDecompose.tasks.map((task) => ({
                   id: task.id,
                   description: task.description,
+                  userConstraints: task.userConstraints ?? [],
+                  relevantHistory: task.relevantHistory ?? "",
+                  progressStatus: task.progressStatus ?? "pending",
                   steps: task.steps.map((step) => ({
                     id: step.id,
                     description: step.description,

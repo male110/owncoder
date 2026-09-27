@@ -76,6 +76,9 @@ export interface SchedulerState {
     tasks: Array<{
       id: string;
       description: string;
+      userConstraints?: string[];
+      relevantHistory?: TaskRelevantHistory;
+      progressStatus?: string;
       steps: Array<{
         id: string;
         description: string;

@@ -728,7 +728,7 @@ export function allEnhancedTools(opts?: {
       function: {
         name: "graph_search",
         description:
-          "Graph search over the native symbol index: returns a symbol's definition plus callers (who invokes X) and callees (what X invokes), up to `depth` hops (1-4, default 2). Use when you already know a symbol name and want impact/dependency tracing. To LOCATE an unknown symbol use search_symbols or codemap_search; to match an exact string use grep. Example: query='loginUser' depth=2 shows who calls loginUser and what it calls.",
+          "Graph search over the native symbol index: returns a symbol's definition plus callers (who invokes X) and callees (what X invokes), up to `depth` hops (1-4, default 2). Use when you already know a symbol name and want impact/dependency tracing. To LOCATE an unknown symbol use search_symbols or codemap_search; to match an exact string use grep. Example: query='loginUser' depth=2 shows who calls loginUser and what it calls. PREFER THIS over reading multiple files to trace call chains — it reveals relationships in one call, saving significant exploration tokens.",
         parameters: {
           type: "object",
           properties: {
@@ -744,7 +744,7 @@ export function allEnhancedTools(opts?: {
       function: {
         name: "codemap_search",
         description:
-          "Semantic search over the embedded Codemap to locate symbols/code concepts when you do NOT already know the file or line and have no exact class/method/file name. Use for vague 'where is X handled / find the Y logic' questions only. If the user already named a symbol, call search_symbols or grep with that exact name instead of this tool. Returns stable nodeId values — pass one to codemap_impact before editing a shared symbol.",
+          "Semantic search over the embedded Codemap to locate symbols/code concepts when you do NOT already know the file or line and have no exact class/method/file name. Use for vague 'where is X handled / find the Y logic' questions only. If the user already named a symbol, call search_symbols or grep with that exact name instead of this tool. Returns stable nodeId values — pass one to codemap_impact before editing a shared symbol. PREFER THIS over scanning multiple files with grep/read_file when exploring unfamiliar code — it narrows the search scope semantically and saves tokens.",
         parameters: {
           type: "object",
           properties: {
@@ -760,7 +760,7 @@ export function allEnhancedTools(opts?: {
       function: {
         name: "codemap_impact",
         description:
-          "Analyze a Codemap node's callers, callees, likely tests, and change risk before editing a shared/public symbol. nodeId MUST come from codemap_search — never a display name (duplicates are ambiguous). Use graph_search if you only need caller/callee hops without risk scoring. Example: codemap_search returns nodeId='n_42' for processPayment → codemap_impact nodeId='n_42' reveals blast radius + related tests.",
+          "Analyze a Codemap node's callers, callees, likely tests, and change risk before editing a shared/public symbol. nodeId MUST come from codemap_search — never a display name (duplicates are ambiguous). Use graph_search if you only need caller/callee hops without risk scoring. Example: codemap_search returns nodeId='n_42' for processPayment → codemap_impact nodeId='n_42' reveals blast radius + related tests. ESSENTIAL before modifying shared symbols — it shows who depends on this code and surfaces related tests, so you can assess change risk without reading every caller manually.",
         parameters: {
           type: "object",
           properties: {
@@ -775,7 +775,7 @@ export function allEnhancedTools(opts?: {
       type: "function",
       function: {
         name: "repo_map",
-        description: "Budgeted repository symbol map (names + locations, no bodies). Use to grasp architecture or pick an entry point in an unfamiliar codebase; NOT for reading a specific implementation — use read_file or codemap_search for that.",
+        description: "Budgeted repository symbol map (names + locations, no bodies). Use to grasp architecture or pick an entry point in an unfamiliar codebase; NOT for reading a specific implementation — use read_file or codemap_search for that. START HERE when exploring an unfamiliar repo — it reveals the structure with minimal token cost, so you can then target specific areas with codemap_search or read_file instead of scanning blindly.",
         parameters: {
           type: "object",
           properties: {

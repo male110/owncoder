@@ -81,5 +81,13 @@ describe("task decompose prompt JSON contract", () => {
     expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(/Steps are abstract, ordered actions or phases/);
     expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(/execution happens later/);
   });
+
+  it("要求任务级上下文，并将无需拆分的请求放入一个任务", () => {
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(/tasks\[\]\.userConstraints/);
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(/tasks\[\]\.relevantHistory/);
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(/tasks\[\]\.progressStatus/);
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(/return exactly one task/);
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).not.toMatch(/"intent": string/);
+  });
 });
 

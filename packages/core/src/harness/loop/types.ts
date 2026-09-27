@@ -1,6 +1,6 @@
 import type { ChatAttachment, ChatMessage, ToolDef } from "@owncoder/llm";
 import type { ModelRef, SystemWorkflowConfig } from "@owncoder/settings";
-import type { AgentMode } from "@owncoder/shared";
+import type { AgentMode, TaskDecompositionDto } from "@owncoder/shared";
 import type { IndexClient } from "@owncoder/index";
 import type { TerminalEntry } from "../terminal.ts";
 import type { FileSnapshot } from "../checkpoint.ts";
@@ -49,18 +49,8 @@ type TurnEventFields =
   | {
       type: "task_decomposition";
       intent: string;
-      /** 可恢复任务的显式状态快照。 */
-      taskState?: import("../../turn-rounds.ts").TaskState;
       userConstraints: string[];
-      tasks: Array<{
-        id: string;
-        description: string;
-        steps: Array<{
-          id: string;
-          description: string;
-          dependsOn: string[];
-        }>;
-      }>;
+      tasks: TaskDecompositionDto["tasks"];
       /** True when the LLM call failed and the shown plan is a local heuristic fallback. */
       fallback: boolean;
     }

@@ -100,6 +100,9 @@ export interface PersistedDecomposeStep {
 export interface PersistedDecomposeTask {
   id: string;
   description: string;
+  userConstraints?: string[];
+  relevantHistory?: string;
+  progressStatus?: string;
   steps: PersistedDecomposeStep[];
 }
 
@@ -253,9 +256,22 @@ function sanitizeDecompose(raw: unknown): PersistedDecompose | undefined {
       },
     ];
     });
+    const taskConstraints = Array.isArray(t.userConstraints)
+      ? t.userConstraints.filter((value): value is string => typeof value === "string")
+        .map((value) => value.trim()).filter(Boolean).slice(0, 20)
+      : [];
+    const relevantHistory = typeof t.relevantHistory === "string" && t.relevantHistory.trim()
+      ? clip(t.relevantHistory.trim(), MAX_UNDERSTANDING_CHARS)
+      : undefined;
+    const progressStatus = typeof t.progressStatus === "string" && t.progressStatus.trim()
+      ? clip(t.progressStatus.trim(), 200)
+      : undefined;
     return [{
       id: typeof t.id === "string" && t.id.trim() ? t.id.trim() : `task_${ti + 1}`,
       description: typeof t.description === "string" ? clip(t.description.trim(), MAX_STEP_DESCRIPTION_CHARS) : "",
+      userConstraints: taskConstraints.length > 0 ? taskConstraints : userConstraints,
+      relevantHistory,
+      progressStatus,
       steps,
     }];
   });

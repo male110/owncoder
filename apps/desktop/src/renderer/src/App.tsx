@@ -365,13 +365,17 @@ export function App() {
   const handleNewSession = useCallback(() => { void onNewSession(); }, [onNewSession]);
   const handleMode = useCallback((m: import("@owncoder/shared").AgentMode) => { void onMode(m); }, [onMode]);
   const handleSelectModel = useCallback((id: string) => { void onSelectModel(id); }, [onSelectModel]);
-  const handleSelectReactModel = useCallback(async (name: string) => {
+  const handleSelectReactModel = useCallback(async (name: string, providerId: string) => {
     const snap = await window.owncoder.getSettings();
     const config = { ...snap.effective };
     if (!config.harness) config.harness = {} as any;
-    config.harness.reactModel = name;
+    const selected = (config.selectedModels ?? []).find((model) =>
+      model.providerId === providerId && (model.name === name || model.id === name),
+    );
+    config.harness.reactModel = selected?.name ?? name;
+    config.harness.reactProviderId = selected?.providerId ?? providerId;
     await window.owncoder.saveSettings(config);
-    useSessionStore.getState().setReactModelId(name);
+    useSessionStore.getState().setReactModelId(config.harness.reactModel);
   }, []);
   const handleSelectThinkingEffort = useCallback((effort: import("@owncoder/settings").ThinkingEffort) => { void onSelectThinkingEffort(effort); }, [onSelectThinkingEffort]);
   const handleSelectReactThinkingEffort = useCallback((effort: import("@owncoder/settings").ThinkingEffort) => { void onSelectReactThinkingEffort(effort); }, [onSelectReactThinkingEffort]);

@@ -204,6 +204,12 @@ function formatPackedHistory(task: TaskItem): string {
     : "";
 }
 
+function formatTaskConstraints(task: TaskItem): string {
+  return task.userConstraints?.length
+    ? `### Task constraints\n${task.userConstraints.map((constraint) => `- ${constraint}`).join("\n")}`
+    : "";
+}
+
 
 
 
@@ -214,6 +220,7 @@ function formatCurrentTaskContext(task: TaskItem): string {
     "1. Read the <task> block above. Note ID / Description / Stop-exploration criteria.",
     "2. Call tools as needed:",
     "   - Exploration tools (read_file / grep / search_symbols / lsp_* / repo_map / read_symbol / read_outline, etc.) — use to understand the codebase. When the user or task provides concrete identifiers, search those strings verbatim first. Locate the relevant code before reading it, then inspect the smallest surrounding range that establishes the behavior. Whole-file read_file is only for files under 10KB. Files 10KB or larger MUST call read_outline first; then use read_symbol only for one unique symbol, or read_file with both offset and limit from the outline's line range.",
+    "   - Code Map exploration strategy (repo_map → codemap_search → codemap_impact / graph_search → read_file) — PREFER THIS ORDER when exploring unfamiliar code or tracing dependencies. Start with repo_map for repo structure, use codemap_search to locate concepts semantically, then codemap_impact/graph_search to trace callers/callees, and only read source files for the specific areas you need to modify. This minimizes token usage during exploration.",
     "   - External knowledge (web_search / web_fetch) — required for unknown APIs, docs, error messages, library behavior, version-specific details. Search before guessing.",
     "   - Implementation tools (apply_patch / write_file / append_file / type_check / bash) — use when ready to make changes.",
     "3. Termination — stop calling tools and produce the final answer when the goal is achieved.",
@@ -221,6 +228,8 @@ function formatCurrentTaskContext(task: TaskItem): string {
     `ID: ${task.id}`,
     `Description: ${task.description}`,
     task.acceptance ? `Acceptance criteria: ${task.acceptance}` : "",
+    task.progressStatus ? `Progress status: ${task.progressStatus}` : "",
+    formatTaskConstraints(task),
     formatPackedHistory(task),
     "Use tools to execute this task. Report the result in one sentence when done; do not keep calling tools.",
   ].filter(Boolean).join("\n");
@@ -436,6 +445,8 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
   const autoFixState = createAutoFixState();
   /** 是否在本轮执行过会触发验证的文件改动（用于成功门禁）。 */
   let hadFileModifyingTools = false;
+  /** 自动修复耗尽后的失败摘要（追加到最终报告，不中断流程）。 */
+  let autoFixFailureSummary: string | null = null;
 
   type ReActReturn = {
     lastAssistant: string;
@@ -451,11 +462,14 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
     decisionSummaries?: ReactDecisionSummary[];
   };
 
-  const withRunState = (result: Omit<ReActReturn, "taskRunState">): ReActReturn => ({
-    ...result,
-    taskRunState,
-    decisionSummaries,
-  });
+  const withRunState = (result: Omit<ReActReturn, "taskRunState">): ReActReturn => {
+    // 如果自动修复耗尽，在最终报告末尾追加失败提示（不中断流程）。
+    let out = { ...result, taskRunState, decisionSummaries };
+    if (autoFixFailureSummary && out.lastAssistant) {
+      out = { ...out, lastAssistant: `${out.lastAssistant}\n\n> ⚠️ ${autoFixFailureSummary}` };
+    }
+    return out;
+  };
 
   /** 最终成功路径：必须通过 canReportSuccess / sealTaskRunSuccess 门禁。 */
   const finalizeSuccess = (
@@ -1767,21 +1781,15 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
         });
       }
       // semantic_diff「移除了导出」等建议性警告：不弹窗、不中断。
-      // 硬错误达修复上限：不发 warning（避免顶部弹窗），正文写入原因后终止。
+      // 硬错误达修复上限：不中断主流程，记录失败摘要，后续在最终报告中提示。
       if (fixResult.exhausted && !isAdvisoryVerificationResult(fixResult.finalVerification)) {
-        const blockedReason = `自动修复达到上限（${autoFixMaxAttempts} 次）：${fixResult.summary}`;
-        return finalizeTerminal({
-          lastAssistant: blockedReason,
-          aborted: false,
-          blocked: true,
-          blockedReason,
-          correctionCount,
-        }, "failed");
+        autoFixFailureSummary = `自动修复失败（已尝试 ${autoFixMaxAttempts} 次）：${fixResult.summary}`;
+        // 不重置 autoFixState：后续 auto-fix 调用会立即识别为已耗尽，避免无限重试。
       }
-      // Inject verification error messages into the conversation for the next LLM turn
+      // Inject verification error messages into the conversation for the next LLM turn.
+      // 只注入到 messages（LLM 上下文），不写入 history（不展示为独立用户消息）。
       for (const msg of fixResult.injectedMessages) {
         messages.push(msg);
-        history.push({ role: "user", content: msg.content ?? "" });
       }
       if (fixResult.resolved) {
         // Reset fix state on clean verification

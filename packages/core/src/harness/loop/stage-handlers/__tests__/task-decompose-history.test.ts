@@ -840,6 +840,21 @@ describe("parseDecomposeAnswer 保留 prompt 约定字段", () => {
     expect(answer!.tasks.map((t) => t.description)).toEqual(["任务一描述", "任务二描述"]);
     expect(answer!.tasks[0].steps[0].id).toBe("s1");
     expect(answer!.tasks[1].steps[0].id).toBe("s2");
+    expect(answer!.tasks[1].steps[0].dependsOn).toEqual([]);
+  });
+
+  it("保留同任务依赖并丢弃未知依赖", () => {
+    const answer = parseDecomposeAnswer(JSON.stringify({
+      tasks: [{
+        id: "task_1",
+        steps: [
+          { id: "s1", description: "一步", dependsOn: ["missing"] },
+          { id: "s2", description: "二步", dependsOn: ["s1", "missing"] },
+        ],
+      }],
+    }));
+
+    expect(answer!.tasks[0].steps.map((step) => step.dependsOn)).toEqual([[], ["s1"]]);
   });
 
   it("显式忽略 tasks[].dependsOn，不进入解析结果", () => {
@@ -867,8 +882,8 @@ describe("parseDecomposeAnswer 保留 prompt 约定字段", () => {
     for (const task of answer!.tasks) {
       expect(task).not.toHaveProperty("dependsOn");
     }
-    // 步骤级 dependsOn 仍保留
-    expect(answer!.tasks[1].steps[0].dependsOn).toEqual(["s1"]);
+    // 跨任务步骤依赖按新协议丢弃
+    expect(answer!.tasks[1].steps[0].dependsOn).toEqual([]);
   });
 
   it("旧格式兼容：顶层 steps + understanding + 被删字段 → 单 task_1 + intent，被删字段忽略", () => {

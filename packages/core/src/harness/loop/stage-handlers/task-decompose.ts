@@ -390,7 +390,10 @@ interface DecomposeStep {
 interface DecomposeTask {
   id: string;
   description: string;
+  userConstraints: string[];
   steps: DecomposeStep[];
+  relevantHistory: string;
+  progressStatus: string;
 }
 
 interface DecomposeAnswer {
@@ -503,11 +506,14 @@ export function buildFallbackRawDecompose(userMessage: string, modelPlainText?: 
       tasks: [{
         id: "task_1",
         description: taskBody,
+        userConstraints: [],
         steps: [{
-          id: "step_1",
+          id: "task_1_step_1",
           description: taskBody,
           dependsOn: [],
         }],
+        relevantHistory: "",
+        progressStatus: "pending",
       }],
     };
   }
@@ -519,11 +525,14 @@ export function buildFallbackRawDecompose(userMessage: string, modelPlainText?: 
     tasks: [{
       id: "task_1",
       description: intent,
+      userConstraints: [],
       steps: plan.steps.map((step, index) => ({
         id: step.id || `step_${index + 1}`,
         description: step.description,
         dependsOn: [],
       })),
+      relevantHistory: "",
+      progressStatus: "pending",
     }],
   };
 }
@@ -544,11 +553,14 @@ export function recoverEmptyDecomposeSteps(
       tasks: [{
         id: "task_1",
         description: `定位并修改与用户请求相关的代码：${userMessage}`,
+        userConstraints: answer.userConstraints,
         steps: [{
           id: "step_1",
           description: `定位并修改与用户请求相关的代码：${userMessage}`,
           dependsOn: [],
         }],
+        relevantHistory: "",
+        progressStatus: "pending",
       }],
     };
   }
@@ -559,7 +571,10 @@ export function recoverEmptyDecomposeSteps(
       tasks: [{
         id: "task_1",
         description: `定位并阅读与用户问题相关的当前实现：${userMessage}`,
+        userConstraints: answer.userConstraints,
         steps: buildInspectCurrentCodeSteps(userMessage),
+        relevantHistory: "",
+        progressStatus: "pending",
       }],
     };
   }
@@ -811,7 +826,10 @@ export function parseDecomposeAnswer(text: string): DecomposeAnswer | null {
     : [{
         id: "task_1",
         description: "",
+        userConstraints: [],
         steps: (Array.isArray(raw) ? raw : Array.isArray(obj.steps) ? obj.steps : []).slice(0, MAX_STEPS),
+        relevantHistory: "",
+        progressStatus: "pending",
       }];
 
   const parseTaskSteps = (rawSteps: unknown[]): DecomposeStep[] => {
@@ -845,21 +863,18 @@ export function parseDecomposeAnswer(text: string): DecomposeAnswer | null {
       deduplicatedSteps.push({step, i: deduplicatedSteps.length});
     }
 
-    return deduplicatedSteps
+    const steps = deduplicatedSteps
       .map(({step, i}) => {
         const description = typeof step.description === "string" ? step.description.trim() : "";
         if (!description) return null;
-      
-        // 确保步骤ID唯一性
+
         const stepId = typeof step.id === "string" && step.id.trim() ? step.id.trim() : `step_${i + 1}`;
-      
         return {
           id: stepId,
           description,
           dependsOn: Array.isArray(step.dependsOn)
             ? step.dependsOn.filter((d): d is string => typeof d === "string")
             : [],
-
           verificationCriteria: parseVerificationCriteria(step.verificationCriteria),
           rollbackStrategy: typeof step.rollbackStrategy === "string"
             ? step.rollbackStrategy.trim() || undefined
@@ -868,6 +883,13 @@ export function parseDecomposeAnswer(text: string): DecomposeAnswer | null {
         };
       })
       .filter((s): s is NonNullable<typeof s> => s !== null);
+
+    // dependsOn is task-local: discard unknown and cross-task references during normalization.
+    const stepIds = new Set(steps.map((step) => step.id));
+    return steps.map((step) => ({
+      ...step,
+      dependsOn: step.dependsOn.filter((dependency) => stepIds.has(dependency)),
+    }));
   };
 
   const tasks: DecomposeTask[] = rawTasks.flatMap((rawTask) => {
@@ -881,7 +903,17 @@ export function parseDecomposeAnswer(text: string): DecomposeAnswer | null {
         `[task_decompose] 忽略 tasks[].dependsOn（仅支持同 task 内 steps[].dependsOn）: ${id || "(unnamed)"}`,
       );
     }
-    return [{ id, description, steps }];
+    const userConstraints = Array.isArray(taskObj.userConstraints)
+      ? taskObj.userConstraints
+          .filter((c): c is string => typeof c === "string")
+          .map((c) => c.trim())
+          .filter(Boolean)
+      : [];
+    const relevantHistory = typeof taskObj.relevantHistory === "string" ? taskObj.relevantHistory.trim() : "";
+    const progressStatus = typeof taskObj.progressStatus === "string" && taskObj.progressStatus.trim()
+      ? taskObj.progressStatus.trim()
+      : "pending";
+    return [{ id, description, userConstraints, steps, relevantHistory, progressStatus }];
   });
 
   // 兼容旧格式：understanding 兜底填充 intent。
@@ -889,16 +921,16 @@ export function parseDecomposeAnswer(text: string): DecomposeAnswer | null {
     ? obj.intent.trim()
     : typeof obj.understanding === "string" ? obj.understanding.trim() : "";
 
+  const topLevelConstraints = Array.isArray(obj.userConstraints)
+    ? obj.userConstraints.map((c) => (typeof c === "string" ? c.trim() : "")).filter(Boolean)
+    : [];
   return {
     intent,
-    userConstraints: Array.isArray(obj.userConstraints)
-      ? obj.userConstraints
-          .map((c) => (typeof c === "string" ? c.trim() : ""))
-          .filter((c) => c.length > 0)
-      : [],
+    userConstraints: topLevelConstraints,
     tasks: tasks.map((task, taskIndex) => ({
       ...task,
       id: task.id || `task_${taskIndex + 1}`,
+      userConstraints: task.userConstraints.length > 0 ? task.userConstraints : topLevelConstraints,
     })),
   };
 }
@@ -945,6 +977,9 @@ export async function runTaskDecompose(
     tasks: Array<{
       id: string;
       description: string;
+      userConstraints?: string[];
+      relevantHistory?: string;
+      progressStatus?: string;
       steps: Array<{
         id: string;
         description: string;
@@ -1259,6 +1294,9 @@ export async function runTaskDecompose(
       tasks: answer.tasks.map((t) => ({
         id: t.id,
         description: t.description,
+        userConstraints: t.userConstraints,
+        relevantHistory: t.relevantHistory,
+        progressStatus: t.progressStatus,
         steps: t.steps.map((s) => ({
           id: s.id,
           description: s.description,
@@ -1310,10 +1348,15 @@ export async function runTaskDecompose(
     if (messages) {
       const taskBlocks = answer.tasks.map((task, taskIndex) => {
         const heading = `Task ${taskIndex + 1} (${task.id}): ${task.description || "(no description)"}`;
+        const taskContext = [
+          task.userConstraints.length > 0 ? `  Constraints: ${task.userConstraints.join("; ")}` : "",
+          task.relevantHistory ? `  Relevant history: ${task.relevantHistory}` : "",
+          `  Progress: ${task.progressStatus}`,
+        ].filter(Boolean).join("\n");
         const stepLines = task.steps
           .map((s, i) => `  ${i + 1}. [${s.id}] ${s.description}`)
           .join("\n");
-        return stepLines ? `${heading}\n${stepLines}` : heading;
+        return [heading, taskContext, stepLines].filter(Boolean).join("\n");
       }).join("\n\n");
       const decomposeBlock = [
         "## Task decomposition",
@@ -1410,6 +1453,9 @@ export const taskDecomposeHandler: StageHandler = {
         tasks: result.rawDecompose.tasks.map((task) => ({
           id: task.id,
           description: task.description,
+          userConstraints: task.userConstraints ?? [],
+          relevantHistory: task.relevantHistory ?? "",
+          progressStatus: task.progressStatus ?? "pending",
           steps: task.steps.map((step) => ({
             id: step.id,
             description: step.description,
@@ -1417,7 +1463,7 @@ export const taskDecomposeHandler: StageHandler = {
           })),
         })),
         fallback: result.fallback === true,
-      } as Parameters<NonNullable<typeof opts.onEvent>>[0]);
+      });
       // 任务分解结果已由 LLM 响应日志中的 [ASSISTANT] 记录；这里只保留状态消息，
       // 避免再将同一份结构化结果写入 DEBUG 日志。
       writeEventLog({
@@ -1432,6 +1478,9 @@ export const taskDecomposeHandler: StageHandler = {
         tasks: result.rawDecompose.tasks.map((task) => ({
           id: task.id,
           description: task.description,
+          userConstraints: task.userConstraints ?? [],
+          relevantHistory: task.relevantHistory ?? "",
+          progressStatus: task.progressStatus ?? "pending",
           steps: task.steps.map((step) => ({
             id: step.id,
             description: step.description,

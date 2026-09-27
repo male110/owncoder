@@ -1,5 +1,10 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { AgentMode, IndexStatus, WorkspaceInfo } from "@owncoder/shared";
+import type {
+  AgentMode,
+  IndexStatus,
+  TaskDecompositionDto,
+  WorkspaceInfo,
+} from "@owncoder/shared";
 import type { SystemWorkflowConfig, WorkflowOverlay, ModelSettingsOverlay } from "@owncoder/settings";
 
 export interface SettingsSnapshotDto {
@@ -107,22 +112,7 @@ type ChatEventFields =
   | { type: "terminal"; entry: TerminalEntryDto }
   | { type: "stage_start"; id: string; nodeType: string; label: string }
   | { type: "stage_done"; id: string; nodeType: string; label: string }
-  | {
-      type: "task_decomposition";
-      intent: string;
-      userConstraints: string[];
-      tasks: Array<{
-        id: string;
-        description: string;
-        steps: Array<{
-          id: string;
-          description: string;
-          dependsOn: string[];
-          informationNeeds: Array<{ id: string; question: string }>;
-        }>;
-      }>;
-      fallback: boolean;
-    }
+  | ({ type: "task_decomposition" } & TaskDecompositionDto)
   | { type: "error"; message: string }
   | { type: "warning"; message: string }
   | { type: "done"; assistantText: string }
