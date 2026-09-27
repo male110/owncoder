@@ -763,13 +763,15 @@ export function useChatActions(deps: {
 
   // ── Model selection ───────────────────────────────────────────────────────
 
-  const onSelectModel = useCallback(async (modelId: string) => {
+  const onSelectModel = useCallback(async (modelId: string, providerId: string) => {
     const snap = await window.owncoder.getSettings();
     const config = { ...snap.effective };
     const available = useSessionStore.getState().availableModels;
-    const model = available.find((m) => m.id === modelId);
+    const model = available.find((m) => m.providerId === providerId && m.id === modelId);
     if (model) {
-      const others = available.filter((m) => m.id !== modelId);
+      const others = available.filter(
+        (m) => m.providerId !== model.providerId || m.id !== model.id,
+      );
       config.selectedModels = [model, ...others];
       await window.owncoder.saveSettings(config);
       session.setModelLabel(model.name);

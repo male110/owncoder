@@ -306,7 +306,7 @@ export function SettingsPanel({ open, onClose, onSaved, initialTab }: Props) {
           <div className="settings-body-head">
             <h2>{tr(TABS.find((tb) => tb.id === tab)?.label ?? "模型")}</h2>
           </div>
-          {tab === "models" && <ModelTab draft={draft} patch={patch} />}
+          {tab === "models" && <ModelTab draft={draft} patch={patch} onProviderAdded={() => void persistSettings()} />}
 
           {tab === "context" && (
             <div className="form">
@@ -900,16 +900,24 @@ export function SettingsPanel({ open, onClose, onSaved, initialTab }: Props) {
 function ModelTab({
   draft,
   patch,
+  onProviderAdded,
 }: {
   draft: SystemWorkflowConfig;
   patch: (fn: (d: SystemWorkflowConfig) => void) => void;
+  onProviderAdded: () => void;
 }) {
   // useMemo 稳定引用：draft.providers 为 undefined 时复用同一空数组，
   // 避免每次渲染新建数组进入 effect deps 导致 effect 空转。
   const providers = useMemo(() => draft.providers ?? [], [draft.providers]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
+  const providerCountRef = useRef(providers.length);
   const { t: tr } = useI18n();
+
+  useEffect(() => {
+    if (providers.length > providerCountRef.current) onProviderAdded();
+    providerCountRef.current = providers.length;
+  }, [providers.length, onProviderAdded]);
 
   useEffect(() => {
     if (adding) return;
@@ -1082,7 +1090,9 @@ function ProviderDetail({
         if (checked) {
           d.selectedModels = [...(d.selectedModels ?? []), model];
         } else {
-          d.selectedModels = (d.selectedModels ?? []).filter((m) => m.id !== model.id);
+          d.selectedModels = (d.selectedModels ?? []).filter(
+            (m) => m.providerId !== model.providerId || m.id !== model.id,
+          );
         }
       });
     },
@@ -1121,7 +1131,9 @@ function ProviderDetail({
         if (idx >= 0) {
           d.providers![idx]!.models = (d.providers![idx]!.models ?? []).filter((m) => m.id !== modelId);
         }
-        d.selectedModels = (d.selectedModels ?? []).filter((m) => m.id !== modelId);
+        d.selectedModels = (d.selectedModels ?? []).filter(
+          (m) => m.providerId !== provider.id || m.id !== modelId,
+        );
       });
     },
     [patch, provider.id],
@@ -1288,7 +1300,9 @@ function ProviderDetail({
           <p className="hint">{tr("无匹配模型")}</p>
         ) : (
           filteredModels.map((m) => {
-            const isSelected = selectedModels.some((s) => s.id === m.id);
+            const isSelected = selectedModels.some(
+              (s) => s.providerId === provider.id && s.id === m.id,
+            );
             return (
               <div key={m.id} className="model-detail-row">
                 <label className="model-detail-row-label">

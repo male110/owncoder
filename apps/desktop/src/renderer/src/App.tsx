@@ -364,7 +364,10 @@ export function App() {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const handleNewSession = useCallback(() => { void onNewSession(); }, [onNewSession]);
   const handleMode = useCallback((m: import("@owncoder/shared").AgentMode) => { void onMode(m); }, [onMode]);
-  const handleSelectModel = useCallback((id: string) => { void onSelectModel(id); }, [onSelectModel]);
+  const handleSelectModel = useCallback(
+    (id: string, providerId: string) => { void onSelectModel(id, providerId); },
+    [onSelectModel],
+  );
   const handleSelectReactModel = useCallback(async (name: string, providerId: string) => {
     const snap = await window.owncoder.getSettings();
     const config = { ...snap.effective };

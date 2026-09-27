@@ -186,7 +186,9 @@ cd owncoder
 pnpm install
 
 # 为 Electron 重建原生模块（better-sqlite3、node-pty）
-cd apps/desktop && pnpm rebuild && cd ../..
+cd apps/desktop
+pnpm rebuild
+cd ../..
 
 # 构建所有 TypeScript 包
 pnpm -r run build

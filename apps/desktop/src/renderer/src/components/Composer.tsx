@@ -33,7 +33,7 @@ interface Props {
   onNewSession: () => void;
   onMode: (mode: AgentMode) => void;
   onModeMenuOpen: (open: boolean) => void;
-  onSelectModel: (modelId: string) => void;
+  onSelectModel: (modelId: string, providerId: string) => void;
   onOpenSettings: () => void;
   onSelectThinkingEffort: (effort: ThinkingEffort) => void;
   onSelectProject: (root: string, focusSessionId?: string) => Promise<void>;
@@ -281,6 +281,23 @@ function ComposerImpl({
     document.addEventListener("mousedown", onDoc);
     return () => document.removeEventListener("mousedown", onDoc);
   }, [wsMenuOpen]);
+
+  useEffect(() => {
+    if (!reactMenuOpen) return;
+    setSelectedReactProviderId(groupedModels[0]?.providerId ?? null);
+    const onDoc = (e: MouseEvent) => {
+      if (!reactMenuRef.current?.contains(e.target as Node)) setReactMenuOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setReactMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [reactMenuOpen, groupedModels]);
 
   useEffect(() => {
     if (!thinkingMenuOpen) return;
@@ -763,7 +780,7 @@ function ComposerImpl({
                               onClick={() => {
                                 setModelMenuOpen(false);
                                 setSelectedProviderId(null);
-                                onSelectModel(m.id);
+                                onSelectModel(m.id, m.providerId);
                               }}
                             >
                               <span className="model-menu-name">{m.name}</span>

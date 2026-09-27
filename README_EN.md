@@ -181,7 +181,9 @@ cd owncoder
 pnpm install
 
 # Rebuild native modules for Electron (better-sqlite3, node-pty)
-cd apps/desktop && pnpm rebuild && cd ../..
+cd apps/desktop
+pnpm rebuild
+cd ../..
 
 # Build all TypeScript packages
 pnpm -r run build
