@@ -13,6 +13,7 @@
     "pack:mac": "pnpm build && electron-builder --mac",
     "pack:linux": "pnpm build && electron-builder --linux",
     "publish": "node ./scripts/publish-release.mjs",
+    "build:release:win": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/build-release.ps1",
     "typecheck": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.web.json --noEmit"
   },
   "dependencies": {
@@ -133,7 +134,7 @@
     "afterAllArtifactBuild": "./scripts/flatten-nsis-output.mjs",
     "publish": {
       "provider": "generic",
-      "url": "https://zy-1310897501.cos.ap-nanjing.myqcloud.com/owncoder/"
+      "url": "https://zy-1310897501.cos.ap-nanjing.myqcloud.com/owncoder/${version}/"
     }
   }
 }

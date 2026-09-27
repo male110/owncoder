@@ -22,6 +22,7 @@ import { mt } from "./i18n";
 
 const FETCH_TIMEOUT_MS = 20_000;
 const RELEASE_PAGE = "https://gitee.com/f6688/owncoder/releases";
+const UPDATE_FEED_URL = "https://zy-1310897501.cos.ap-nanjing.myqcloud.com/owncoder/";
 
 let statusSink: ((status: UpdateDownloadStatusDto) => void) | null = null;
 let downloadInProgress = false;
@@ -51,6 +52,8 @@ function ensureUpdater(): NsisUpdater | null {
   if (!canAutoUpdate()) return null;
   if (currentUpdater) return currentUpdater;
   const updater = new NsisUpdater();
+  // nsis-web 引导器的资源在版本目录；应用内更新仍从根目录读取 latest.yml。
+  updater.setFeedURL({ provider: "generic", url: UPDATE_FEED_URL });
   // 手动控制下载/安装时机；状态通过 statusSink 推给渲染层。
   updater.autoDownload = false;
   updater.autoInstallOnAppQuit = false;
