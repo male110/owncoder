@@ -40,6 +40,7 @@ export interface SessionState {
   // 执行阶段单独配置
   separateStageModels: boolean;
   reactModelId: string | null;
+  reactProviderId: string | null;
   reactThinkingEffort: ThinkingEffort;
 
   // Plan & tasks
@@ -83,6 +84,7 @@ export interface SessionActions {
   // 执行阶段单独配置
   setSeparateStageModels: (enabled: boolean) => void;
   setReactModelId: (id: string | null) => void;
+  setReactProviderId: (id: string | null) => void;
   setReactThinkingEffort: (effort: ThinkingEffort) => void;
   setActivePlanPath: (path: string | null, sessionId?: string | null) => void;
   getActivePlanPathForSession: (sessionId?: string | null) => string | null;
@@ -119,6 +121,7 @@ const initialState: SessionState = {
   
   separateStageModels: false,
   reactModelId: null,
+  reactProviderId: null,
   reactThinkingEffort: "medium",
   activePlanPath: null,
   activePlanPathBySession: {},
@@ -188,6 +191,7 @@ export const useSessionStore = create<SessionState & SessionActions>()((set, get
   
   setSeparateStageModels: (separateStageModels) => set({ separateStageModels }),
   setReactModelId: (reactModelId) => set({ reactModelId }),
+  setReactProviderId: (reactProviderId) => set({ reactProviderId }),
   setReactThinkingEffort: (reactThinkingEffort) => set({ reactThinkingEffort }),
   setActivePlanPath: (path, sessionId) => {
     const sid = sessionId ?? get().activeSessionId;

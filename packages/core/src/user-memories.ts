@@ -135,6 +135,14 @@ export class UserMemoryStore {
     return true;
   }
 
+  clear(): number {
+    const count = this.memories.length;
+    if (count === 0) return 0;
+    this.memories = [];
+    this.persist();
+    return count;
+  }
+
   /**
    * Format active memories into a markdown block suitable for injection
    * into the system prompt. Returns empty string when there are no memories.

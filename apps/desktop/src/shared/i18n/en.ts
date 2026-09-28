@@ -443,6 +443,13 @@ export const en = {
   "运转": "Operation",
   "维护": "Maintenance",
   "已自动保存（{{fp}}）": "Auto-saved ({{fp}})",
+  "一键还原将清除当前项目的全部规则和偏好记忆，此操作不可撤销。":
+    "Restore will clear all rules and preference memories for the current project. This cannot be undone.",
+  "已清除 {{rules}} 条项目规则和 {{memories}} 条项目偏好记忆":
+    "Cleared {{rules}} project rules and {{memories}} project preference memories",
+  "清除当前项目的全部规则和偏好记忆，不影响项目源码、全局偏好、模型设置或 API Key。":
+    "Clear all rules and preference memories for the current project. Project sources, global preferences, model settings, and API keys are unaffected.",
+  "一键还原": "Restore project context",
   "一键还原出厂设置？将删除用户工作流覆盖层，保留模型设置，不影响 API Key 环境变量与项目源码。":
     "Restore factory defaults? This deletes user workflow overlays, keeps model settings, and does not affect API-key environment variables or project sources.",
   "已还原出厂配置（不含项目规则）": "Factory configuration restored (project rules excluded)",

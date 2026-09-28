@@ -277,9 +277,13 @@ export function useSessionSync() {
     const unifiedEffort = snap.effective.thinking?.defaultEffort ?? "high";
     
     const reactModel = snap.effective.harness?.reactModel ?? (separateEnabled ? unifiedModelName : null);
+    const reactProviderId = snap.effective.harness?.reactProviderId
+      ?? sel.find((model) => model.name === reactModel || model.id === reactModel)?.providerId
+      ?? null;
     const reactEffort = snap.effective.harness?.reactThinkingEffort ?? (separateEnabled ? unifiedEffort : "medium");
     
     session.setReactModelId(reactModel);
+    session.setReactProviderId(reactProviderId);
     session.setReactThinkingEffort(reactEffort);
 
     const auth = await window.owncoder.getLlmAuthStatus();

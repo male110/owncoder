@@ -1612,6 +1612,17 @@ export class SessionOrchestrator {
     await this.reloadProjectRules();
   }
 
+  async restoreProjectContext(): Promise<{ rules: number; memories: number }> {
+    const ws = this.state.workspace;
+    if (!ws) throw new Error(ERR_NO_WORKSPACE);
+
+    const rules = await this.listRules();
+    await Promise.all(rules.map((rule) => deleteRule(ws.root, rule.name)));
+    const memories = this.projectMemoryStore?.clear() ?? 0;
+    await this.reloadProjectRules();
+    return { rules: rules.length, memories };
+  }
+
   getIndex(): IndexClient {
     return this.index;
   }

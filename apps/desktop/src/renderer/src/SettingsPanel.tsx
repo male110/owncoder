@@ -185,17 +185,14 @@ export function SettingsPanel({ open, onClose, onSaved, initialTab }: Props) {
   persistSettingsRef.current = persistSettings;
 
   const onRestore = async () => {
-    if (!(await customConfirm(tr("一键还原出厂设置？将删除用户工作流覆盖层，保留模型设置，不影响 API Key 环境变量与项目源码。")))) {
+    if (!(await customConfirm(tr("一键还原将清除当前项目的全部规则和偏好记忆，此操作不可撤销。")))) {
       return;
     }
-    settingsRevisionRef.current += 1;
     setBusy(true);
     try {
-      const s = await window.owncoder.restoreFactorySettings();
-      setSnap(s);
-      setDraft(structuredClone(s.effective));
-      setLocalePref((s.effective.harness.locale ?? "system") as LocalePref);
-      setStatus(tr("已还原出厂配置（不含项目规则）"));
+      const result = await window.owncoder.restoreProjectContext();
+      await reloadRules();
+      setStatus(tr("已清除 {{rules}} 条项目规则和 {{memories}} 条项目偏好记忆", result));
       onSaved();
     } catch (e) {
       setStatus(e instanceof Error ? e.message : String(e));
@@ -863,16 +860,11 @@ export function SettingsPanel({ open, onClose, onSaved, initialTab }: Props) {
 
           {tab === "restore" && (
             <div className="form">
-              <p>
-                {tr("指纹：")}<code>{snap.fingerprint}</code>
-                {snap.matchesBuiltin ? tr("（与出厂一致）") : tr("（已有用户覆盖）")}
-              </p>
-              <p className="mono">{tr("工作流：{{path}}", { path: snap.paths.userWorkflow })}</p>
-              <p className="mono">{tr("模型设置：{{path}}", { path: snap.paths.userModels })}</p>
-              <button type="button" className="danger" disabled={busy} onClick={() => void onRestore()}>
-                {tr("一键还原出厂")}
+              <p className="hint">{tr("清除当前项目的全部规则和偏好记忆，不影响项目源码、全局偏好、模型设置或 API Key。")}</p>
+              <button type="button" className="danger" disabled={busy || !hasWorkspace} onClick={() => void onRestore()}>
+                {tr("一键还原")}
               </button>
-              <p className="hint">{tr("删除用户工作流覆盖；保留模型设置与 API Key，不改项目源码与规则。")}</p>
+              {!hasWorkspace ? <p className="hint">{tr("请先打开工作区文件夹")}</p> : null}
             </div>
           )}
         </div>

@@ -9,9 +9,9 @@
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "rebuild": "electron-rebuild -f -w node-pty -w better-sqlite3",
-    "pack:win": "pnpm build && electron-builder --win",
-    "pack:mac": "pnpm build && electron-builder --mac",
-    "pack:linux": "pnpm build && electron-builder --linux",
+    "pack:win": "pnpm build && electron-builder --win nsis",
+    "pack:mac": "node ./scripts/verify-macos-signing.mjs && pnpm build && electron-builder --mac",
+    "pack:linux": "pnpm build && electron-builder --linux deb",
     "publish": "node ./scripts/publish-release.mjs",
     "build:release:win": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/build-release.ps1",
     "typecheck": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.web.json --noEmit"
@@ -66,13 +66,7 @@
       "!node_modules/monaco-editor/min/**",
       "!node_modules/monaco-editor/dev/**",
       "!node_modules/monaco-editor/min-maps/**",
-      "!node_modules/node-pty/prebuilds/darwin-*/**",
-      "!node_modules/node-pty/prebuilds/win32-arm64/**",
-      "!node_modules/node-pty/third_party/conpty/**/win10-arm64/**",
-      "!node_modules/better-sqlite3/prebuilds/darwin-*/**",
-      "!node_modules/better-sqlite3/prebuilds/linux-*/**",
-      "!node_modules/better-sqlite3/prebuilds/linuxmusl-*/**",
-      "!node_modules/better-sqlite3/prebuilds/win32-arm64/**",
+
       "!node_modules/better-sqlite3/build/Release/obj.target/**",
       "!node_modules/better-sqlite3/build/Release/obj/**",
       "!node_modules/better-sqlite3/build/Release/.deps/**",
@@ -118,7 +112,7 @@
     "win": {
       "target": [
         {
-          "target": "nsis-web",
+          "target": "nsis",
           "arch": [
             "x64"
           ]
@@ -128,10 +122,32 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
-      "differentialPackage": true,
-      "artifactName": "${productName} Web Setup ${version}.${ext}"
+      "artifactName": "${productName} Setup ${version}.${ext}"
     },
-    "afterAllArtifactBuild": "./scripts/flatten-nsis-output.mjs",
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
+      "forceCodeSigning": true,
+      "hardenedRuntime": true
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "category": "Development"
+    },
     "publish": {
       "provider": "generic",
       "url": "https://zy-1310897501.cos.ap-nanjing.myqcloud.com/owncoder/${version}/"

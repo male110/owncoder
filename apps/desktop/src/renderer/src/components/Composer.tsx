@@ -18,6 +18,7 @@ interface Props {
   /** 执行阶段单独配置 */
   separateStageModels: boolean;
   reactModelId: string | null;
+  reactProviderId: string | null;
   reactThinkingEffort: ThinkingEffort;
 
   workspaceName: string | null;
@@ -56,6 +57,7 @@ function ComposerImpl({
   
   separateStageModels,
   reactModelId,
+  reactProviderId,
   reactThinkingEffort,
 
   workspaceName,
@@ -284,7 +286,7 @@ function ComposerImpl({
 
   useEffect(() => {
     if (!reactMenuOpen) return;
-    setSelectedReactProviderId(groupedModels[0]?.providerId ?? null);
+    setSelectedReactProviderId(reactProviderId ?? groupedModels[0]?.providerId ?? null);
     const onDoc = (e: MouseEvent) => {
       if (!reactMenuRef.current?.contains(e.target as Node)) setReactMenuOpen(false);
     };
@@ -297,7 +299,7 @@ function ComposerImpl({
       document.removeEventListener("mousedown", onDoc);
       document.removeEventListener("keydown", onKey);
     };
-  }, [reactMenuOpen, groupedModels]);
+  }, [reactMenuOpen, groupedModels, reactProviderId]);
 
   useEffect(() => {
     if (!thinkingMenuOpen) return;
@@ -771,8 +773,8 @@ function ComposerImpl({
                             <button
                               type="button"
                               role="option"
-                              aria-selected={m.id === availableModels[0]?.id}
-                              className={`${m.id === availableModels[0]?.id ? "selected" : ""} ${
+                              aria-selected={m.providerId === availableModels[0]?.providerId && m.id === availableModels[0]?.id}
+                              className={`${m.providerId === availableModels[0]?.providerId && m.id === availableModels[0]?.id ? "selected" : ""} ${
                                 (groupedModels.find((g) => g.providerId === selectedProviderId)?.models.length ?? 0) === 1
                                   ? "single-model"
                                   : ""
@@ -784,7 +786,7 @@ function ComposerImpl({
                               }}
                             >
                               <span className="model-menu-name">{m.name}</span>
-                              {m.id === availableModels[0]?.id ? <span className="mode-check">✓</span> : null}
+                              {m.providerId === availableModels[0]?.providerId && m.id === availableModels[0]?.id ? <span className="mode-check">✓</span> : null}
                             </button>
                           </li>
                         ))}
@@ -887,7 +889,9 @@ function ComposerImpl({
                   title={t("循环执行模型")}
                 >
                   <span className="model-stage-indicator">🔄</span>
-                  {availableModels.find(m => m.name === reactModelId)?.name || t("选择模型")}
+                  {availableModels.find(m =>
+                    m.providerId === reactProviderId && (m.name === reactModelId || m.id === reactModelId),
+                  )?.name || t("选择模型")}
                   <span className="mode-chevron" aria-hidden>▾</span>
                 </button>
                 {reactMenuOpen ? (
@@ -912,9 +916,9 @@ function ComposerImpl({
                           <ul className="model-menu-models" role="group">
                             {(groupedModels.find((g) => g.providerId === selectedReactProviderId)?.models ?? []).map((m) => (
                               <li key={m.id}>
-                                <button type="button" role="option" aria-selected={m.name === reactModelId} className={`${m.name === reactModelId ? "selected" : ""}`} onClick={() => { setReactMenuOpen(false); setSelectedReactProviderId(null); onSelectReactModel(m.name, m.providerId); }}>
+                                <button type="button" role="option" aria-selected={m.providerId === reactProviderId && (m.name === reactModelId || m.id === reactModelId)} className={`${m.providerId === reactProviderId && (m.name === reactModelId || m.id === reactModelId) ? "selected" : ""}`} onClick={() => { setReactMenuOpen(false); setSelectedReactProviderId(null); onSelectReactModel(m.name, m.providerId); }}>
                                   <span className="model-menu-name">{m.name}</span>
-                                  {m.name === reactModelId ? <span className="mode-check">✓</span> : null}
+                                  {m.providerId === reactProviderId && (m.name === reactModelId || m.id === reactModelId) ? <span className="mode-check">✓</span> : null}
                                 </button>
                               </li>
                             ))}

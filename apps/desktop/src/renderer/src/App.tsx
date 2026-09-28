@@ -58,7 +58,7 @@ export function App() {
     workspace, projects, sessions, sessionsByProject, activeSessionId, sessionTitle,
     expanded, mode, modelLabel, availableModels, providers, llmConfigured,
     activePlanPathBySession, activePlanMetaBySession, plansBySession, gitStatus, changesBySession, thinkingEffort,
-    separateStageModels, reactModelId, reactThinkingEffort,
+    separateStageModels, reactModelId, reactProviderId, reactThinkingEffort,
   } = useSessionStore();
 
   // Derive changes for the active session (session-scoped isolation)
@@ -379,6 +379,7 @@ export function App() {
     config.harness.reactProviderId = selected?.providerId ?? providerId;
     await window.owncoder.saveSettings(config);
     useSessionStore.getState().setReactModelId(config.harness.reactModel);
+    useSessionStore.getState().setReactProviderId(config.harness.reactProviderId);
   }, []);
   const handleSelectThinkingEffort = useCallback((effort: import("@owncoder/settings").ThinkingEffort) => { void onSelectThinkingEffort(effort); }, [onSelectThinkingEffort]);
   const handleSelectReactThinkingEffort = useCallback((effort: import("@owncoder/settings").ThinkingEffort) => { void onSelectReactThinkingEffort(effort); }, [onSelectReactThinkingEffort]);
@@ -457,6 +458,7 @@ export function App() {
         thinkingEffort={thinkingEffort}
         separateStageModels={separateStageModels}
         reactModelId={reactModelId}
+        reactProviderId={reactProviderId}
         reactThinkingEffort={reactThinkingEffort}
         workspaceName={workspace?.name ?? null}
         workspaceRoot={workspace?.root ?? null}

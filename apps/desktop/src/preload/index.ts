@@ -446,6 +446,7 @@ export interface DesktopApi {
   writeRule: (name: string, content: string) => Promise<RuleFileDto>;
   deleteRule: (name: string) => Promise<boolean>;
   getCombinedRules: () => Promise<string>;
+  restoreProjectContext: () => Promise<{ rules: number; memories: number }>;
   getTerminalLog: (sessionId?: string) => Promise<TerminalEntryDto[]>;
   clearTerminal: () => Promise<boolean>;
   /** Spawn an interactive PTY; resolves to a terminal id. */
@@ -610,6 +611,7 @@ const api: DesktopApi = {
   writeRule: (name, content) => ipcRenderer.invoke("rules:write", name, content),
   deleteRule: (name) => ipcRenderer.invoke("rules:delete", name),
   getCombinedRules: () => ipcRenderer.invoke("rules:combined"),
+  restoreProjectContext: () => ipcRenderer.invoke("project:restoreContext"),
   getTerminalLog: (sessionId?) => ipcRenderer.invoke("terminal:log", sessionId),
   clearTerminal: () => ipcRenderer.invoke("terminal:clear"),
   createTerminal: (opts) => ipcRenderer.invoke("pty:create", opts),

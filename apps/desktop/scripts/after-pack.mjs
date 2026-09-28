@@ -7,11 +7,30 @@ import { join } from "node:path";
  *
  * 1. Strip unused Chromium locale files (keep only en-US + zh-CN).
  * 2. Strip dxcompiler.dll (WebGPU shader compiler, not needed for a code editor).
- * 3. Strip cross-platform native prebuilds (keep only the win32-x64 binaries).
+ * 3. Strip cross-platform native prebuilds for the current target platform and architecture.
  */
 export default async function afterPack(context) {
+  const platform = context.electronPlatformName;
+  const arch = context.arch === 3 ? "arm64" : "x64";
+  const resourcesDir =
+    platform === "darwin"
+      ? join(context.appOutDir, "Contents", "Resources")
+      : join(context.appOutDir, "resources");
+
   // ── strip locales ────────────────────────────────────────────────
-  const localesDir = join(context.appOutDir, "locales");
+  const localesDir =
+    platform === "darwin"
+      ? join(
+          context.appOutDir,
+          "Contents",
+          "Frameworks",
+          "Electron Framework.framework",
+          "Versions",
+          "A",
+          "Resources",
+          "locales",
+        )
+      : join(context.appOutDir, "locales");
   const keepLocales = new Set(["en-US.pak", "zh-CN.pak"]);
   try {
     const files = await readdir(localesDir);
@@ -37,16 +56,16 @@ export default async function afterPack(context) {
     // file may already be absent
   }
 
-  // ── strip non-win32-x64 native prebuilds ─────────────────────────
+  // ── strip native prebuilds for other targets ──────────────────────
   const nativeTargets = [
     {
-      root: join(context.appOutDir, "resources", "app.asar.unpacked", "node_modules", "better-sqlite3", "prebuilds"),
-      keep: new Set(["win32-x64.node"]),
+      root: join(resourcesDir, "app.asar.unpacked", "node_modules", "better-sqlite3", "prebuilds"),
+      keep: new Set([`${platform}-${arch}.node`]),
       filesOnly: true,
     },
     {
-      root: join(context.appOutDir, "resources", "app.asar.unpacked", "node_modules", "node-pty", "prebuilds"),
-      keep: new Set(["win32-x64"]),
+      root: join(resourcesDir, "app.asar.unpacked", "node_modules", "node-pty", "prebuilds"),
+      keep: new Set([`${platform}-${arch}`]),
       filesOnly: false,
     },
   ];
@@ -64,20 +83,40 @@ export default async function afterPack(context) {
     }
   }
 
-  // ── strip non-win32-x64 sqlite-vec platform packages ─────────────
-  // sqlite-vec ships one optionalDependency per platform
-  // (e.g. sqlite-vec-darwin-x64, sqlite-vec-linux-arm64); keep only the
-  // main package and the win32-x64 loader binary.
-  const vecModulesDir = join(
-    context.appOutDir,
-    "resources",
+  // ── strip node-pty ConPTY binaries for other Windows architectures ─
+  const conptyDir = join(
+    resourcesDir,
     "app.asar.unpacked",
     "node_modules",
+    "node-pty",
+    "third_party",
+    "conpty",
   );
+  if (platform === "win32" && existsSync(conptyDir)) {
+    const versions = await readdir(conptyDir, { withFileTypes: true });
+    for (const version of versions) {
+      if (!version.isDirectory()) continue;
+      const versionDir = join(conptyDir, version.name);
+      const targets = await readdir(versionDir, { withFileTypes: true });
+      for (const target of targets) {
+        if (target.isDirectory() && target.name !== `win10-${arch}`) {
+          await rm(join(versionDir, target.name), { recursive: true, force: true });
+          console.log(`[afterPack] removed ConPTY prebuild: ${target.name}`);
+        }
+      }
+    }
+  }
+
+  // ── strip sqlite-vec platform packages for other targets ──────────
+  // sqlite-vec ships one optionalDependency per platform
+  // (e.g. sqlite-vec-darwin-x64, sqlite-vec-linux-arm64); keep only the
+  // main package and the loader binary matching this build target.
+  const vecModulesDir = join(resourcesDir, "app.asar.unpacked", "node_modules");
   if (existsSync(vecModulesDir)) {
     const vecEntries = await readdir(vecModulesDir, { withFileTypes: true });
     for (const entry of vecEntries) {
-      if (entry.name === "sqlite-vec" || entry.name === "sqlite-vec-windows-x64") continue;
+      const sqliteVecPlatform = platform === "win32" ? "windows" : platform;
+      if (entry.name === "sqlite-vec" || entry.name === `sqlite-vec-${sqliteVecPlatform}-${arch}`) continue;
       if (entry.isDirectory() && entry.name.startsWith("sqlite-vec-")) {
         await rm(join(vecModulesDir, entry.name), { recursive: true, force: true });
         console.log(`[afterPack] removed sqlite-vec prebuild: ${entry.name}`);

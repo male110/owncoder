@@ -173,6 +173,8 @@ export function registerSessionHandlers(ctx: IpcContext): void {
     return session.getProjectRulesText();
   });
 
+  ipcMain.handle("project:restoreContext", () => session.restoreProjectContext());
+
   // ── Memories ──────────────────────────────────────────────────────────────
 
   ipcMain.handle("memories:list", (_e, scope?: string) => {
