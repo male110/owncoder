@@ -3,7 +3,7 @@ import type { ChatSessionMetaDto } from "../../../preload/index";
 import { useI18n } from "../i18n";
 
 export type SearchResult =
-  | { kind: "session"; id: string; title: string; subtitle: string }
+  | { kind: "session"; id: string; projectRoot: string; title: string; subtitle: string }
   | { kind: "file"; path: string }
   | { kind: "action"; id: string; label: string; hint?: string };
 
@@ -12,7 +12,7 @@ interface Props {
   sessions: ChatSessionMetaDto[];
   workspaceName: string | null;
   onClose: () => void;
-  onSelectSession: (id: string) => void | Promise<void>;
+  onSelectSession: (id: string, projectRoot: string) => void | Promise<void>;
   onSelectFile: (path: string) => void;
   onNewSession: () => void;
   onOpenSettings: () => void;
@@ -98,6 +98,7 @@ export function CommandPalette({
         out.push({
           kind: "session",
           id: s.id,
+          projectRoot: s.projectRoot,
           title: s.title,
           subtitle: s.pinned ? t("已固定") : workspaceName ?? t("会话"),
         });
@@ -139,7 +140,7 @@ export function CommandPalette({
 
   const pick = useCallback(
     (item: SearchResult) => {
-      if (item.kind === "session") onSelectSession(item.id);
+      if (item.kind === "session") onSelectSession(item.id, item.projectRoot);
       else if (item.kind === "file") onSelectFile(item.path);
       else if (item.id === "new") onNewSession();
       else if (item.id === "settings") onOpenSettings();

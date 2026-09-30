@@ -46,7 +46,7 @@ describe("resolveApiFormat", () => {
     expect(resolveApiFormat({ baseUrl: "http://127.0.0.1:11434/v1" })).toBe("openai-chat");
   });
 
-  it("defaults missing format to openai-chat", () => {
+  it("defaults missing or unknown format to openai-chat", () => {
     expect(resolveApiFormat({})).toBe("openai-chat");
     expect(resolveApiFormat({ apiFormat: "unknown" })).toBe("openai-chat");
   });

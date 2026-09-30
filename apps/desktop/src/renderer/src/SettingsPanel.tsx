@@ -1011,7 +1011,14 @@ function ProviderDetail({
   const [name, setName] = useState(provider.name);
   const [baseUrl, setBaseUrl] = useState(provider.baseUrl);
   const [apiKey, setApiKey] = useState(provider.apiKey);
-  const [apiFormat, setApiFormat] = useState<ApiFormat>(provider.apiFormat ?? "openai-chat");
+  const [apiFormat, setApiFormat] = useState<ApiFormat>(
+    provider.apiFormat === "openai-chat" ||
+      provider.apiFormat === "openai-responses" ||
+      provider.apiFormat === "anthropic-messages" ||
+      provider.apiFormat === "google-gemini"
+      ? provider.apiFormat
+      : "openai-chat",
+  );
   const [fetching, setFetching] = useState(false);
   const [fetchError, setFetchError] = useState("");
   const [showKey, setShowKey] = useState(false);
@@ -1025,7 +1032,14 @@ function ProviderDetail({
     setName(provider.name);
     setBaseUrl(provider.baseUrl);
     setApiKey(provider.apiKey);
-    setApiFormat(provider.apiFormat ?? "openai-chat");
+    setApiFormat(
+      provider.apiFormat === "openai-chat" ||
+        provider.apiFormat === "openai-responses" ||
+        provider.apiFormat === "anthropic-messages" ||
+        provider.apiFormat === "google-gemini"
+        ? provider.apiFormat
+        : "openai-chat",
+    );
     setListMode("add");
     setModelSearchQuery("");
     setManualModelId("");
@@ -1194,7 +1208,9 @@ function ProviderDetail({
           }}
         >
           <option value="openai-chat">OpenAI Chat Completions</option>
+          <option value="openai-responses">OpenAI Responses</option>
           <option value="anthropic-messages">Anthropic Messages</option>
+          <option value="google-gemini">Google Gemini</option>
         </select>
         <span className="hint">{tr("协议与 Base URL 独立：自建或代理端点也可选 Anthropic Messages。")}</span>
       </label>
@@ -1425,7 +1441,9 @@ function NewProviderForm({
         {tr("API 协议")}
         <select value={apiFormat} onChange={(e) => setApiFormat(e.target.value as ApiFormat)}>
           <option value="openai-chat">OpenAI Chat Completions</option>
+          <option value="openai-responses">OpenAI Responses</option>
           <option value="anthropic-messages">Anthropic Messages</option>
+          <option value="google-gemini">Google Gemini</option>
         </select>
         <span className="hint">{tr("协议与 Base URL 独立：自建或代理端点也可选 Anthropic Messages。")}</span>
       </label>

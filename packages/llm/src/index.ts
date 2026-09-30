@@ -813,7 +813,7 @@ export async function chatCompletion(
   opts?: ChatCompletionOpts,
 ): Promise<ChatResponse> {
   const codec = resolveCodec(ref);
-  const url = codec.buildUrl(ref.baseUrl);
+  const url = codec.buildUrl(ref.baseUrl, ref.model);
   const body = await codec.encodeRequest(encodeInput(ref, messages, opts, false));
   const requestImageUrls = findImageUrls(body);
   console.log(`[llm] final request image URLs: hasImageUrl=${requestImageUrls.length > 0} count=${requestImageUrls.length}`, requestImageUrls);
@@ -972,7 +972,7 @@ export async function chatCompletionStream(
   opts?: ChatCompletionStreamOpts,
 ): Promise<ChatResponse> {
   const codec = resolveCodec(ref);
-  const url = codec.buildUrl(ref.baseUrl);
+  const url = codec.buildStreamUrl?.(ref.baseUrl, ref.model) ?? codec.buildUrl(ref.baseUrl, ref.model);
   const body = await codec.encodeRequest(encodeInput(ref, messages, opts, true));
   const requestImageUrls = findImageUrls(body);
   console.log(`[llm] final request image URLs: hasImageUrl=${requestImageUrls.length > 0} count=${requestImageUrls.length}`, requestImageUrls);

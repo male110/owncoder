@@ -3,6 +3,8 @@ export { API_FORMATS, isApiFormat } from "./types.js";
 export { resolveApiFormat, isOfficialAnthropicHost } from "./resolve.js";
 export { getCodec, listCodecs } from "./registry.js";
 export { openaiChatCodec, buildThinkingFields } from "./openai-chat.js";
+export { openaiResponsesCodec } from "./openai-responses.js";
+export { googleGeminiCodec } from "./google-gemini.js";
 export { anthropicMessagesCodec, encodeAnthropicMessages, decodeAnthropicResponse } from "./anthropic-messages.js";
 export { ensureTrailingSlash, normalizeApiBaseUrl } from "./url.js";
 export { createSseFramer } from "./sse.js";

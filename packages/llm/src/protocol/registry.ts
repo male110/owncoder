@@ -1,10 +1,14 @@
 import type { ApiFormat, ProtocolCodec } from "./types.js";
 import { openaiChatCodec } from "./openai-chat.js";
 import { anthropicMessagesCodec } from "./anthropic-messages.js";
+import { openaiResponsesCodec } from "./openai-responses.js";
+import { googleGeminiCodec } from "./google-gemini.js";
 
 const CODECS: Record<ApiFormat, ProtocolCodec> = {
   "openai-chat": openaiChatCodec,
+  "openai-responses": openaiResponsesCodec,
   "anthropic-messages": anthropicMessagesCodec,
+  "google-gemini": googleGeminiCodec,
 };
 
 export function getCodec(format: ApiFormat): ProtocolCodec {

@@ -35,7 +35,7 @@ export function useSessionSync() {
   const projectsSyncVersionRef = useRef(0);
   const navigationVersionRef = useRef(0);
   const navigationTailRef = useRef<Promise<void>>(Promise.resolve());
-  const switchSessionInternalRef = useRef<(id: string, version: number, rollbackId?: string | null) => Promise<unknown>>(
+  const switchSessionInternalRef = useRef<(id: string, version: number, rollbackId?: string | null, projectRoot?: string) => Promise<unknown>>(
     async () => {},
   );
   const previousSessionIdRef = useRef<string | null>(null);
@@ -180,7 +180,7 @@ export function useSessionSync() {
       if (prev && prev.title !== "新会话" && s.title === "新会话") {
         return { ...s, title: prev.title };
       }
-      return s;
+      return { ...s, projectRoot: s.projectRoot || root };
     });
     session.setSessions(merged);
     // Do NOT overwrite activeSessionId here. The backend index.activeId reflects
@@ -214,7 +214,7 @@ export function useSessionSync() {
     await Promise.all(
       list.map(async (p) => {
         const res = await window.owncoder.listChatSessions(p.root);
-        map[p.root] = res.sessions;
+        map[p.root] = res.sessions.map((item) => ({ ...item, projectRoot: item.projectRoot || p.root }));
       }),
     );
     if (
@@ -498,15 +498,17 @@ export function useSessionSync() {
           ? cachedActiveId
           : cached[0]?.id ?? null;
 
-      session.setWorkspace(targetWs);
-      session.setSessions(cached);
-      session.setExpanded((e) => ({ ...e, [root]: true }));
-      workspaceRef.current = targetWs;
-      // 使用轻量级 switchWorkspacePath，不清理正在运行的会话
+      // 先完成主进程的 workspace 绑定，再更新 renderer 的当前项目。
+      // 在 IPC 完成前修改 workspaceRef 会让刷新请求以为已经在 B，
+      // 但主进程仍在 A，从而把首次跨项目加载的状态串到错误项目。
       if (workspace?.root !== root) {
         await window.owncoder.switchWorkspacePath(root);
         if (!isNavigationCurrent(navigationVersion)) return;
       }
+      session.setWorkspace(targetWs);
+      session.setSessions(cached);
+      session.setExpanded((e) => ({ ...e, [root]: true }));
+      workspaceRef.current = targetWs;
 
       // 必须走完整会话切换：仅 syncFocusSession 只会更新左侧选中态，
       // 若 bySession 尚无该会话历史，右侧仍会显示空/新会话界面。
@@ -524,10 +526,11 @@ export function useSessionSync() {
     }
 
     // 慢速路径：项目未加载，需要完整初始化
-    session.setWorkspace(targetWs);
-    session.setExpanded((e) => ({ ...e, [root]: true }));
     const ws = await window.owncoder.openWorkspacePath(root);
     if (ws && isNavigationCurrent(navigationVersion)) {
+      session.setWorkspace(targetWs);
+      session.setExpanded((e) => ({ ...e, [root]: true }));
+      workspaceRef.current = targetWs;
       await applyOpenedInternal(targetWs, { navigationVersion });
       if (focusSessionId && isNavigationCurrent(navigationVersion)) {
         await switchSessionInternalRef.current(focusSessionId, navigationVersion, null);
@@ -721,6 +724,7 @@ export function useSessionSync() {
     id: string,
     navigationVersion: number,
     rollbackId = getFocusSessionId(),
+    projectRoot?: string,
   ) => {
     previousSessionIdRef.current = rollbackId;
     // 取消 pending-new 状态
@@ -741,7 +745,17 @@ export function useSessionSync() {
         // 3. Always notify main so it can persist+unload the previous idle
         // runtime. Skipping this on cache hits was the multi-session OOM path:
         // renderer kept bySession forever and main never called unloadIdleRuntime.
-        const backendData = await window.owncoder.switchChatSession(id);
+        const targetRoot = projectRoot ?? workspaceRef.current?.root;
+        if (targetRoot && workspaceRef.current?.root !== targetRoot) {
+          await window.owncoder.switchWorkspacePath(targetRoot);
+          if (!isNavigationCurrent(navigationVersion)) return;
+          const targetProject = useSessionStore.getState().projects.find((p) => p.root === targetRoot);
+          const targetWorkspace = { root: targetRoot, name: targetProject?.name ?? targetRoot };
+          session.setWorkspace(targetWorkspace);
+          session.setSessions(useSessionStore.getState().sessionsByProject[targetRoot] ?? []);
+          workspaceRef.current = targetWorkspace;
+        }
+        const backendData = await window.owncoder.switchChatSession(id, targetRoot);
         // 即使后续导航版本已过期，也先把后端快照写入 bySession[id]。
         // 跨项目首次点历史会话时，乐观 syncFocusSession 会先露出空 runtime；
         // 若这里因为 navigationVersion 过期直接 return，就会一直只剩上方输入框。
@@ -823,7 +837,7 @@ export function useSessionSync() {
   }, [applyHistory, isNavigationCurrent, refreshPlans, refreshActivePlan, refreshSessions, refreshChanges]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const onSwitchSession = useCallback(
-    (id: string) => enqueueNavigation((navigationVersion) => switchSessionInternal(id, navigationVersion)),
+    (id: string, projectRoot?: string) => enqueueNavigation((navigationVersion) => switchSessionInternal(id, navigationVersion, getFocusSessionId(), projectRoot)),
     [enqueueNavigation, switchSessionInternal],
   );
 

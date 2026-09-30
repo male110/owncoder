@@ -2,12 +2,12 @@ import type { ChatMessage, ChatResponse, ToolDef } from "../types.js";
 import type { ThinkingConfig } from "../thinking.js";
 
 /** Wire format identifier. Named after the protocol, not the vendor. */
-export type ApiFormat = "openai-chat" | "anthropic-messages";
+export type ApiFormat = "openai-chat" | "openai-responses" | "anthropic-messages" | "google-gemini";
 
-export const API_FORMATS: readonly ApiFormat[] = ["openai-chat", "anthropic-messages"] as const;
+export const API_FORMATS: readonly ApiFormat[] = ["openai-chat", "openai-responses", "anthropic-messages", "google-gemini"] as const;
 
 export function isApiFormat(value: unknown): value is ApiFormat {
-  return value === "openai-chat" || value === "anthropic-messages";
+  return value === "openai-chat" || value === "openai-responses" || value === "anthropic-messages" || value === "google-gemini";
 }
 
 export interface ProtocolEncodeInput {
@@ -39,7 +39,8 @@ export interface ListedModel {
 
 export interface ProtocolCodec {
   readonly format: ApiFormat;
-  buildUrl(baseUrl: string): string;
+  buildUrl(baseUrl: string, model?: string): string;
+  buildStreamUrl?(baseUrl: string, model?: string): string;
   buildHeaders(apiKey: string | undefined): Record<string, string>;
   encodeRequest(input: ProtocolEncodeInput): unknown | Promise<unknown>;
   decodeResponse(json: unknown): ChatResponse;

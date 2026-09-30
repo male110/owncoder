@@ -1333,7 +1333,9 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
     });
     history.push({
       role: "assistant",
-      content: content || calls.map((c) => `→ ${c.name}`).join("\n"),
+      // Tool calls are already represented by the structured tool events below;
+      // do not turn a textless response into a visible tool-name chain.
+      content: content || "",
     });
 
     // ── Git Auto-Snapshot: checkpoint before any file-modifying tools execute ──

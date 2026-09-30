@@ -65,7 +65,7 @@ interface Props {
   onOpenSettings: () => void;
   onSelectProject: (root: string, focusSessionId?: string) => Promise<void>;
   onRemoveProject: (root: string) => Promise<void>;
-  onSwitchSession: (id: string) => Promise<void>;
+  onSwitchSession: (id: string, projectRoot?: string) => Promise<void>;
   onDeleteSession: (id: string, projectRoot: string) => void;
   /** Open a workspace-relative file path in the editor (double-click from file tree). */
   onOpenFile?: (path: string) => void;
@@ -340,7 +340,7 @@ export function AgentSidebar({
                                         // first history hydrate, leaving only the
                                         // composer until a later revisit.
                                         if (!isCurrent) await onSelectProject(p.root, s.id);
-                                        else await onSwitchSession(s.id);
+                                        else await onSwitchSession(s.id, s.projectRoot);
                                         // If the session is no longer running,
                                         // the confirmation is stale — clear the
                                         // icon so it doesn't get stuck forever.
@@ -358,7 +358,7 @@ export function AgentSidebar({
                                 className="session-row"
                                 onClick={async () => {
                                   if (!isCurrent) await onSelectProject(p.root, s.id);
-                                  else await onSwitchSession(s.id);
+                                  else await onSwitchSession(s.id, s.projectRoot);
                                   // 切换到当前会话时去掉小绿点
                                   onClearSessionStatus?.(s.id);
                                 }}

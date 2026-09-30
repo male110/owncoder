@@ -13,6 +13,12 @@ import type { IpcContext } from "./types";
 
 export function registerSessionHandlers(ctx: IpcContext): void {
   const { session, settingsStore } = ctx;
+  const withProjectRoot = <T extends { id: string }>(meta: T, root?: string) => ({
+    ...meta,
+    projectRoot: root ?? session.getState(meta.id).workspace?.root ?? "",
+  });
+  const withProjectRoots = <T extends { id: string }>(metas: T[], root?: string) =>
+    metas.map((meta) => withProjectRoot(meta, root));
 
   // ── Session state ──────────────────────────────────────────────────────────
 
@@ -46,17 +52,24 @@ export function registerSessionHandlers(ctx: IpcContext): void {
   );
 
   ipcMain.handle("sessions:list", async (_e, root?: string) => {
-    if (root) return listSessionMetas(root);
-    return session.listChatSessions();
+    const result = root ? await listSessionMetas(root) : await session.listChatSessions();
+    return { ...result, sessions: withProjectRoots(result.sessions, root) };
   });
 
   ipcMain.handle("sessions:create", async (_e, title?: string) => {
     const meta = await session.createChatSession(title);
     // createChatSession makes the new session the focus; return its (empty) history.
-    return { meta, history: session.getHistory(meta.id), state: session.getState(meta.id) };
+    return {
+      meta: withProjectRoot(meta, session.getState(meta.id).workspace?.root),
+      history: session.getHistory(meta.id),
+      state: session.getState(meta.id),
+    };
   });
 
-  ipcMain.handle("sessions:switch", async (_e, id: string) => {
+  ipcMain.handle("sessions:switch", async (_e, id: string, projectRoot?: string) => {
+    if (projectRoot && session.getState().workspace?.root !== projectRoot) {
+      await session.switchWorkspace(projectRoot, projectRoot.split(/[\\/]+/).pop() || projectRoot);
+    }
     const state = await session.switchChatSession(id);
     return { state, history: session.getHistory(id), terminal: session.getTerminalLog(id) };
   });
@@ -65,16 +78,21 @@ export function registerSessionHandlers(ctx: IpcContext): void {
     const res = await session.deleteChatSession(id, projectRoot);
     ctx.chatBuffer?.removeSession(id ?? null);
     ctx.chatBufferRef?.removeSession(id ?? null);
+    const list = projectRoot ? await listSessionMetas(projectRoot) : await session.listChatSessions();
     return {
       ...res,
       history: session.getHistory(res.activeId ?? undefined),
-      list: projectRoot ? await listSessionMetas(projectRoot) : await session.listChatSessions(),
+      list: { ...list, sessions: withProjectRoots(list.sessions, projectRoot) },
     };
   });
 
   ipcMain.handle("sessions:pin", async (_e, id: string) => {
     const sessions = await session.toggleChatSessionPin(id);
-    return { sessions, list: await session.listChatSessions() };
+    const list = await session.listChatSessions();
+    return {
+      sessions: withProjectRoots(sessions),
+      list: { ...list, sessions: withProjectRoots(list.sessions) },
+    };
   });
 
   ipcMain.handle("session:wipe", async (_e, sessionId?: string) => {

@@ -83,8 +83,8 @@ const ProviderSchema = z.object({
   name: z.string().default(""),
   baseUrl: z.string(),
   apiKey: z.string().default(""),
-  /** Wire format. Optional so missing values stay distinguishable from explicit openai-chat. */
-  apiFormat: z.enum(["openai-chat", "anthropic-messages"]).optional(),
+  /** Wire format. Keep unknown values for forward compatibility with newer protocols. */
+  apiFormat: z.string().optional(),
   models: z.array(z.object({
     id: z.string(),
     name: z.string(),

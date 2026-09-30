@@ -279,6 +279,8 @@ export interface SessionStateDto {
 
 export interface ChatSessionMetaDto {
   id: string;
+  /** 会话所属项目根目录。由 IPC 列表边界注入，不写入单项目索引文件。 */
+  projectRoot: string;
   title: string;
   updatedAt: string;
   createdAt: string;
@@ -388,7 +390,7 @@ export interface DesktopApi {
     meta: ChatSessionMetaDto;
     history: ChatTurnDto[];
   }>;
-  switchChatSession: (id: string) => Promise<{
+  switchChatSession: (id: string, projectRoot?: string) => Promise<{
     history: ChatTurnDto[];
     terminal: TerminalEntryDto[];
     state: SessionStateDto;
@@ -534,7 +536,7 @@ export interface DesktopApi {
   fetchModelList: (
     baseUrl: string,
     apiKey?: string,
-    apiFormat?: "openai-chat" | "anthropic-messages",
+    apiFormat?: "openai-chat" | "openai-responses" | "anthropic-messages" | "google-gemini",
   ) => Promise<{ ok: true; models: { id: string; name: string }[] } | { ok: false; error: string }>;
   /** Notify the main process that the settings panel opened/closed. */
   setSettingsPanelOpen: (open: boolean) => void;
@@ -583,7 +585,7 @@ const api: DesktopApi = {
   getSessionState: () => ipcRenderer.invoke("session:getState"),
   listChatSessions: (root?) => ipcRenderer.invoke("sessions:list", root),
   createChatSession: (title) => ipcRenderer.invoke("sessions:create", title),
-  switchChatSession: (id) => ipcRenderer.invoke("sessions:switch", id),
+  switchChatSession: (id, projectRoot) => ipcRenderer.invoke("sessions:switch", id, projectRoot),
   deleteChatSession: (id, projectRoot) => ipcRenderer.invoke("sessions:delete", id, projectRoot),
   pinChatSession: (id) => ipcRenderer.invoke("sessions:pin", id),
   setMode: (mode, sessionId) => ipcRenderer.invoke("session:setMode", mode, sessionId),
@@ -649,7 +651,7 @@ const api: DesktopApi = {
   getChatHistoryPage: (sessionId, beforeSeq, limit) => ipcRenderer.invoke("chat:historyPage", sessionId, beforeSeq, limit),
   clearChat: (sessionId) => ipcRenderer.invoke("chat:clear", sessionId),
   cancelChat: (sessionId) => ipcRenderer.invoke("chat:cancel", sessionId),
-  fetchModelList: (baseUrl: string, apiKey?: string, apiFormat?: "openai-chat" | "anthropic-messages") =>
+  fetchModelList: (baseUrl: string, apiKey?: string, apiFormat?: "openai-chat" | "openai-responses" | "anthropic-messages" | "google-gemini") =>
     ipcRenderer.invoke("models:fetchList", baseUrl, apiKey, apiFormat),
   setSettingsPanelOpen: (open: boolean) => ipcRenderer.send("app:settingsPanelState", open),
   setChromeTheme: (theme) => ipcRenderer.invoke("app:setChromeTheme", theme),

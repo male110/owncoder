@@ -541,7 +541,7 @@ export function App() {
           onSelectProject={(root, focusSessionId) => onSelectProject(root, focusSessionId)}
           onToggleExpand={onToggleExpand}
           onRemoveProject={(root) => onRemoveProject(root)}
-          onSwitchSession={(id) => onSwitchSession(id)}
+          onSwitchSession={(id, projectRoot) => onSwitchSession(id, projectRoot)}
           onDeleteSession={(id, projectRoot) => void onDeleteSession(id, projectRoot)}
           onOpenFile={openEditorFile}
         />
@@ -653,8 +653,8 @@ export function App() {
           sessions={sessions}
           workspaceName={workspace?.name ?? null}
           onClose={() => setSearchOpen(false)}
-          onSelectSession={async (id) => {
-            await onSwitchSession(id);
+          onSelectSession={async (id, projectRoot) => {
+            await onSwitchSession(id, projectRoot);
           }}
           onSelectFile={(path) => {
             openEditorFile(path);
