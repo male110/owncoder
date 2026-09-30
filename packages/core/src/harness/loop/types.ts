@@ -232,6 +232,8 @@ export interface ChatTurn {
   content: string;
   attachments?: ChatAttachment[];
   toolName?: string;
+  /** 工具调用参数，用于历史执行过程回放。 */
+  toolArgs?: Record<string, unknown>;
   
   /**
    * 结构化消息部件（阶段三架构）

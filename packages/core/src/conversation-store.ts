@@ -49,6 +49,7 @@ const MAX_ASSISTANT_CONTENT_CHARS = 200_000;
  * stay bounded. */
 const MAX_EVENT_PAYLOAD_CHARS = 250_000;
 const MAX_TOOL_ARG_STRING_CHARS = 4_000;
+const MAX_TOOL_OUTPUT_CHARS = 64_000;
 const MAX_GENERIC_STRING_CHARS = 64_000;
 const MAX_REASONING_CHARS = 16_000;
 
@@ -71,11 +72,13 @@ function slimChatTurn(turn: unknown): ChatTurn | null {
   if (typeof row.content !== "string") return null;
   const slim: ChatTurn = {
     role: row.role,
-    // Tool result bodies are not durable; keep only a marker row if needed.
-    content: row.role === "tool" ? "" : truncateText(row.content, MAX_ASSISTANT_CONTENT_CHARS),
+    content: row.role === "tool" ? truncateText(row.content, MAX_TOOL_OUTPUT_CHARS) : truncateText(row.content, MAX_ASSISTANT_CONTENT_CHARS),
   };
   if (typeof row.id === "string") slim.id = row.id;
   if (typeof row.toolName === "string") slim.toolName = row.toolName;
+  if (row.toolArgs && typeof row.toolArgs === "object" && !Array.isArray(row.toolArgs)) {
+    slim.toolArgs = slimToolArgs(row.toolArgs);
+  }
   if (Array.isArray(row.attachments) && row.attachments.length) {
     const attachments = row.attachments.filter((item): item is NonNullable<ChatTurn["attachments"]>[number] =>
       !!item &&
@@ -218,9 +221,8 @@ export function slimDurableEvent(event: unknown): unknown {
   const slim: Record<string, unknown> = { ...row };
 
   if (type === "tool_end") {
-    // Do not persist tool result bodies — only status + identity.
-    delete slim.output;
-    slim.outputOmitted = true;
+    // Keep a bounded result so completed history can show the same tool detail as live runs.
+    if (typeof slim.output === "string") slim.output = truncateText(slim.output, MAX_TOOL_OUTPUT_CHARS);
     if (slim.metadata != null) {
       slim.metadata = slimStringFields(slim.metadata, MAX_TOOL_ARG_STRING_CHARS);
     }
@@ -526,13 +528,14 @@ export function projectConversationTurns(turns: ConversationTurn[]): ChatTurn[] 
       pushUnique({ ...turn.user });
     }
 
-    const pendingTools = new Map<string, { name: string }>();
+    const pendingTools = new Map<string, { name: string; args: Record<string, unknown> }>();
     for (const event of turn.events) {
       const payload = event.payload as
         | (Partial<ChatTurn> & {
             type?: string;
             id?: string;
             name?: string;
+            args?: Record<string, unknown>;
             output?: string;
             ok?: boolean;
           })
@@ -542,6 +545,10 @@ export function projectConversationTurns(turns: ConversationTurn[]): ChatTurn[] 
       if (payload.type === "tool_start" && typeof payload.id === "string") {
         pendingTools.set(payload.id, {
           name: typeof payload.name === "string" ? payload.name : "unknown",
+          args:
+            payload.args && typeof payload.args === "object" && !Array.isArray(payload.args)
+              ? (payload.args as Record<string, unknown>)
+              : {},
         });
         continue;
       }
@@ -565,6 +572,7 @@ export function projectConversationTurns(turns: ConversationTurn[]): ChatTurn[] 
           role: "tool",
           id: payload.id,
           toolName,
+          toolArgs: start?.args,
           content: output,
         });
         pendingTools.delete(payload.id);

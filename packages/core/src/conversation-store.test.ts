@@ -214,9 +214,9 @@ describe("conversation store", () => {
     ];
     expect(projectConversationTurns(turns)).toEqual([
       user("run tools"),
-      { role: "tool", id: "c1", toolName: "bash", content: "ok" },
-      { role: "tool", id: "c2", toolName: "web_fetch", content: "html" },
-      { role: "tool", id: "c3", toolName: "ask_user", content: "answered" },
+      { role: "tool", id: "c1", toolName: "bash", toolArgs: { command: "ls" }, content: "ok" },
+      { role: "tool", id: "c2", toolName: "web_fetch", toolArgs: { url: "https://x" }, content: "html" },
+      { role: "tool", id: "c3", toolName: "ask_user", toolArgs: {}, content: "answered" },
     ]);
   });
 
@@ -355,7 +355,7 @@ describe("conversation store", () => {
     const page = await loadRecentTurns(r, "s", 10);
     expect(projectConversationTurns(page.turns)).toEqual([
       user("hello"),
-      { role: "tool", id: "t1", toolName: "bash", content: "" },
+      { role: "tool", id: "t1", toolName: "bash", toolArgs: {}, content: "ok" },
       assistant("done"),
     ]);
   });
@@ -381,7 +381,7 @@ describe("conversation store", () => {
     expect(after.turns[0]?.final).toMatchObject({ omitted: true, reason: "final_json_too_large" });
   });
 
-  it("slimDurableEvent drops tool/terminal result bodies while keeping ids", () => {
+  it("slimDurableEvent keeps bounded tool results and removes terminal streams", () => {
     const huge = "H".repeat(80_000);
     const toolEnd = slimDurableEvent({
       type: "tool_end",
@@ -389,15 +389,14 @@ describe("conversation store", () => {
       name: "bash",
       ok: true,
       output: huge,
-    }) as { type: string; id: string; name: string; ok: boolean; output?: string; outputOmitted?: boolean };
+    }) as { type: string; id: string; name: string; ok: boolean; output?: string };
     expect(toolEnd).toMatchObject({
       type: "tool_end",
       id: "c1",
       name: "bash",
       ok: true,
-      outputOmitted: true,
     });
-    expect(toolEnd.output).toBeUndefined();
+    expect(toolEnd.output).toHaveLength(64_000 + "\n…[truncated 16000 chars]".length);
     expect(JSON.stringify(toolEnd)).not.toContain(huge);
 
     const toolStart = slimDurableEvent({
@@ -424,7 +423,7 @@ describe("conversation store", () => {
     expect(terminal.entry.stderr).toBeUndefined();
   });
 
-  it("appendTurnEvent does not persist tool_end output bodies", async () => {
+  it("appendTurnEvent persists bounded tool_end output", async () => {
     const r = await root();
     const turn = await beginTurn(r, "s", user("run"));
     const huge = "Y".repeat(100_000);
@@ -438,14 +437,14 @@ describe("conversation store", () => {
     await completeTurn(r, "s", turn.turnId, assistant("done"));
 
     const loaded = await loadTurn(r, "s", turn.turnId);
-    const payload = loaded?.events[0]?.payload as { output?: string; outputOmitted?: boolean; id?: string };
-    expect(payload).toMatchObject({ id: "c9", outputOmitted: true });
-    expect(payload?.output).toBeUndefined();
+    const payload = loaded?.events[0]?.payload as { output?: string; id?: string };
+    expect(payload).toMatchObject({ id: "c9" });
+    expect(payload?.output).toHaveLength(64_000 + "\n…[truncated 36000 chars]".length);
     expect(JSON.stringify(loaded)).not.toContain(huge);
 
     expect(projectConversationTurns([loaded!])).toEqual([
       user("run"),
-      { role: "tool", id: "c9", toolName: "bash", content: "" },
+      { role: "tool", id: "c9", toolName: "bash", content: payload?.output },
       assistant("done"),
     ]);
   });

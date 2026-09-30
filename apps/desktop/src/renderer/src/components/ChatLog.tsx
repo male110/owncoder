@@ -10,7 +10,6 @@ import {
   buildLogBlocks,
   deriveLiveStatus,
   lastAssistantBlockIndex,
-  toolLabel,
   toolStatusLabel as toolStatusLabelFromModel,
   type ChatItem,
   type LogBlock,
@@ -130,14 +129,9 @@ function LiveToolCardImpl({ tool }: { tool: PendingTool }) {
 
         {/* Tool name + arg summary */}
         <span className="tool-card-label">
-          {isRead
-            ? <><span className="tool-verb">Read</span>{" "}<span className="tool-path">{argSummary}</span>{readParams ? <span className="tool-read-params">{readParams}</span> : null}</>
-            : isWrite
-            ? <><span className="tool-verb">{tool.name === "apply_patch" ? "Edit" : "Write"}</span>{" "}<span className="tool-path">{argSummary}</span></>
-            : isBash
-            ? <><span className="tool-verb">Run</span>{" "}<span className="tool-path">{argSummary}</span></>
-            : <>{toolLabel(tool.name)}{argSummary ? <span className="tool-path"> {argSummary}</span> : null}</>
-          }
+          <span className="tool-verb">{tool.name}</span>
+          {argSummary ? <span className="tool-path"> {argSummary}</span> : null}
+          {isRead && readParams ? <span className="tool-read-params">{readParams}</span> : null}
         </span>
 
         {/* Diff stat for write/patch */}
@@ -157,8 +151,12 @@ function LiveToolCardImpl({ tool }: { tool: PendingTool }) {
         <span className="activity-chev">{open ? "▾" : "▸"}</span>
       </button>
 
-      {open && (tool.output || running) ? (
+      {open && (tool.output || running || Object.keys(tool.args).length > 0) ? (
         <div className="tool-card-body" ref={bodyRef}>
+          <div className="tool-card-content-wrap">
+            <div className="tool-card-result-label">参数</div>
+            <pre>{JSON.stringify(tool.args, null, 2)}</pre>
+          </div>
           {tool.output ? (
             <div className="tool-card-content-wrap">
               <div className="tool-card-result-label">{t("结果")}</div>
@@ -571,13 +569,17 @@ function ProcessStepsImpl({ items }: { items: ChatTurnDto[] }) {
             const key = it.id ?? `p-${idx}`;
             if (it.role === "tool") {
               const failed = it.content.startsWith("Error:");
-              const argSummary = it.toolName ? summarizeArgs(it.toolName, it.toolArgs ?? {}) : "";
               return (
                 <div key={key} className="process-step">
-                  <span className={`tool-status ${failed ? "error" : "done"}`}>
-                    {toolStatusLabelFromModel(failed ? "error" : "done", it.toolName, it.toolArgs)}
-                  </span>
-                  {argSummary ? <span className="process-step-arg">{argSummary}</span> : null}
+                  <LiveToolCard
+                    tool={{
+                      id: it.id ?? key,
+                      name: it.toolName ?? "unknown",
+                      args: it.toolArgs ?? {},
+                      status: failed ? "error" : "done",
+                      output: it.content || undefined,
+                    }}
+                  />
                 </div>
               );
             }
