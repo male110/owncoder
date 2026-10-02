@@ -13,7 +13,7 @@
     "pack:mac": "node ./scripts/verify-macos-signing.mjs && pnpm build && electron-builder --mac",
     "pack:linux": "pnpm build && electron-builder --linux deb",
     "publish": "node ./scripts/publish-release.mjs",
-    "build:release:win": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/build-release.ps1",
+    "build:release:win": "pnpm pack:win && pnpm publish",
     "typecheck": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.web.json --noEmit"
   },
   "dependencies": {

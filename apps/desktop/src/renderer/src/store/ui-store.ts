@@ -172,6 +172,7 @@ export const useUiStore = create<UiState & UiActions>()((set) => ({
   setEditorPath: (path) =>
     set((s) => {
       if (path === null) return { editorTabs: [], editorPath: null };
+      if (s.editorPath === path) return s;
       if (s.editorTabs.includes(path)) return { editorPath: path };
       return { editorTabs: [...s.editorTabs, path], editorPath: path };
     }),

@@ -46,6 +46,32 @@ describe("composer draft persistence", () => {
     expect(loadDrafts()).toEqual({ "sess-1": "还没发出去" });
   });
 
+  it("does not notify subscribers when reopening the active editor tab", () => {
+    useUiStore.setState({ editorTabs: ["src/app.ts"], editorPath: "src/app.ts" });
+    const listener = vi.fn();
+    const unsubscribe = useUiStore.subscribe(listener);
+
+    useUiStore.getState().setEditorPath("src/app.ts");
+
+    expect(listener).not.toHaveBeenCalled();
+    expect(useUiStore.getState()).toMatchObject({
+      editorTabs: ["src/app.ts"],
+      editorPath: "src/app.ts",
+    });
+    unsubscribe();
+  });
+
+  it("activates an existing inactive editor tab without adding a duplicate", () => {
+    useUiStore.setState({ editorTabs: ["src/a.ts", "src/b.ts"], editorPath: "src/a.ts" });
+
+    useUiStore.getState().setEditorPath("src/b.ts");
+
+    expect(useUiStore.getState()).toMatchObject({
+      editorTabs: ["src/a.ts", "src/b.ts"],
+      editorPath: "src/b.ts",
+    });
+  });
+
   it("keeps pending composer text when there is no active session", () => {
     useUiStore.getState().setDraft("新会话草稿", PENDING_DRAFT_KEY);
     expect(loadDrafts()[PENDING_DRAFT_KEY]).toBe("新会话草稿");
