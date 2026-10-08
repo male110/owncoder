@@ -1,6 +1,6 @@
 {
   "name": "@owncoder/desktop",
-  "version": "0.1.19",
+  "version": "0.1.20",
   "private": true,
   "description": "OwnCoder desktop shell",
   "main": "./out/main/index.js",
@@ -9,11 +9,11 @@
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "rebuild": "electron-rebuild -f -w node-pty -w better-sqlite3",
-    "pack:win": "pnpm build && electron-builder --win nsis",
+    "pack:win": "node ./scripts/pack-win-release.mjs",
     "pack:mac": "node ./scripts/verify-macos-signing.mjs && pnpm build && electron-builder --mac",
     "pack:linux": "pnpm build && electron-builder --linux deb",
     "publish": "node ./scripts/publish-release.mjs",
-    "build:release:win": "pnpm pack:win && pnpm publish",
+    "build:release:win": "pnpm pack:win && pnpm run publish",
     "typecheck": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.web.json --noEmit"
   },
   "dependencies": {
@@ -34,6 +34,7 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-virtuoso": "^4.18.13",
+    "semver": "7.7.4",
     "sqlite-vec": "^0.1.9",
     "zustand": "^5.0.3"
   },
@@ -66,7 +67,6 @@
       "!node_modules/monaco-editor/min/**",
       "!node_modules/monaco-editor/dev/**",
       "!node_modules/monaco-editor/min-maps/**",
-
       "!node_modules/better-sqlite3/build/Release/obj.target/**",
       "!node_modules/better-sqlite3/build/Release/obj/**",
       "!node_modules/better-sqlite3/build/Release/.deps/**",
@@ -116,6 +116,12 @@
           "arch": [
             "x64"
           ]
+        },
+        {
+          "target": "nsis-web",
+          "arch": [
+            "x64"
+          ]
         }
       ]
     },
@@ -123,6 +129,10 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "artifactName": "${productName} Setup ${version}.${ext}"
+    },
+    "nsisWeb": {
+      "artifactName": "${productName} Web Setup ${version}.${ext}",
+      "appPackageUrl": "https://zy-1310897501.cos.ap-nanjing.myqcloud.com/owncoder/0.1.20/%40owncoderdesktop-0.1.20-x64.nsis.7z"
     },
     "mac": {
       "target": [
@@ -150,7 +160,7 @@
     },
     "publish": {
       "provider": "generic",
-      "url": "https://zy-1310897501.cos.ap-nanjing.myqcloud.com/owncoder/${version}/"
+      "url": "https://zy-1310897501.cos.ap-nanjing.myqcloud.com/owncoder/"
     }
   }
 }

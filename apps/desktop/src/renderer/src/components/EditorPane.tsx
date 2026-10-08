@@ -49,6 +49,8 @@ self.MonacoEnvironment = {
 
 loader.config({ monaco });
 
+let nextDiffModelId = 0;
+
 function languageForPath(path: string): string {
   const ext = path.split(".").pop()?.toLowerCase() ?? "";
   const map: Record<string, string> = {
@@ -155,6 +157,14 @@ export function EditorPane({
     original: monaco.editor.ITextModel;
     modified: monaco.editor.ITextModel;
   } | null>(null);
+  // DiffEditor 会按模型 URI 复用内部视图状态；每次查看使用新 URI，避免前次展开的
+  // 未变更区域在关闭并重开后恢复为全部内容。
+  const diffModelPaths = useRef(
+    diffMode ? {
+      original: `inmemory://owncoder/diff/${++nextDiffModelId}/original/${path}`,
+      modified: `inmemory://owncoder/diff/${nextDiffModelId}/modified/${path}`,
+    } : null,
+  );
 
   const load = useCallback(async () => {
     const requestId = ++loadRequestRef.current;
@@ -325,6 +335,8 @@ export function EditorPane({
             language={languageForPath(path)}
             original={original}
             modified={value}
+            originalModelPath={diffModelPaths.current?.original}
+            modifiedModelPath={diffModelPaths.current?.modified}
             keepCurrentOriginalModel
             keepCurrentModifiedModel
             options={{

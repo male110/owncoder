@@ -16,6 +16,16 @@ describe("web search prompt guidance", () => {
     }
   });
 
+  it("requires consecutive tool use until the current task is complete or blocked", () => {
+    for (const prompt of [BUILTIN_AGENT_PROMPT, BUILTIN_PLAN_PROMPT]) {
+      const loop = prompt.split("## Loop")[1]?.split("## ")[0] ?? "";
+      expect(loop).toMatch(/\*\*Continue\*\*/);
+      expect(loop).toMatch(/After every tool result, call the next tool needed to complete the current task/);
+      expect(loop).toMatch(/Do not return a partial result/);
+      expect(loop.indexOf("**Continue**")).toBeLessThan(loop.indexOf("**Stop**"));
+    }
+  });
+
   it("requires exact named identifiers before semantic search", () => {
     for (const prompt of [BUILTIN_AGENT_PROMPT, BUILTIN_PLAN_PROMPT]) {
       expect(prompt).toMatch(/## Code location/);

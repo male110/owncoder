@@ -1,5 +1,6 @@
 import { app, shell } from "electron";
 import { NsisUpdater, type ProgressInfo, type UpdateInfo } from "electron-updater";
+import { gt, valid } from "semver";
 import type {
   UpdateCheckOutcomeDto,
   UpdateDownloadStatusDto,
@@ -98,8 +99,10 @@ export async function checkForUpdates(): Promise<UpdateCheckOutcomeDto> {
   if (!info) {
     return { status: "error", currentVersion: current, message: mt("无法获取最新版本信息") };
   }
-  // semver 比较：electron-updater 内部已过滤，只有更新时才会返回 updateInfo
-  if (info.version && info.version !== current) {
+  // 远程元数据可能因 CDN 缓存或错误发布而倒退；绝不能把旧版当作更新。
+  const remoteVersion = valid(info.version);
+  const currentVersion = valid(current);
+  if (remoteVersion && currentVersion && gt(remoteVersion, currentVersion)) {
     return { status: "update-available", currentVersion: current, info };
   }
   return { status: "up-to-date", currentVersion: current };
