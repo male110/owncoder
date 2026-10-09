@@ -9,7 +9,7 @@ import {
   type AvailableModel,
   type ApiFormat,
 } from "@owncoder/settings";
-import type { WritePolicy } from "@owncoder/shared";
+
 import type { RuleFileDto, SettingsSnapshotDto, UserMemoryDto } from "../../preload/index";
 import { BlurNumberInput } from "./components/BlurNumberInput";
 import { SecurityRedactionTest } from "./components/SecurityRedactionTest";
@@ -689,30 +689,9 @@ export function SettingsPanel({ open, onClose, onSaved, initialTab }: Props) {
 
               <SecurityRedactionTest />
 
-              <h3>{tr("文件写入保护")}</h3>
-              <label>
-                {tr("可写策略")}
-                <select
-                  value={draft.context.writePolicy}
-                  onChange={(e) =>
-                    patch((d) => {
-                      d.context.writePolicy = e.target.value as WritePolicy;
-                    })
-                  }
-                >
-                  <option value="loose">{tr("宽松（仅保留核心敏感文件保护）")}</option>
-                  <option value="balanced">{tr("均衡（推荐：保护密钥、依赖、构建产物和锁文件）")}</option>
-                  <option value="strict">{tr("严格（仅允许主流源码与配置文件）")}</option>
-                </select>
-              </label>
+              <h3>{tr("文件写入")}</h3>
               <p className="hint" style={{ marginTop: 4 }}>
-                {draft.context.writePolicy === "balanced" && tr("保护敏感文件（.env、密钥）、锁文件（package-lock、yarn.lock）和构建产物目录（dist、build），其余文件可写入。")}
-                {draft.context.writePolicy === "strict" && tr("仅允许主流源码和配置文件扩展名（.ts/.py/.go/.rs/.json/.yaml 等），其他类型文件一律拒绝写入。")}
-                {draft.context.writePolicy === "loose" && tr("只保留核心安全防护（.git、node_modules、.owncoder 元数据不可写），其余文件均放行。")}
-              </p>
-              <p className="hint" style={{ marginTop: 2 }}>
-                {tr("该策略约束内建文件写入工具；Agent 命令中的潜在写入/删除操作仍会进入危险命令确认。")}
-                {tr("严格模式已覆盖 Java/Spring、Kotlin、Maven/Gradle、Node.js、Python、Go、Rust、.NET、PHP、Ruby、移动端、Shell、SQL、GraphQL、Protobuf 及常见前端框架。")}
+                {tr("内建工具允许修改工作区内的文件，不再按文件类型、敏感文件、依赖目录或锁文件拦截写入。读取内容发送给大模型前仍会执行敏感信息脱敏；命令行中的潜在写入或删除操作仍会进入危险命令确认。")}
               </p>
 
               <h3>{tr("主流项目默认覆盖")}</h3>

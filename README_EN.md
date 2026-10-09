@@ -86,17 +86,11 @@ You can validate redaction without calling an LLM.
 
 ---
 
-### Three-Layer Write Protection
+### File Writes and Security Boundaries
 
-Stops the Agent from touching files it should not modify:
+Built-in file tools allow the Agent to modify files inside the workspace. There is no longer a write policy that blocks sensitive files, dependency directories, build artifacts, lockfiles, or particular file extensions. File contents are still redacted before being sent to the model, and redaction never changes the local files.
 
-| Policy | Scope |
-|--------|--------|
-| **balanced** (recommended) | Blocks writes to `.git/`, `node_modules/`, `dist/`, `build/`, lockfiles, and internal `.owncoder/` paths |
-| **strict** | Everything above, plus only ~70 code extensions (`.ts`, `.py`, `.rs`, etc.) and whitelisted filenames may be edited |
-| **loose** | Only always-forbidden paths are blocked |
-
-Every policy includes **path-escape detection** — attempts like `../` are intercepted.
+Workspace boundaries are still checked. Potentially destructive writes or deletes performed through Agent commands still require dangerous-command confirmation.
 
 ---
 

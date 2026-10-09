@@ -4,7 +4,6 @@
 import { dialog, ipcMain } from "electron";
 import { promises as fs } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { checkWritable } from "@owncoder/core";
 import { searchWorkspaceFiles } from "../workspace-search";
 import type { IpcContext } from "./types";
 
@@ -56,7 +55,7 @@ export function resolveWorkspaceFileLink(workspaceRoot: string, href: string): s
 }
 
 export function registerWorkspaceHandlers(ctx: IpcContext): void {
-  const { session, settingsStore, recentStore, openWorkspaceRoot, switchWorkspaceRoot, resolveWorkspacePath } = ctx;
+  const { session, recentStore, openWorkspaceRoot, switchWorkspaceRoot, resolveWorkspacePath } = ctx;
 
   ipcMain.handle("workspace:openDialog", async () => {
     const result = await dialog.showOpenDialog({ properties: ["openDirectory"] });
@@ -143,12 +142,10 @@ export function registerWorkspaceHandlers(ctx: IpcContext): void {
   ipcMain.handle("workspace:writeFile", async (_e, path: string, content: string) => {
     const ws = session.getState().workspace;
     if (!ws) throw new Error("No workspace open");
-    const policy = settingsStore.getEffective().context.writePolicy;
-    const check = checkWritable(ws.root, String(path || ""), policy);
-    if (!check.ok) throw new Error(check.reason || "write denied");
-    const abs = resolveWorkspacePath(ws.root, check.relPath);
+    const relPath = String(path || "");
+    const abs = resolveWorkspacePath(ws.root, relPath);
     await fs.mkdir(dirname(abs), { recursive: true });
     await fs.writeFile(abs, String(content ?? ""), "utf8");
-    return { path: check.relPath };
+    return { path: relPath };
   });
 }

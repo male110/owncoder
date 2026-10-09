@@ -6,7 +6,7 @@
 import assert from "node:assert/strict";
 import { applySearchReplacePatch } from "../src/harness/patch.js";
 import { parseToolCallsFromAssistant } from "../src/harness/parser.js";
-import { checkWritable } from "../src/harness/writable.js";
+
 
 // patch
 {
@@ -106,14 +106,6 @@ hello OwnCoder
   assert.equal(calls[0]?.arguments.path, "docs/TDD.md");
 }
 
-// writable balanced
-{
-  const root = "C:\\\\repo";
-  assert.equal(checkWritable(root, "src/a.ts", "balanced").ok, true);
-  assert.equal(checkWritable(root, "node_modules/x", "balanced").ok, false);
-  assert.equal(checkWritable(root, ".env", "balanced").ok, false);
-  assert.equal(checkWritable(root, "../outside", "balanced").ok, false);
-}
 
 // parser: recover `path` for apply_patch when arguments JSON is broken by a
 // patch payload with raw newlines + unescaped quotes (a common weak-model

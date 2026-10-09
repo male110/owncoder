@@ -61,7 +61,6 @@ export const BUILTIN_VALUE_REDACTION_FILES = [
   "*.tfvars",
   "*.tfvars.json",
 ] as const;
-
 /** Files that contain opaque credentials, encrypted payloads, or database data. */
 export const BUILTIN_WHOLE_FILE_REDACTION_FILES = [
   ".htpasswd",
@@ -118,30 +117,3 @@ export const SECURITY_STACK_COVERAGE = [
   { name: "云原生 / 数据库", files: "AWS/GCP、Kubernetes、Docker、Vault、Terraform、数据库备份" },
 ] as const;
 
-/** Extensions accepted by strict write policy after protected/generated paths are rejected. */
-export const STRICT_WRITABLE_EXTENSIONS = [
-  ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".mts", ".cts",
-  ".py", ".pyi", ".ipynb", ".rs", ".go",
-  ".java", ".kt", ".kts", ".groovy", ".gradle", ".scala",
-  ".c", ".h", ".cc", ".hh", ".cpp", ".hpp", ".m", ".mm", ".swift",
-  ".cs", ".fs", ".fsx", ".vb",
-  ".rb", ".php", ".pl", ".pm", ".lua", ".r", ".dart",
-  ".sh", ".bash", ".zsh", ".fish", ".ps1", ".bat", ".cmd",
-  ".md", ".mdx", ".txt", ".rst", ".adoc",
-  ".json", ".jsonc", ".toml", ".yaml", ".yml", ".xml", ".ini", ".cfg", ".conf", ".properties",
-  ".css", ".scss", ".sass", ".less", ".styl", ".html", ".htm",
-  ".vue", ".svelte", ".astro",
-  ".sql", ".graphql", ".gql", ".proto", ".thrift",
-] as const;
-
-/** Common source/config entry points without an extension. */
-export const STRICT_WRITABLE_FILENAMES = [
-  "dockerfile",
-  "makefile",
-  "rakefile",
-  "gemfile",
-  "procfile",
-  "jenkinsfile",
-  "gradlew",
-  "mvnw",
-] as const;

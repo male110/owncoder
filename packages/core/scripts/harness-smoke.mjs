@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   applySearchReplacePatch,
-  checkWritable,
+
   extractPathsFromPlan,
   isPlanPath,
   parseToolCallsFromAssistant,
@@ -40,11 +40,6 @@ hello OwnCoder
   assert.equal(isPlanPath(".owncoder/index/x"), false);
 }
 
-{
-  const root = "C:\\\\repo";
-  assert.equal(checkWritable(root, ".owncoder/plans/a.md", "balanced").ok, true);
-  assert.equal(checkWritable(root, "src/a.ts", "balanced").ok, true);
-}
 
 {
   const paths = extractPathsFromPlan(

@@ -22,7 +22,7 @@ const checkpoint = await import(
 const {
   applySearchReplacePatch,
   parseToolCallsFromAssistant,
-  checkWritable,
+
   isPlanPath,
   writePlanFile,
   compactHistory,
@@ -69,7 +69,7 @@ console.log("— parser / patch / writable —");
   assert.ok(crlf.content?.includes("LINE 2"), crlf.content);
 
   assert.equal(isPlanPath(".owncoder/plans/x.md"), true);
-  assert.equal(checkWritable("C:\\\\w", "src/a.ts", "balanced").ok, true);
+
   assert.equal(looksDangerous("rm -rf /"), true);
   assert.equal(looksDangerous("pnpm test"), false);
 }
@@ -283,7 +283,7 @@ console.log("— workflow diff / summary —");
   } = settings;
   assert.equal(diffWorkflow(BUILTIN_WORKFLOW).length, 0);
   const tweaked = structuredClone(BUILTIN_WORKFLOW);
-  tweaked.context.writePolicy = "strict";
+
   tweaked.providers = [
     {
       id: "local",
@@ -295,11 +295,11 @@ console.log("— workflow diff / summary —");
   ];
   tweaked.selectedModels = [{ id: "qwen2.5", name: "qwen2.5", providerId: "local" }];
   const diffs = diffWorkflow(tweaked);
-  assert.ok(diffs.some((d) => d.path === "context.writePolicy"));
+
   assert.ok(diffs.some((d) => d.path === "selectedModels"));
   assert.ok(diffs.some((d) => d.path === "providers"));
   const sum = summarizeEffectiveWorkflow(tweaked);
-  assert.equal(sum.writePolicy, "strict");
+
   assert.ok(sum.defaultModel.includes("qwen2.5"));
 
   // Dual-mode pipelines: context → call model → (review)

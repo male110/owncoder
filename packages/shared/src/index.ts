@@ -98,7 +98,6 @@ export function deserializeError(raw: string): AppError {
 
 export type AgentMode = "plan" | "agent";
 
-export type WritePolicy = "balanced" | "strict" | "loose";
 
 export type IndexStatusKind = "idle" | "building" | "ready" | "error";
 

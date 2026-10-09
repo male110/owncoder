@@ -2444,7 +2444,7 @@ export function createSession(): SessionOrchestrator {
   return new SessionOrchestrator();
 }
 
-export { checkWritable } from "./harness/writable.ts";
+
 export { listSessionMetas } from "./session-store.ts";
 
 export {

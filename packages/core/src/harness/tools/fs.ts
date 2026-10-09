@@ -9,7 +9,7 @@ import { applyUnifiedDiff } from "./unified-diff.ts";
 import { resolvePatchTarget } from "./patch-target.ts";
 import { applySearchReplace } from "./search-replace.ts";
 import { isReadonlyBash, looksDangerous } from "../terminal.ts";
-import { checkWritable } from "../writable.ts";
+
 import { fromMarkdown } from "mdast-util-from-markdown";
 import { redactSecrets, isRedactionEnabled } from "../redact.ts";
 import { redactCommandReadOutput } from "../command-redaction.ts";
@@ -963,12 +963,11 @@ export async function toolPatch(ctx: ToolContext, path: string, patch: string): 
   const target = resolvePatchTarget(path, patch);
   if ("error" in target) return fail(target.error);
   path = target.path;
-  const check = checkWritable(ctx.workspaceRoot, path, ctx.workflow.context.writePolicy);
-  if (!check.ok) return fail(check.reason ?? "not writable");
-  const planBlock = assertPlanMutationAllowed(ctx, check.relPath);
+  const rel = normalizeInputPath(path);
+  const planBlock = assertPlanMutationAllowed(ctx, rel);
   if (planBlock) return planBlock;
-  const abs = toAbs(ctx.workspaceRoot, check.relPath);
-  const rel = check.relPath;
+  const abs = toAbs(ctx.workspaceRoot, rel);
+  assertInside(ctx.workspaceRoot, abs);
   let original = "";
   let fileExists = false;
   try {
@@ -1108,15 +1107,13 @@ export async function toolWrite(
   if (!content) {
     return fail("write_file requires non-empty content; got an empty string. Pass the full file text in `content`. If you intended to clear the file, use apply_patch with an empty REPLACE block instead.");
   }
-  path = normalizeInputPath(path);
-  const check = checkWritable(ctx.workspaceRoot, path, ctx.workflow.context.writePolicy);
-  if (!check.ok) return fail(check.reason ?? "not writable");
-  const planBlock = assertPlanMutationAllowed(ctx, check.relPath);
+  const rel = normalizeInputPath(path);
+  const planBlock = assertPlanMutationAllowed(ctx, rel);
   if (planBlock) return planBlock;
   // 硬护栏：plan 模式下，文档交付物（PRD/TDD 等）不得写入 .owncoder/plans/，
   // 否则会被误标为可执行计划并显示"批准"按钮。应落到工作区根目录或 docs/。
-  if (ctx.mode === "plan" && isPlanPath(check.relPath) && check.relPath.toLowerCase().endsWith(".md")) {
-    const fname = check.relPath.split(/[/\\]/).pop() ?? "doc";
+  if (ctx.mode === "plan" && isPlanPath(rel) && rel.toLowerCase().endsWith(".md")) {
+    const fname = rel.split(/[/\\]/).pop() ?? "doc";
     const docTitle = extractTitle(content, fname);
     if (classifyPlanKind(fname, docTitle) === "document") {
       return fail(
@@ -1126,8 +1123,8 @@ export async function toolWrite(
       );
     }
   }
-  const abs = toAbs(ctx.workspaceRoot, check.relPath);
-  const rel = check.relPath;
+  const abs = toAbs(ctx.workspaceRoot, rel);
+  assertInside(ctx.workspaceRoot, abs);
 
   // Read the current file (when present) so we can both report accurately and
   // refuse a suspicious shrink below.
@@ -1638,15 +1635,13 @@ export async function toolAppend(ctx: ToolContext, path: string, content: string
     return fail("append_file requires non-empty content to append");
   }
   
-  path = normalizeInputPath(path);
-  const check = checkWritable(ctx.workspaceRoot, path, ctx.workflow.context.writePolicy);
-  if (!check.ok) return fail(check.reason ?? "not writable");
-  const planBlock = assertPlanMutationAllowed(ctx, check.relPath);
+  const rel = normalizeInputPath(path);
+  const planBlock = assertPlanMutationAllowed(ctx, rel);
   if (planBlock) return planBlock;
   
-  const abs = toAbs(ctx.workspaceRoot, check.relPath);
-  const rel = check.relPath;
-  
+  const abs = toAbs(ctx.workspaceRoot, rel);
+  assertInside(ctx.workspaceRoot, abs);
+
   // Check if file exists
   let originalSize = 0;
   try {

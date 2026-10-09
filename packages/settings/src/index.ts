@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { WritePolicy } from "@owncoder/shared";
+
 import type { ModelRef } from "@owncoder/llm/browser";
 import { resolveApiFormat } from "@owncoder/llm/browser";
 import {
@@ -54,8 +54,7 @@ export {
   BUILTIN_WHOLE_FILE_REDACTION_FILES,
   SENSITIVE_FILE_ALLOWLIST,
   SECURITY_STACK_COVERAGE,
-  STRICT_WRITABLE_EXTENSIONS,
-  STRICT_WRITABLE_FILENAMES,
+
 } from "./security-defaults.js";
 export {
   BUILTIN_AGENT_PROMPT,
@@ -142,9 +141,7 @@ export const SystemWorkflowConfigSchema = z.object({
     }),
   }),
   context: z.object({
-    writePolicy: z
-      .enum(["balanced", "strict", "loose"])
-      .default("loose" satisfies WritePolicy),
+
     /** Total context window size in tokens. Presets: 64K/128K/256K/1M.
      *  Supports suffixes: K = ×1024, M = ×1024². */
     contextWindow: z.number().int().min(1024).default(131072),
@@ -302,7 +299,6 @@ export const BUILTIN_WORKFLOW: SystemWorkflowConfig = SystemWorkflowConfigSchema
     },
   },
   context: {
-    writePolicy: "loose",
     contextWindow: 131072,
     inputRatio: 80,
     segments: {
