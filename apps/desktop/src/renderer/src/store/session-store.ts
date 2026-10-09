@@ -71,6 +71,7 @@ export interface SessionActions {
   setExpanded: (updater: (prev: Record<string, boolean>) => Record<string, boolean>) => void;
   setSessions: (sessions: ChatSessionMetaDto[]) => void;
   setSessionsByProject: (updater: (prev: Record<string, ChatSessionMetaDto[]>) => Record<string, ChatSessionMetaDto[]>) => void;
+  touchSessionUpdatedAt: (sessionId: string, updatedAt?: string) => void;
   setActiveSessionIdByProject: (projectRoot: string, id: string | null) => void;
   setActiveSessionId: (id: string | null) => void;
   setSessionTitle: (title: string | null) => void;
@@ -147,6 +148,20 @@ export const useSessionStore = create<SessionState & SessionActions>()((set, get
           : sessions,
     })),
   setSessionsByProject: (updater) => set((s) => ({ sessionsByProject: updater(s.sessionsByProject) })),
+  touchSessionUpdatedAt: (sessionId, updatedAt = new Date().toISOString()) =>
+    set((s) => {
+      const sortSessions = (items: ChatSessionMetaDto[]) => [...items].sort((a, b) =>
+        Number(!!b.pinned) - Number(!!a.pinned)
+        || (b.updatedAt || "").localeCompare(a.updatedAt || ""),
+      );
+      const update = (items: ChatSessionMetaDto[]) => sortSessions(
+        items.map((item) => item.id === sessionId ? { ...item, updatedAt } : item),
+      );
+      const sessionsByProject = Object.fromEntries(
+        Object.entries(s.sessionsByProject).map(([root, items]) => [root, update(items)]),
+      );
+      return { sessions: update(s.sessions), sessionsByProject };
+    }),
   setActiveSessionIdByProject: (projectRoot, activeSessionId) =>
     set((s) => ({
       activeSessionIdByProject: { ...s.activeSessionIdByProject, [projectRoot]: activeSessionId },

@@ -326,9 +326,7 @@ export function EditorPane({
       {tabActions}
       {error ? <p className="editor-error">{error}</p> : null}
       <div className="editor-pane-body">
-        {loading ? (
-          <p className="hint context-empty">{t("加载中…")}</p>
-        ) : diffMode ? (
+        {diffMode ? (
           <DiffEditor
             height="100%"
             theme={monacoTheme}
@@ -396,6 +394,7 @@ export function EditorPane({
             }}
           />
         )}
+        {loading ? <p className="hint context-empty editor-loading-overlay">{t("加载中…")}</p> : null}
       </div>
     </div>
   );

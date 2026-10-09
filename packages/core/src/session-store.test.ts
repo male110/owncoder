@@ -9,6 +9,8 @@ import {
   listSessionMetas,
   loadSessionById,
   saveSessionById,
+  setActiveSessionId,
+  toggleSessionPin,
 } from "./session-store.ts";
 import { conversationStorePath } from "./conversation-store.ts";
 
@@ -81,6 +83,48 @@ describe("session store history sanitization", () => {
       attachments,
     });
     expect(loaded?.queuedMessages).toEqual([{ text: "queued", attachments }]);
+  });
+
+  it("lists sessions by the latest user-message update time", async () => {
+    const r = await root();
+    const first = await createSessionFile(r, { title: "first" });
+    await new Promise((resolve) => setTimeout(resolve, 2));
+    const second = await createSessionFile(r, { title: "second" });
+
+    await new Promise((resolve) => setTimeout(resolve, 2));
+    await saveSessionById(r, first.meta.id, {
+      title: "first",
+      mode: "agent",
+      history: [{ role: "user", content: "a newer task" }],
+      terminalLog: [],
+      lastPlanPath: null,
+      todoAnchor: null,
+      lastCheckpointId: null,
+      documentWorkflow: null,
+    }, new Date().toISOString());
+
+    const listed = await listSessionMetas(r);
+    expect(listed.sessions.map((s) => s.id)).toEqual([first.meta.id, second.meta.id]);
+  });
+
+  it("preserves activity time, focus and pin on ordinary saves", async () => {
+    const r = await root();
+    const first = await createSessionFile(r, { title: "first" });
+    const second = await createSessionFile(r, { title: "second" });
+    await toggleSessionPin(r, first.meta.id);
+    await setActiveSessionId(r, second.meta.id);
+    const before = await listSessionMetas(r);
+    const snapshot = (await loadSessionById(r, first.meta.id))!;
+
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await saveSessionById(r, first.meta.id, snapshot);
+    await saveSessionById(r, first.meta.id, {
+      ...snapshot,
+      history: [...snapshot.history, { role: "assistant", content: "background reply" }],
+    });
+
+    expect(await listSessionMetas(r)).toEqual(before);
+    expect((await loadSessionById(r, first.meta.id))?.updatedAt).toBe(first.meta.updatedAt);
   });
 
   it("deleteSessionFile drops the session json and index entry", async () => {

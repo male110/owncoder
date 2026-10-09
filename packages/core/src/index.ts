@@ -877,8 +877,11 @@ export class SessionOrchestrator {
   setQueuedMessages(messages: QueuedMessage[] | string[], sessionId?: string): void {
     const r = this.rtOpt(sessionId);
     if (!r) return;
-    r.queuedMessages = sanitizeQueuedMessages(messages);
-    void this.persist(sessionId);
+    const queuedMessages = sanitizeQueuedMessages(messages);
+    const activityUpdatedAt = queuedMessages.length > r.queuedMessages.length
+      ? new Date().toISOString() : undefined;
+    r.queuedMessages = queuedMessages;
+    void this.persist(sessionId, activityUpdatedAt);
   }
 
   /**
@@ -1449,11 +1452,11 @@ export class SessionOrchestrator {
     }
     r.history = r.history.slice(0, lastUserIdx);
     await this.persist(sessionId);
-    return this.sendMessage(userText, onEvent, sessionId, attachments);
+    return this.sendMessage(userText, onEvent, sessionId, attachments, false);
   }
 
   /** Flush current chat session to `.owncoder/sessions/{id}.json`. */
-  async persist(sessionId?: string): Promise<void> {
+  async persist(sessionId?: string, activityUpdatedAt?: string): Promise<void> {
     const sid = sessionId ?? this.state.activeSessionId;
     if (!sid) return;
     const r = this.runtimes.get(sid);
@@ -1473,7 +1476,7 @@ export class SessionOrchestrator {
           queuedMessages: r.queuedMessages,
           taskRunState: r.taskRunState,
           createdAt: r.sessionCreatedAt ?? undefined,
-        });
+        }, activityUpdatedAt);
         r.sessionTitle = meta.title;
         if (sid === this.state.activeSessionId) {
           this.state.sessionTitle = meta.title;
@@ -2001,6 +2004,7 @@ export class SessionOrchestrator {
     onEvent?: (ev: TurnEvent) => void,
     sessionId?: string,
     attachments: import("@owncoder/llm").ChatAttachment[] = [],
+    updateActivity = true,
   ): Promise<AgentLoopResult> {
     const trimmed = text.trim();
     if (!trimmed && !attachments.length) {
@@ -2046,7 +2050,7 @@ export class SessionOrchestrator {
     // beginTurn 成功后再写入 runtime + session JSON，保证并发 loadHistoryPage
     // 看到 store 已有行时会跳过 migrate，不会再复制一条 user。
     r.history = [...r.history, userTurn];
-    await this.persist(sid);
+    await this.persist(sid, updateActivity ? new Date().toISOString() : undefined);
 
     // 通过协调器提交输入，传递 onEvent 上下文
     // 协调器会自动处理队列、串行化和 drain loop

@@ -594,6 +594,8 @@ export function useChatActions(deps: {
 
       console.log("[onSend] enqueueing message, sid=", sid);
       enqueueMessage(sid, text, attachments);
+      // 消息实际入队后才更新排序时间。
+      useSessionStore.getState().touchSessionUpdatedAt(sid);
       // 用户主动发送新消息，清除可能残留的停止标志，确保队列能正常执行。
       clearStopRequest(sid);
       console.log("[onSend] running queue...");

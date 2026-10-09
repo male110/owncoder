@@ -13,6 +13,7 @@ import { checkForUpdates } from "./updates";
 import { mt } from "./i18n";
 import { indexHost } from "./index-host";
 import { disposeWebFetchRenderer, renderPage } from "./web-fetch-render";
+import { registerExternalLinks } from "./external-links";
 
 /**
  * electron-vite 产物布局：
@@ -392,6 +393,7 @@ function createWindow(): void {
     },
   });
 
+  registerExternalLinks(mainWindow.webContents);
   mainWindow.once("ready-to-show", () => mainWindow?.show());
 
   // Renderer failures used to leave only BrowserWindow's dark background visible.

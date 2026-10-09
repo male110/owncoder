@@ -1315,8 +1315,7 @@ button.ghost.accent {
   z-index: 20;
   display: flex;
   flex-direction: column;
-  /* 模型侧栏不能被平台列的高度裁切。 */
-  overflow: visible;
+  overflow: hidden;
   animation: model-menu-in 0.15s ease-out;
 }
 
@@ -1333,12 +1332,10 @@ button.ghost.accent {
   font-size: 13px;
 }
 
-/*
-  经典二级菜单：平台列留在文档流中，决定菜单主体高度；模型列是旁侧面板，
-  不参与平台列的高度计算，并且只滚动自己的内容。
-*/
+/* 两列共同撑开菜单主体，各自限制高度并独立滚动，为底部设置入口留出空间。 */
 .model-menu-body {
-  position: relative;
+  display: flex;
+  align-items: flex-start;
   flex: 0 0 auto;
   min-height: 0;
   height: auto;
@@ -1346,6 +1343,7 @@ button.ghost.accent {
 }
 
 .model-menu-providers {
+  flex: 0 0 140px;
   width: 140px;
   height: auto;
   display: flex;
@@ -1360,10 +1358,7 @@ button.ghost.accent {
 }
 
 .model-menu-models {
-  position: absolute;
-  top: 0;
-  left: 140px;
-  width: calc(100% - 140px);
+  flex: 1;
   list-style: none;
   margin: 0;
   padding: 4px;
@@ -1885,6 +1880,13 @@ button.ghost.accent {
 .editor-pane-body {
   flex: 1;
   min-height: 0;
+  position: relative;
+}
+
+.editor-loading-overlay {
+  position: absolute;
+  inset: 8px 12px auto;
+  pointer-events: none;
 }
 
 .editor-md-preview {

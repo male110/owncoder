@@ -81,7 +81,8 @@ function sortSessions(sessions: SessionMeta[]): SessionMeta[] {
     const ap = a.pinned ? 1 : 0;
     const bp = b.pinned ? 1 : 0;
     if (ap !== bp) return bp - ap;
-    return b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id);
+    // 会话顺序由最近一次实际写入用户消息的时间决定，而不是创建时间。
+    return (b.updatedAt || b.createdAt || "").localeCompare(a.updatedAt || a.createdAt || "");
   });
 }
 
@@ -250,9 +251,15 @@ export async function saveSessionById(
     title?: string;
     createdAt?: string;
   },
+  activityUpdatedAt?: string,
 ): Promise<SessionMeta> {
   const prev = await loadSessionById(workspaceRoot, id);
+  const index = await readIndex(workspaceRoot);
+  const previousMeta = index.sessions.find((s) => s.id === id);
   const now = new Date().toISOString();
+  // 普通持久化不代表用户提交了新消息，必须保留用于列表排序的活动时间。
+  const updatedAt = activityUpdatedAt || previousMeta?.updatedAt || prev?.updatedAt
+    || previousMeta?.createdAt || prev?.createdAt || now;
   const title =
     snap.title?.trim() || titleFromHistory(snap.history, prev?.title || "新会话");
   const full: PersistedSession = {
@@ -260,7 +267,7 @@ export async function saveSessionById(
     id,
     title,
     createdAt: snap.createdAt || prev?.createdAt || now,
-    updatedAt: now,
+    updatedAt,
     mode: snap.mode,
     history: sanitizeHistory(snap.history),
     terminalLog: (snap.terminalLog ?? []).slice(-MAX_TERMINAL),
@@ -281,18 +288,16 @@ export async function saveSessionById(
   const writeSession = fs.writeFile(sessionFilePath(workspaceRoot, id), encoded, "utf8");
   const writeLegacy = fs.writeFile(resolve(workspaceRoot, LEGACY_SESSION_FILE), encoded, "utf8").catch(() => undefined);
 
-  const index = await readIndex(workspaceRoot);
   const meta: SessionMeta = {
     id,
     title,
     createdAt: full.createdAt!,
-    updatedAt: now,
+    updatedAt,
+    ...(previousMeta?.pinned !== undefined ? { pinned: previousMeta.pinned } : {}),
   };
   const i = index.sessions.findIndex((s) => s.id === id);
   if (i >= 0) index.sessions[i] = meta;
   else index.sessions.unshift(meta);
-  index.activeId = id;
-  index.sessions.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   index.sessions = sortSessions(index.sessions);
   await Promise.all([writeSession, writeLegacy, writeIndex(workspaceRoot, index)]);
   return meta;
@@ -372,7 +377,7 @@ function sanitizeSession(data: PersistedSession): PersistedSession {
     version: 1,
     id: data.id,
     title: data.title,
-    updatedAt: data.updatedAt ?? new Date().toISOString(),
+    updatedAt: data.updatedAt || data.createdAt || "",
     createdAt: data.createdAt,
     mode: data.mode === "agent" ? "agent" : "plan",
     history: sanitizeHistory(data.history),

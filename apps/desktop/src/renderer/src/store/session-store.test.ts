@@ -2,6 +2,34 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { useSessionStore } from "./session-store";
 import type { ActivePlanMetaDto, PlanInfoDto } from "../../../preload/index";
 
+describe("session-store activity order", () => {
+  it("preserves order on focus and list refresh, promotes only a submitted message", () => {
+    const sessions = ["1", "2", "3"].map((id) => ({
+      id, title: id, updatedAt: `2026-01-0${4 - Number(id)}T00:00:00.000Z`,
+    }));
+    useSessionStore.setState({ activeSessionId: "2", sessions, sessionsByProject: { test: sessions } });
+    const store = useSessionStore.getState();
+    store.setActiveSessionId("1");
+    store.setSessions([...sessions]);
+    expect(useSessionStore.getState().sessions).toEqual(sessions);
+    store.touchSessionUpdatedAt("3", "2026-02-01T00:00:00.000Z");
+    expect(useSessionStore.getState().sessions.map((s) => s.id)).toEqual(["3", "1", "2"]);
+    expect(useSessionStore.getState().sessionsByProject.test).toEqual(useSessionStore.getState().sessions);
+  });
+
+  it("preserves pins and stable ties including missing times", () => {
+    const sessions = [
+      { id: "p", title: "p", pinned: true, updatedAt: "" },
+      { id: "b", title: "b", updatedAt: "" },
+      { id: "a", title: "a", updatedAt: "" },
+      { id: "c", title: "c", updatedAt: "" },
+    ];
+    useSessionStore.setState({ sessions, sessionsByProject: { test: sessions } });
+    useSessionStore.getState().touchSessionUpdatedAt("c", "2026-02-01T00:00:00.000Z");
+    expect(useSessionStore.getState().sessions.map((s) => s.id)).toEqual(["p", "c", "b", "a"]);
+  });
+});
+
 function task(id: string, description: string, status: "in_progress" | "completed" = "in_progress") {
   return {
     id,
