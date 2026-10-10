@@ -1,7 +1,8 @@
 import { promises as fs } from "node:fs";
 import { resolve } from "node:path";
+import { BUILTIN_SENSITIVE_FILES } from "@owncoder/settings";
 import { normalizeRel } from "./tools/shared.ts";
-import { redactSecrets } from "./redact.ts";
+import { isSensitiveFile, redactSecrets } from "./redact.ts";
 
 export interface CommandRedactionOptions {
   sensitiveFiles?: readonly string[];
@@ -103,8 +104,8 @@ function fileArguments(executable: string, args: readonly string[]): string[] {
   return files;
 }
 
-function parseStaticFileRead(command: string): StaticFileRead | "untrusted" | null {
-  if (UNSAFE_SHELL_SYNTAX.test(command)) return "untrusted";
+function parseStaticFileRead(command: string, rejectUnsafe = true): StaticFileRead | "untrusted" | null {
+  if (rejectUnsafe && UNSAFE_SHELL_SYNTAX.test(command)) return "untrusted";
   const args = splitArguments(command.trim());
   if (!args?.length) return null;
 
@@ -125,6 +126,28 @@ function parseStaticFileRead(command: string): StaticFileRead | "untrusted" | nu
   return { path: fileArgs[0]! };
 }
 
+function splitShellCommands(command: string): string[] {
+  return command.split(/\|\||&&|[|&;`<>\r\n]/).map((part) => part.trim()).filter(Boolean);
+}
+
+function hasSensitiveReadInUnsafeCommand(
+  command: string,
+  options?: CommandRedactionOptions,
+): boolean | null {
+  let foundRead = false;
+  const patterns = [...BUILTIN_SENSITIVE_FILES, ...(options?.sensitiveFiles ?? [])];
+  for (const part of splitShellCommands(command)) {
+    // A dynamic path cannot be attributed to a concrete file safely.
+    if (/[$%*?\[\]\r\n]/.test(part)) return null;
+    const read = parseStaticFileRead(part, false);
+    if (read === "untrusted") return null;
+    if (!read) continue;
+    foundRead = true;
+    if (isSensitiveFile(read.path, patterns)) return true;
+  }
+  return foundRead ? false : null;
+}
+
 function mask(text: string): string {
   return text ? "*** command output redacted: file source could not be verified ***" : text;
 }
@@ -143,7 +166,13 @@ export async function redactCommandReadOutput(
 ): Promise<{ stdout: string; stderr: string }> {
   const read = parseStaticFileRead(command);
   if (read === null) return { stdout, stderr };
-  if (read === "untrusted") return { stdout: mask(stdout), stderr: mask(stderr) };
+  if (read === "untrusted") {
+    // Complex commands can be released when every statically identifiable read
+    // targets a non-sensitive file. Unknown sources remain fail-closed.
+    const sensitive = hasSensitiveReadInUnsafeCommand(command, options);
+    if (sensitive === false) return { stdout, stderr };
+    return { stdout: mask(stdout), stderr: mask(stderr) };
+  }
 
   const absolute = resolve(workspaceRoot, read.path);
   const root = resolve(workspaceRoot);

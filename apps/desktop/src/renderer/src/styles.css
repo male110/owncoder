@@ -1308,14 +1308,8 @@ button.ghost.accent {
   margin: 0;
   padding: 0;
   list-style: none;
-  background: var(--bg-alt);
-  border: 1px solid var(--glass-border-strong);
-  border-radius: 12px;
-  box-shadow: var(--shadow-dropdown);
   z-index: 20;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
+  overflow: visible;
   animation: model-menu-in 0.15s ease-out;
 }
 
@@ -1332,48 +1326,64 @@ button.ghost.accent {
   font-size: 13px;
 }
 
-/* 两列共同撑开菜单主体，各自限制高度并独立滚动，为底部设置入口留出空间。 */
+/* 平台列决定锚点位置，模型浮层独立计算高度。 */
 .model-menu-body {
-  display: flex;
-  align-items: flex-start;
-  flex: 0 0 auto;
-  min-height: 0;
-  height: auto;
+  position: relative;
   overflow: visible;
 }
 
+.model-menu-providers,
+.model-menu-models,
+.model-menu-empty {
+  background: var(--bg-alt);
+  border: 1px solid var(--glass-border-strong);
+  border-radius: 12px;
+  box-shadow: var(--shadow-dropdown);
+}
+
 .model-menu-providers {
-  flex: 0 0 140px;
   width: 140px;
-  height: auto;
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding: 4px;
-  max-height: min(300px, calc(50vh - 60px));
-  overflow-x: hidden;
-  overflow-y: auto;
+  align-items: stretch;
+  padding: 0;
   box-sizing: border-box;
-  border-right: 1px solid var(--overlay-04);
+
+  overflow: hidden;
+}
+
+.model-menu-providers-list {
+  flex: 0 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 8px;
+  max-height: max(36px, min(300px, calc(50vh - 60px)));
+  overflow-y: auto;
+  overflow-x: hidden;
+  box-sizing: border-box;
 }
 
 .model-menu-models {
-  flex: 1;
+  position: absolute;
+  left: 140px;
+  top: 0;
+  height: max-content;
+  width: calc(100% - 140px);
   list-style: none;
   margin: 0;
   padding: 4px;
   min-width: 0;
-  max-height: min(300px, calc(50vh - 60px));
+  max-height: max(36px, min(300px, calc(50vh - 60px)));
   overflow-x: hidden;
   overflow-y: auto;
   box-sizing: border-box;
-  background: var(--bg-alt);
-  border-left: 1px solid var(--overlay-04);
-  box-shadow: 8px 0 16px rgba(0, 0, 0, 0.12);
   z-index: 1;
 }
 
 .model-menu-provider-item {
+  flex-shrink: 0;
   width: 100%;
   text-align: left;
   border-radius: 8px;
@@ -1391,6 +1401,7 @@ button.ghost.accent {
   font-weight: 500;
   color: var(--muted);
   transition: all 0.12s ease;
+  overflow: hidden;
   white-space: nowrap;
 }
 
@@ -1420,12 +1431,12 @@ button.ghost.accent {
 }
 
 .model-menu-models::-webkit-scrollbar,
-.model-menu-providers::-webkit-scrollbar {
+.model-menu-providers-list::-webkit-scrollbar {
   width: 4px;
 }
 
 .model-menu-models::-webkit-scrollbar-thumb,
-.model-menu-providers::-webkit-scrollbar-thumb {
+.model-menu-providers-list::-webkit-scrollbar-thumb {
   background: rgba(255, 255, 255, 0.12);
   border-radius: 2px;
 }
@@ -1494,16 +1505,18 @@ button.ghost.accent {
   width: 100%;
   color: var(--muted);
   font-size: 12px;
-  padding: 8px 12px !important;
+  padding: 10px 12px !important;
   justify-content: center;
   border-top: 1px solid var(--overlay-04);
   margin-top: 0;
-  transition: color 0.12s;
+  transition: all 0.12s;
   flex-shrink: 0;
+  background: transparent;
 }
 
 .model-menu-settings:hover {
   color: var(--accent);
+  background: var(--glass-bg-strong);
 }
 
 /* Thinking effort picker dropdown — unified style */

@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { runGit, isGitRepo } from "../git.ts";
+import git from "isomorphic-git";
+import { isGitRepo, runGit } from "../git.ts";
 
 interface CheckpointChatTurn {
   role: string;
@@ -31,24 +32,84 @@ export interface TurnCheckpoint {
   sessionId?: string | null;
 }
 
-const CHECKPOINTS_DIR = ".owncoder/checkpoints";
-/** Checkpoints kept per session (see pruneCheckpoints). */
-const MAX_KEEP = 12;
-/** Bucket for checkpoints written before `sessionId` existed. */
-const UNKNOWN_SESSION = "\u0000unknown";
-
-function checkpointDirAbs(workspaceRoot: string): string {
-  return resolve(workspaceRoot, CHECKPOINTS_DIR);
+/** Metadata stored separately from git commit */
+interface CheckpointMetadata {
+  id: string;
+  createdAt: string;
+  historyLen: number;
+  history: CheckpointChatTurn[];
+  sessionId?: string | null;
+  commitHash: string;
 }
 
-async function ensureCheckpointDir(workspaceRoot: string): Promise<string> {
-  const dir = checkpointDirAbs(workspaceRoot);
+const CHECKPOINTS_DIR = ".owncoder/checkpoints";
+/** Checkpoints kept per session */
+const MAX_KEEP = 12;
+
+/** Get session-specific checkpoint directory */
+function sessionCheckpointDir(workspaceRoot: string, sessionId: string): string {
+  return resolve(workspaceRoot, CHECKPOINTS_DIR, sessionId);
+}
+
+/** Get git dir for session */
+function gitDir(workspaceRoot: string, sessionId: string): string {
+  return join(sessionCheckpointDir(workspaceRoot, sessionId), ".git");
+}
+
+/** Get work tree (where files are checked out) */
+function workTree(workspaceRoot: string, sessionId: string): string {
+  return join(sessionCheckpointDir(workspaceRoot, sessionId), "workspace");
+}
+
+/** Get metadata dir */
+function metadataDir(workspaceRoot: string, sessionId: string): string {
+  return join(sessionCheckpointDir(workspaceRoot, sessionId), "metadata");
+}
+
+/** Initialize git repo for session if not exists */
+async function ensureGitRepo(workspaceRoot: string, sessionId: string): Promise<void> {
+  const dir = sessionCheckpointDir(workspaceRoot, sessionId);
+  const gitDirPath = gitDir(workspaceRoot, sessionId);
+  
+  try {
+    await fs.access(gitDirPath);
+    // Already exists
+    return;
+  } catch {
+    // Need to init
+  }
+
   await fs.mkdir(dir, { recursive: true });
-  return dir;
+  await fs.mkdir(workTree(workspaceRoot, sessionId), { recursive: true });
+  await fs.mkdir(metadataDir(workspaceRoot, sessionId), { recursive: true });
+
+  await git.init({
+    fs,
+    dir: workTree(workspaceRoot, sessionId),
+    gitdir: gitDirPath,
+    defaultBranch: "checkpoints",
+  });
+
+  // Configure git
+  await git.setConfig({
+    fs,
+    dir: workTree(workspaceRoot, sessionId),
+    gitdir: gitDirPath,
+    path: "user.name",
+    value: "OwnCoder Checkpoint",
+  });
+
+  await git.setConfig({
+    fs,
+    dir: workTree(workspaceRoot, sessionId),
+    gitdir: gitDirPath,
+    path: "user.email",
+    value: "checkpoint@owncoder.local",
+  });
 }
 
 export function newCheckpointId(): string {
-  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
 }
 
 export async function snapshotFileBeforeWrite(
@@ -66,71 +127,114 @@ export async function snapshotFileBeforeWrite(
   }
 }
 
+/**
+ * Persist checkpoint using git commit for files and separate JSON for metadata
+ */
 export async function persistCheckpoint(
   workspaceRoot: string,
   cp: TurnCheckpoint,
 ): Promise<void> {
-  const dir = await ensureCheckpointDir(workspaceRoot);
-  const file = join(dir, `${cp.id}.json`);
-  // Compact JSON: pretty-print made prune/read parse multi-MB history+file
-  // snapshots on every turn, which delayed sendChat / turn_complete.
-  await fs.writeFile(file, JSON.stringify(cp), "utf8");
-  await pruneCheckpoints(dir);
+  if (!cp.sessionId) {
+    throw new Error("sessionId is required for git-based checkpoints");
+  }
+
+  await ensureGitRepo(workspaceRoot, cp.sessionId);
+
+  const wt = workTree(workspaceRoot, cp.sessionId);
+  const gd = gitDir(workspaceRoot, cp.sessionId);
+
+  // Write files to work tree and stage them
+  for (const snap of cp.files) {
+    const absPath = join(wt, snap.path);
+    if (snap.existed) {
+      // File should exist - write content
+      await fs.mkdir(dirname(absPath), { recursive: true });
+      await fs.writeFile(absPath, snap.content ?? "", "utf8");
+      
+      // Stage the file
+      await git.add({
+        fs,
+        dir: wt,
+        gitdir: gd,
+        filepath: snap.path,
+      });
+    } else {
+      // File should be deleted - remove from work tree and stage removal
+      try {
+        await git.remove({
+          fs,
+          dir: wt,
+          gitdir: gd,
+          filepath: snap.path,
+        });
+      } catch {
+        // File might not exist in git yet, that's ok
+      }
+    }
+  }
+
+  // Create commit
+  const commitHash = await git.commit({
+    fs,
+    dir: wt,
+    gitdir: gd,
+    message: `Checkpoint ${cp.id} at ${cp.createdAt}`,
+    author: {
+      name: "OwnCoder Checkpoint",
+      email: "checkpoint@owncoder.local",
+    },
+  });
+
+  // Save metadata separately
+  const metadata: CheckpointMetadata = {
+    id: cp.id,
+    createdAt: cp.createdAt,
+    historyLen: cp.historyLen,
+    history: cp.history,
+    sessionId: cp.sessionId,
+    commitHash,
+  };
+
+  const metaFile = join(metadataDir(workspaceRoot, cp.sessionId), `${cp.id}.json`);
+  await fs.writeFile(metaFile, JSON.stringify(metadata), "utf8");
+
+  await pruneCheckpoints(workspaceRoot, cp.sessionId);
 }
 
 /**
- * Keep the newest MAX_KEEP checkpoints *per session*.
- *
- * The quota used to be per-directory, which meant two active sessions in one
- * workspace would evict each other's checkpoints — and an evicted checkpoint
- * turns the undo button into a silent no-op. Bucketing by session keeps each
- * session's undo depth independent.
+ * Keep the newest MAX_KEEP checkpoints per session
  */
-async function pruneCheckpoints(dir: string): Promise<void> {
+async function pruneCheckpoints(workspaceRoot: string, sessionId: string): Promise<void> {
+  const metaDir = metadataDir(workspaceRoot, sessionId);
+  
   let entries;
   try {
-    entries = await fs.readdir(dir);
+    entries = await fs.readdir(metaDir);
   } catch {
     return;
   }
-  // Newest first: ids start with Date.now().toString(36), so name sort works.
+
+  // Newest first: ids start with Date.now().toString(36), so name sort works
   const jsons = entries.filter((e) => e.endsWith(".json")).sort().reverse();
-  const seenPerSession = new Map<string, number>();
-  for (const name of jsons) {
-    const owner = await readCheckpointOwner(join(dir, name));
-    const kept = seenPerSession.get(owner) ?? 0;
-    if (kept >= MAX_KEEP) {
-      await fs.unlink(join(dir, name)).catch(() => undefined);
-      continue;
-    }
-    seenPerSession.set(owner, kept + 1);
+
+  if (jsons.length <= MAX_KEEP) return;
+
+  // Remove old checkpoints
+  const toRemove = jsons.slice(MAX_KEEP);
+  for (const name of toRemove) {
+    await fs.unlink(join(metaDir, name)).catch(() => undefined);
   }
+
+  // Note: We keep all git commits for now. In production you might want to:
+  // - Use git tags for checkpoints and delete unreferenced commits
+  // - Run git gc periodically
+  // For now, extra commits are cheap and can be cleaned manually if needed
 }
 
-/** `sessionId` is the last field we write; only the file tail is needed. */
-const SESSION_ID_TAIL = /"sessionId"\s*:\s*(null|"((?:[^"\\]|\\.)*)")\s*\}\s*$/;
-
-async function readCheckpointOwner(file: string): Promise<string> {
-  try {
-    const fh = await fs.open(file, "r");
-    try {
-      const { size } = await fh.stat();
-      if (size <= 0) return UNKNOWN_SESSION;
-      const len = Math.min(1024, size);
-      const buf = Buffer.alloc(len);
-      await fh.read(buf, 0, len, size - len);
-      const match = SESSION_ID_TAIL.exec(buf.toString("utf8"));
-      if (!match || match[1] === "null") return UNKNOWN_SESSION;
-      return match[2] || UNKNOWN_SESSION;
-    } finally {
-      await fh.close();
-    }
-  } catch {
-    return UNKNOWN_SESSION;
-  }
-}
-
-export async function listCheckpoints(workspaceRoot: string): Promise<
+export async function listCheckpoints(
+  workspaceRoot: string,
+  sessionId: string,
+): Promise<
   Array<{
     id: string;
     createdAt: string;
@@ -139,51 +243,142 @@ export async function listCheckpoints(workspaceRoot: string): Promise<
     sessionId?: string | null;
   }>
 > {
-  const dir = checkpointDirAbs(workspaceRoot);
-  let entries;
-  try {
-    entries = await fs.readdir(dir);
-  } catch {
-    return [];
-  }
-  const out: Array<{
+  const result: Array<{
     id: string;
     createdAt: string;
     touched: string[];
     historyLen: number;
     sessionId?: string | null;
   }> = [];
-  for (const name of entries.filter((e) => e.endsWith(".json")).sort().reverse()) {
+
+  // Only scan the specified session directory
+  const metaDir = metadataDir(workspaceRoot, sessionId);
+  
+  let entries;
+  try {
+    entries = await fs.readdir(metaDir);
+  } catch {
+    return [];
+  }
+
+  for (const name of entries) {
+    if (!name.endsWith(".json")) continue;
     try {
-      const raw = await fs.readFile(join(dir, name), "utf8");
-      const cp = JSON.parse(raw) as TurnCheckpoint;
-      out.push({
-        id: cp.id,
-        createdAt: cp.createdAt,
-        touched: cp.touched ?? [],
-        historyLen: cp.historyLen,
-        sessionId: cp.sessionId ?? null,
+      const raw = await fs.readFile(join(metaDir, name), "utf8");
+      const meta = JSON.parse(raw) as CheckpointMetadata;
+      result.push({
+        id: meta.id,
+        createdAt: meta.createdAt,
+        touched: [], // Not tracked in git version
+        historyLen: meta.historyLen,
+        sessionId: meta.sessionId,
       });
     } catch {
-      /* skip */
+      // Skip corrupted metadata
     }
   }
-  return out;
+
+  // Sort newest first
+  result.sort((a, b) => b.id.localeCompare(a.id));
+  return result;
 }
 
 export async function loadCheckpoint(
   workspaceRoot: string,
   id: string,
 ): Promise<TurnCheckpoint | null> {
+  // Need to find which session owns this checkpoint
+  const checkpointsRoot = resolve(workspaceRoot, CHECKPOINTS_DIR);
+  
+  let sessions;
   try {
-    const raw = await fs.readFile(join(checkpointDirAbs(workspaceRoot), `${id}.json`), "utf8");
-    return JSON.parse(raw) as TurnCheckpoint;
+    sessions = await fs.readdir(checkpointsRoot);
   } catch {
     return null;
   }
+
+  // Search all sessions for this checkpoint ID
+  for (const sessionId of sessions) {
+    const metaFile = join(metadataDir(workspaceRoot, sessionId), `${id}.json`);
+    
+    try {
+      const raw = await fs.readFile(metaFile, "utf8");
+      const meta = JSON.parse(raw) as CheckpointMetadata;
+
+      // Found it, now load from git
+      return await loadCheckpointFromMeta(workspaceRoot, sessionId, meta);
+    } catch {
+      // Not in this session, continue searching
+      continue;
+    }
+  }
+
+  return null;
 }
 
-/** Restore files from checkpoint; returns restored relative paths. */
+async function loadCheckpointFromMeta(
+  workspaceRoot: string,
+  sessionId: string,
+  meta: CheckpointMetadata,
+): Promise<TurnCheckpoint> {
+  const wt = workTree(workspaceRoot, sessionId);
+  const gd = gitDir(workspaceRoot, sessionId);
+
+  const files: FileSnapshot[] = [];
+  
+  // List all files in commit recursively
+  const commitObj = await git.readCommit({
+    fs,
+    dir: wt,
+    gitdir: gd,
+    oid: meta.commitHash,
+  });
+
+  // Walk tree recursively to collect all files
+  async function walkTree(treeOid: string, prefix: string = ""): Promise<void> {
+    const tree = await git.readTree({
+      fs,
+      dir: wt,
+      gitdir: gd,
+      oid: treeOid,
+    });
+
+    for (const entry of tree.tree) {
+      const fullPath = prefix ? `${prefix}/${entry.path}` : entry.path;
+      
+      if (entry.type === "blob") {
+        const content = await git.readBlob({
+          fs,
+          dir: wt,
+          gitdir: gd,
+          oid: entry.oid,
+        });
+        files.push({
+          path: fullPath,
+          existed: true,
+          content: Buffer.from(content.blob).toString("utf8"),
+        });
+      } else if (entry.type === "tree") {
+        // Recurse into subdirectory
+        await walkTree(entry.oid, fullPath);
+      }
+    }
+  }
+
+  await walkTree(commitObj.commit.tree);
+
+  return {
+    id: meta.id,
+    createdAt: meta.createdAt,
+    historyLen: meta.historyLen,
+    history: meta.history,
+    files,
+    touched: [], // Not tracked in git version
+    sessionId: meta.sessionId,
+  };
+}
+
+/** Restore files from checkpoint; returns restored relative paths */
 export async function restoreCheckpointFiles(
   workspaceRoot: string,
   cp: TurnCheckpoint,
@@ -278,7 +473,7 @@ export async function gitAutoSnapshot(
   const dirtyFiles = status.out
     .split(/\r?\n/)
     .filter(Boolean)
-    .map((line) => line.slice(3).trim())
+    .map((line: string) => line.slice(3).trim())
     .filter(Boolean);
 
   const gitDir = await runGit(workspaceRoot, ["rev-parse", "--absolute-git-dir"]);

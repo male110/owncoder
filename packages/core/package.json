@@ -32,6 +32,7 @@
     "better-sqlite3": "^13.0.0",
     "diff": "^9.0.0",
     "fast-xml-parser": "^5.11.1",
+    "isomorphic-git": "^1.43.3",
     "jsonrepair": "^3.15.0",
     "mdast-util-from-markdown": "^2.0.3",
     "simple-git": "^3.36.0",
