@@ -41,4 +41,34 @@ describe("googleGeminiCodec", () => {
     expect(parser.finish().choices[0]?.message.content).toBe("Hi");
     expect(deltas).toEqual(["Hi"]);
   });
+
+  it("preserves empty args as an empty object and keeps parallel calls isolated", () => {
+    const result = googleGeminiCodec.decodeResponse({
+      candidates: [{
+        content: {
+          parts: [
+            { functionCall: { name: "first", args: {} } },
+            { functionCall: { name: "second", args: { value: 2 } } },
+          ],
+        },
+        finishReason: "STOP",
+      }],
+    });
+
+    expect(result.choices[0]?.message.tool_calls).toEqual([
+      { id: "call_0", type: "function", function: { name: "first", arguments: "{}" } },
+      { id: "call_1", type: "function", function: { name: "second", arguments: '{"value":2}' } },
+    ]);
+  });
+
+  it("keeps function calls from separate Gemini SSE chunks in order", () => {
+    const parser = googleGeminiCodec.createStreamParser({});
+    parser.feed({ data: JSON.stringify({ candidates: [{ content: { parts: [{ functionCall: { name: "first", args: { a: 1 } } }] } }] }) });
+    parser.feed({ data: JSON.stringify({ candidates: [{ content: { parts: [{ functionCall: { name: "second", args: { b: 2 } } }] } }] }) });
+
+    expect(parser.finish().choices[0]?.message.tool_calls).toEqual([
+      { id: "call_0", type: "function", function: { name: "first", arguments: '{"a":1}' } },
+      { id: "call_1", type: "function", function: { name: "second", arguments: '{"b":2}' } },
+    ]);
+  });
 });

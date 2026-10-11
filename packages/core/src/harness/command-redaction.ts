@@ -134,18 +134,17 @@ function hasSensitiveReadInUnsafeCommand(
   command: string,
   options?: CommandRedactionOptions,
 ): boolean | null {
-  let foundRead = false;
   const patterns = [...BUILTIN_SENSITIVE_FILES, ...(options?.sensitiveFiles ?? [])];
   for (const part of splitShellCommands(command)) {
-    // A dynamic path cannot be attributed to a concrete file safely.
-    if (/[$%*?\[\]\r\n]/.test(part)) return null;
+    // 检测 shell 变量展开（$VAR、${VAR}、%VAR%）或通配符，这些无法静态归因到具体文件
+    if (/\$[A-Za-z_]|\$\{|%[A-Za-z_][A-Za-z0-9_]*%|[*?\[\]]|\r|\n/.test(part)) return null;
     const read = parseStaticFileRead(part, false);
     if (read === "untrusted") return null;
     if (!read) continue;
-    foundRead = true;
     if (isSensitiveFile(read.path, patterns)) return true;
   }
-  return foundRead ? false : null;
+  // 遍历完所有命令段，未找到敏感文件读取（可能有普通文件读取，或无文件读取），放行
+  return false;
 }
 
 function mask(text: string): string {
@@ -176,7 +175,10 @@ export async function redactCommandReadOutput(
 
   const absolute = resolve(workspaceRoot, read.path);
   const root = resolve(workspaceRoot);
-  if (absolute !== root && !absolute.startsWith(`${root}/`) && !absolute.startsWith(`${root}\\`)) {
+  // 标准化路径比较：统一转换为正斜杠以支持跨平台路径判断
+  const normalizedAbsolute = absolute.replace(/\\/g, "/");
+  const normalizedRoot = root.replace(/\\/g, "/");
+  if (normalizedAbsolute !== normalizedRoot && !normalizedAbsolute.startsWith(`${normalizedRoot}/`)) {
     return { stdout: mask(stdout), stderr: mask(stderr) };
   }
 

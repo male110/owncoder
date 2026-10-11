@@ -1040,19 +1040,6 @@ function ComposerImpl({
         </div>
 
         <div className="composer-actions">
-          {queueCount > 0 ? (
-            <div className="queue-badge">
-              <span className="queue-badge-text">{t("待执行{{count}}条", { count: queueCount })}</span>
-              <button
-                type="button"
-                className="queue-badge-remove"
-                onClick={() => onRemoveQueueMessage(0)}
-                title={t("移除最早待执行消息")}
-              >
-                ✕
-              </button>
-            </div>
-          ) : null}
           {sending ? (
             <button type="button" className="stop-btn" onClick={onCancel}>
               {t("停止")}

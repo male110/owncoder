@@ -135,11 +135,11 @@ describe("anthropicMessagesCodec encode", () => {
         { type: "text", text: "look" },
         {
           type: "image",
-          source: { type: "url", media_type: "image/png", url: "https://cdn.example/a.png" },
+          source: { type: "base64", media_type: "image/png", data: "iVBORw0KGgo=" },
         },
         {
           type: "image",
-          source: { type: "url", media_type: "image/jpeg", url: "https://cdn.example/b.jpg" },
+          source: { type: "base64", media_type: "image/jpeg", data: "/9j/4AAQ=" },
         },
         {
           type: "text",
@@ -361,6 +361,54 @@ describe("anthropicMessagesCodec stream", () => {
     });
     expect(result.usage?.prompt_tokens).toBe(3);
     expect(result.usage?.completion_tokens).toBe(8);
+  });
+
+  it("does not let an empty content_block_stop overwrite accumulated tool arguments", () => {
+    const parser = anthropicMessagesCodec.createStreamParser({});
+    parser.feed({
+      event: "content_block_start",
+      data: JSON.stringify({
+        type: "content_block_start",
+        index: 0,
+        content_block: { type: "tool_use", id: "toolu_1", name: "read_file", input: {} },
+      }),
+    });
+    parser.feed({
+      event: "content_block_delta",
+      data: JSON.stringify({
+        type: "content_block_delta",
+        index: 0,
+        delta: { type: "input_json_delta", partial_json: '{"path":"a.ts"}' },
+      }),
+    });
+    parser.feed({
+      event: "content_block_stop",
+      data: JSON.stringify({ type: "content_block_stop", index: 0 }),
+    });
+
+    expect(parser.finish().choices[0]?.message.tool_calls?.[0]?.function.arguments).toBe('{"path":"a.ts"}');
+  });
+
+  it("keeps parallel Anthropic tool arguments isolated by content block index", () => {
+    const parser = anthropicMessagesCodec.createStreamParser({});
+    for (const [index, id, name, partial_json] of [
+      [0, "toolu_1", "first", '{"a":1}'],
+      [1, "toolu_2", "second", '{"b":2}'],
+    ] as const) {
+      parser.feed({
+        event: "content_block_start",
+        data: JSON.stringify({ type: "content_block_start", index, content_block: { type: "tool_use", id, name, input: {} } }),
+      });
+      parser.feed({
+        event: "content_block_delta",
+        data: JSON.stringify({ type: "content_block_delta", index, delta: { type: "input_json_delta", partial_json } }),
+      });
+    }
+
+    expect(parser.finish().choices[0]?.message.tool_calls).toEqual([
+      { id: "toolu_1", type: "function", function: { name: "first", arguments: '{"a":1}' } },
+      { id: "toolu_2", type: "function", function: { name: "second", arguments: '{"b":2}' } },
+    ]);
   });
 
   it("does not fallback on generic 400s, only when stream is explicitly unsupported", () => {

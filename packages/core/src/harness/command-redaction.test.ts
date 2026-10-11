@@ -85,3 +85,77 @@ test("command file redaction: ordinary command output is unchanged", async () =>
   assert.equal(result.stdout, output);
   assert.equal(result.stderr, "warning");
 });
+
+test("command file redaction: non-file-reading pipes are allowed", async () => {
+  const root = await workspace();
+  const output = "password = Hunter2\nerror TS6133";
+  // pnpm run typecheck 管道到 Select-Object 不涉及文件读取，应放行
+  const result = await redactCommandReadOutput("pnpm run typecheck 2>&1 | Select-Object -Last 5", root, output, "");
+  assert.equal(result.stdout, output);
+  assert.equal(result.stderr, "");
+});
+
+test("command file redaction: echo with pipe should be allowed", async () => {
+  const root = await workspace();
+  const output = "test output";
+  const result = await redactCommandReadOutput("echo test | Select-Object -First 1", root, output, "");
+  assert.equal(result.stdout, output);
+  assert.equal(result.stderr, "");
+});
+
+test("command file redaction: file read in complex pipe should still be redacted for sensitive files", async () => {
+  const root = await workspace();
+  const result = await redactCommandReadOutput("Get-Content .env | Select-Object -First 1", root, "PASSWORD=hunter2", "");
+  assert.match(result.stdout, /source could not be verified/);
+  assert.ok(!result.stdout.includes("hunter2"));
+});
+
+test("command file redaction: file read in complex pipe should be allowed for normal files", async () => {
+  const root = await workspace();
+  const output = "ordinary output";
+  const result = await redactCommandReadOutput("Get-Content notes.txt | Out-String", root, output, "");
+  assert.equal(result.stdout, output);
+  assert.equal(result.stderr, "");
+});
+
+test("command file redaction: path traversal attempts are blocked", async () => {
+  const root = await workspace();
+  const result = await redactCommandReadOutput("cat ../../etc/passwd", root, "root:x:0:0", "");
+  assert.match(result.stdout, /source could not be verified/);
+  assert.ok(!result.stdout.includes("root:x:0:0"));
+});
+
+test("command file redaction: Windows absolute paths outside workspace are blocked", async () => {
+  const root = await workspace();
+  const result = await redactCommandReadOutput("type C:\\secrets\\.env", root, "API_KEY=secret123", "");
+  assert.match(result.stdout, /source could not be verified/);
+  assert.ok(!result.stdout.includes("secret123"));
+});
+
+test("command file redaction: custom sensitiveFiles configuration", async () => {
+  const root = await workspace();
+  await writeFile(join(root, "custom-secret.txt"), "sensitive data\n");
+  const result = await redactCommandReadOutput(
+    "cat custom-secret.txt",
+    root,
+    "sensitive data",
+    "",
+    { sensitiveFiles: ["custom-secret.txt"] }
+  );
+  assert.ok(!result.stdout.includes("sensitive data"));
+});
+
+test("command file redaction: empty output is preserved", async () => {
+  const root = await workspace();
+  const result = await redactCommandReadOutput("cat .env", root, "", "");
+  assert.equal(result.stdout, "");
+  assert.equal(result.stderr, "");
+});
+
+test("command file redaction: paths containing $ are allowed when not variable expansion", async () => {
+  const root = await workspace();
+  await writeFile(join(root, "price$.txt"), "normal content\n");
+  const output = "normal content";
+  const result = await redactCommandReadOutput("cat price$.txt", root, output, "");
+  assert.equal(result.stdout, output);
+});

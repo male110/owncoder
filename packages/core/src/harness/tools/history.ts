@@ -5,6 +5,7 @@ import { searchHistory } from "../loop/history-vector.ts";
 const HISTORY_TOP_K = 5;
 const HISTORY_MIN_SCORE = 0.6;
 const HISTORY_FIELD_MAX_CHARS = 4_000;
+const NEAR_DUPLICATE_THRESHOLD = 0.8;
 
 export interface HistoryRecallOptions {
   query: string;
@@ -17,11 +18,11 @@ export interface HistoryRecallSource {
   sessionId?: string;
 }
 
-function compactField(value: unknown): string {
+function compactField(value: unknown, allowFullReport = false): string {
   const text = typeof value === "string"
     ? value
     : JSON.stringify(value ?? "(none)", null, 2);
-  if (text.length <= HISTORY_FIELD_MAX_CHARS) return text;
+  if (allowFullReport || text.length <= HISTORY_FIELD_MAX_CHARS) return text;
   return `${text.slice(0, HISTORY_FIELD_MAX_CHARS)}\n…[truncated]`;
 }
 
@@ -37,7 +38,7 @@ export async function recallHistoryBefore(
   if (!text) return fail("query must not be empty");
   if (!source.sessionId) return ok("No searchable session history is available.");
 
-  const hits = (await searchHistory(
+  let hits = (await searchHistory(
     source.embedding,
     source.store,
     text,
@@ -51,6 +52,39 @@ export async function recallHistoryBefore(
   if (hits.length === 0) {
     return ok("No relevant history found (minimum relevance: 60%).");
   }
+
+  // Deduplicate near-duplicate high-similarity hits: keep only the newest
+  const seen = new Set<string>();
+  const deduped: typeof hits = [];
+  
+  for (const hit of hits) {
+    const contentHash = hashContent(hit.content);
+    
+    // Check if we've seen a highly similar hit
+    let isDuplicate = false;
+    for (const prev of deduped) {
+      if (hit.score >= NEAR_DUPLICATE_THRESHOLD && prev.score >= NEAR_DUPLICATE_THRESHOLD) {
+        const prevHash = hashContent(prev.content);
+        if (contentHash === prevHash) {
+          // Same content, keep the newer one (higher turnIndex)
+          if ((hit.turnIndex ?? 0) > (prev.turnIndex ?? 0)) {
+            // Replace old with new
+            const idx = deduped.indexOf(prev);
+            deduped.splice(idx, 1);
+            deduped.push(hit);
+          }
+          isDuplicate = true;
+          break;
+        }
+      }
+    }
+    
+    if (!isDuplicate) {
+      deduped.push(hit);
+    }
+  }
+
+  hits = deduped;
 
   const output = hits.map((hit, index) => {
     type ArchivedRound = {
@@ -71,13 +105,30 @@ export async function recallHistoryBefore(
     `## Match ${index + 1}`,
     `User input:\n${compactField(round?.userInput ?? hit.content)}`,
     `Task decomposition:\n${compactField(round?.taskDecomposition)}`,
-    `LLM report:\n${compactField(round?.llmReport)}`,
+    `LLM report:\n${compactField(round?.llmReport, true)}`,
     `Evidence:\n${compactField(round?.evidence)}`,
     `Tool calls:\n${compactField(round?.toolCalls)}`,
   ].join("\n");
   }).join("\n\n");
 
   return ok(output);
+}
+
+function hashContent(content: string): string {
+  // Simple hash for deduplication - extract userInput and taskDecomposition
+  try {
+    const parsed = JSON.parse(content);
+    if (parsed && typeof parsed === "object") {
+      const key = JSON.stringify({
+        userInput: parsed.userInput,
+        taskDecomposition: parsed.taskDecomposition,
+      });
+      return key;
+    }
+  } catch {
+    // Fall back to content itself
+  }
+  return content;
 }
 
 /** Ordinary recall delegates to the shared boundary implementation. */

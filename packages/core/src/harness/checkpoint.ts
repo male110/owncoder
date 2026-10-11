@@ -40,6 +40,7 @@ interface CheckpointMetadata {
   history: CheckpointChatTurn[];
   sessionId?: string | null;
   commitHash: string;
+  touched?: string[];
 }
 
 const CHECKPOINTS_DIR = ".owncoder/checkpoints";
@@ -134,16 +135,22 @@ export async function persistCheckpoint(
   workspaceRoot: string,
   cp: TurnCheckpoint,
 ): Promise<void> {
+  const startTime = Date.now();
+  console.log(`[checkpoint] persistCheckpoint 开始: id=${cp.id}, files=${cp.files.length}`);
+  
   if (!cp.sessionId) {
     throw new Error("sessionId is required for git-based checkpoints");
   }
 
+  const t0 = Date.now();
   await ensureGitRepo(workspaceRoot, cp.sessionId);
+  console.log(`[checkpoint] - 仓库初始化完成: ${Date.now() - t0}ms`);
 
   const wt = workTree(workspaceRoot, cp.sessionId);
   const gd = gitDir(workspaceRoot, cp.sessionId);
 
   // Write files to work tree and stage them
+  const t1 = Date.now();
   for (const snap of cp.files) {
     const absPath = join(wt, snap.path);
     if (snap.existed) {
@@ -173,7 +180,10 @@ export async function persistCheckpoint(
     }
   }
 
+  console.log(`[checkpoint] - 文件写入及暂存完成: ${Date.now() - t1}ms`);
+
   // Create commit
+  const t2 = Date.now();
   const commitHash = await git.commit({
     fs,
     dir: wt,
@@ -184,8 +194,10 @@ export async function persistCheckpoint(
       email: "checkpoint@owncoder.local",
     },
   });
+  console.log(`[checkpoint] - Git commit 完成: ${Date.now() - t2}ms`);
 
   // Save metadata separately
+  const t3 = Date.now();
   const metadata: CheckpointMetadata = {
     id: cp.id,
     createdAt: cp.createdAt,
@@ -193,12 +205,18 @@ export async function persistCheckpoint(
     history: cp.history,
     sessionId: cp.sessionId,
     commitHash,
+    touched: cp.touched,
   };
 
   const metaFile = join(metadataDir(workspaceRoot, cp.sessionId), `${cp.id}.json`);
   await fs.writeFile(metaFile, JSON.stringify(metadata), "utf8");
+  console.log(`[checkpoint] - 元数据保存完成: ${Date.now() - t3}ms`);
 
+  const t4 = Date.now();
   await pruneCheckpoints(workspaceRoot, cp.sessionId);
+  console.log(`[checkpoint] - 旧检查点清理完成: ${Date.now() - t4}ms`);
+
+  console.log(`[checkpoint] - persistCheckpoint 总耗时: ${Date.now() - startTime}ms`);
 }
 
 /**
@@ -287,17 +305,27 @@ export async function loadCheckpoint(
   workspaceRoot: string,
   id: string,
 ): Promise<TurnCheckpoint | null> {
+  const startTime = Date.now();
+  console.log(`[checkpoint] loadCheckpoint 开始: id=${id}`);
+  
   // Need to find which session owns this checkpoint
   const checkpointsRoot = resolve(workspaceRoot, CHECKPOINTS_DIR);
   
   let sessions;
+  const t0 = Date.now();
   try {
     sessions = await fs.readdir(checkpointsRoot);
   } catch {
+    console.log(`[checkpoint] loadCheckpoint 失败: 检查点目录不存在`);
+    console.log(`[checkpoint] - loadCheckpoint 总耗时: ${Date.now() - startTime}ms`);
     return null;
+  } finally {
+    console.log(`[checkpoint] - 会话目录扫描: ${Date.now() - t0}ms`);
   }
 
   // Search all sessions for this checkpoint ID
+  const t1 = Date.now();
+  console.log(`[checkpoint] - 搜索 ${sessions.length} 个会话目录`);
   for (const sessionId of sessions) {
     const metaFile = join(metadataDir(workspaceRoot, sessionId), `${id}.json`);
     
@@ -306,13 +334,20 @@ export async function loadCheckpoint(
       const meta = JSON.parse(raw) as CheckpointMetadata;
 
       // Found it, now load from git
-      return await loadCheckpointFromMeta(workspaceRoot, sessionId, meta);
+      console.log(`[checkpoint] - 元数据查找: ${Date.now() - t1}ms`);
+      console.log(`[checkpoint] - 找到元数据，开始从 Git 加载: session=${sessionId}`);
+      const result = await loadCheckpointFromMeta(workspaceRoot, sessionId, meta);
+      console.log(`[checkpoint] - loadCheckpoint 总耗时: ${Date.now() - startTime}ms`);
+      return result;
     } catch {
       // Not in this session, continue searching
       continue;
     }
   }
 
+  console.log(`[checkpoint] - 元数据查找: ${Date.now() - t1}ms`);
+  console.log(`[checkpoint] loadCheckpoint 失败: 未找到检查点 ${id}`);
+  console.log(`[checkpoint] - loadCheckpoint 总耗时: ${Date.now() - startTime}ms`);
   return null;
 }
 
@@ -324,9 +359,10 @@ async function loadCheckpointFromMeta(
   const wt = workTree(workspaceRoot, sessionId);
   const gd = gitDir(workspaceRoot, sessionId);
 
-  const files: FileSnapshot[] = [];
+  const fileMap = new Map<string, FileSnapshot>();
   
   // List all files in commit recursively
+  const t1 = Date.now();
   const commitObj = await git.readCommit({
     fs,
     dir: wt,
@@ -353,7 +389,7 @@ async function loadCheckpointFromMeta(
           gitdir: gd,
           oid: entry.oid,
         });
-        files.push({
+        fileMap.set(fullPath, {
           path: fullPath,
           existed: true,
           content: Buffer.from(content.blob).toString("utf8"),
@@ -366,6 +402,26 @@ async function loadCheckpointFromMeta(
   }
 
   await walkTree(commitObj.commit.tree);
+  console.log(`[checkpoint] - Git 树遍历与文件读取: ${Date.now() - t1}ms`);
+
+  // If we have touched order, use it; otherwise use map values
+  const files: FileSnapshot[] = [];
+  if (meta.touched && meta.touched.length > 0) {
+    for (const path of meta.touched) {
+      const snap = fileMap.get(path);
+      if (snap) {
+        files.push(snap);
+      }
+    }
+    // Add any remaining files not in touched list
+    for (const [path, snap] of fileMap) {
+      if (!meta.touched.includes(path)) {
+        files.push(snap);
+      }
+    }
+  } else {
+    files.push(...fileMap.values());
+  }
 
   return {
     id: meta.id,
@@ -373,7 +429,7 @@ async function loadCheckpointFromMeta(
     historyLen: meta.historyLen,
     history: meta.history,
     files,
-    touched: [], // Not tracked in git version
+    touched: meta.touched ?? [],
     sessionId: meta.sessionId,
   };
 }
@@ -383,6 +439,9 @@ export async function restoreCheckpointFiles(
   workspaceRoot: string,
   cp: TurnCheckpoint,
 ): Promise<string[]> {
+  const startTime = Date.now();
+  console.log(`[checkpoint] restoreCheckpointFiles 开始: id=${cp.id}, files=${cp.files.length}`);
+  
   const restored: string[] = [];
   // Restore in reverse touch order when possible
   const files = [...cp.files].reverse();
@@ -397,6 +456,7 @@ export async function restoreCheckpointFiles(
     await fs.writeFile(abs, snap.content ?? "", "utf8");
     restored.push(snap.path);
   }
+  console.log(`[checkpoint] - restoreCheckpointFiles 总耗时: ${Date.now() - startTime}ms`);
   return restored;
 }
 
@@ -458,14 +518,27 @@ export async function gitAutoSnapshot(
   workspaceRoot: string,
   label = "auto-snapshot",
 ): Promise<GitSnapshotResult> {
-  if (!(await isGitRepo(workspaceRoot))) return { ok: false, reason: "not-a-repo" };
+  const startTime = Date.now();
+  console.log(`[checkpoint] gitAutoSnapshot 开始: label=${label}`);
+  
+  const t0 = Date.now();
+  if (!(await isGitRepo(workspaceRoot))) {
+    console.log(`[checkpoint] gitAutoSnapshot 跳过: 非 Git 仓库`);
+    return { ok: false, reason: "not-a-repo" };
+  }
+  console.log(`[checkpoint] - Git 仓库检查完成: ${Date.now() - t0}ms`);
 
   // Check if there's anything to save
+  const t1 = Date.now();
   const status = await runGit(workspaceRoot, ["status", "--porcelain"]);
+  console.log(`[checkpoint] - Git status 检查完成: ${Date.now() - t1}ms`);
+  
   if (status.code !== 0) {
+    console.log(`[checkpoint] gitAutoSnapshot 失败: git status 失败`);
     return { ok: false, reason: "failed", error: status.err || "git status failed" };
   }
   if (!status.out.trim()) {
+    console.log(`[checkpoint] gitAutoSnapshot 跳过: 工作区干净，无需快照`);
     return { ok: false, reason: "clean" }; // Clean working tree, nothing to snapshot
   }
 
@@ -475,11 +548,15 @@ export async function gitAutoSnapshot(
     .filter(Boolean)
     .map((line: string) => line.slice(3).trim())
     .filter(Boolean);
+  console.log(`[checkpoint] - 发现 ${dirtyFiles.length} 个变更文件`);
 
+  const t2 = Date.now();
   const gitDir = await runGit(workspaceRoot, ["rev-parse", "--absolute-git-dir"]);
   if (gitDir.code !== 0 || !gitDir.out.trim()) {
+    console.log(`[checkpoint] gitAutoSnapshot 失败: 无法解析 Git 目录`);
     return { ok: false, reason: "failed", error: gitDir.err || "cannot resolve git dir" };
   }
+  console.log(`[checkpoint] - Git 目录解析完成: ${Date.now() - t2}ms`);
 
   const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
   const message = `${GIT_SNAPSHOT_PREFIX}:${id}:${label}`;
@@ -488,8 +565,10 @@ export async function gitAutoSnapshot(
 
   try {
     // A fresh repo with zero commits has no HEAD — snapshot as a root commit.
+    const t3 = Date.now();
     const head = await runGit(workspaceRoot, ["rev-parse", "--verify", "HEAD"]);
     const parent = head.code === 0 ? head.out.trim() : null;
+    console.log(`[checkpoint] - HEAD 解析完成: ${Date.now() - t3}ms`);
 
     const step = (what: string, err: string): GitSnapshotResult => {
       const detail = err.trim() || `git ${what} failed`;
@@ -498,35 +577,47 @@ export async function gitAutoSnapshot(
     };
 
     if (parent) {
+      const t4 = Date.now();
       const readTree = await runGit(workspaceRoot, ["read-tree", parent], 15_000, env);
       if (readTree.code !== 0) return step("read-tree", readTree.err);
+      console.log(`[checkpoint] - read-tree 完成: ${Date.now() - t4}ms`);
     }
 
     // Stage everything (tracked edits, deletions and untracked files) into the
     // throwaway index. .gitignore is still respected, matching `stash -u`.
+    const t5 = Date.now();
     const add = await runGit(workspaceRoot, ["add", "-A", "--", "."], 60_000, env);
     if (add.code !== 0) return step("add", add.err);
+    console.log(`[checkpoint] - git add 完成: ${Date.now() - t5}ms`);
 
+    const t6 = Date.now();
     const writeTree = await runGit(workspaceRoot, ["write-tree"], 30_000, env);
     if (writeTree.code !== 0 || !writeTree.out.trim()) return step("write-tree", writeTree.err);
     const tree = writeTree.out.trim();
+    console.log(`[checkpoint] - write-tree 完成: ${Date.now() - t6}ms`);
 
+    const t7 = Date.now();
     const commitArgs = ["commit-tree", tree, "-m", message];
     if (parent) commitArgs.push("-p", parent);
     const commitTree = await runGit(workspaceRoot, commitArgs, 15_000, env);
     if (commitTree.code !== 0 || !commitTree.out.trim()) return step("commit-tree", commitTree.err);
     const commit = commitTree.out.trim();
+    console.log(`[checkpoint] - commit-tree 完成: ${Date.now() - t7}ms`);
 
     // Anchor the commit to a ref so gc/prune can never reclaim it.
+    const t8 = Date.now();
     const ref = `${GIT_SNAPSHOT_REF_NS}/${id}`;
     const updateRef = await runGit(workspaceRoot, ["update-ref", ref, commit], 15_000, env);
     if (updateRef.code !== 0) return step("update-ref", updateRef.err);
+    console.log(`[checkpoint] - update-ref 完成: ${Date.now() - t8}ms`);
 
     console.log("[checkpoint] git snapshot created:", id, dirtyFiles.length, "files ->", ref);
 
     // Prune old snapshots
+    const t9 = Date.now();
     await pruneGitSnapshots(workspaceRoot);
-
+    console.log(`[checkpoint] - 旧快照清理完成: ${Date.now() - t9}ms`);
+    
     return {
       ok: true,
       snapshot: {
@@ -540,6 +631,7 @@ export async function gitAutoSnapshot(
     };
   } finally {
     await fs.unlink(tmpIndex).catch(() => undefined);
+    console.log(`[checkpoint] - gitAutoSnapshot 总耗时: ${Date.now() - startTime}ms`);
   }
 }
 
