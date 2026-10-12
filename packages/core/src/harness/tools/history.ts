@@ -54,7 +54,6 @@ export async function recallHistoryBefore(
   }
 
   // Deduplicate near-duplicate high-similarity hits: keep only the newest
-  const seen = new Set<string>();
   const deduped: typeof hits = [];
   
   for (const hit of hits) {

@@ -19,11 +19,15 @@ describe("web search prompt guidance", () => {
   it("requires consecutive tool use until the current task is complete or blocked", () => {
     for (const prompt of [BUILTIN_AGENT_PROMPT, BUILTIN_PLAN_PROMPT]) {
       const loop = prompt.split("## Loop")[1]?.split("## ")[0] ?? "";
-      expect(loop).toMatch(/\*\*Continue\*\*/);
-      expect(loop).toMatch(/After every tool result, call the next tool needed to complete the current task/);
-      expect(loop).toMatch(/Do not return a partial result/);
-      expect(loop.indexOf("**Continue**")).toBeLessThan(loop.indexOf("**Stop**"));
+      // New structure: explicit Verify/Report phases instead of generic Continue
+      expect(loop).toMatch(/\*\*Report\*\*/);
+      expect(loop).toMatch(/Do NOT call any tools after starting/);
+      expect(loop.indexOf("**Report**")).toBeLessThan(loop.indexOf("**Stop**"));
     }
+    // Agent mode has explicit verification phase
+    const agentLoop = BUILTIN_AGENT_PROMPT.split("## Loop")[1]?.split("## ")[0] ?? "";
+    expect(agentLoop).toMatch(/\*\*Verify\*\*/);
+    expect(agentLoop).toMatch(/All verification tool calls MUST complete before generating any summary/);
   });
 
   it("requires exact named identifiers before semantic search", () => {

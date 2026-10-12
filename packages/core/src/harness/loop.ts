@@ -382,6 +382,7 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
   };
 
   const finishWithRoundsPersist = (assistantText: string): AgentLoopResult => {
+    const started = performance.now();
     const result = finish(assistantText);
 
     // Fire-and-forget: persist this turn's report + evidence so the next
@@ -501,6 +502,7 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
         });
     }
 
+    console.log(`[loop] sid=${opts.sessionId ?? "unknown"} step=final_result status=done duration=${Math.round(performance.now() - started)}ms`);
     return result;
   };
 
@@ -575,6 +577,8 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
     return finishWithRoundsPersist(state.lastAssistant || msg);
   }
 
+  const reportStarted = performance.now();
+  let reportStatus = "skipped";
   // ── Final verification report (single LLM call) ──
   // All verify nodes in the pipeline have now finished; issue ONE
   // `chatCompletionStream` and merge the `### Verification` paragraph into the
@@ -591,6 +595,8 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
     !state.awaitingUserConfirmation &&
     !state.handoffRequested
   ) {
+    console.log(`[loop] sid=${opts.sessionId ?? "unknown"} step=verify_report start`);
+    reportStatus = "error";
     try {
       const verifyText = await runVerifyReport(
         opts,
@@ -604,6 +610,7 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
         verifyText,
         history,
       );
+      reportStatus = "done";
     } catch (verifyError) {
       // best-effort: a failed verification report must not break the turn
       const verifyErr = verifyError instanceof Error ? verifyError.message : String(verifyError);
@@ -618,6 +625,8 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
       });
     }
   }
+
+  console.log(`[loop] sid=${opts.sessionId ?? "unknown"} step=verify_report status=${reportStatus} duration=${Math.round(performance.now() - reportStarted)}ms`);
 
   // A blocked exploration is a user-visible non-success terminal state. Keep
   // the collected report/evidence, but do not run verification or auto-fix.

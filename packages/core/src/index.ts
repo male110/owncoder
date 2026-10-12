@@ -2088,23 +2088,43 @@ export class SessionOrchestrator {
     // to the wrong project or silently skip (map entry removed). The captured
     // root + direct reference to `r` survive the workspace switch.
     const capturedRoot = ws.root;
+    const timingContext = `sid=${sessionId} turn=${turnId}`;
+    const logTiming = (step: string, started: number, status = "done") => {
+      console.log(`[turn] ${timingContext} step=${step} status=${status} duration=${Math.round(performance.now() - started)}ms`);
+    };
+    const timed = async <T>(step: string, run: () => Promise<T>): Promise<T> => {
+      const started = performance.now();
+      let status = "error";
+      console.log(`[turn] ${timingContext} step=${step} start`);
+      try {
+        const value = await run();
+        status = "done";
+        return value;
+      } finally {
+        logTiming(step, started, status);
+      }
+    };
     const directPersist = (): Promise<void> => {
+      const queuedAt = performance.now();
       const run = async () => {
-        const timestamp = new Date().toISOString();
-        console.log(`[${timestamp}] [persist] sid=${r.id} historyLen=${r.history.length} terminalLogLen=${r.terminalLog.length}`);
-        const meta = await saveSessionById(capturedRoot, r.id, {
-          mode: r.mode,
-          history: r.history,
-          terminalLog: r.terminalLog.slice(-80),
-          lastPlanPath: r.lastPlanPath,
-          todoAnchor: r.todoAnchor,
-          lastCheckpointId: r.lastCheckpointId,
-          documentWorkflow: r.documentWorkflow,
-          queuedMessages: r.queuedMessages,
-          taskRunState: r.taskRunState,
-          createdAt: r.sessionCreatedAt ?? undefined,
+        logTiming("session_queue_wait", queuedAt);
+        return timed("session_save", async () => {
+          const timestamp = new Date().toISOString();
+          console.log(`[${timestamp}] [persist] sid=${r.id} historyLen=${r.history.length} terminalLogLen=${r.terminalLog.length}`);
+          const meta = await saveSessionById(capturedRoot, r.id, {
+            mode: r.mode,
+            history: r.history,
+            terminalLog: r.terminalLog.slice(-80),
+            lastPlanPath: r.lastPlanPath,
+            todoAnchor: r.todoAnchor,
+            lastCheckpointId: r.lastCheckpointId,
+            documentWorkflow: r.documentWorkflow,
+            queuedMessages: r.queuedMessages,
+            taskRunState: r.taskRunState,
+            createdAt: r.sessionCreatedAt ?? undefined,
+          });
+          r.sessionTitle = meta.title;
         });
-        r.sessionTitle = meta.title;
       };
       r.persistQueue = r.persistQueue.then(run, run);
       return r.persistQueue;
@@ -2250,6 +2270,8 @@ export class SessionOrchestrator {
       },
       });
     } catch (error) {
+      const finalizeStarted = performance.now();
+      const messageStarted = performance.now();
       // 判断是否是用户中止
       const isAborted = error instanceof Error && error.name === 'AbortError';
       
@@ -2289,9 +2311,11 @@ export class SessionOrchestrator {
         });
       }
       
+      logTiming("final_message", messageStarted);
       await directPersist();
-      await eventPersist;
-      await completeTurn(capturedRoot, sessionId, turnId, { error: metadata.error, aborted: isAborted }, isAborted ? "cancelled" : "failed");
+      await timed("events_drain", () => eventPersist);
+      await timed("completeTurn", () => completeTurn(capturedRoot, sessionId, turnId, { error: metadata.error, aborted: isAborted }, isAborted ? "cancelled" : "failed"));
+      const notifyStarted = performance.now();
       // 收尾落盘完成后再发 turn_complete，让界面「已完成」与 sendChat 返回对齐。
       if (onEvent) {
         onEvent(stampTurnEvent({
@@ -2300,6 +2324,8 @@ export class SessionOrchestrator {
           metadata,
         }, sessionId));
       }
+      logTiming("turn_complete_emit", notifyStarted, onEvent ? "done" : "skipped");
+      logTiming("finalize_total", finalizeStarted, isAborted ? "cancelled" : "failed");
       r.abort = null;
       
       // 注销会话日志目录映射
@@ -2309,12 +2335,17 @@ export class SessionOrchestrator {
       throw error;
     }
 
+    const finalizeStarted = performance.now();
+    const projectorStarted = performance.now();
     // 完成 projector，获取结构化消息
     // timestamp 已在 finalize() 中自动设置，无需额外处理
     const { parts, metadata } = projector.finalize();
     
     // ✅ 更新 runtime 的 history 为 loop 返回的完整 history
     r.history = result.history;
+    logTiming("projector_finalize", projectorStarted);
+    const compactStarted = performance.now();
+    let compactedHistory = false;
 
     // Auto-compact: bound in-memory history after each turn to prevent
     // unbounded heap growth during long sessions. The manual compactNow()
@@ -2335,6 +2366,7 @@ export class SessionOrchestrator {
           metadata: { isCompressed: true, originalLength: old.length, compressedAt: new Date().toISOString(), compressionReason: "auto" },
         };
         r.history = [compacted, ...r.history.slice(keepFrom)];
+        compactedHistory = true;
         if (r.taskRunState && sessionId) {
           r.taskRunState = applyTaskEvent(r.taskRunState, {
             type: "observability",
@@ -2360,6 +2392,8 @@ export class SessionOrchestrator {
       }
     }
 
+    logTiming("history_compact", compactStarted, compactedHistory ? "done" : "skipped");
+    const messageStarted = performance.now();
     // 循环内已把最终报告写入 history。不要把整轮 projector parts
     //（含每一次 assistant_delta）再叠到最后一条消息 / turn_complete 上，
     // 否则用户会看到同一份最终报告两次。
@@ -2389,7 +2423,8 @@ export class SessionOrchestrator {
       r.taskRunState = result.taskRunState;
     }
 
-    const persistStarted = Date.now();
+    logTiming("final_message", messageStarted);
+    const persistStarted = performance.now();
     let checkpointMs = 0;
     if (checkpointEnabled && (fileSnapshots.length > 0 || touchedPaths.length > 0)) {
       const cp = {
@@ -2401,9 +2436,9 @@ export class SessionOrchestrator {
         touched: [...new Set(touchedPaths)],
         sessionId: r.id ?? null,
       };
-      const checkpointStarted = Date.now();
-      await persistCheckpoint(ws.root, cp);
-      checkpointMs = Date.now() - checkpointStarted;
+      const checkpointStarted = performance.now();
+      await timed("checkpoint", () => persistCheckpoint(ws.root, cp));
+      checkpointMs = Math.round(performance.now() - checkpointStarted);
       r.lastCheckpointId = cp.id;
       r.keptPaths.clear();
 
@@ -2413,16 +2448,20 @@ export class SessionOrchestrator {
       }
     }
 
-    const sessionStarted = Date.now();
+    if (!checkpointEnabled || (fileSnapshots.length === 0 && touchedPaths.length === 0)) {
+      logTiming("checkpoint", performance.now(), "skipped");
+    }
+    const sessionStarted = performance.now();
     await directPersist();
-    const sessionMs = Date.now() - sessionStarted;
-    const eventsStarted = Date.now();
-    await eventPersist;
-    const eventsMs = Date.now() - eventsStarted;
-    const completeStarted = Date.now();
-    await completeTurn(capturedRoot, sessionId, turnId, result);
-    const completeMs = Date.now() - completeStarted;
-    console.log(`[turn] sid=${sessionId} persist checkpoint=${checkpointMs}ms session=${sessionMs}ms events=${eventsMs}ms completeTurn=${completeMs}ms total=${Date.now() - persistStarted}ms`);
+    const sessionMs = Math.round(performance.now() - sessionStarted);
+    const eventsStarted = performance.now();
+    await timed("events_drain", () => eventPersist);
+    const eventsMs = Math.round(performance.now() - eventsStarted);
+    const completeStarted = performance.now();
+    await timed("completeTurn", () => completeTurn(capturedRoot, sessionId, turnId, result));
+    const completeMs = Math.round(performance.now() - completeStarted);
+    console.log(`[turn] ${timingContext} persist checkpoint=${checkpointMs}ms session=${sessionMs}ms events=${eventsMs}ms completeTurn=${completeMs}ms total=${Math.round(performance.now() - persistStarted)}ms`);
+    const notifyStarted = performance.now();
     // 收尾落盘完成后再发 turn_complete，让界面「已完成」与 sendChat 返回对齐。
     if (onEvent) {
       onEvent(stampTurnEvent({
@@ -2431,6 +2470,8 @@ export class SessionOrchestrator {
         metadata,
       }, sessionId));
     }
+    logTiming("turn_complete_emit", notifyStarted, onEvent ? "done" : "skipped");
+    logTiming("finalize_total", finalizeStarted);
     r.abort = null;
     
     // 注销会话日志目录映射

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import Database from "better-sqlite3";
-import Parser from "web-tree-sitter";
+import { Language } from "web-tree-sitter";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -86,7 +86,7 @@ describe("新增语言的默认索引支持", () => {
 
   it("实际加载每种新增语言的 grammar 并执行解析", async () => {
     await initTreeSitter();
-    const load = vi.spyOn(Parser.Language, "load");
+    const load = vi.spyOn(Language, "load");
     const languages = new Set<string>();
     for (const [, language, content] of fixtures) {
       if (language === "java" || languages.has(language)) continue;
@@ -96,7 +96,7 @@ describe("新增语言的默认索引支持", () => {
     // 空符号数组也可能代表 grammar 未找到，必须验证实际加载成功。
     expect(load).toHaveBeenCalledTimes(18);
     for (const result of load.mock.results) {
-      expect(await result.value).toBeInstanceOf(Parser.Language);
+      expect(await result.value).toBeInstanceOf(Language);
     }
   });
 

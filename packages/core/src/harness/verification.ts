@@ -160,9 +160,12 @@ export class VerificationEngine {
   private timeout: number;
   private projectSize: ProjectSizeInfo | null = null;
   private indexFileCount?: number;
+  private timingContext?: string;
 
   constructor(workspaceRoot: string, opts?: {
     timeout?: number;
+    /** 控制台耗时日志的关联标识，不包含消息正文。 */
+    timingContext?: string;
     /** Pre-computed project size info; if omitted, will be estimated automatically. */
     projectSize?: ProjectSizeInfo;
     /** File count from IndexClient.status(). When provided, avoids recursive directory scan. */
@@ -172,6 +175,7 @@ export class VerificationEngine {
     this.timeout = opts?.timeout ?? 120_000; // 2 min default
     this.projectSize = opts?.projectSize ?? null;
     this.indexFileCount = opts?.indexFileCount;
+    this.timingContext = opts?.timingContext;
   }
 
   /**
@@ -189,21 +193,37 @@ export class VerificationEngine {
     const checks: VerificationCheck[] = [];
     const suggestions: string[] = [];
 
+    const timed = async <T>(step: string, run: () => Promise<T>): Promise<T> => {
+      const started = performance.now();
+      let status = "error";
+      console.log(`[verify] ${this.timingContext ?? ""} step=${step} start`);
+      try {
+        const result = await run();
+        const check = result as Partial<VerificationCheck>;
+        status = check.skipped || check.status === "skipped" ? "skipped" : check.passed === false ? "failed" : "done";
+        return result;
+      } finally {
+        console.log(`[verify] ${this.timingContext ?? ""} step=${step} status=${status} duration=${Math.round(performance.now() - started)}ms`);
+      }
+    };
+    const skipped = (step: string, reason: string) => console.log(`[verify] ${this.timingContext ?? ""} step=${step} status=skipped duration=0ms reason=${reason}`);
+
     // Detect project type and size
-    const projectType = await this.detectProjectType();
-    const size = this.projectSize ?? await estimateProjectSize(this.workspaceRoot, this.indexFileCount);
+    const projectType = await timed("detect_project", () => this.detectProjectType());
+    const size = await timed("estimate_project_size", async () => this.projectSize ?? await estimateProjectSize(this.workspaceRoot, this.indexFileCount));
     this.projectSize = size;
 
     // 1. Type checking — adaptive based on project size
     if (projectType.typeChecker) {
       if (size.category === "large") {
+        skipped("typecheck", "large_project");
         // Large project: skip full type check, add informational note
         suggestions.push(
           `项目较大（${size.sourceFileCount} 个源文件），已跳过全量类型检查以避免长时间等待。` +
           `建议在 CI 中运行完整检查，或手动运行类型检查命令。`
         );
       } else {
-        const typeCheck = await this.runTypeCheck(projectType, size);
+        const typeCheck = await timed("typecheck", () => this.runTypeCheck(projectType, size));
         checks.push(typeCheck);
         if (!typeCheck.passed) {
           suggestions.push("类型检查未通过，请修复类型错误后重试");
@@ -211,18 +231,26 @@ export class VerificationEngine {
       }
     }
 
+    if (!projectType.typeChecker) skipped("typecheck", "no_checker");
+
     // 2. Lint checking (always run on changed files — it's fast)
     if (projectType.linter && changedFiles.length > 0) {
-      const lintCheck = await this.runLint(changedFiles, projectType);
+      const lintCheck = await timed("lint", () => this.runLint(changedFiles, projectType));
       checks.push(lintCheck);
       if (!lintCheck.passed) {
         suggestions.push("Lint 检查发现警告，建议修复以保持代码风格一致");
       }
     }
 
+    if (!projectType.linter || changedFiles.length === 0) skipped("lint", changedFiles.length === 0 ? "no_changed_files" : "no_linter");
+    if (changedFiles.length === 0) {
+      skipped("lsp_diagnostics", "no_changed_files");
+      skipped("semantic_diff", "no_changed_files");
+    }
+
     // 3. LSP diagnostics on changed files (error-level → hard fail + auto-fix)
     if (changedFiles.length > 0) {
-      const lspCheck = await this.runLspDiagnostics(changedFiles);
+      const lspCheck = await timed("lsp_diagnostics", () => this.runLspDiagnostics(changedFiles));
       checks.push(lspCheck);
       if (lspCheck.errors.some((e) => e.severity === "error")) {
         suggestions.push("LSP 诊断发现了错误，请修复以避免错误累积");
@@ -236,7 +264,7 @@ export class VerificationEngine {
 
     // 4. Semantic diff analysis (always run — it's lightweight)
     if (changedFiles.length > 0) {
-      const diffCheck = await this.analyzeSemanticDiff(changedFiles);
+      const diffCheck = await timed("semantic_diff", () => this.analyzeSemanticDiff(changedFiles));
       checks.push(diffCheck);
     }
 

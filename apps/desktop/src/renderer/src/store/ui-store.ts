@@ -16,6 +16,7 @@ export interface UiState {
   // Editor pane（多 tab：editorTabs 为已打开文件，editorPath 为当前激活）
   editorTabs: string[];
   editorPath: string | null;
+  diffDataByPath: Record<string, { before: string; after: string }>;
   chatWidth: number;
   isDragging: boolean;
 
@@ -44,6 +45,8 @@ export interface UiState {
 export interface UiActions {
   /** 打开文件：已存在则激活，否则追加到 tabs 并激活；传 null 清空全部。 */
   setEditorPath: (path: string | null) => void;
+  /** 同时打开页签和设置快照，避免中间渲染为普通文件。 */
+  openEditorDiff: (path: string, before: string, after: string) => void;
   /** 仅切换当前激活 tab（不增删）。 */
   setActiveEditorTab: (path: string) => void;
   /** 关闭指定 tab；若关闭的是当前激活，则激活相邻 tab。 */
@@ -155,6 +158,7 @@ function omitDraft(drafts: Record<string, string>, sessionId: string): Record<st
 export const useUiStore = create<UiState & UiActions>()((set) => ({
   editorTabs: [],
   editorPath: null,
+  diffDataByPath: {},
   chatWidth: 20,
   isDragging: false,
   sidebarWidth: 260,
@@ -171,11 +175,22 @@ export const useUiStore = create<UiState & UiActions>()((set) => ({
 
   setEditorPath: (path) =>
     set((s) => {
-      if (path === null) return { editorTabs: [], editorPath: null };
-      if (s.editorPath === path) return s;
-      if (s.editorTabs.includes(path)) return { editorPath: path };
-      return { editorTabs: [...s.editorTabs, path], editorPath: path };
+      if (path === null) return { editorTabs: [], editorPath: null, diffDataByPath: {} };
+      if (s.editorPath === path && !(path in s.diffDataByPath)) return s;
+      const diffDataByPath = { ...s.diffDataByPath };
+      delete diffDataByPath[path];
+      return {
+        editorTabs: s.editorTabs.includes(path) ? s.editorTabs : [...s.editorTabs, path],
+        editorPath: path,
+        diffDataByPath,
+      };
     }),
+  openEditorDiff: (path, before, after) =>
+    set((s) => ({
+      editorTabs: s.editorTabs.includes(path) ? s.editorTabs : [...s.editorTabs, path],
+      editorPath: path,
+      diffDataByPath: { ...s.diffDataByPath, [path]: { before, after } },
+    })),
   setActiveEditorTab: (path) =>
     set((s) => (s.editorTabs.includes(path) ? { editorPath: path } : s)),
   closeEditorTab: (path) =>
@@ -183,10 +198,12 @@ export const useUiStore = create<UiState & UiActions>()((set) => ({
       const idx = s.editorTabs.indexOf(path);
       if (idx < 0) return s;
       const editorTabs = s.editorTabs.filter((p) => p !== path);
-      if (s.editorPath !== path) return { editorTabs };
+      const diffDataByPath = { ...s.diffDataByPath };
+      delete diffDataByPath[path];
+      if (s.editorPath !== path) return { editorTabs, diffDataByPath };
       const next =
         editorTabs[Math.min(idx, editorTabs.length - 1)] ?? null;
-      return { editorTabs, editorPath: next };
+      return { editorTabs, editorPath: next, diffDataByPath };
     }),
   setChatWidth: (chatWidth) => set({ chatWidth }),
   setIsDragging: (isDragging) => set({ isDragging }),

@@ -707,9 +707,9 @@ const LANGUAGE_SERVER_CATALOG: Record<string, LspServerCandidate> = {
     fileTypes: ["toml"],
   },
   markdown: {
-    commands: ["marksman", "vscode-markdown-language-server"],
+    commands: ["marksman"],
     fileTypes: ["md", "markdown", "mdx"],
-    npmPackage: "vscode-markdown-language-server",
+    // marksman is a Go binary, not an npm package - no npmPackage needed
   },
   docker: {
     commands: ["docker-langserver", "dockerfile-language-server-nodejs"],
@@ -767,7 +767,7 @@ const LANGUAGE_SERVER_CATALOG: Record<string, LspServerCandidate> = {
     commands: ["prisma-language-server"],
     args: ["--stdio"],
     fileTypes: ["prisma"],
-    npmPackage: "prisma-language-server",
+    npmPackage: "@prisma/language-server",
   },
   graphql: {
     commands: ["graphql-lsp"],
@@ -852,7 +852,7 @@ const LANGUAGE_SERVER_CATALOG: Record<string, LspServerCandidate> = {
     commands: ["tailwindcss-language-server"],
     args: ["--stdio"],
     fileTypes: ["html", "css", "scss", "less", "vue", "svelte", "jsx", "tsx"],
-    npmPackage: "tailwindcss-language-server",
+    npmPackage: "@tailwindcss/language-server",
   },
   biome: {
     commands: ["biome"],
@@ -915,7 +915,8 @@ const LANGUAGE_SERVER_CATALOG: Record<string, LspServerCandidate> = {
     commands: ["rescript-language-server"],
     args: ["--stdio"],
     fileTypes: ["res", "resi"],
-    npmPackage: "rescript-language-server",
+    // ReScript's language server is embedded in the rescript-vscode extension
+    // and not available as a standalone npm package
   },
   astro: {
     commands: ["astro-ls"],

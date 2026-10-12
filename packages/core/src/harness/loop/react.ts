@@ -1,7 +1,7 @@
 import upath from "upath";
 import { assertLlmAuth, chatCompletionStream, writeEventLog, type ChatMessage, type ToolCall } from "@owncoder/llm";
 import { defaultReactSteps, type PipelineNode, type ReactStepConfig } from "@owncoder/settings";
-import { clampText } from "../budget.ts";
+
 import {
   createLoopState,
   checkTermination,
@@ -67,9 +67,7 @@ function isExplorationComplete(task: TaskItem): boolean {
 import { executeTool } from "../execute.ts";
 import { parseToolCallsFromAssistant, normalizeToolName } from "../parser.ts";
 import {
-  buildCorrectionPrompt,
   logReasoningStep,
-  reflectOnStepWithLLM,
   selectNextStep,
   type PlanStep,
 } from "../agent-reasoning.ts";
@@ -1066,7 +1064,7 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
           report: content,
         });
         logReasoningStep(reasoningTrace, {
-          type: "reflection",
+          type: "observation",
           content: `Task ${currentTask.id} → ${currentTask.status}: ${currentTask.result}`,
           timestamp: Date.now(),
         });
@@ -1178,61 +1176,7 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
       });
 
       if (currentStep) {
-        // Build an LLM caller for reflection (uses current model)
-        const stepId = currentStep.id; // narrowed-const for nested closure
-        const reflectionCaller = async (prompt: string): Promise<string> => {
-          try {
-            const resp = await chatCompletionStream(
-              model,
-              [{ role: "system", content: prompt }],
-              {
-                signal: opts.signal,
-                apiKey: opts.llmApiKey,
-                purpose: `reflection#${stageId}#${stepId}`,
-                taskId: opts.sessionId,
-                thinking: { effort: opts.workflow.thinking?.defaultEffort },
-              },
-            );
-            return resp.choices[0]!.message.content ?? "";
-          } catch {
-            return "";
-          }
-        };
-
-        // Use LLM-based reflection (falls back to regex on failure)
-        const reflection = await reflectOnStepWithLLM(
-          currentStep, [], content, reflectionCaller,
-        );
-        logReasoningStep(reasoningTrace, {
-          type: "reflection",
-          content: reflection.stepCompleted ? "Step completed" : "Step may need correction",
-          timestamp: Date.now(),
-          metadata: { qualityScore: reflection.qualityScore, issues: reflection.issues },
-        });
-
-        if (reflection.stepCompleted) {
-          currentStep.status = "completed";
-        } else if (reflection.needsReplan && currentStep.retryCount < currentStep.maxRetries) {
-          currentStep.retryCount++;
-          correctionCount++;
-          applyRunEvent({
-            type: "observability",
-            taskId: args.opts.sessionId,
-            retries: 1,
-          });
-          messages.push({
-            role: "system",
-            content: clampText(buildCorrectionPrompt(reflection, content), 2000),
-          });
-          logReasoningStep(reasoningTrace, {
-            type: "replan",
-            content: `Step needs re-execution (retry ${currentStep.retryCount})`,
-            timestamp: Date.now(),
-          });
-          continue;
-        } else {
-          currentStep.status = "failed";
-        }
+        currentStep.status = "completed";
         currentStep = selectNextStep(plan!);
       }
 

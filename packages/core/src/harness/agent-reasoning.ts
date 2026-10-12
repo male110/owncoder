@@ -1,19 +1,18 @@
 /**
  * Advanced Agent Reasoning Engine
- * Implements ReAct (Reasoning + Acting) with Plan-Execute-Reflect closed loop.
+ * 实现 ReAct（推理与行动）及计划执行流程。
  * 
  * Key upgrades from simple tool loop:
  * 1. Structured Thought-Action-Observation cycle (ReAct pattern)
- * 2. Plan generation → Execution → Self-reflection → Replan cycle
+ * 2. 计划生成与执行
  * 3. Branch exploration with backtracking (Tree-of-Thoughts lite)
  * 4. Confidence scoring and self-correction
  * 5. Task decomposition with dependency ordering
  */
 
-import { jsonrepair } from "jsonrepair";
 
 export interface ReasoningStep {
-  type: "thought" | "action" | "observation" | "reflection" | "replan";
+  type: "thought" | "action" | "observation" | "replan";
   content: string;
   timestamp: number;
   metadata?: Record<string, unknown>;
@@ -44,13 +43,6 @@ interface ToolCallPlan {
   expectedOutcome: string;
 }
 
-export interface ReflectionResult {
-  stepCompleted: boolean;
-  qualityScore: number; // 0-1
-  issues: string[];
-  suggestions: string[];
-  needsReplan: boolean;
-}
 
 export interface ReasoningTrace {
   steps: ReasoningStep[];
@@ -176,208 +168,6 @@ function heuristicDecompose(request: string, _context: string): PlanStep[] {
   return steps;
 }
 
-/**
- * LLM-driven self-reflection on step execution outcomes.
- * Uses the model to critically analyze step results, going beyond
- * regex-based sentiment matching to understand semantic correctness.
- *
- * This is the primary reflection path. Falls back to regex-based
- * reflectOnStep when no LLM caller is available.
- */
-export async function reflectOnStepWithLLM(
-  step: PlanStep,
-  toolOutputs: string[],
-  assistantText: string,
-  callLLM: (prompt: string) => Promise<string>,
-): Promise<ReflectionResult> {
-  const toolSummary = toolOutputs.length > 0
-    ? toolOutputs.map((o) => o.slice(0, 500)).join("\n").slice(0, 2000)
-    : "(no tool output)";
-
-  const reflectionPrompt = [
-    "You are a strict code-review judge. Decide whether the step below was actually completed,",
-    "based ONLY on the evidence in the tool outputs and response — not on claimed success.",
-    "",
-    "Judge by:",
-    "1. Did the described work actually happen (files edited, commands run)?",
-    "2. Do any errors, failures, or unresolved issues remain in the evidence?",
-    "3. Does the outcome satisfy the step's goal?",
-    "",
-    "Hard rules:",
-    "- Compilation errors, test failures, or tool errors in the evidence → stepCompleted=false.",
-    "- Claims of success without supporting tool evidence → lower qualityScore, note it in issues.",
-    "- qualityScore reflects verified correctness, not confidence or effort.",
-    "- Set needsReplan=true only when the current approach itself is wrong, not for small fixable slips.",
-    "",
-    "Step description:",
-    step.description,
-    "",
-    "Tool outputs (truncated):",
-    toolSummary,
-    "",
-    "Assistant response:",
-    assistantText.slice(0, 3000),
-    "",
-    "Respond with EXACTLY this JSON format (no other text):",
-    '{',
-    '  "stepCompleted": true/false,',
-    '  "qualityScore": 0.0-1.0,',
-    '  "issues": ["issue1", "issue2"],',
-    '  "suggestions": ["suggestion1", "suggestion2"],',
-    '  "needsReplan": true/false',
-    '}',
-  ].join("\n");
-
-  try {
-    const responseText = await callLLM(reflectionPrompt);
-    const parsed = parseReflectionResponse(responseText);
-    if (parsed) {
-      return parsed;
-    }
-  } catch {
-    // LLM reflection failed — fall through to regex-based fallback
-  }
-
-  // Fallback to regex-based reflection
-  return reflectOnStep(step, toolOutputs, assistantText);
-}
-
-function parseReflectionResponse(text: string): ReflectionResult | null {
-  // Try to extract JSON from the response (model may wrap in markdown)
-  const jsonMatch = text.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) return null;
-
-  try {
-    const obj = JSON.parse(jsonrepair(jsonMatch[0]!));
-    const stepCompleted = Boolean(obj.stepCompleted);
-    const qualityScore = typeof obj.qualityScore === "number"
-      ? Math.max(0, Math.min(1, obj.qualityScore))
-      : (stepCompleted ? 0.7 : 0.3);
-    const issues = Array.isArray(obj.issues)
-      ? obj.issues.filter((i: unknown) => typeof i === "string")
-      : [];
-    const suggestions = Array.isArray(obj.suggestions)
-      ? obj.suggestions.filter((s: unknown) => typeof s === "string")
-      : [];
-    const needsReplan = Boolean(obj.needsReplan);
-
-    return { stepCompleted, qualityScore, issues, suggestions, needsReplan };
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Regex-based reflection (fallback).
- * Uses sentiment-aware scoring: strips code blocks, checks negations,
- * and balances positive vs negative signals for fewer false positives.
- *
- * This is kept as a fallback for when LLM reflection is unavailable
- * or fails. Prefer reflectOnStepWithLLM for production use.
- */
-function reflectOnStep(
-  step: PlanStep,
-  toolOutputs: string[],
-  assistantText: string,
-): ReflectionResult {
-  // Strip code fences and inline code from tool outputs — error keywords
-  // inside displayed code snippets are diagnostic, not failures.
-  const stripCode = (s: string) =>
-    s.replace(/```[\s\S]*?```/g, " ").replace(/`[^`]+`/g, " ");
-
-  const toolCleaned = toolOutputs.map(stripCode).join("\n").toLowerCase();
-  const textCleaned = assistantText.toLowerCase();
-  const combined = toolCleaned + "\n" + textCleaned;
-  const issues: string[] = [];
-  const suggestions: string[] = [];
-
-  // ── Positive signals ────────────────────────────────────────
-  const positivePatterns: Array<{ pattern: RegExp; weight: number }> = [
-    { pattern: /\b(no\s+)?error\s*[−-]\s*free\b/i, weight: 2 },     // "error-free"
-    { pattern: /\bno errors?\b/i, weight: 2 },                       // "no errors"
-    { pattern: /\bwithout (any )?errors?\b/i, weight: 2 },           // "without errors"
-    { pattern: /\bnot failing\b/i, weight: 1.5 },
-    { pattern: /\b(all|everything)\s+(?:passed|succeeded|works?)\b/i, weight: 2 },
-    { pattern: /\b(successfully|success)\b/i, weight: 1.5 },
-    { pattern: /\b(completed|done|finished)\b/i, weight: 1 },
-    { pattern: /✅|\bpassed\b|\bverified\b|\bcorrect\b/i, weight: 1 },
-    { pattern: /\b(looks good|working (now|correctly|as expected))\b/i, weight: 1.5 },
-  ];
-
-  // ── Negative signals (context-aware) ────────────────────────
-  const errorPatterns: Array<{ pattern: RegExp; issue: string; weight: number }> = [
-    { pattern: /\berror[: ]/i, issue: "检测到错误输出", weight: 2 },
-    { pattern: /\b(?:compile|compilation)\s+(?:error|failed)\b/i, issue: "编译错误", weight: 3 },
-    { pattern: /\bfailed\b(?!.*\bno\b)/i, issue: "执行失败", weight: 2 },
-    { pattern: /\bfailure\b/i, issue: "执行失败", weight: 2 },
-    { pattern: /\b(not found|doesn'?t exist|no such file)\b/i, issue: "目标资源未找到", weight: 2 },
-    { pattern: /\bpermission denied\b/i, issue: "权限不足", weight: 2 },
-    { pattern: /\btime[ -]?out\b/i, issue: "操作超时", weight: 1 },
-    { pattern: /\bundefined\b(?!\s+is)/i, issue: "可能产生未定义值", weight: 1 },
-    { pattern: /\bnull pointer\b/i, issue: "空指针", weight: 2 },
-    { pattern: /\bcannot\b(?!\s*(?:be|find|see|help|assist))/i, issue: "操作无法完成", weight: 1 },
-    { pattern: /\bunable to\b/i, issue: "操作无法完成", weight: 1 },
-    { pattern: /\bstack trace\b/i, issue: "异常堆栈", weight: 2 },
-    { pattern: /\bpanic\b/i, issue: "程序panic", weight: 3 },
-    { pattern: /\bexited with (non-zero|code [1-9])\b/i, issue: "非零退出码", weight: 2 },
-  ];
-
-  // ── Score computation ────────────────────────────────────────
-  let netScore = 0; // positive - negative
-
-  // Count positive matches
-  for (const pp of positivePatterns) {
-    const matches = (textCleaned.match(new RegExp(pp.pattern.source, "gi")) || []).length;
-    netScore += matches * pp.weight;
-  }
-
-  // Count negative matches
-  for (const ep of errorPatterns) {
-    if (ep.pattern.test(combined)) {
-      issues.push(ep.issue);
-      netScore -= ep.weight;
-    }
-  }
-
-  // ── Quality heuristics ───────────────────────────────────────
-  let qualityScore = 1.0;
-  // Net sentiment: each -1 weight ≈ -0.1 quality
-  if (netScore < 0) qualityScore += netScore * 0.1;
-  // Negative issues above 3 are almost certainly a real problem
-  if (issues.length >= 3) qualityScore -= 0.3;
-  // No tool output and no text → silence
-  if (!assistantText.trim()) qualityScore -= 0.3;
-  // No tool output at all
-  if (toolOutputs.length === 0) qualityScore -= 0.1;
-  // But strong positive net score can override
-  if (netScore >= 4) qualityScore = Math.max(qualityScore, 0.85);
-  qualityScore = Math.max(0, Math.min(1, qualityScore));
-
-  const stepCompleted = qualityScore >= 0.5 && issues.length <= 2;
-  const needsReplan = qualityScore < 0.3 || issues.length >= 4;
-
-  if (!stepCompleted && step.retryCount < step.maxRetries) {
-    suggestions.push(
-      `建议重试步骤 "${step.description}"，尝试不同的方法`,
-    );
-  }
-
-  if (needsReplan) {
-    suggestions.push("当前方案可能不合适，建议重新规划");
-  }
-
-  if (stepCompleted && issues.length > 0) {
-    suggestions.push("步骤基本完成，但存在一些需要注意的问题");
-  }
-
-  return {
-    stepCompleted,
-    qualityScore,
-    issues,
-    suggestions,
-    needsReplan,
-  };
-}
 
 /**
  * Create a reasoning trace entry for observability.
@@ -419,15 +209,7 @@ export function updateTraceStats(
 }
 
 function calculateOverallConfidence(trace: ReasoningTrace): number {
-  if (trace.steps.length === 0) return 0;
-  const reflectionSteps = trace.steps.filter((s) => s.type === "reflection");
-  if (reflectionSteps.length === 0) return 0.5;
-  
-  const avgQuality = reflectionSteps.reduce((sum, s) => {
-    return sum + ((s.metadata?.qualityScore as number) ?? 0.5);
-  }, 0) / reflectionSteps.length;
-  
-  return avgQuality;
+  return trace.steps.length === 0 ? 0 : 0.5;
 }
 
 /**
@@ -467,42 +249,6 @@ export function formatReasoningTrace(trace: ReasoningTrace): string {
   return lines.join("\n");
 }
 
-/**
- * Self-correction prompt template.
- * Injects the reflection result to guide the next iteration.
- */
-export function buildCorrectionPrompt(
-  reflection: ReflectionResult,
-  previousOutput: string,
-): string {
-  const parts: string[] = [];
-  
-  parts.push("## Self-Correction Guidance");
-  parts.push(`Quality Score: ${(reflection.qualityScore * 100).toFixed(0)}%`);
-  
-  if (reflection.issues.length > 0) {
-    parts.push("\n### Issues Found:");
-    for (const issue of reflection.issues) {
-      parts.push(`- ${issue}`);
-    }
-  }
-  
-  if (reflection.suggestions.length > 0) {
-    parts.push("\n### Suggestions:");
-    for (const suggestion of reflection.suggestions) {
-      parts.push(`- ${suggestion}`);
-    }
-  }
-
-  if (reflection.needsReplan) {
-    parts.push("\n### Replan Required");
-    parts.push("The current approach is not working. Please reconsider the strategy and try a different approach.");
-  }
-
-  parts.push(`\nPrevious output:\n${previousOutput.slice(0, 2000)}`);
-  
-  return parts.join("\n");
-}
 
 /**
  * Select the next step to execute based on dependency resolution.

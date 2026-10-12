@@ -72,6 +72,47 @@ describe("composer draft persistence", () => {
     });
   });
 
+  it("打开变更时订阅者只收到同时包含页签和快照的一次更新", () => {
+    useUiStore.getState().setEditorPath(null);
+    const listener = vi.fn();
+    const unsubscribe = useUiStore.subscribe(listener);
+    try {
+      useUiStore.getState().openEditorDiff("src/a.ts", "旧内容", "新内容");
+      expect(listener).toHaveBeenCalledOnce();
+      expect(listener.mock.calls[0][0]).toMatchObject({
+        editorTabs: ["src/a.ts"], editorPath: "src/a.ts",
+        diffDataByPath: { "src/a.ts": { before: "旧内容", after: "新内容" } },
+      });
+    } finally {
+      unsubscribe();
+      useUiStore.getState().setEditorPath(null);
+    }
+  });
+
+  it("反复打开、切换及普通打开保持对应快照且不重复创建页签", () => {
+    const ui = useUiStore.getState();
+    ui.setEditorPath(null);
+    ui.openEditorDiff("a.ts", "A旧", "A新");
+    ui.openEditorDiff("b.ts", "", "B新");
+    ui.openEditorDiff("a.ts", "A旧", "A更新");
+    expect(useUiStore.getState().editorTabs).toEqual(["a.ts", "b.ts"]);
+    ui.setActiveEditorTab("b.ts");
+    expect(useUiStore.getState().diffDataByPath).toEqual({
+      "a.ts": { before: "A旧", after: "A更新" },
+      "b.ts": { before: "", after: "B新" },
+    });
+    ui.setEditorPath("b.ts");
+    expect(useUiStore.getState().diffDataByPath["b.ts"]).toBeUndefined();
+    expect(useUiStore.getState().diffDataByPath["a.ts"]?.after).toBe("A更新");
+    ui.closeEditorTab("a.ts");
+    expect(useUiStore.getState().diffDataByPath).toEqual({});
+    ui.openEditorDiff("a.ts", "删除", "");
+    ui.closeEditorTab("a.ts");
+    expect(useUiStore.getState().editorPath).toBe("b.ts");
+    ui.setEditorPath(null);
+    expect(useUiStore.getState()).toMatchObject({ editorTabs: [], editorPath: null, diffDataByPath: {} });
+  });
+
   it("keeps pending composer text when there is no active session", () => {
     useUiStore.getState().setDraft("新会话草稿", PENDING_DRAFT_KEY);
     expect(loadDrafts()[PENDING_DRAFT_KEY]).toBe("新会话草稿");

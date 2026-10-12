@@ -7,7 +7,7 @@
  * @module parser-treesitter
  */
 
-import Parser from "web-tree-sitter";
+import { Language, Parser, type TreeCursor } from "web-tree-sitter";
 import type { ExtractedSymbol, ExtractedReference } from "./parser.js";
 
 /**
@@ -92,7 +92,7 @@ const LANGUAGE_MAP: Record<string, string> = {
 /**
  * 已加载的语言解析器缓存
  */
-const languageCache = new Map<string, Parser.Language>();
+const languageCache = new Map<string, Language>();
 
 /**
  * Parser 实例缓存
@@ -180,11 +180,11 @@ export async function initTreeSitter(): Promise<void> {
  * 加载指定语言的解析器
  * 
  * @param language - 语言标识或文件扩展名
- * @returns Promise<Parser.Language | null> - 解析器语言对象，不支持时返回 null
+ * @returns Promise<Language | null> - 解析器语言对象，不支持时返回 null
  * 
  * @internal
  */
-async function loadLanguage(language: string): Promise<Parser.Language | null> {
+async function loadLanguage(language: string): Promise<Language | null> {
   const normalized = language.toLowerCase();
   const wasmName = LANGUAGE_MAP[normalized];
 
@@ -254,7 +254,7 @@ async function loadLanguage(language: string): Promise<Parser.Language | null> {
       const wasmPath = findLanguageWasm();
       if (!wasmPath) return null;
       const wasmBuffer = readFileSync(wasmPath);
-      const lang = await Parser.Language.load(new Uint8Array(wasmBuffer));
+      const lang = await Language.load(new Uint8Array(wasmBuffer));
       languageCache.set(wasmName, lang);
       return lang;
     } else {
@@ -262,7 +262,7 @@ async function loadLanguage(language: string): Promise<Parser.Language | null> {
       const wasmUrl = `/node_modules/tree-sitter-wasms/out/${wasmName}.wasm`;
       const response = await fetch(wasmUrl);
       const wasmBuffer = await response.arrayBuffer();
-      const lang = await Parser.Language.load(new Uint8Array(wasmBuffer));
+      const lang = await Language.load(new Uint8Array(wasmBuffer));
       languageCache.set(wasmName, lang);
       return lang;
     }
@@ -307,6 +307,7 @@ export async function extractSymbolsTreeSitter(
 
   parserInstance.setLanguage(lang);
   const tree = parserInstance.parse(content);
+  if (!tree) return [];
 
   const symbols: ExtractedSymbol[] = [];
   const cursor = tree.walk();
@@ -340,6 +341,7 @@ export async function extractReferencesTreeSitter(
 
   parserInstance.setLanguage(lang);
   const tree = parserInstance.parse(content);
+  if (!tree) return [];
 
   const references: ExtractedReference[] = [];
   const cursor = tree.walk();
@@ -353,7 +355,7 @@ export async function extractReferencesTreeSitter(
 // ========== 符号提取器策略 ==========
 
 type SymbolExtractor = (
-  cursor: Parser.TreeCursor,
+  cursor: TreeCursor,
   symbols: ExtractedSymbol[],
   _content: string
 ) => void;
@@ -398,11 +400,11 @@ function getSymbolExtractor(language: string): SymbolExtractor {
 // ========== TypeScript/JavaScript 符号提取 ==========
 
 function extractTSSymbolsFromTree(
-  cursor: Parser.TreeCursor,
+  cursor: TreeCursor,
   symbols: ExtractedSymbol[],
   _content: string
 ): void {
-  const traverse = (cursor: Parser.TreeCursor) => {
+  const traverse = (cursor: TreeCursor) => {
     const node = cursor.currentNode;
     const nodeType = node.type;
 
@@ -530,11 +532,11 @@ function extractTSSymbolsFromTree(
 // ========== Python 符号提取 ==========
 
 function extractPythonSymbolsFromTree(
-  cursor: Parser.TreeCursor,
+  cursor: TreeCursor,
   symbols: ExtractedSymbol[],
   _content: string
 ): void {
-  const traverse = (cursor: Parser.TreeCursor) => {
+  const traverse = (cursor: TreeCursor) => {
     const node = cursor.currentNode;
     const nodeType = node.type;
 
@@ -584,11 +586,11 @@ function extractPythonSymbolsFromTree(
 // ========== Rust 符号提取 ==========
 
 function extractRustSymbolsFromTree(
-  cursor: Parser.TreeCursor,
+  cursor: TreeCursor,
   symbols: ExtractedSymbol[],
   _content: string
 ): void {
-  const traverse = (cursor: Parser.TreeCursor) => {
+  const traverse = (cursor: TreeCursor) => {
     const node = cursor.currentNode;
     const nodeType = node.type;
 
@@ -654,11 +656,11 @@ function extractRustSymbolsFromTree(
 // ========== Go 符号提取 ==========
 
 function extractGoSymbolsFromTree(
-  cursor: Parser.TreeCursor,
+  cursor: TreeCursor,
   symbols: ExtractedSymbol[],
   _content: string
 ): void {
-  const traverse = (cursor: Parser.TreeCursor) => {
+  const traverse = (cursor: TreeCursor) => {
     const node = cursor.currentNode;
     const nodeType = node.type;
 
@@ -715,11 +717,11 @@ function extractGoSymbolsFromTree(
 // ========== JVM 语言符号提取 (Java/Kotlin/Scala) ==========
 
 function extractJVMSymbolsFromTree(
-  cursor: Parser.TreeCursor,
+  cursor: TreeCursor,
   symbols: ExtractedSymbol[],
   _content: string
 ): void {
-  const traverse = (cursor: Parser.TreeCursor) => {
+  const traverse = (cursor: TreeCursor) => {
     const node = cursor.currentNode;
     const nodeType = node.type;
 
@@ -785,11 +787,11 @@ function extractJVMSymbolsFromTree(
 // ========== C/C++ 符号提取 ==========
 
 function extractCppSymbolsFromTree(
-  cursor: Parser.TreeCursor,
+  cursor: TreeCursor,
   symbols: ExtractedSymbol[],
   _content: string
 ): void {
-  const traverse = (cursor: Parser.TreeCursor) => {
+  const traverse = (cursor: TreeCursor) => {
     const node = cursor.currentNode;
     const nodeType = node.type;
 
@@ -847,11 +849,11 @@ function extractCppSymbolsFromTree(
 // ========== 通用符号提取器 ==========
 
 function extractGenericSymbolsFromTree(
-  cursor: Parser.TreeCursor,
+  cursor: TreeCursor,
   symbols: ExtractedSymbol[],
   _content: string
 ): void {
-  const traverse = (cursor: Parser.TreeCursor) => {
+  const traverse = (cursor: TreeCursor) => {
     const node = cursor.currentNode;
     const nodeType = node.type;
 
@@ -899,7 +901,7 @@ function extractGenericSymbolsFromTree(
 // ========== 引用提取器策略 ==========
 
 type ReferenceExtractor = (
-  cursor: Parser.TreeCursor,
+  cursor: TreeCursor,
   references: ExtractedReference[],
   _content: string
 ) => void;
@@ -919,11 +921,11 @@ function getReferenceExtractor(language: string): ReferenceExtractor {
 }
 
 function extractTSReferencesFromTree(
-  cursor: Parser.TreeCursor,
+  cursor: TreeCursor,
   references: ExtractedReference[],
   _content: string
 ): void {
-  const traverse = (cursor: Parser.TreeCursor) => {
+  const traverse = (cursor: TreeCursor) => {
     const node = cursor.currentNode;
     const nodeType = node.type;
 
@@ -937,6 +939,7 @@ function extractTSReferencesFromTree(
         // Named imports: import { A, B } from './module'
         const namedImports = clauseNode.descendantsOfType("import_specifier");
         for (const specifier of namedImports) {
+          if (!specifier) continue;
           const nameNode = specifier.childForFieldName("name");
           if (nameNode) {
             references.push({
@@ -1004,11 +1007,11 @@ function extractTSReferencesFromTree(
 }
 
 function extractPythonReferencesFromTree(
-  cursor: Parser.TreeCursor,
+  cursor: TreeCursor,
   references: ExtractedReference[],
   _content: string
 ): void {
-  const traverse = (cursor: Parser.TreeCursor) => {
+  const traverse = (cursor: TreeCursor) => {
     const node = cursor.currentNode;
     const nodeType = node.type;
 
@@ -1063,12 +1066,12 @@ function extractPythonReferencesFromTree(
 }
 
 function extractGenericReferencesFromTree(
-  cursor: Parser.TreeCursor,
+  cursor: TreeCursor,
   references: ExtractedReference[],
   _content: string
 ): void {
   // 通用引用提取逻辑（简化版）
-  const traverse = (cursor: Parser.TreeCursor) => {
+  const traverse = (cursor: TreeCursor) => {
     const node = cursor.currentNode;
     const nodeType = node.type;
 

@@ -83,10 +83,10 @@ export function App() {
   const bySession = useChatStore((s) => s.bySession);
 
   const {
-    editorTabs, editorPath, chatWidth, isDragging, sidebarWidth, isSidebarDragging,
+    editorTabs, editorPath, diffDataByPath, chatWidth, isDragging, sidebarWidth, isSidebarDragging,
     sidebarCollapsed, settingsOpen, settingsTab,
     searchOpen, modeMenuOpen, drafts, busy, keepAllBusy,
-    setEditorPath, setActiveEditorTab, closeEditorTab, setChatWidth, setIsDragging, setSidebarWidth, setIsSidebarDragging,
+    setEditorPath, openEditorDiff, setActiveEditorTab, closeEditorTab, setChatWidth, setIsDragging, setSidebarWidth, setIsSidebarDragging,
     setSidebarCollapsed, setSettingsOpen, setSettingsTab, setSearchOpen, setModeMenuOpen,
     setDraft, openSettings,
   } = useUiStore();
@@ -103,16 +103,6 @@ export function App() {
   const [editorTabActionsHost, setEditorTabActionsHost] = useState<HTMLDivElement | null>(null);
   /** 各打开文件的 dirty 状态，供 tab 关闭确认与脏点标记。 */
   const [editorDirtyByPath, setEditorDirtyByPath] = useState<Record<string, boolean>>({});
-  /** 当前以 diff 模式打开的文件内容（按 path 绑定，切换/重开时需触发重渲染）。 */
-  const [diffDataByPath, setDiffDataByPath] = useState<Record<string, { before: string; after: string }>>({});
-  const clearFileDiff = useCallback((path: string) => {
-    setDiffDataByPath((prev) => {
-      if (!(path in prev)) return prev;
-      const next = { ...prev };
-      delete next[path];
-      return next;
-    });
-  }, []);
 
   // ── Hooks ────────────────────────────────────────────────────────────────────
   const {
@@ -189,7 +179,6 @@ export function App() {
   }, []);
 
   const handleCloseEditorTab = useCallback((path: string) => {
-    clearFileDiff(path);
     setEditorDirtyByPath((prev) => {
       if (!(path in prev)) return prev;
       const next = { ...prev };
@@ -197,7 +186,7 @@ export function App() {
       return next;
     });
     closeEditorTab(path);
-  }, [closeEditorTab, clearFileDiff]);
+  }, [closeEditorTab]);
 
   const requestCloseEditorTab = useCallback(async (path: string) => {
     if (editorDirtyByPath[path]) {
@@ -209,9 +198,8 @@ export function App() {
 
   /** 普通打开文件：激活/追加 tab，并取消该路径上的 diff 模式。 */
   const openEditorFile = useCallback((path: string) => {
-    clearFileDiff(path);
     setEditorPath(path);
-  }, [setEditorPath, clearFileDiff]);
+  }, [setEditorPath]);
 
   const fileNameOf = useCallback((path: string) => {
     const parts = path.replace(/\\/g, "/").split("/");
@@ -422,10 +410,7 @@ export function App() {
             onUndoAll={() => void onRollback()}
             onKeepFile={(p) => void onKeepFile(p)}
             onUndoFile={(p) => void onUndoFile(p)}
-            onViewDiff={(path, before, after) => {
-              setDiffDataByPath((prev) => ({ ...prev, [path]: { before, after } }));
-              setEditorPath(path);
-            }}
+            onViewDiff={openEditorDiff}
             onOpenFile={openEditorFile}
           />
           <PlansBar

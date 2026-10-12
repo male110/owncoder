@@ -74,14 +74,23 @@ export async function runPostVerify(
   tracer: Tracer,
   schedulerState?: PostVerifySchedulerState,
 ): Promise<void> {
-  if (opts.enableVerification === false || opts.mode !== "agent" || !toolCtx.touchedPaths?.length) return;
+  const timingContext = `sid=${opts.sessionId ?? "unknown"}`;
+  const started = performance.now();
+  if (opts.enableVerification === false || opts.mode !== "agent" || !toolCtx.touchedPaths?.length) {
+    const reason = opts.enableVerification === false ? "disabled" : opts.mode !== "agent" ? "mode" : "no_changed_files";
+    console.log(`[post_verify] ${timingContext} status=skipped duration=${Math.round(performance.now() - started)}ms reason=${reason}`);
+    return;
+  }
 
+  console.log(`[post_verify] ${timingContext} start files=${toolCtx.touchedPaths.length}`);
+  let status = "error";
   const verifSpanId = tracer.startSpan("post_verification", "verification");
   try {
-    const verifier = new VerificationEngine(opts.workspaceRoot);
+    const verifier = new VerificationEngine(opts.workspaceRoot, { timingContext });
     const verifResult = normalizeVerificationResult(
       await verifier.verify(toolCtx.touchedPaths ?? []),
     );
+    status = verifResult.passed ? "passed" : "failed";
     if (verifResult.passed) {
       if (schedulerState?.taskRunState) {
         schedulerState.taskRunState = applyTaskEvent(schedulerState.taskRunState, {
@@ -132,6 +141,7 @@ export async function runPostVerify(
       verifResult.suggestions.join("; "),
     );
   } catch (e) {
+    status = "error";
     tracer.endSpan(verifSpanId, "error");
     const msg = e instanceof Error ? e.message : String(e);
     writeEventLog({
@@ -165,6 +175,8 @@ export async function runPostVerify(
       sealPostVerifyFailure(schedulerState, result, `post_verify 执行异常: ${msg}`);
     }
     memory.addError("verification_error", msg, "");
+  } finally {
+    console.log(`[post_verify] ${timingContext} status=${status} duration=${Math.round(performance.now() - started)}ms`);
   }
 }
 

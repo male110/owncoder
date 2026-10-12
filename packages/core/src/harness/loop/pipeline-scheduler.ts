@@ -41,12 +41,12 @@ export async function runPipelineScheduler(
 ): Promise<void> {
   let modelCalled = false;
   let plainCompletionDone = false;
-  const t0 = Date.now();
-  const ts = (label: string) => `[scheduler +${Date.now() - t0}ms] ${label}`;
+  const t0 = performance.now();
+  const ts = (label: string) => `[scheduler +${Math.round(performance.now() - t0)}ms] sid=${ctx.opts.sessionId ?? "unknown"} ${label}`;
 
   for (const node of stages) {
     console.log(ts(`stage start: ${node.type}`));
-    const stageT0 = Date.now();
+    const stageT0 = performance.now();
     // Before any model-calling stage, ensure history + user message are in messages.
     if (!ctx.state.userMessageInjected && isModelCallingStage(node)) {
       await injectHistoryAndUserMessage(ctx);
@@ -68,17 +68,25 @@ export async function runPipelineScheduler(
     // self-review, no execution-grounded verification, nothing that would pull
     // the model back into the loop it just exited. present_changes is exempt so
     // the user still sees any diff produced before the handoff.
-    if (ctx.state.handoffRequested && node.type !== "present_changes") continue;
+    if (ctx.state.handoffRequested && node.type !== "present_changes") {
+      console.log(ts(`stage skipped: ${node.type} reason=handoff (+${Math.round(performance.now() - stageT0)}ms)`));
+      continue;
+    }
 
     const handler = STAGE_HANDLERS.get(node.type);
     if (handler) {
-      await handler.run({ ...ctx, node });
+      try {
+        await handler.run({ ...ctx, node });
+      } catch (error) {
+        console.log(ts(`stage error: ${node.type} (+${Math.round(performance.now() - stageT0)}ms)`));
+        throw error;
+      }
       if (isModelCallingStage(node)) {
         modelCalled = true;
       }
     }
 
-    console.log(ts(`stage done: ${node.type} (+${Date.now() - stageT0}ms)`));
+    console.log(ts(`stage ${handler ? "done" : "skipped"}: ${node.type} (+${Math.round(performance.now() - stageT0)}ms)`));
 
     if (ctx.state.aborted || ctx.state.blocked || ctx.state.awaitingUserConfirmation || ctx.state.shortCircuited) break;
   }
