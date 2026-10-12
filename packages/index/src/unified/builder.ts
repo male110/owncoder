@@ -179,6 +179,9 @@ export function buildIndex(db: Database.Database, options: BuildOptions): BuildR
 
     const currentMap = new Map(currentMetas.map((f) => [f.path, f]));
     const diff = computeDiffFromMetas(currentMetas, indexedFiles);
+    if (!options.incremental) {
+      diff.modified = currentMetas.filter((meta) => indexedFiles.has(meta.path)).map((meta) => meta.path);
+    }
     console.log(
       `[UnifiedIndex] Diff: +${diff.added.length} ~${diff.modified.length} -${diff.removed.length}`
     );
@@ -467,6 +470,9 @@ export async function buildIndexAsync(
     const indexedFiles = getIndexedFiles(db);
     const indexedWithSize = new Map(Array.from(indexedFiles.entries()).map(([path, value]) => [path, value]));
     const diff = computeDiffFromMetas(currentMetas, indexedWithSize);
+    if (!options.incremental) {
+      diff.modified = currentMetas.filter((meta) => indexedFiles.has(meta.path)).map((meta) => meta.path);
+    }
     const currentPaths = new Set(currentMetas.map((meta) => meta.path));
     for (const forcedPath of options.forcedPaths ?? []) {
       const normalizedPath = upath.normalize(forcedPath);

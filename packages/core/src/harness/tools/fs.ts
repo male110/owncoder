@@ -842,7 +842,7 @@ export async function toolGrep(
     }
   }
 
-  async function walk(dir: string, depth: number): Promise<void> {
+  async function walk(dir: string): Promise<void> {
     if (hits.length >= limit) return;
     let st;
     try {
@@ -871,7 +871,7 @@ export async function toolGrep(
       const childRel = normalizeRel(ctx.workspaceRoot, full);
       if (it.isDirectory()) {
         if (pathIgnored(childRel, true, ignoreRules)) continue;
-        if (depth < 6) await walk(full, depth + 1);
+        await walk(full);
       } else if (it.isFile()) {
         if (pathIgnored(childRel, false, ignoreRules)) continue;
         await scanFile(full);
@@ -879,7 +879,7 @@ export async function toolGrep(
     }
   }
 
-  await walk(root, 0);
+  await walk(root);
   return ok(cap(hits.join("\n") || "No matches", ctx.maxOutputChars));
 }
 

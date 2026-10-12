@@ -2,26 +2,32 @@
 
 中文: [README.md](./README.md)
 
-**Security-first AI coding tool — your code always stays yours.**
+**An AI coding tool focused on security and token savings: file redaction protects sensitive information, a higher-cost model plans and guides, and a lower-cost model executes.**
 
 ---
 
 ## Why OwnCoder?
 
-When using AI coding tools, do you worry about:
-- Database credentials being sent to the cloud?
-- API keys, SSH private keys, and other secrets leaking?
-- Your source code being uploaded to third-party servers?
+AI coding tools need to protect passwords and keys in your files while controlling the token costs of repeatedly reading code, editing files, and running checks. OwnCoder focuses on both:
 
-**OwnCoder redacts sensitive information before anything is sent to the model, so your security stays protected.**
+| Core value | How it works |
+|------------|--------------|
+| **Security: file redaction** | Sensitive values in protected files are masked locally before the redacted content reaches the model; custom file rules and redaction previews are supported |
+| **Token savings and lower costs: separate model roles** | A higher-cost model understands the request, breaks down the task, and provides execution steps; a lower-cost model follows those steps to edit and verify code, with on-demand retrieval and context caching to reduce costs |
 
-### Security First
+### 🔒 Security: Redact File Contents Before Sending Them to the Model
 
-OwnCoder starts from **security**, not after-the-fact patches:
-- **Automatic redaction**: Database passwords, API keys, SSH private keys, and similar secrets are replaced with `[REDACTED]` before they reach the model
-- **Fully local**: Code analysis, indexing, and retrieval all run on your machine — no source is uploaded to the cloud
-- **Zero telemetry**: No usage analytics, no crash reporting, no tracking endpoints
-- **You stay in control**: Your data lives only on your machine and always belongs to you
+- **Automatic redaction**: Configuration, credential, and private key files covered by the rules receive value-level or full-file redaction, masking sensitive content with `***`.
+- **Local processing**: File redaction, code indexing, and retrieval run locally. Redaction does not modify the original files on disk.
+- **Configurable rules**: Add project-specific sensitive file and detection rules, and preview the results in Settings.
+
+When using a remote model, code snippets and context needed for the task are still sent to your configured model service. Redaction protects sensitive content covered by the rules; see the scope described below.
+
+### 💰 Token Savings: A Higher-Cost Model Plans, a Lower-Cost Model Executes
+
+**Let a higher-cost model guide a lower-cost model through the task.** The higher-cost model first understands the request, organizes constraints, and creates ordered steps. The lower-cost model then follows those steps to retrieve code, edit files, run commands, and verify results. The execution loop, which consumes more tokens, can use a lower-cost model while the higher-cost model focuses on planning.
+
+On-demand code reads and context caching further reduce unnecessary input tokens and execution costs.
 
 ---
 
@@ -29,7 +35,7 @@ OwnCoder starts from **security**, not after-the-fact patches:
 
 ### Automatic Sensitive-Data Redaction
 
-Your `.env` files, database connection strings, API keys, SSH private keys… before the Agent sends file contents to the model, they are **detected and replaced with `[REDACTED]`**. Secrets never leave your machine.
+With redaction enabled, when the Agent reads protected files such as `.env`, credential configurations, and SSH private keys through built-in file-reading tools, the contents are redacted locally before being returned to the model. Matching sensitive content is replaced with `***`, and the original files remain unchanged.
 
 **Three layers of protection:**
 
@@ -42,9 +48,9 @@ Your `.env` files, database connection strings, API keys, SSH private keys… be
 **Two redaction granularities:**
 
 - **Value-level redaction** (`.env`, `credentials.json`, etc.): Only sensitive field values are masked; the rest stays readable so the Agent can still understand structure.
-- **Full-file redaction** (`*.pem`, `*.key`, `id_rsa`, `*.sqlite`, etc.): Every non-empty line is masked; the Agent only learns that “this is a sensitive file.”
+- **Full-file redaction** (`*.pem`, `*.key`, `id_rsa`, `*.sqlite`, etc.): Non-empty line contents are masked. Some key-value lines retain their keys and separators to help the Agent understand the structure.
 
-> Allowlist: template files such as `.env.example` and `.env.sample` are whitelisted and will not be redacted by mistake.
+> Scope: Value-level detection rules apply only to sensitive files covered by the built-in rules; ordinary source files do not automatically receive these checks. Custom sensitive file rules use full-file redaction. Template files such as `.env.example` and `.env.sample` are allowlisted and excluded from redaction. Use the preview to confirm that your project's sensitive files are covered.
 
 ---
 
@@ -104,11 +110,38 @@ When the Agent runs risky commands such as `rm -rf`, `git push --force`, or `chm
 
 ---
 
-## High Cache Hit Rate
+## 💰 Token Savings and Model Cost Optimization
 
-Tokens cost money. OwnCoder is built to reuse context aggressively, with cache hit rates up to about 95%:
+### A Higher-Cost Model Plans, a Lower-Cost Model Executes
 
-![Screenshot](%E5%B1%8F%E5%B9%95%E6%88%AA%E5%9B%BE%202026-09-17%20235326.png)
+OwnCoder lets you configure models and reasoning effort separately for task decomposition and the execution loop, so a plan produced by a more capable model guides a lower-cost model's execution.
+
+| Stage | Recommended model | Responsibilities |
+|-------|-------------------|------------------|
+| **Task decomposition** | A more capable, higher-cost model | Understand user intent, organize relevant history and constraints, and break the goal into ordered execution steps with dependencies |
+| **Execution loop** | A lower-cost model suited to coding | Follow the plan to search and read code, edit files, run commands and checks, and continue based on the results |
+
+Workflow: **User request → Higher-cost model breaks down the task and provides guidance → Lower-cost model executes the steps → Verification and delivery**.
+
+Execution typically involves multiple rounds of tool calls and feedback. Assigning this work to a lower-cost model reduces the unit price of the many tokens consumed during execution. Clear steps also help reduce repeated exploration and unsuccessful attempts. Actual savings depend on task complexity, model capabilities, and provider pricing.
+
+**Configuration:**
+
+1. Add the models you need in **Settings → Models**.
+2. Enable **Separate execution-stage configuration** in Settings.
+3. Select the **Task decomposition model** and **Execution loop model** separately in the chat bar, and adjust reasoning effort for each stage as needed.
+
+Without separate stage configuration, task decomposition and execution use the same model configuration.
+
+### On-Demand Reads and Context Caching
+
+- **Retrieve code on demand**: Symbol search, file outlines, and partial reads provide relevant code, reducing the tokens needed to include entire files in context.
+- **Reuse relevant history**: Retrieve history related to the current task to reduce repeated background input and exploration.
+- **Use the model service's context cache**: Cache hits can reduce the cost of repeated input; billing details depend on the provider.
+
+The screenshot below shows one example with approximately 95% cache hits. Actual hit rates vary with the model service, context, and task.
+
+![Context cache hit example](%E5%B1%8F%E5%B9%95%E6%88%AA%E5%9B%BE%202026-09-17%20235326.png)
 
 ---
 

@@ -78,11 +78,9 @@ type SendResult =
       sessionTitle: string | null;
     };
 
-// 生成临时会话标题：取首条消息前若干字符并清理空白。
+// 保留首条消息的完整标题，显示省略号由侧栏的可用宽度决定。
 function provisionalTitle(text: string): string {
-  const clean = text.replace(/\s+/g, " ").trim();
-  const LIMIT = 24;
-  return clean.length > LIMIT ? `${clean.slice(0, LIMIT)}…` : clean;
+  return text.replace(/\s+/g, " ").trim();
 }
 
 // 仅当会话仍持有默认标题（"新会话"或空）时，立即用首条用户消息更新侧栏标题，

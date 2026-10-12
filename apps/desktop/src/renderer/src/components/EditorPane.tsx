@@ -104,6 +104,8 @@ type EditorPaneProps = {
   hidePathTitle?: boolean;
   /** 将保存/重新加载等操作渲染到外层页签行容器。 */
   actionsHost?: HTMLElement | null;
+  /** 当前页签是否可见。 */
+  active?: boolean;
 } & (
   | {
       /** 普通编辑模式 */
@@ -131,6 +133,7 @@ export function EditorPane({
   onDirtyChange,
   hidePathTitle = false,
   actionsHost = null,
+  active = true,
 }: EditorPaneProps) {
   const [value, setValue] = useState("");
   const [original, setOriginal] = useState("");
@@ -147,35 +150,48 @@ export function EditorPane({
   const loadRequestRef = useRef(0);
 
   useEffect(() => {
-    onDirtyChange?.(dirty && !diffMode);
-  }, [dirty, diffMode, onDirtyChange]);
-  // DiffEditor 的模型由 @monaco-editor/react 自动创建；组件卸载时它先释放模型、
-  // 再销毁编辑器，会触发 Monaco 的 "TextModel got disposed before DiffEditorWidget
-  // model got reset" 报错。因此用 keepCurrent* 让包装组件不释放模型，改由这里在
-  // 编辑器销毁之后统一释放（子组件清理先于父组件清理执行）。
+    onDirtyChange?.(dirty);
+  }, [dirty, onDirtyChange]);
+  // 包装组件默认先释放模型再销毁编辑器；保留模型并延后释放，避免销毁顺序错误。
   const diffModelsRef = useRef<{
     original: monaco.editor.ITextModel;
     modified: monaco.editor.ITextModel;
   } | null>(null);
-  // DiffEditor 会按模型 URI 复用内部视图状态；每次查看使用新 URI，避免前次展开的
-  // 未变更区域在关闭并重开后恢复为全部内容。
-  const diffModelPaths = useRef(
-    diffMode ? {
-      original: `inmemory://owncoder/diff/${++nextDiffModelId}/original/${path}`,
-      modified: `inmemory://owncoder/diff/${nextDiffModelId}/modified/${path}`,
-    } : null,
-  );
+  const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
+  const diffEditorRef = useRef<monaco.editor.IStandaloneDiffEditor | null>(null);
+  const editorModelRef = useRef<monaco.editor.ITextModel | null>(null);
+  const normalLoadedRef = useRef(false);
+  const diffSnapshotRef = useRef<{ before: string; after: string } | null>(null);
+  if (diffMode) diffSnapshotRef.current = { before: originalContent, after: content };
+  const diffSnapshot = diffSnapshotRef.current;
+  const sourceVisible = active && !diffMode && !(isMarkdown && mdViewMode === "preview");
+  const sourceVisibleRef = useRef(sourceVisible);
+  sourceVisibleRef.current = sourceVisible;
+  const diffVisible = active && Boolean(diffMode);
+  const diffVisibleRef = useRef(diffVisible);
+  diffVisibleRef.current = diffVisible;
+  // 同一页签复用 URI，关闭并重开页签时才生成新 URI。
+  const diffModelPaths = useMemo(() => {
+    const id = ++nextDiffModelId;
+    return {
+      original: `inmemory://owncoder/diff/${id}/original/${path}`,
+      modified: `inmemory://owncoder/diff/${id}/modified/${path}`,
+    };
+  }, [path]);
 
   const load = useCallback(async () => {
     const requestId = ++loadRequestRef.current;
     const isCurrent = () => loadRequestRef.current === requestId;
 
-    // 如果传入了 content，直接使用，跳过文件读取
+    // Diff 快照不能覆盖普通文件内容和撤销历史。
+    if (diffMode) {
+      setLoading(false);
+      return;
+    }
     if (content !== undefined) {
-      if (!isCurrent()) return;
+      normalLoadedRef.current = true;
       setValue(content);
-      // 如果是diff模式，originalContent 保证存在（由类型系统确保）
-      setOriginal(diffMode ? originalContent : content);
+      setOriginal(content);
       setLoading(false);
       return;
     }
@@ -184,6 +200,7 @@ export function EditorPane({
     try {
       const text = await window.owncoder.readWorkspaceFile(path);
       if (!isCurrent()) return;
+      normalLoadedRef.current = true;
       setValue(text);
       setOriginal(text);
     } catch (e) {
@@ -191,10 +208,10 @@ export function EditorPane({
     } finally {
       if (isCurrent()) setLoading(false);
     }
-  }, [path, content, originalContent, diffMode]);
+  }, [path, content, diffMode]);
 
   useEffect(() => {
-    void load();
+    if (diffMode || !normalLoadedRef.current) void load();
     return () => {
       loadRequestRef.current += 1;
     };
@@ -222,16 +239,34 @@ export function EditorPane({
     saveRef.current = save;
   }, [save]);
 
-  // 在 DiffEditor（子组件）卸载并销毁编辑器之后再释放模型
+  // 父组件清理可能早于子组件；等本轮清理完成、编辑器销毁后再释放模型。
   useEffect(() => {
     return () => {
       const models = diffModelsRef.current;
       diffModelsRef.current = null;
-      if (!models) return;
-      if (!models.original.isDisposed()) models.original.dispose();
-      if (!models.modified.isDisposed()) models.modified.dispose();
+      const editorModel = editorModelRef.current;
+      editorModelRef.current = null;
+      editorRef.current = null;
+      diffEditorRef.current = null;
+      queueMicrotask(() => {
+        if (editorModel && !editorModel.isDisposed()) editorModel.dispose();
+        if (models && !models.original.isDisposed()) models.original.dispose();
+        if (models && !models.modified.isDisposed()) models.modified.dispose();
+      });
     };
-  }, [diffMode]);
+  }, [diffModelPaths]);
+
+  useEffect(() => {
+    editorRef.current?.updateOptions({ readOnly: !sourceVisible });
+    if (sourceVisible) {
+      editorRef.current?.layout();
+      editorRef.current?.focus();
+    }
+    if (diffVisible) {
+      diffEditorRef.current?.layout();
+      diffEditorRef.current?.getModifiedEditor().focus();
+    }
+  }, [sourceVisible, diffVisible]);
 
   const mdToggle =
     !diffMode && isMarkdown ? (
@@ -326,15 +361,20 @@ export function EditorPane({
       {tabActions}
       {error ? <p className="editor-error">{error}</p> : null}
       <div className="editor-pane-body">
-        {diffMode ? (
+        <div
+          style={{ position: "absolute", inset: 0, visibility: diffVisible ? "visible" : "hidden", pointerEvents: diffVisible ? "auto" : "none" }}
+          aria-hidden={!diffVisible}
+          inert={!diffVisible}
+        >
+        {diffSnapshot ? (
           <DiffEditor
             height="100%"
             theme={monacoTheme}
             language={languageForPath(path)}
-            original={original}
-            modified={value}
-            originalModelPath={diffModelPaths.current?.original}
-            modifiedModelPath={diffModelPaths.current?.modified}
+            original={diffSnapshot.before}
+            modified={diffSnapshot.after}
+            originalModelPath={diffModelPaths?.original}
+            modifiedModelPath={diffModelPaths?.modified}
             keepCurrentOriginalModel
             keepCurrentModifiedModel
             options={{
@@ -358,13 +398,20 @@ export function EditorPane({
               },
             }}
             onMount={(ed) => {
+              diffEditorRef.current = ed;
+              if (diffVisibleRef.current) {
+                ed.layout();
+                ed.getModifiedEditor().focus();
+              }
               const model = ed.getModel();
               diffModelsRef.current = model
                 ? { original: model.original, modified: model.modified }
                 : null;
             }}
           />
-        ) : isMarkdown && mdViewMode === "preview" ? (
+        ) : null}
+        </div>
+        {active && !diffMode && isMarkdown && mdViewMode === "preview" ? (
           <div className="editor-md-preview">
             {value.trim() ? (
               <Markdown content={value} className="md-body editor-md-body" showCopy={false} />
@@ -372,13 +419,19 @@ export function EditorPane({
               <p className="hint context-empty">{t("空文档")}</p>
             )}
           </div>
-        ) : (
+        ) : null}
+        <div
+          style={{ position: "absolute", inset: 0, visibility: sourceVisible ? "visible" : "hidden", pointerEvents: sourceVisible ? "auto" : "none" }}
+          aria-hidden={!sourceVisible}
+          inert={!sourceVisible}
+        >
           <Editor
             height="100%"
             theme={monacoTheme}
             language={languageForPath(path)}
             value={value}
-            onChange={(v) => setValue(v ?? "")}
+            keepCurrentModel
+            onChange={(v) => { if (sourceVisibleRef.current) setValue(v ?? ""); }}
             options={{
               fontSize: 13,
               minimap: { enabled: false },
@@ -386,15 +439,23 @@ export function EditorPane({
               wordWrap: "on",
               automaticLayout: true,
               tabSize: 2,
+              readOnly: !sourceVisible,
             }}
             onMount={(ed) => {
+              editorRef.current = ed;
+              editorModelRef.current = ed.getModel();
+              ed.updateOptions({ readOnly: !sourceVisibleRef.current });
+              if (sourceVisibleRef.current) {
+                ed.layout();
+                ed.focus();
+              }
               ed.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
-                void saveRef.current();
+                if (sourceVisibleRef.current) void saveRef.current();
               });
             }}
           />
-        )}
-        {loading ? <p className="hint context-empty editor-loading-overlay">{t("加载中…")}</p> : null}
+        </div>
+        {loading && !diffMode ? <p className="hint context-empty editor-loading-overlay">{t("加载中…")}</p> : null}
       </div>
     </div>
   );

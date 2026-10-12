@@ -72,8 +72,7 @@ export function newSessionId(): string {
 export function titleFromHistory(history: ChatTurn[], fallback = "新会话"): string {
   const user = history.find((h) => h.role === "user" && h.content.trim());
   if (!user) return fallback;
-  const t = user.content.trim().replace(/\s+/g, " ");
-  return t.length > 42 ? `${t.slice(0, 42)}…` : t;
+  return user.content.trim().replace(/\s+/g, " ");
 }
 
 function sortSessions(sessions: SessionMeta[]): SessionMeta[] {

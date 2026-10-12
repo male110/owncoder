@@ -3,7 +3,7 @@
  */
 
 import { UnifiedIndex } from "./index.ts";
-import { buildIndex } from "./builder.ts";
+import { buildIndexAsync } from "./builder.ts";
 import type {
   CodemapClient,
   CodemapStatus,
@@ -50,9 +50,9 @@ export class UnifiedCodemapAdapter implements CodemapClient {
       }
 
       // 构建索引
-      const buildResult = buildIndex(db, {
+      const buildResult = await buildIndexAsync(db, {
         root,
-        incremental: true,
+        incremental: false,
         onProgress: (current, total, file) => {
           if (current % 10 === 0 || current === total) {
             console.log(`[UnifiedIndex] Progress: ${current}/${total} - ${file}`);

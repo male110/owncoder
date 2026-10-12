@@ -1,0 +1,9 @@
+{
+  "errors": [
+    "%cElectron Security Warning (Insecure Content-Security-Policy) font-weight: bold; This renderer process has either no Content Security\n  Policy set or a policy with \"unsafe-eval\" enabled. This exposes users of\n  this app to unnecessary security risks.\n\nFor more information and help, consult\nhttps://electronjs.org/docs/tutorial/security.\nThis warning will not show up\nonce the app is packaged.",
+    "Uncaught TypeError: e.getDiffComputationResult is not a function",
+    "Error: Script failed to execute, this normally means an error was thrown. Check the renderer console for the error."
+  ],
+  "gone": [],
+  "cases": []
+}

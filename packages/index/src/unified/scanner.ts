@@ -80,6 +80,34 @@ const INDEXABLE_EXTENSIONS = new Set([
   ".swift",
   // Scala
   ".scala",
+  // 其他编程语言
+  ".zig",
+  ".lua",
+  ".dart",
+  ".ex",
+  ".exs",
+  ".elm",
+  ".ml",
+  ".mli",
+  ".res",
+  ".resi",
+  ".el",
+  ".sh",
+  ".bash",
+  ".m",
+  ".mm",
+  ".sol",
+  ".ql",
+  ".qll",
+  // 样式、标记与配置文件
+  ".css",
+  ".html",
+  ".htm",
+  ".vue",
+  ".json",
+  ".yaml",
+  ".yml",
+  ".toml",
 ]);
 
 export const MAX_FILE_SIZE = 130 * 1024; // 130KB
@@ -607,7 +635,7 @@ function isIndexableFile(filename: string): boolean {
 
   // 检查是否是需要索引的点文件
   if (filename.startsWith('.')) {
-    return DOT_FILES_TO_INDEX.has(filename.toLowerCase());
+    if (DOT_FILES_TO_INDEX.has(filename.toLowerCase())) return true;
   }
 
   // 正常的扩展名检查
@@ -649,6 +677,32 @@ export function detectLanguage(filename: string): string | null {
     ".php": "php",
     ".swift": "swift",
     ".scala": "scala",
+    ".zig": "zig",
+    ".lua": "lua",
+    ".dart": "dart",
+    ".ex": "elixir",
+    ".exs": "elixir",
+    ".elm": "elm",
+    ".ml": "ocaml",
+    ".mli": "ocaml",
+    ".res": "rescript",
+    ".resi": "rescript",
+    ".el": "elisp",
+    ".sh": "bash",
+    ".bash": "bash",
+    ".m": "objc",
+    ".mm": "objc",
+    ".sol": "solidity",
+    ".ql": "ql",
+    ".qll": "ql",
+    ".css": "css",
+    ".html": "html",
+    ".htm": "html",
+    ".vue": "vue",
+    ".json": "json",
+    ".yaml": "yaml",
+    ".yml": "yaml",
+    ".toml": "toml",
   };
 
   return languageMap[ext] ?? null;

@@ -109,6 +109,29 @@ test("grep skips gitignored files, lockfiles, binaries, and oversized files", as
   );
 });
 
+test("grep 能从工作区根目录检索超过六层目录中的 39KB 源码", async () => {
+  const relativeDir = "src/features/domain/services/internal/handlers/nested";
+  const method = "loadDeepWorkspaceData";
+  await withWorkspace(
+    async (root) => {
+      const dir = join(root, relativeDir);
+      await mkdir(dir, { recursive: true });
+      const declaration = `export function ${method}() {}\n`;
+      const content = declaration + " ".repeat(39 * 1024 - Buffer.byteLength(declaration));
+      await writeFile(join(dir, "service.ts"), content);
+    },
+    async (root) => {
+      const ctx = ctxFor(root);
+      const direct = await toolGrep(ctx, method, `${relativeDir}/service.ts`, 40);
+      assert.equal(direct.ok, true);
+      assert.match(direct.output, /service\.ts:1:/);
+      const recursive = await toolGrep(ctx, method, ".", 40);
+      assert.equal(recursive.ok, true);
+      assert.equal(recursive.output, direct.output);
+    },
+  );
+});
+
 test("grep respects extraIgnore from workflow index settings", async () => {
   await withWorkspace(
     async (root) => {

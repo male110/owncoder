@@ -67,6 +67,10 @@ function bootstrap(): void {
   const require = createRequire(__filename);
   const { app } = require("electron") as typeof import("electron");
   app.setPath("userData", userDataDir);
+  // npm 作为独立资源发布；安装和启动均复用 Electron 内置 Node。
+  process.env.OWNCODER_LSP_NPM_CLI = app.isPackaged
+    ? join(process.resourcesPath, "lsp-npm", "bin", "npm-cli.js")
+    : join(require.resolve("npm"), "..", "bin", "npm-cli.js");
 }
 
 bootstrap();

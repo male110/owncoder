@@ -433,7 +433,7 @@ export class UnifiedIndexAdapter implements IndexClient {
     try {
       const result = await buildIndexAsync(db, {
         root,
-        incremental: true,
+        incremental: false,
         useAsyncScan: true,
         scanConcurrency: 50,
         maxFileSize: MAX_FILE_SIZE,

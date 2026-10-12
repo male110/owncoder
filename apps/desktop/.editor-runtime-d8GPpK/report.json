@@ -1,0 +1,60 @@
+{
+  "errors": [],
+  "gone": [],
+  "cases": [
+    {
+      "models": 3,
+      "diffs": [
+        {
+          "changes": null,
+          "height": 3600
+        }
+      ]
+    },
+    {
+      "models": 3,
+      "diffs": [
+        {
+          "changes": null,
+          "height": 3600
+        }
+      ]
+    },
+    {
+      "models": 3,
+      "diffs": [
+        {
+          "changes": null,
+          "height": 3600
+        }
+      ]
+    },
+    {
+      "models": 3,
+      "diffs": [
+        {
+          "changes": null,
+          "height": 3600
+        }
+      ]
+    },
+    {
+      "models": 3,
+      "diffs": [
+        {
+          "changes": null,
+          "height": 3600
+        }
+      ]
+    }
+  ],
+  "closed": {
+    "models": 0,
+    "diffs": [
+      {
+        "changes": null,
+        "height": -1
+      }
+    ]
+  }
+}

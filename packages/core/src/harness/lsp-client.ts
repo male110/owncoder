@@ -3,6 +3,7 @@ import { existsSync, promises as fs } from "node:fs";
 import { promisify } from "node:util";
 import upath from "upath";
 import path from "node:path";
+import { runLspNpmInstall, lspNodeRuntime, resolveLspNodeEntry } from "./lsp-npm.ts";
 
 const execFileAsync = promisify(execFile);
 
@@ -15,6 +16,8 @@ export interface LspClientConfig {
   args?: string[];
   /** Working directory for the server */
   cwd?: string;
+  /** 语言服务器子进程环境（用于应用内 Node 运行时）。 */
+  env?: NodeJS.ProcessEnv;
   /** Initialization options */
   initOptions?: Record<string, unknown>;
   /** File types this server handles */
@@ -108,6 +111,8 @@ export class LspClient {
       try {
         this.process = spawn(this.config.command, this.config.args ?? [], {
           cwd: this.config.cwd,
+          env: this.config.env,
+          windowsHide: true,
           stdio: ["pipe", "pipe", "pipe"],
           shell: false,
         });
@@ -1157,18 +1162,14 @@ async function installNpmLanguageServer(
         "install",
         "--no-save",
         "--no-package-lock",
-        "--ignore-scripts=false",
+        "--ignore-scripts",
         "--prefix",
         installRoot,
         ...packages,
         "--registry",
         npmRegistry(),
       ];
-      await execFileAsync(process.platform === "win32" ? "npm.cmd" : "npm", npmArgs, {
-        cwd,
-        windowsHide: true,
-        maxBuffer: 2 * 1024 * 1024,
-      });
+      await runLspNpmInstall(npmArgs, cwd);
       for (const command of entry.commands) {
         const local = resolveLocalBin(cwd, command);
         if (local) return local;
@@ -1251,9 +1252,12 @@ async function resolveCatalogEntry(
         ? [...entry.args]
         : (COMMAND_DEFAULT_ARGS[command] ?? []);
 
+    const nodeEntry = local ? resolveLspNodeEntry(local, command) : null;
+    const runtime = nodeEntry ? lspNodeRuntime() : null;
     return {
-      command: local ?? command,
-      args,
+      command: runtime?.command ?? local ?? command,
+      args: nodeEntry ? [nodeEntry, ...args] : args,
+      env: runtime?.env,
       fileTypes: entry.fileTypes,
       initOptions: entry.initOptions,
     };
@@ -1263,14 +1267,7 @@ async function resolveCatalogEntry(
     if (installed) {
       const command = entry.commands.find((candidate) => resolveLocalBin(cwd, candidate));
       if (command) {
-        return {
-          command: resolveLocalBin(cwd, command) ?? command,
-          args: entry.args && entry.args.length > 0
-            ? [...entry.args]
-            : (COMMAND_DEFAULT_ARGS[command] ?? []),
-          fileTypes: entry.fileTypes,
-          initOptions: entry.initOptions,
-        };
+        return resolveCatalogEntry(entry, cwd, false);
       }
     }
   }
