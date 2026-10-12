@@ -112,6 +112,44 @@ test("list_dir dispatch preserves failure output", async () => {
   }
 });
 
+test("read_file 在访问文件前拒绝缺失路径和错误参数", async () => {
+  const invalidArgs = [
+    {}, { file_path: "small.ts" }, { path: "" }, { path: "   " },
+    { path: 123 }, { path: { name: "small.ts" } },
+    { parameters: { path: "small.ts" } },
+    { path: "small.ts", offset: "2", limit: 1 },
+    { path: "small.ts", offset: 0 }, { path: "small.ts", offset: 1.5 },
+    { path: "small.ts", limit: -1 }, { path: "small.ts", limit: null },
+  ];
+  for (const args of invalidArgs) {
+    const ctx = ctxFor("unused-workspace");
+    const result = await executeTool(ctx, {
+      id: "invalid-read", name: "read_file", arguments: args,
+      rawArguments: JSON.stringify(args),
+    });
+    assert.equal(result.ok, false);
+    assert.match(result.output, /read_file 参数错误/);
+    assert.equal(ctx.readSet.size, 0);
+  }
+});
+
+test("read_file 执行入口接受正常路径和合法行范围", async () => {
+  await withWorkspace(
+    async (root) => { await writeFile(join(root, "small.ts"), "first\nsecond\nthird"); },
+    async (root) => {
+      for (const args of [{ path: "small.ts" }, { path: "small.ts", offset: 2, limit: 1 }]) {
+        const result = await executeTool(ctxFor(root), {
+          id: "valid-read", name: "read_file", arguments: args,
+          rawArguments: JSON.stringify(args),
+        });
+        assert.equal(result.ok, true);
+        assert.match(result.output, /second/);
+        if ("offset" in args) assert.doesNotMatch(result.output, /first|third/);
+      }
+    },
+  );
+});
+
 test("whole-file read is allowed under 10KB", async () => {
   await withWorkspace(
     async (root) => {

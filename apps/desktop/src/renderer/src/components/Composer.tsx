@@ -241,6 +241,45 @@ function ComposerImpl({
     });
   }, [availableModels, providers]);
 
+  // 两个模型菜单都以当前平台项的中心定位，并在窗口边缘限制位置。
+  useLayoutEffect(() => {
+    const cleanups: Array<() => void> = [];
+    for (const [open, ref] of [[modelMenuOpen, modelMenuRef], [reactMenuOpen, reactMenuRef]] as const) {
+      if (!open) continue;
+      const body = ref.current?.querySelector<HTMLElement>(".model-menu-body");
+      const list = body?.querySelector<HTMLElement>(".model-menu-providers-list");
+      const models = body?.querySelector<HTMLElement>(".model-menu-models");
+      if (!body || !list || !models) continue;
+      const updatePosition = () => {
+        const active = list.querySelector<HTMLElement>('[aria-selected="true"]');
+        if (!active) return;
+        const bodyTop = body.getBoundingClientRect().top;
+        const activeRect = active.getBoundingClientRect();
+        const center = activeRect.top - bodyTop + activeRect.height / 2;
+        const desiredTop = center - models.getBoundingClientRect().height / 2;
+        const minTop = 8 - bodyTop;
+        const maxTop = window.innerHeight - 8 - bodyTop - models.offsetHeight;
+        models.style.top = `${Math.max(minTop, Math.min(desiredTop, maxTop))}px`;
+      };
+      models.scrollTop = 0;
+      updatePosition();
+      const observer = new ResizeObserver(updatePosition);
+      observer.observe(body);
+      observer.observe(models);
+      list.addEventListener("scroll", updatePosition);
+      window.addEventListener("resize", updatePosition);
+      ref.current?.addEventListener("animationend", updatePosition);
+      const menu = ref.current;
+      cleanups.push(() => {
+        observer.disconnect();
+        list.removeEventListener("scroll", updatePosition);
+        window.removeEventListener("resize", updatePosition);
+        menu?.removeEventListener("animationend", updatePosition);
+      });
+    }
+    return () => cleanups.forEach((cleanup) => cleanup());
+  }, [modelMenuOpen, reactMenuOpen, selectedProviderId, selectedReactProviderId, groupedModels]);
+
   useEffect(() => {
     if (!modeMenuOpen) return;
     const onDoc = (e: MouseEvent) => {
@@ -743,29 +782,38 @@ function ComposerImpl({
                   </div>
                 ) : (
                   <>
-                    {/*
-                      经典二级菜单：两列同在文档流 + align-items:flex-start，
-                      高度互不拉伸；各自 height:auto / max-height 独立滚动。
-                    */}
+                    {/* 平台列含设置入口，模型浮层独立滚动。 */}
                     <div className="model-menu-body">
                       <nav className="model-menu-providers" role="tablist" aria-label={t("模型平台")}>
-                        {groupedModels.map((group) => (
-                          <button
-                            key={group.providerId}
-                            type="button"
-                            role="tab"
-                            aria-selected={selectedProviderId === group.providerId}
-                            className={`model-menu-provider-item ${selectedProviderId === group.providerId ? "active" : ""}`}
-                            onMouseEnter={() => setSelectedProviderId(group.providerId)}
-                            onFocus={() => setSelectedProviderId(group.providerId)}
-                            onClick={() => setSelectedProviderId(group.providerId)}
-                          >
-                            <span className="model-menu-provider-label">
-                              {group.providerName}
-                              <span className="model-menu-provider-count">{group.models.length}</span>
-                            </span>
-                          </button>
-                        ))}
+                        <div className="model-menu-providers-list">
+                          {groupedModels.map((group) => (
+                            <button
+                              key={group.providerId}
+                              type="button"
+                              role="tab"
+                              aria-selected={selectedProviderId === group.providerId}
+                              className={`model-menu-provider-item ${selectedProviderId === group.providerId ? "active" : ""}`}
+                              onMouseEnter={() => setSelectedProviderId(group.providerId)}
+                              onFocus={() => setSelectedProviderId(group.providerId)}
+                              onClick={() => setSelectedProviderId(group.providerId)}
+                            >
+                              <span className="model-menu-provider-label">
+                                {group.providerName}
+                                <span className="model-menu-provider-count">{group.models.length}</span>
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                        <button
+                          type="button"
+                          className="model-menu-settings"
+                          onClick={() => {
+                            setModelMenuOpen(false);
+                            onOpenSettings();
+                          }}
+                        >
+                          {t("⚙ 模型设置…")}
+                        </button>
                       </nav>
                       <ul className="model-menu-models" role="group">
                         {(groupedModels.find((g) => g.providerId === selectedProviderId)?.models ?? []).map((m) => (
@@ -792,17 +840,6 @@ function ComposerImpl({
                         ))}
                       </ul>
                     </div>
-                    <div className="ws-menu-sep" aria-hidden />
-                    <button
-                      type="button"
-                      className="model-menu-settings"
-                      onClick={() => {
-                        setModelMenuOpen(false);
-                        onOpenSettings();
-                      }}
-                    >
-                      {t("⚙ 模型设置…")}
-                    </button>
                   </>
                 )}
               </div>
@@ -907,11 +944,14 @@ function ComposerImpl({
                       <>
                         <div className="model-menu-body">
                           <nav className="model-menu-providers" role="tablist" aria-label={t("模型平台")}>
-                            {groupedModels.map((group) => (
-                              <button key={group.providerId} type="button" role="tab" aria-selected={selectedReactProviderId === group.providerId} className={`model-menu-provider-item ${selectedReactProviderId === group.providerId ? "active" : ""}`} onMouseEnter={() => setSelectedReactProviderId(group.providerId)} onFocus={() => setSelectedReactProviderId(group.providerId)} onClick={() => setSelectedReactProviderId(group.providerId)}>
-                                <span className="model-menu-provider-label">{group.providerName}<span className="model-menu-provider-count">{group.models.length}</span></span>
-                              </button>
-                            ))}
+                            <div className="model-menu-providers-list">
+                              {groupedModels.map((group) => (
+                                <button key={group.providerId} type="button" role="tab" aria-selected={selectedReactProviderId === group.providerId} className={`model-menu-provider-item ${selectedReactProviderId === group.providerId ? "active" : ""}`} onMouseEnter={() => setSelectedReactProviderId(group.providerId)} onFocus={() => setSelectedReactProviderId(group.providerId)} onClick={() => setSelectedReactProviderId(group.providerId)}>
+                                  <span className="model-menu-provider-label">{group.providerName}<span className="model-menu-provider-count">{group.models.length}</span></span>
+                                </button>
+                              ))}
+                            </div>
+                            <button type="button" className="model-menu-settings" onClick={() => { setReactMenuOpen(false); onOpenSettings(); }}>{t("⚙ 模型设置…")}</button>
                           </nav>
                           <ul className="model-menu-models" role="group">
                             {(groupedModels.find((g) => g.providerId === selectedReactProviderId)?.models ?? []).map((m) => (
@@ -924,8 +964,7 @@ function ComposerImpl({
                             ))}
                           </ul>
                         </div>
-                        <div className="ws-menu-sep" aria-hidden />
-                        <button type="button" className="model-menu-settings" onClick={() => { setReactMenuOpen(false); onOpenSettings(); }}>{t("⚙ 模型设置…")}</button>
+
                       </>
                     )}
                   </div>
@@ -1001,19 +1040,6 @@ function ComposerImpl({
         </div>
 
         <div className="composer-actions">
-          {queueCount > 0 ? (
-            <div className="queue-badge">
-              <span className="queue-badge-text">{t("待执行{{count}}条", { count: queueCount })}</span>
-              <button
-                type="button"
-                className="queue-badge-remove"
-                onClick={() => onRemoveQueueMessage(0)}
-                title={t("移除最早待执行消息")}
-              >
-                ✕
-              </button>
-            </div>
-          ) : null}
           {sending ? (
             <button type="button" className="stop-btn" onClick={onCancel}>
               {t("停止")}

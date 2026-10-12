@@ -216,9 +216,10 @@ describe("task lifecycle", () => {
     for (let i = 0; i < 3; i++) {
       await write(`b-${String(i).padStart(2, "0")}`, "session-b");
     }
-    const listed = await listCheckpoints(root);
-    const a = listed.filter((cp) => cp.sessionId === "session-a").map((cp) => cp.id).sort();
-    const b = listed.filter((cp) => cp.sessionId === "session-b").map((cp) => cp.id).sort();
+    const listedA = await listCheckpoints(root, "session-a");
+    const listedB = await listCheckpoints(root, "session-b");
+    const a = listedA.map((cp) => cp.id).sort();
+    const b = listedB.map((cp) => cp.id).sort();
     expect(a).toEqual(Array.from({ length: 12 }, (_, i) => `a-${String(i + 1).padStart(2, "0")}`));
     expect(b).toEqual(["b-00", "b-01", "b-02"]);
     expect(await loadCheckpoint(root, "a-00")).toBeNull();

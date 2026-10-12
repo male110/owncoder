@@ -1684,8 +1684,9 @@ export class SessionOrchestrator {
     Array<{ id: string; createdAt: string; touched: string[]; historyLen: number }>
   > {
     const ws = this.state.workspace;
-    if (!ws) return [];
-    return listCheckpoints(ws.root);
+    const sessionId = this.state.activeSessionId;
+    if (!ws || !sessionId) return [];
+    return listCheckpoints(ws.root, sessionId);
   }
 
   async getPendingChanges(sessionId?: string): Promise<{
@@ -1775,12 +1776,8 @@ export class SessionOrchestrator {
     let targetId = id ?? r.lastCheckpointId ?? null;
     if (!targetId) {
       // Fall back to the newest checkpoint that belongs to this session.
-      const list = await listCheckpoints(root);
-      targetId =
-        list.find((c) => c.sessionId && c.sessionId === activeSessionId)?.id ??
-        // No owned candidate: only consider legacy checkpoints of unknown origin.
-        list.find((c) => !c.sessionId)?.id ??
-        null;
+      const list = await listCheckpoints(root, activeSessionId);
+      targetId = list[0]?.id ?? null;
     }
     if (!targetId) throw new Error("没有可回滚的检查点");
     const cp = await loadCheckpoint(root, targetId);

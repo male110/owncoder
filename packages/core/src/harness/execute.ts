@@ -230,10 +230,18 @@ async function runTool(ctx: ToolContext, call: ParsedToolCall): Promise<ToolResu
   try {
     switch (name) {
       // ── Original tools ──
-      case "read_file":
-        // By default returns the entire file. When offset/limit are provided
-        // (continuation of a truncated read), returns only the requested window.
-        return await toolRead(ctx, str(args.path), num(args.offset, 0), num(args.limit, 0));
+      case "read_file": {
+        if (typeof args.path !== "string" || !args.path.trim()) {
+          return fail('read_file 参数错误：必须提供非空字符串 path，例如 {"path":"src/main.ts"}；参数名是 path。');
+        }
+        for (const key of ["offset", "limit"] as const) {
+          const value = args[key];
+          if (value !== undefined && (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1)) {
+            return fail(`read_file 参数错误：${key} 必须是大于等于 1 的整数，不能使用字符串或 null。`);
+          }
+        }
+        return await toolRead(ctx, args.path, num(args.offset, 0), num(args.limit, 0));
+      }
       case "read_symbol":
         return await toolReadSymbol(ctx, str(args.path), str(args.symbol), num(args.padding, 12));
       case "read_outline":

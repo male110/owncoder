@@ -1,7 +1,8 @@
 import { promises as fs } from "node:fs";
 import { resolve } from "node:path";
+import { BUILTIN_SENSITIVE_FILES } from "@owncoder/settings";
 import { normalizeRel } from "./tools/shared.ts";
-import { redactSecrets } from "./redact.ts";
+import { isSensitiveFile, redactSecrets } from "./redact.ts";
 
 export interface CommandRedactionOptions {
   sensitiveFiles?: readonly string[];
@@ -103,8 +104,8 @@ function fileArguments(executable: string, args: readonly string[]): string[] {
   return files;
 }
 
-function parseStaticFileRead(command: string): StaticFileRead | "untrusted" | null {
-  if (UNSAFE_SHELL_SYNTAX.test(command)) return "untrusted";
+function parseStaticFileRead(command: string, rejectUnsafe = true): StaticFileRead | "untrusted" | null {
+  if (rejectUnsafe && UNSAFE_SHELL_SYNTAX.test(command)) return "untrusted";
   const args = splitArguments(command.trim());
   if (!args?.length) return null;
 
@@ -125,6 +126,27 @@ function parseStaticFileRead(command: string): StaticFileRead | "untrusted" | nu
   return { path: fileArgs[0]! };
 }
 
+function splitShellCommands(command: string): string[] {
+  return command.split(/\|\||&&|[|&;`<>\r\n]/).map((part) => part.trim()).filter(Boolean);
+}
+
+function hasSensitiveReadInUnsafeCommand(
+  command: string,
+  options?: CommandRedactionOptions,
+): boolean | null {
+  const patterns = [...BUILTIN_SENSITIVE_FILES, ...(options?.sensitiveFiles ?? [])];
+  for (const part of splitShellCommands(command)) {
+    // 检测 shell 变量展开（$VAR、${VAR}、%VAR%）或通配符，这些无法静态归因到具体文件
+    if (/\$[A-Za-z_]|\$\{|%[A-Za-z_][A-Za-z0-9_]*%|[*?\[\]]|\r|\n/.test(part)) return null;
+    const read = parseStaticFileRead(part, false);
+    if (read === "untrusted") return null;
+    if (!read) continue;
+    if (isSensitiveFile(read.path, patterns)) return true;
+  }
+  // 遍历完所有命令段，未找到敏感文件读取（可能有普通文件读取，或无文件读取），放行
+  return false;
+}
+
 function mask(text: string): string {
   return text ? "*** command output redacted: file source could not be verified ***" : text;
 }
@@ -143,11 +165,20 @@ export async function redactCommandReadOutput(
 ): Promise<{ stdout: string; stderr: string }> {
   const read = parseStaticFileRead(command);
   if (read === null) return { stdout, stderr };
-  if (read === "untrusted") return { stdout: mask(stdout), stderr: mask(stderr) };
+  if (read === "untrusted") {
+    // Complex commands can be released when every statically identifiable read
+    // targets a non-sensitive file. Unknown sources remain fail-closed.
+    const sensitive = hasSensitiveReadInUnsafeCommand(command, options);
+    if (sensitive === false) return { stdout, stderr };
+    return { stdout: mask(stdout), stderr: mask(stderr) };
+  }
 
   const absolute = resolve(workspaceRoot, read.path);
   const root = resolve(workspaceRoot);
-  if (absolute !== root && !absolute.startsWith(`${root}/`) && !absolute.startsWith(`${root}\\`)) {
+  // 标准化路径比较：统一转换为正斜杠以支持跨平台路径判断
+  const normalizedAbsolute = absolute.replace(/\\/g, "/");
+  const normalizedRoot = root.replace(/\\/g, "/");
+  if (normalizedAbsolute !== normalizedRoot && !normalizedAbsolute.startsWith(`${normalizedRoot}/`)) {
     return { stdout: mask(stdout), stderr: mask(stderr) };
   }
 

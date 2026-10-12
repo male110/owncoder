@@ -80,6 +80,7 @@ class OpenAiResponsesStreamParser implements StreamParser {
   private content = "";
   private reasoning = "";
   private readonly calls = new Map<string, { name: string; arguments: string }>();
+  private readonly itemCallIds = new Map<string, string>();
   private usage: ChatResponse["usage"];
   private completed = false;
 
@@ -90,7 +91,8 @@ class OpenAiResponsesStreamParser implements StreamParser {
     let value: {
       type?: string;
       delta?: string;
-      item?: { type?: string; id?: string; call_id?: string; name?: string };
+      arguments?: string;
+      item?: { type?: string; id?: string; call_id?: string; name?: string; arguments?: string };
       response?: { usage?: { input_tokens?: number; output_tokens?: number; total_tokens?: number; [key: string]: unknown } };
       item_id?: string;
       call_id?: string;
@@ -108,15 +110,34 @@ class OpenAiResponsesStreamParser implements StreamParser {
       this.handlers.onThinkingDelta?.(this.reasoning);
       return true;
     }
-    if (type === "response.output_item.added" && value.item?.type === "function_call") {
+    if ((type === "response.output_item.added" || type === "response.output_item.done") && value.item?.type === "function_call") {
       const callId = value.item.call_id || value.item.id;
       if (callId) {
-        this.calls.set(callId, { name: value.item.name || "unknown", arguments: "" });
+        if (value.item.id) this.itemCallIds.set(value.item.id, callId);
+        const existing = this.calls.get(callId);
+        // 只在 item.arguments 非空时更新，避免空字符串覆盖已累积的 delta 参数
+        const newArgs = (value.item.arguments && value.item.arguments.trim()) ? value.item.arguments : (existing?.arguments ?? "");
+        this.calls.set(callId, {
+          name: value.item.name || existing?.name || "unknown",
+          arguments: newArgs,
+        });
         return true;
       }
     }
+    if (type === "response.function_call_arguments.done" && typeof value.arguments === "string") {
+      const callId = value.call_id || (value.item_id && (this.itemCallIds.get(value.item_id) || value.item_id));
+      if (callId) {
+        const call = this.calls.get(callId) || { name: "unknown", arguments: "" };
+        // 只在 done 事件参数非空且比已有参数更完整时才更新，避免覆盖已累积的增量
+        if (value.arguments && value.arguments.trim() && value.arguments !== "{}") {
+          call.arguments = value.arguments;
+        }
+        this.calls.set(callId, call);
+      }
+      return true;
+    }
     if (type === "response.function_call_arguments.delta" && typeof value.delta === "string") {
-      const callId = value.call_id || value.item_id;
+      const callId = value.call_id || (value.item_id && (this.itemCallIds.get(value.item_id) || value.item_id));
       if (callId) {
         const call = this.calls.get(callId) || { name: "unknown", arguments: "" };
         call.arguments += value.delta;
