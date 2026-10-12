@@ -37,7 +37,7 @@ export type {
 
 export {
   computeHistoryLimits,
-  historyCompactHandler,
+
   pushHistoryBlockToMessages,
   pushCurrentUserMessageOnce,
 } from "./history.ts";
@@ -68,8 +68,7 @@ export {
 
 /**
  * Push the current user message (+ optional packed decompose context) into `messages`.
- * 方案A：执行上下文由任务分解结果提供；不再走 history_compact 的召回/过滤路径。
- * Fallback used when the history_compact handler does not inject (always, under 方案A).
+ * 执行上下文由任务分解结果提供；模型调用前统一注入一次。
  */
 export async function injectHistoryAndUserMessage(ctx: SchedulerContext): Promise<void> {
   // 幂等性检查：如果已注入，直接返回（task_decompose 阶段可能已调用）
@@ -249,7 +248,7 @@ const presentChangesHandler: StageHandler = {
 
 // ── Handler Registry ───────────────────────────────────────────────
 
-// `document_intent_router` and `agent_intent_router` are deliberately absent:
+// history_compact、document_intent_router 和 agent_intent_router 已移除：
 // the nodes are gone, and an unmapped type is skipped by the scheduler, so a
 // saved pipeline still holding one degrades to a no-op until the migrator drops
 // it rather than throwing.

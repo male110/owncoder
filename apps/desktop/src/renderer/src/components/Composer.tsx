@@ -9,7 +9,6 @@ interface Props {
   activeSessionId: string | null;
   draft: string;
   sending: boolean;
-  queueCount: number;
   modelLabel: string;
   availableModels: AvailableModel[];
   providers: Provider[];
@@ -39,7 +38,6 @@ interface Props {
   onSelectThinkingEffort: (effort: ThinkingEffort) => void;
   onSelectProject: (root: string, focusSessionId?: string) => Promise<void>;
   onAddProject: () => void;
-  onRemoveQueueMessage: (index: number) => void;
   onSelectReactModel: (modelName: string, providerId: string) => void;
   onSelectReactThinkingEffort: (effort: ThinkingEffort) => void;
 }
@@ -49,7 +47,6 @@ function ComposerImpl({
   activeSessionId,
   draft,
   sending,
-  queueCount,
   modelLabel,
   availableModels,
   providers,
@@ -78,7 +75,6 @@ function ComposerImpl({
   onSelectThinkingEffort,
   onSelectProject,
   onAddProject,
-  onRemoveQueueMessage,
   onSelectReactModel,
   onSelectReactThinkingEffort,
 }: Props) {

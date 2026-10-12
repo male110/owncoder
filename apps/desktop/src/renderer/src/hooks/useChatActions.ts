@@ -17,7 +17,6 @@ import {
   enqueueMessage,
   isQueueRunning,
   markQueueRunning,
-  removeMessage,
   setQueueRunner,
   clearQueueRunner,
   isStopRequested,
@@ -808,12 +807,6 @@ export function useChatActions(deps: {
     session.setReactThinkingEffort(effort);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const onRemoveQueueMessage = useCallback((index: number) => {
-    const sid = getFocusSessionId();
-    if (!sid) return;
-    removeMessage(sid, index);
-  }, []);
-
   return {
     onSend,
     onRegenerate,
@@ -828,7 +821,6 @@ export function useChatActions(deps: {
     onMode,
     onSelectThinkingEffort,
     onSelectReactThinkingEffort,
-    onRemoveQueueMessage,
     sendQueued,
     showError,
   };

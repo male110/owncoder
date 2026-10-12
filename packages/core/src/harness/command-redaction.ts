@@ -133,17 +133,23 @@ function splitShellCommands(command: string): string[] {
 function hasSensitiveReadInUnsafeCommand(
   command: string,
   options?: CommandRedactionOptions,
-): boolean | null {
+): boolean {
   const patterns = [...BUILTIN_SENSITIVE_FILES, ...(options?.sensitiveFiles ?? [])];
   for (const part of splitShellCommands(command)) {
-    // 检测 shell 变量展开（$VAR、${VAR}、%VAR%）或通配符，这些无法静态归因到具体文件
-    if (/\$[A-Za-z_]|\$\{|%[A-Za-z_][A-Za-z0-9_]*%|[*?\[\]]|\r|\n/.test(part)) return null;
-    const read = parseStaticFileRead(part, false);
-    if (read === "untrusted") return null;
-    if (!read) continue;
-    if (isSensitiveFile(read.path, patterns)) return true;
+    // 去掉赋值和读取表达式的外壳，保留文件路径用于敏感文件归因。
+    const expression = part.replace(/^\$[A-Za-z_][\w]*\s*=\s*/, "");
+    const nested = expression.match(/^\(\s*(Get-Content|gc)\s+(.+?)\)\s*(?:\.\w+\(\))?$/i);
+    const candidate = nested ? `${nested[1]} ${nested[2]}` : expression;
+    if (/\$[A-Za-z_]|\$\{|%[A-Za-z_][A-Za-z0-9_]*%|[*?\[\]]/.test(candidate)) continue;
+    const read = parseStaticFileRead(candidate, false);
+    if (read && read !== "untrusted" && isSensitiveFile(read.path, patterns)) return true;
+    if (read === "untrusted") {
+      const args = splitArguments(candidate);
+      const executable = args?.[0]?.toLowerCase();
+      if (executable && READ_COMMANDS.has(executable) &&
+          fileArguments(executable, args!.slice(1)).some((path) => isSensitiveFile(path, patterns))) return true;
+    }
   }
-  // 遍历完所有命令段，未找到敏感文件读取（可能有普通文件读取，或无文件读取），放行
   return false;
 }
 
@@ -152,9 +158,8 @@ function mask(text: string): string {
 }
 
 /**
- * Redact bash output only when a static file read can be attributed to one
- * workspace file. Ambiguous file-reading commands are masked as a fail-closed
- * boundary; ordinary non-reading command output remains unchanged.
+ * Redact output only when a configured sensitive file read is identified.
+ * Ambiguous reads without an identified sensitive path leave output unchanged.
  */
 export async function redactCommandReadOutput(
   command: string,
@@ -166,13 +171,15 @@ export async function redactCommandReadOutput(
   const read = parseStaticFileRead(command);
   if (read === null) return { stdout, stderr };
   if (read === "untrusted") {
-    // Complex commands can be released when every statically identifiable read
-    // targets a non-sensitive file. Unknown sources remain fail-closed.
+    // Only positively identified reads of configured files trigger redaction.
     const sensitive = hasSensitiveReadInUnsafeCommand(command, options);
     if (sensitive === false) return { stdout, stderr };
     return { stdout: mask(stdout), stderr: mask(stderr) };
   }
 
+  if (!isSensitiveFile(read.path, [...BUILTIN_SENSITIVE_FILES, ...(options?.sensitiveFiles ?? [])])) {
+    return { stdout, stderr };
+  }
   const absolute = resolve(workspaceRoot, read.path);
   const root = resolve(workspaceRoot);
   // 标准化路径比较：统一转换为正斜杠以支持跨平台路径判断

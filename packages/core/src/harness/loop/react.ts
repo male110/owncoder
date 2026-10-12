@@ -72,7 +72,7 @@ import {
   type PlanStep,
 } from "../agent-reasoning.ts";
 import { withRetry } from "../model-coordinator.ts";
-import { emitStage, resolveStageModel } from "./stages.ts";
+import { resolveStageModel } from "./stages.ts";
 import type { AgentLoopOpts, ChatTurn, DocumentWorkflowState, ReActLoopArgs, ReactDecisionSummary } from "./types.ts";
 import { classifyRecoveryError } from "../recovery.ts";
 import { documentStageFromArtifact, inferDocumentType } from "./document-workflow.ts";
@@ -590,10 +590,6 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
   const persistTaskUpdate = async (nextId: string | null): Promise<void> => {
     if (opts.onTaskUpdate) await opts.onTaskUpdate(tasks, nextId);
   };
-  // Evidence tracking removed - stop criteria evaluated directly
-  const invalidateStaleEvidence = async (_task: TaskItem): Promise<boolean> => {
-    return false;
-  };
   if (taskDriven) {
     const startId = opts.currentTaskId ?? tasks[0]?.id ?? null;
     const selected = startId ? tasks.find((t) => t.id === startId) : undefined;
@@ -601,7 +597,6 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
       ? selected
       : selectNextPendingTask(tasks);
     if (currentTask) {
-      await invalidateStaleEvidence(currentTask);
       currentTask.status = "in_progress";
       await persistTaskUpdate(currentTask.id);
     }
@@ -780,10 +775,6 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
     // Earlier history is compacted before this loop into a separate LLM-generated
     // context message. Do not mutate `history` here: it is the source of truth
     // for the visible and persisted conversation.
-
-    if (currentTask && await invalidateStaleEvidence(currentTask)) {
-      await persistTaskUpdate(currentTask.id);
-    }
 
     // ── Public decision summary (bounded; no private chain-of-thought) ──
     recordDecision({
@@ -1366,17 +1357,8 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
       return { call, id, result };
     };
 
-    // Evidence tracking removed
-    const invalidateEvidenceForPath = async (_inputPath: string): Promise<void> => {
-      // No-op: evidence removed
-    };
-
-    const invalidateAllTaskEvidence = async (): Promise<void> => {
-      // No-op: evidence removed
-    };
-
     const executedToolResults: Array<{ name: string; arguments: Record<string, unknown>; result: string }> = [];
-    const recordResult = async (r: {
+    const recordResult = (r: {
       call: typeof calls[number];
       id: string;
       result: Awaited<ReturnType<typeof executeTool>>;
@@ -1406,7 +1388,6 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
         const modifiedPath = String(r.call.arguments?.path ?? "");
         if (modifiedPath) {
           emitFreshnessFollowUp(contextControl?.invalidatePath(modifiedPath) ?? null);
-          await invalidateEvidenceForPath(modifiedPath);
         }
       }
 
@@ -1416,7 +1397,6 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
         !isReadonlyBash(String(r.call.arguments?.command ?? ""))
       ) {
         emitFreshnessFollowUp(contextControl?.invalidateAll() ?? null);
-        await invalidateAllTaskEvidence();
       }
 
       const resultMetadata = r.result.metadata;
@@ -1428,20 +1408,12 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
       if (r.result.ok && resultMetadata?.kind === "file_mutation") {
         for (const modifiedPath of resultMetadata.paths) {
           emitFreshnessFollowUp(contextControl?.invalidatePath(modifiedPath) ?? null);
-          await invalidateEvidenceForPath(modifiedPath);
+
         }
       }
 
-      if (
-        r.result.ok &&
-        (resultMetadata?.kind === "read_file" || resultMetadata?.kind === "read_outline")
-      ) {
-        const isBoundedSourceRead = resultMetadata.kind === "read_file";
-        if (isBoundedSourceRead) {
-          emitFreshnessFollowUp(contextControl?.recordFreshRead(resultMetadata) ?? null);
-        }
-
-        // Evidence collection removed - stop criteria are now evaluated directly
+      if (r.result.ok && resultMetadata?.kind === "read_file") {
+        emitFreshnessFollowUp(contextControl?.recordFreshRead(resultMetadata) ?? null);
       }
 
       // 文件修改类工具执行后，向对话流推一条 assistant 总结，让用户看到行动反馈（解决静默执行）。
@@ -1591,13 +1563,13 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
           ti++;
         }
         if (batch.length === 1) {
-          await recordResult(await runOne(batch[0]!));
+          recordResult(await runOne(batch[0]!));
         } else {
           const results = await Promise.all(batch.map((idx) => runOne(idx)));
-          for (const r of results) await recordResult(r);
+          for (const r of results) recordResult(r);
         }
       } else {
-        await recordResult(await runOne(ti));
+        recordResult(await runOne(ti));
         ti++;
       }
     }
@@ -1867,20 +1839,3 @@ export function mergeVerificationIntoAssistant(
   return combined;
 }
 
-/**
- * @deprecated Per-verify-node report generation has been replaced by a single
- * endpoint call (`runVerifyReport` from `loop.ts`). Kept only so any external
- * import does not fail to type-check; it now emits the start/done stage markers
- * and returns the input unchanged.
- */
-export async function maybeVerify(
-  _opts: AgentLoopOpts,
-  verifyNode: PipelineNode,
-  _messages: ChatMessage[],
-  _history: ChatTurn[],
-  assistantText: string,
-): Promise<string> {
-  emitStage(_opts.onEvent, "start", verifyNode);
-  emitStage(_opts.onEvent, "done", verifyNode);
-  return assistantText;
-}

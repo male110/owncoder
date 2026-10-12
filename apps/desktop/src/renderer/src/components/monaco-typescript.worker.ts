@@ -6,6 +6,6 @@ const pending: MessageEvent[] = [];
 globalThis.onmessage = (event) => { pending.push(event); };
 // @ts-expect-error Monaco 0.52 ships this ESM worker without declarations.
 void import("monaco-editor/esm/vs/language/typescript/ts.worker").then(() => {
-  for (const event of pending) globalThis.onmessage?.call(globalThis, event);
+  for (const event of pending) globalThis.dispatchEvent(event);
   pending.length = 0;
 });

@@ -495,6 +495,9 @@ export const en = {
   "注意：": "Note: ",
   "脱敏不是命令或第三方 MCP 的完整权限沙箱；可变更数据的 MCP 工具会要求确认，其服务器授权范围仍由本机 MCP 配置决定。":
     "Redaction is not a full permission sandbox for commands or third-party MCP servers; MCP tools that mutate data require confirmation, and their server-side scopes are still governed by the local MCP configuration.",
+  "文件写入": "File writes",
+  "内建工具允许修改工作区内的文件，不再按文件类型、敏感文件、依赖目录或锁文件拦截写入。读取内容发送给大模型前仍会执行敏感信息脱敏；命令行中的潜在写入或删除操作仍会进入危险命令确认。":
+    "Built-in tools can modify files within the workspace without blocking writes based on file type, sensitive files, dependency directories, or lockfiles. Sensitive information is still redacted before read content is sent to the model; potential write or delete operations in shell commands still require dangerous-command confirmation.",
   "文件写入保护": "File-write protection",
   "可写策略": "Write policy",
   "宽松（仅保留核心敏感文件保护）": "Loose (core sensitive-file protection only)",

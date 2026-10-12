@@ -50,7 +50,7 @@ export interface NodeTypeDescriptor {
 export const NODE_TYPE_REGISTRY: ReadonlyArray<NodeTypeDescriptor> = [
   { type: "start", label: "开始", fixed: true, positionConstraints: { deletable: false, repeatable: false } },
   { type: "context_gather", label: "收集上下文", fixed: true, hint: "固定起点：组装上下文（规则、@、检索、仓库地图、Git；Agent 还可注入活动计划/TODO）。", positionConstraints: { deletable: false, repeatable: false, slot: "pre-model" } },
-  { type: "history_compact", label: "压缩历史", palette: "智能压缩对话历史", hint: "智能压缩对话历史，防止上下文溢出。可禁用以保留完整历史。", addableIn: ["plan", "agent"], positionConstraints: { deletable: true, repeatable: false, slot: "pre-model" } },
+  { type: "history_compact", label: "压缩历史", hint: "旧节点：已移除运行处理器，仅保留旧配置兼容，执行时跳过。历史上下文由任务分解和模型调用前的统一注入提供。", positionConstraints: { deletable: true, repeatable: false, slot: "pre-model" } },
   { type: "document_intent_router", label: "文档意图识别", hint: "旧节点：一次 LLM 调用把用户回复归类为“确认/问下一步/其他”。已删除——一个标签装不下用户的真实意思，而且它的判定结果任务分解看不到，两者会互相矛盾。PRD/TDD 的确认判断已并入 Plan 模式「调用模型」的提示词。", positionConstraints: { deletable: true, repeatable: false, slot: "pre-model" } },
   { type: "agent_intent_router", label: "Agent 意图识别", hint: "旧节点：一次 LLM 调用把用户消息归类为“执行当前任务/问进度/其他”。已删除，原因同上；理解用户意图已并入「任务分解」——先读懂再分解，同一次调用。", positionConstraints: { deletable: true, repeatable: false, slot: "pre-model" } },
   { type: "task_decompose", label: "理解与任务分解", palette: "读懂请求，再分解为有序步骤", hint: "一次 LLM 调用：先结合对话历史、用户偏好和项目规则说清用户到底要什么，同时记下用户设下的限制，再据此分解为有序步骤（Agent 模式）。琐碎任务返回空步骤列表。可禁用以跳过该阶段。", addableIn: ["agent"], positionConstraints: { deletable: true, repeatable: false, slot: "pre-model" } },

@@ -216,7 +216,7 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
   // 系统提示词（用户/项目定制 prompt 或内置 builtin prompt）不允许截断：
   // 用户在设置里写下的提示词是契约、规则、约束；内置 prompt 也是出厂定义的产品行为。
   // 任何裁剪都会让 LLM 丢掉关键指令（典型如大项目禁止全量 build 的约束被砍）。
-  // 历史消息可以截断（由 history_compact / history-filter 控制）。
+  // 历史消息可以截断（由 history_compact 控制）。
   const systemPrompt = basePrompt;
 
   // Authentication is checked at each actual model-call boundary. This lets

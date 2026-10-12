@@ -1,18 +1,15 @@
 /**
- * History management stage handler and related utilities.
- *
- * 方案A：history_compact 节点不再做召回/过滤/注入；执行上下文由任务分解结果提供，
- * 注入统一走 injectHistoryAndUserMessage。本文件保留 computeHistoryLimits /
- * pushHistoryBlockToMessages / pushCurrentUserMessageOnce 等公共工具。
+ * 历史消息预算与注入工具。执行上下文由任务分解结果提供，
+ * 注入统一走 injectHistoryAndUserMessage。
  */
 
 import {
-  writeEventLog,
+
   type ChatAttachment,
   type ChatMessage,
 } from "@owncoder/llm";
 import type { ChatTurn } from "../types.ts";
-import type { StageHandler } from "./types.ts";
+
 
 // ── Budget safety factor ───────────────────────────────────────────
 
@@ -93,27 +90,3 @@ export function pushCurrentUserMessageOnce(history: ChatTurn[], userMessage: str
   history.push({ role: "user", content: userMessage, attachments: attachments.length ? attachments : undefined });
 }
 
-// ── Stage Handler ──────────────────────────────────────────────────
-
-/**
- * history_compact（方案A）：短路。不再召回/过滤/注入历史；
- * 执行上下文由任务分解写入，注入由 injectHistoryAndUserMessage 完成。
- * 会话源历史仍不被本 handler 修改。
- */
-export const historyCompactHandler: StageHandler = {
-  async run(ctx) {
-    // 方案A：始终禁用召回+过滤+注入。执行上下文由任务分解结果提供，
-    // 注入统一交给 injectHistoryAndUserMessage（优先使用分解打包的 context）。
-    if (ctx.state.userMessageInjected) return;
-
-    writeEventLog({
-      category: "other",
-      message: "方案A：history_compact 跳过召回/过滤/注入，交由 injectHistoryAndUserMessage",
-      details: {
-        sessionId: ctx.opts.sessionId,
-        hasRelevantHistory: (ctx.state.rawDecompose?.relevantHistory?.trim().length ?? 0) > 0,
-        historyTurns: ctx.opts.history.length,
-      },
-    });
-  },
-};

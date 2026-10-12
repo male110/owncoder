@@ -1,4 +1,4 @@
-import upath from "upath";
+
 import type { DocumentWorkflowState, DocumentType } from "./types.ts";
 
 /**
@@ -67,9 +67,3 @@ export function inferDocumentType(path: string, content = ""): DocumentType {
   return "other";
 }
 
-/** Suggest appropriate output path for a document based on its type. */
-export function suggestDocumentPath(_type: DocumentType, filename: string): string {
-  // Always use docs/ directory for document deliverables (industry standard)
-  const base = upath.basename(filename);
-  return `docs/${base}`;
-}

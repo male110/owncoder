@@ -78,7 +78,6 @@ export function App() {
 
   const historyLength = useChatStore((s) => s.history.length);
   const sending = useChatStore((s) => s.sending);
-  const queueCount = useChatStore((s) => s.queuedMessages.length);
   const terminal = useChatStore((s) => s.terminal);
   const bySession = useChatStore((s) => s.bySession);
 
@@ -120,7 +119,7 @@ export function App() {
     onSend, onRegenerate,
     onApprovePlan, onUpdateTask,
     onRollback, onKeepAll, onKeepFile, onUndoFile,
-    onSelectModel, onMode, onSelectThinkingEffort, onSelectReactThinkingEffort, onRemoveQueueMessage, sendQueued,
+    onSelectModel, onMode, onSelectThinkingEffort, onSelectReactThinkingEffort, sendQueued,
   } = useChatActions({
     applySessionState,
     refreshChanges,
@@ -444,7 +443,6 @@ export function App() {
         activeSessionId={activeSessionId}
         draft={draft}
         sending={sending}
-        queueCount={queueCount}
         modelLabel={modelLabel}
         availableModels={availableModels}
         providers={providers}
@@ -471,7 +469,6 @@ export function App() {
         onSelectThinkingEffort={handleSelectThinkingEffort}
         onSelectProject={handleSelectProject}
         onAddProject={handleAddProject}
-        onRemoveQueueMessage={onRemoveQueueMessage}
         onSelectReactModel={handleSelectReactModel}
         onSelectReactThinkingEffort={handleSelectReactThinkingEffort}
       />
