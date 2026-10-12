@@ -1,6 +1,6 @@
 {
   "name": "@owncoder/core",
-  "version": "0.1.20",
+  "version": "0.1.21",
   "private": true,
   "type": "module",
   "main": "./dist/index.js",
@@ -35,12 +35,11 @@
     "isomorphic-git": "^1.43.3",
     "jsonrepair": "^3.15.0",
     "mdast-util-from-markdown": "^2.0.3",
-    "simple-git": "^3.36.0",
+    "simple-git": "^4.0.2",
     "upath": "^3.0.8"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.11",
-    "@types/diff": "^8.0.0",
     "@types/node": "^26.1.2",
     "typescript": "^5.8.2",
     "vitest": "^5.0.0"

@@ -1,6 +1,6 @@
 {
   "name": "@owncoder/desktop",
-  "version": "0.1.20",
+  "version": "0.1.21",
   "private": true,
   "description": "OwnCoder desktop shell",
   "main": "./out/main/index.js",
@@ -35,7 +35,7 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-virtuoso": "^4.18.13",
-    "semver": "7.7.4",
+    "semver": "7.8.5",
     "sqlite-vec": "^0.1.9",
     "zustand": "^5.0.3"
   },
@@ -138,7 +138,7 @@
     },
     "nsisWeb": {
       "artifactName": "${productName} Web Setup ${version}.${ext}",
-      "appPackageUrl": "https://zy-1310897501.cos.ap-nanjing.myqcloud.com/owncoder/0.1.20/%40owncoderdesktop-0.1.20-x64.nsis.7z"
+      "appPackageUrl": "https://zy-1310897501.cos.ap-nanjing.myqcloud.com/owncoder/0.1.21/%40owncoderdesktop-0.1.21-x64.nsis.7z"
     },
     "mac": {
       "target": [

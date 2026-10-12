@@ -48,3 +48,4 @@ _tmp_opencode/
 # Deprecated Rust implementation (replaced by TypeScript)
 crates/
 .idea/
+pnpm-lock.yaml

@@ -303,7 +303,20 @@ export function SettingsPanel({ open, onClose, onSaved, initialTab }: Props) {
           <div className="settings-body-head">
             <h2>{tr(TABS.find((tb) => tb.id === tab)?.label ?? "模型")}</h2>
           </div>
-          {tab === "models" && <ModelTab draft={draft} patch={patch} onProviderAdded={() => void persistSettings()} />}
+          {tab === "models" && (
+            <ModelTab
+              draft={draft}
+              patch={patch}
+              onProviderAdded={() => void persistSettings()}
+              onImported={(next) => {
+                setSnap(next);
+                setDraft(structuredClone(next.effective));
+                onSaved();
+              }}
+              setStatus={setStatus}
+              setBusy={setBusy}
+            />
+          )}
 
           {tab === "context" && (
             <div className="form">
@@ -872,16 +885,23 @@ function ModelTab({
   draft,
   patch,
   onProviderAdded,
+  onImported,
+  setStatus,
+  setBusy,
 }: {
   draft: SystemWorkflowConfig;
   patch: (fn: (d: SystemWorkflowConfig) => void) => void;
   onProviderAdded: () => void;
+  onImported: (snapshot: SettingsSnapshotDto) => void;
+  setStatus: (status: string) => void;
+  setBusy: (busy: boolean) => void;
 }) {
   // useMemo 稳定引用：draft.providers 为 undefined 时复用同一空数组，
   // 避免每次渲染新建数组进入 effect deps 导致 effect 空转。
   const providers = useMemo(() => draft.providers ?? [], [draft.providers]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
+  const [transferAction, setTransferAction] = useState<"import" | "export" | null>(null);
   const providerCountRef = useRef(providers.length);
   const { t: tr } = useI18n();
 
@@ -904,7 +924,53 @@ function ModelTab({
   return (
     <div className="model-tab-layout">
       <div className="model-provider-list">
-        <div className="model-provider-list-head">{tr("自定义平台")}</div>
+        <div className="model-provider-list-head">
+          <div className="model-provider-list-title">
+            <span>{tr("自定义平台")}</span>
+            <span className="model-provider-count" aria-hidden="true">{providers.length}</span>
+          </div>
+          <div className="model-settings-actions">
+            <button type="button" className="model-transfer-button" title={tr("导出模型设置")} disabled={transferAction !== null} aria-busy={transferAction === "export"} onClick={() => void (async () => {
+              setTransferAction("export");
+              setBusy(true);
+              try {
+                const result = await window.owncoder.exportModelSettings();
+                if (result.status === "success") setStatus(tr("已导出 {{count}} 个模型", { count: result.count ?? 0 }));
+              } catch (e) {
+                setStatus(e instanceof Error ? e.message : String(e));
+              } finally { setBusy(false); setTransferAction(null); }
+            })()}>
+              <span className="model-transfer-icon" aria-hidden="true">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 15V3m-4 4 4-4 4 4M5 14v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5" />
+                </svg>
+              </span>
+              <span>{tr("导出")}</span>
+            </button>
+            <button type="button" className="model-transfer-button model-transfer-button-primary" title={tr("导入模型设置")} disabled={transferAction !== null} aria-busy={transferAction === "import"} onClick={() => void (async () => {
+              setTransferAction("import");
+              setBusy(true);
+              try {
+                const result = await window.owncoder.importModelSettings();
+                if (result.status === "success") {
+                  onImported(result.snapshot);
+                  setStatus(tr("导入完成：新增 {{added}} 个，跳过 {{skipped}} 个", { added: result.added, skipped: result.skipped }));
+                } else if (result.status === "error") {
+                  setStatus(result.message);
+                }
+              } catch (e) {
+                setStatus(e instanceof Error ? e.message : String(e));
+              } finally { setBusy(false); setTransferAction(null); }
+            })()}>
+              <span className="model-transfer-icon" aria-hidden="true">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 3v12m-4-4 4 4 4-4M5 14v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5" />
+                </svg>
+              </span>
+              <span>{tr("导入")}</span>
+            </button>
+          </div>
+        </div>
         {providers.map((p) => {
           const enabledCount =
             draft.selectedModels?.filter((m) => m.providerId === p.id).length ?? 0;

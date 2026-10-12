@@ -5419,12 +5419,136 @@ button.ghost.tiny {
 }
 
 .model-provider-list-head {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   font-size: 11px;
   font-weight: 600;
   color: var(--muted);
   text-transform: uppercase;
   letter-spacing: 0.5px;
   padding: 6px 10px 10px;
+}
+
+.model-provider-list-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.model-provider-count {
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-alt);
+  font-size: 10px;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+}
+
+.model-settings-actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(72px, 100%), 1fr));
+  gap: 6px;
+  padding-bottom: 9px;
+  border-bottom: 1px solid var(--border);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.model-transfer-button {
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 6px 4px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--bg-alt);
+  color: var(--muted);
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.5;
+  text-align: center;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.model-transfer-icon {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-tint);
+  flex-shrink: 0;
+}
+
+.model-transfer-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.model-transfer-button-primary {
+  color: var(--accent);
+  border-color: var(--primary-border);
+  background: var(--accent-dim);
+}
+
+.model-transfer-button-primary .model-transfer-icon {
+  border-color: var(--primary-border);
+  background: var(--accent-dim);
+}
+
+.model-transfer-button:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--accent);
+  background: var(--hover-strong);
+}
+
+.model-transfer-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.model-transfer-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.model-transfer-button[aria-busy="true"] {
+  opacity: 1;
+  cursor: progress;
+}
+
+.model-transfer-button[aria-busy="true"] .model-transfer-icon svg {
+  display: none;
+}
+
+.model-transfer-button[aria-busy="true"] .model-transfer-icon::after {
+  content: "";
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--border);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: model-transfer-spin 0.8s linear infinite;
+}
+
+@keyframes model-transfer-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .model-transfer-button { transition: none; }
+  .model-transfer-button[aria-busy="true"] .model-transfer-icon::after { animation: none; }
 }
 
 .model-provider-item {

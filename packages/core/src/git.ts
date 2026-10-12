@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import simpleGit from "simple-git";
+import { simpleGit } from "simple-git";
 
 export interface GitStatus {
   isRepo: boolean;

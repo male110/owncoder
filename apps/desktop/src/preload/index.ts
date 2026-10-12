@@ -464,6 +464,12 @@ export interface DesktopApi {
   openPath: (path: string) => Promise<string>;
   getSettings: () => Promise<SettingsSnapshotDto>;
   saveSettings: (config: SystemWorkflowConfig) => Promise<SettingsSnapshotDto>;
+  exportModelSettings: () => Promise<{ status: "success" | "cancelled"; filePath?: string; count?: number }>;
+  importModelSettings: () => Promise<
+    | { status: "cancelled" }
+    | { status: "success"; added: number; skipped: number; invalid: number; snapshot: SettingsSnapshotDto }
+    | { status: "error"; added: number; skipped: number; invalid: number; message: string }
+  >;
   restoreFactorySettings: () => Promise<SettingsSnapshotDto>;
   restorePipelineSettings: (mode: "plan" | "agent") => Promise<SettingsSnapshotDto>;
   /** Translate a system prompt to English for runtime use. */
@@ -636,6 +642,8 @@ const api: DesktopApi = {
   openPath: (path) => ipcRenderer.invoke("shell:openPath", path),
   getSettings: () => ipcRenderer.invoke("settings:get"),
   saveSettings: (config) => ipcRenderer.invoke("settings:save", config),
+  exportModelSettings: () => ipcRenderer.invoke("settings:exportModels"),
+  importModelSettings: () => ipcRenderer.invoke("settings:importModels"),
   restoreFactorySettings: () => ipcRenderer.invoke("settings:restoreFactory"),
   restorePipelineSettings: (mode) => ipcRenderer.invoke("settings:restorePipeline", mode),
   translatePrompt: (text, target) => ipcRenderer.invoke("llm:translatePrompt", text, target),

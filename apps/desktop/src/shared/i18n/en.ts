@@ -547,6 +547,10 @@ export const en = {
   "（已有用户覆盖）": "(user overrides exist)",
   "工作流：{{path}}": "Workflow: {{path}}",
   "模型设置：{{path}}": "Model settings: {{path}}",
+  "导出模型设置": "Export model settings",
+  "导入模型设置": "Import model settings",
+  "已导出 {{count}} 个模型": "Exported {{count}} models",
+  "导入完成：新增 {{added}} 个，跳过 {{skipped}} 个": "Import complete: added {{added}}, skipped {{skipped}}",
   "一键还原出厂": "Restore factory defaults",
   "删除用户工作流覆盖；保留模型设置与 API Key，不改项目源码与规则。":
     "Deletes user workflow overrides; keeps model settings and the API key; does not change project sources or rules.",

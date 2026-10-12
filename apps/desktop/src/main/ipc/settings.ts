@@ -2,10 +2,11 @@
  * IPC handlers: settings, secrets, LLM auth, model list, prompt translation.
  */
 import { dialog, ipcMain } from "electron";
-import { readFile, stat } from "node:fs/promises";
+import { readFile, stat, writeFile } from "node:fs/promises";
 import { basename, isAbsolute, relative } from "node:path";
 import {
   BUILTIN_SENSITIVE_FILES,
+  ModelSettingsSchema,
   SystemWorkflowConfigSchema,
   WorkflowOverlaySchema,
   getActiveModelRef,
@@ -75,6 +76,87 @@ export function registerSettingsHandlers(ctx: IpcContext): void {
     const effective = settingsStore.saveUserOverlay(parsed);
     session.setWorkflow(effective);
     return settingsStore.snapshot();
+  });
+
+  ipcMain.handle("settings:exportModels", async () => {
+    const selection = await dialog.showSaveDialog({
+      title: mt("导出模型设置"),
+      defaultPath: "owncoder-model-settings.json",
+      filters: [{ name: "JSON", extensions: ["json"] }],
+    });
+    if (selection.canceled || !selection.filePath) return { status: "cancelled" as const };
+    const current = settingsStore.getEffective();
+    const payload = {
+      type: "owncoder-model-settings",
+      version: 1,
+      providers: current.providers ?? [],
+      selectedModels: current.selectedModels ?? [],
+    };
+    await writeFile(selection.filePath, JSON.stringify(payload, null, 2), "utf8");
+    return { status: "success" as const, filePath: selection.filePath, count: payload.selectedModels.length };
+  });
+
+  ipcMain.handle("settings:importModels", async () => {
+    const selection = await dialog.showOpenDialog({
+      title: mt("导入模型设置"),
+      properties: ["openFile"],
+      filters: [{ name: "JSON", extensions: ["json"] }],
+    });
+    if (selection.canceled || selection.filePaths.length === 0) return { status: "cancelled" as const };
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(await readFile(selection.filePaths[0]!, "utf8"));
+      const input = parsed as Record<string, unknown>;
+      if (input.type !== "owncoder-model-settings") throw new Error("Invalid model settings file");
+      const imported = ModelSettingsSchema.parse({
+        providers: input.providers,
+        selectedModels: input.selectedModels,
+      });
+      const current = settingsStore.getEffective();
+      const providers = structuredClone(current.providers ?? []);
+      const selectedModels = structuredClone(current.selectedModels ?? []);
+      const providerIds = new Set(providers.map((provider) => provider.id));
+      const modelKeys = new Set(selectedModels.map((model) => `${model.providerId}\u0000${model.id}`));
+      let added = 0;
+      let skipped = 0;
+      for (const provider of imported.providers) {
+        const existingProvider = providers.find((item) => item.id === provider.id);
+        if (!existingProvider) {
+          providers.push(provider);
+          providerIds.add(provider.id);
+          continue;
+        }
+        const existingModelIds = new Set((existingProvider.models ?? []).map((model) => model.id));
+        for (const model of provider.models ?? []) {
+          if (!existingModelIds.has(model.id)) {
+            existingProvider.models = [...(existingProvider.models ?? []), model];
+            existingModelIds.add(model.id);
+          }
+        }
+      }
+      for (const model of imported.selectedModels) {
+        const key = `${model.providerId}\u0000${model.id}`;
+        if (modelKeys.has(key)) {
+          skipped++;
+          continue;
+        }
+        selectedModels.push(model);
+        modelKeys.add(key);
+        added++;
+      }
+      const effective = settingsStore.saveEffectiveAsUser({ ...current, providers, selectedModels });
+      session.setWorkflow(effective);
+      return { status: "success" as const, added, skipped, invalid: 0, snapshot: settingsStore.snapshot() };
+    } catch (error) {
+      return {
+        status: "error" as const,
+        added: 0,
+        skipped: 0,
+        invalid: 1,
+        message: error instanceof Error ? error.message : String(error),
+      };
+    }
   });
 
   ipcMain.handle("settings:restoreFactory", () => {
