@@ -433,7 +433,7 @@ export const openaiChatCodec: ProtocolCodec = {
   },
 
   encodeRequest(input: ProtocolEncodeInput): unknown {
-    const messages = input.messages.map((message) => {
+    const messages = input.messages.map(({ is_error: _isError, ...message }) => {
       if (!message.attachments?.length || message.role !== "user") return message;
       const content: Array<Record<string, unknown>> = [];
       if (message.content) content.push({ type: "text", text: message.content });

@@ -29,8 +29,9 @@ describe("classifyRecoveryError", () => {
     const out = classifyRecoveryError(
       'Error: File "packages/core/src/harness/loop/termination.ts" is 32137 bytes. Whole-file reads are limited to 10000 bytes. Call read_outline first, then decide which lines to read with read_symbol or read_file(offset+limit).',
     );
+    expect(out.type).toBe("tool_argument_error");
     expect(out.retryable).toBe(true);
-    expect(out.action).toBe("inspect_failure_and_retry");
+    expect(out.action).toBe("correct_arguments");
   });
 
   it("符号索引未命中/查询失败应可重试，不停止流程", () => {

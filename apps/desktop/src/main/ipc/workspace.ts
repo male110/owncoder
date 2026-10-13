@@ -1,7 +1,7 @@
 /**
  * IPC handlers: workspace / project / file operations.
  */
-import { dialog, ipcMain } from "electron";
+import { dialog, ipcMain, shell } from "electron";
 import { promises as fs } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { searchWorkspaceFiles } from "../workspace-search";
@@ -131,6 +131,19 @@ export function registerWorkspaceHandlers(ctx: IpcContext): void {
       return result;
     },
   );
+
+  ipcMain.handle("workspace:showInFolder", async (_e, root: string, relPath: string) => {
+    const projectRoot = String(root || "").trim();
+    if (!projectRoot) throw new Error("No workspace root");
+    const abs = resolveWorkspacePath(projectRoot, String(relPath || "."));
+    const stat = await fs.stat(abs);
+    if (stat.isDirectory()) {
+      const error = await shell.openPath(abs);
+      if (error) throw new Error(error);
+      return;
+    }
+    shell.showItemInFolder(abs);
+  });
 
   ipcMain.handle("workspace:readFile", async (_e, path: string) => {
     const ws = session.getState().workspace;

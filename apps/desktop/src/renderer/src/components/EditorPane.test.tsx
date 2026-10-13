@@ -183,6 +183,21 @@ describe("变更查看器", () => {
     expect(findEditor(render({ path: "src/a.ts" }))!.props.value).toBe("未保存修改");
   });
 
+  it("按请求定位到指定行", () => {
+    const ed = {
+      getModel: () => null,
+      updateOptions: vi.fn(),
+      layout: vi.fn(),
+      focus: vi.fn(),
+      addCommand: vi.fn(),
+      setPosition: vi.fn(),
+      revealLineInCenter: vi.fn(),
+    };
+    findEditor(render({ path: "src/a.ts", revealLine: { line: 81, requestId: 1 } }))!.props.onMount(ed);
+    expect(ed.setPosition).toHaveBeenCalledWith({ lineNumber: 81, column: 1 });
+    expect(ed.revealLineInCenter).toHaveBeenCalledWith(81);
+  });
+
   it("页签显示后恢复布局和焦点，隐藏页签保持只读", () => {
     const ed = { getModel: () => null, updateOptions: vi.fn(), layout: vi.fn(), focus: vi.fn(), addCommand: vi.fn() };
     findEditor(render({ path: "src/a.ts", active: false }))!.props.onMount(ed);

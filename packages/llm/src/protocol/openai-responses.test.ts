@@ -23,35 +23,35 @@ describe("openaiResponsesCodec", () => {
     const result = openaiResponsesCodec.decodeResponse({
       id: "resp_1",
       output_text: "done",
-      output: [{ type: "function_call", call_id: "call_1", name: "read_file", arguments: "{\"path\":\"a.ts\"}" }],
+      output: [{ type: "function_call", call_id: "call_1", name: "read_file", arguments: "{\"file_path\":\"a.ts\"}" }],
       usage: { input_tokens: 2, output_tokens: 3, total_tokens: 5 },
     });
     expect(result.choices[0]?.message.content).toBe("done");
     expect(result.choices[0]?.message.tool_calls?.[0]).toEqual({
       id: "call_1",
       type: "function",
-      function: { name: "read_file", arguments: "{\"path\":\"a.ts\"}" },
+      function: { name: "read_file", arguments: "{\"file_path\":\"a.ts\"}" },
     });
   });
 
   it("将不同的 item_id 与 call_id 关联到同一次调用", () => {
     const parser = openaiResponsesCodec.createStreamParser({});
     parser.feed({ data: JSON.stringify({ type: "response.output_item.added", item: { type: "function_call", id: "fc_1", call_id: "call_1", name: "read_file" } }) });
-    parser.feed({ data: JSON.stringify({ type: "response.function_call_arguments.delta", item_id: "fc_1", delta: '{"path":' }) });
+    parser.feed({ data: JSON.stringify({ type: "response.function_call_arguments.delta", item_id: "fc_1", delta: '{"file_path":' }) });
     parser.feed({ data: JSON.stringify({ type: "response.function_call_arguments.delta", item_id: "fc_1", delta: '"a.ts"}' }) });
     expect(parser.finish().choices[0]?.message.tool_calls).toEqual([
-      { id: "call_1", type: "function", function: { name: "read_file", arguments: '{"path":"a.ts"}' } },
+      { id: "call_1", type: "function", function: { name: "read_file", arguments: '{"file_path":"a.ts"}' } },
     ]);
   });
 
   it("从完成事件恢复完整参数，且不重复拼接增量", () => {
     const parser = openaiResponsesCodec.createStreamParser({});
     parser.feed({ data: JSON.stringify({ type: "response.output_item.added", item: { type: "function_call", id: "fc_1", call_id: "call_1", name: "read_file" } }) });
-    parser.feed({ data: JSON.stringify({ type: "response.function_call_arguments.delta", item_id: "fc_1", delta: '{"path":' }) });
-    parser.feed({ data: JSON.stringify({ type: "response.function_call_arguments.done", item_id: "fc_1", arguments: '{"path":"a.ts"}' }) });
-    parser.feed({ data: JSON.stringify({ type: "response.output_item.done", item: { type: "function_call", id: "fc_1", call_id: "call_1", name: "read_file", arguments: '{"path":"a.ts"}' } }) });
+    parser.feed({ data: JSON.stringify({ type: "response.function_call_arguments.delta", item_id: "fc_1", delta: '{"file_path":' }) });
+    parser.feed({ data: JSON.stringify({ type: "response.function_call_arguments.done", item_id: "fc_1", arguments: '{"file_path":"a.ts"}' }) });
+    parser.feed({ data: JSON.stringify({ type: "response.output_item.done", item: { type: "function_call", id: "fc_1", call_id: "call_1", name: "read_file", arguments: '{"file_path":"a.ts"}' } }) });
     expect(parser.finish().choices[0]?.message.tool_calls).toEqual([
-      { id: "call_1", type: "function", function: { name: "read_file", arguments: '{"path":"a.ts"}' } },
+      { id: "call_1", type: "function", function: { name: "read_file", arguments: '{"file_path":"a.ts"}' } },
     ]);
   });
 
@@ -73,13 +73,13 @@ describe("openaiResponsesCodec", () => {
     // 1. 创建调用
     parser.feed({ data: JSON.stringify({ type: "response.output_item.added", item: { type: "function_call", id: "fc_1", call_id: "call_1", name: "read_file" } }) });
     // 2. 通过 delta 累积完整参数
-    parser.feed({ data: JSON.stringify({ type: "response.function_call_arguments.delta", item_id: "fc_1", delta: '{"path":"test.ts"}' }) });
+    parser.feed({ data: JSON.stringify({ type: "response.function_call_arguments.delta", item_id: "fc_1", delta: '{"file_path":"test.ts"}' }) });
     // 3. done 事件携带空对象，不应覆盖
     parser.feed({ data: JSON.stringify({ type: "response.function_call_arguments.done", item_id: "fc_1", arguments: "{}" }) });
     // 4. output_item.done 携带空 arguments 字段
     parser.feed({ data: JSON.stringify({ type: "response.output_item.done", item: { type: "function_call", id: "fc_1", call_id: "call_1", name: "read_file", arguments: "" } }) });
     const result = parser.finish();
-    expect(result.choices[0]?.message.tool_calls?.[0]?.function.arguments).toBe('{"path":"test.ts"}');
+    expect(result.choices[0]?.message.tool_calls?.[0]?.function.arguments).toBe('{"file_path":"test.ts"}');
   });
 
   it("处理服务器直接发送 done 事件而无 delta 的情况", () => {

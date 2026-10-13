@@ -128,8 +128,8 @@ Verification passes → Delivery
 | **Execution Loop** | A reliable coding model with lower usage costs | Follow the plan to search code, edit files, run commands, and check results |
 
 1. Add the required models in **Settings → Models**.
-2. Enable **Separate execution-stage configuration**.
-3. Select the **Task decomposition model** and **Execution loop model** separately in the chat bar.
+2. Go to **Settings → General** and check **Separate execution-stage configuration**.
+3. Once enabled, configure the models for the **task decomposition stage** and **execution stage** separately: choose a model with stronger planning capabilities for task decomposition and a model suited to coding tasks for execution.
 
 > Actual savings depend on task complexity, model capabilities, and provider pricing.
 

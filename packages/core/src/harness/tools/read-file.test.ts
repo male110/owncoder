@@ -13,6 +13,7 @@ import {
 } from "./fs.ts";
 import type { ToolContext } from "./types.ts";
 import { executeTool } from "../execute.ts";
+import { allEnhancedTools } from "../enhanced-tools.ts";
 
 function stubIndex(): IndexClient {
   return {
@@ -114,12 +115,12 @@ test("list_dir dispatch preserves failure output", async () => {
 
 test("read_file 在访问文件前拒绝缺失路径和错误参数", async () => {
   const invalidArgs = [
-    {}, { file_path: "small.ts" }, { path: "" }, { path: "   " },
-    { path: 123 }, { path: { name: "small.ts" } },
-    { parameters: { path: "small.ts" } },
-    { path: "small.ts", offset: "2", limit: 1 },
-    { path: "small.ts", offset: 0 }, { path: "small.ts", offset: 1.5 },
-    { path: "small.ts", limit: -1 }, { path: "small.ts", limit: null },
+    {}, { path: "small.ts" }, { file_path: "" }, { file_path: "   " },
+    { file_path: 123 }, { file_path: { name: "small.ts" } },
+    { parameters: { file_path: "small.ts" } },
+    { file_path: "small.ts", offset: "2", limit: 1 },
+    { file_path: "small.ts", offset: 0 }, { file_path: "small.ts", offset: 1.5 },
+    { file_path: "small.ts", limit: -1 }, { file_path: "small.ts", limit: null },
   ];
   for (const args of invalidArgs) {
     const ctx = ctxFor("unused-workspace");
@@ -134,10 +135,17 @@ test("read_file 在访问文件前拒绝缺失路径和错误参数", async () =
 });
 
 test("read_file 执行入口接受正常路径和合法行范围", async () => {
+  for (const mode of ["agent", "plan"] as const) {
+    const tool = allEnhancedTools({ mode }).find((entry) => entry.function.name === "read_file");
+    assert.deepEqual(tool?.function.parameters.required, ["file_path"]);
+    const properties = tool?.function.parameters.properties as Record<string, unknown>;
+    assert.ok(properties.file_path);
+    assert.equal(properties.path, undefined);
+  }
   await withWorkspace(
     async (root) => { await writeFile(join(root, "small.ts"), "first\nsecond\nthird"); },
     async (root) => {
-      for (const args of [{ path: "small.ts" }, { path: "small.ts", offset: 2, limit: 1 }]) {
+      for (const args of [{ file_path: "small.ts" }, { file_path: "small.ts", offset: 2, limit: 1 }]) {
         const result = await executeTool(ctxFor(root), {
           id: "valid-read", name: "read_file", arguments: args,
           rawArguments: JSON.stringify(args),
@@ -189,14 +197,43 @@ test("whole-file read at or over 10KB is rejected and asks for read_outline; ran
       await writeFile(join(root, "mid.ts"), body);
     },
     async (root) => {
-      const whole = await toolRead(ctxFor(root), "mid.ts");
+      const ctx = ctxFor(root);
+      const whole = await toolRead(ctx, "mid.ts");
       assert.equal(whole.ok, false);
       assert.match(whole.output, /Whole-file reads are limited/);
       assert.match(whole.output, /read_outline first/);
+      assert.match(whole.output, /已自动尝试 read_outline/);
+      assert.match(whole.output, /file: mid\.ts/);
+      assert.match(whole.output, /"offset":1,"limit":60/);
+      assert.equal(whole.metadata, undefined);
 
-      const ranged = await toolRead(ctxFor(root), "mid.ts", 2, 1);
+      const ranged = await toolRead(ctx, "mid.ts", 2, 1);
       assert.equal(ranged.ok, true);
       assert.match(ranged.output, /line-two/);
+    },
+  );
+});
+
+test("CSS 大文件重复整读仍提供导航；模型采用建议参数后可恢复", async () => {
+  await withWorkspace(
+    async (root) => {
+      await writeFile(join(root, "styles.css"), Array.from({ length: 400 }, (_, i) => `.item-${i} { color: red; padding: 10px; }`).join("\n"));
+    },
+    async (root) => {
+      const ctx = ctxFor(root);
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const result = await executeTool(ctx, { id: `whole-${attempt}`, rawArguments: '{}', name: "read_file", arguments: { file_path: "styles.css" } });
+        assert.equal(result.ok, false);
+        assert.match(result.output, /no symbol outline for .css/);
+        assert.match(result.output, /1\|\.item-0/);
+        assert.doesNotMatch(result.output, /item-399/);
+        assert.equal(result.metadata, undefined);
+      }
+      const recovered = await executeTool(ctx, { id: "ranged", rawArguments: '{}', name: "read_file", arguments: { file_path: "styles.css", offset: 100, limit: 2 } });
+      assert.equal(recovered.ok, true);
+      assert.equal(recovered.metadata?.kind, "read_file");
+      assert.match(recovered.output, /item-99/);
+      assert.doesNotMatch(recovered.output, /item-101/);
     },
   );
 });

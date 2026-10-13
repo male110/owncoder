@@ -480,6 +480,7 @@ export interface DesktopApi {
   searchWorkspaceFiles: (query: string) => Promise<string[]>;
   /** List one directory under a project root. Paths are relative to root. */
   listWorkspaceDir: (root: string, relPath?: string) => Promise<WorkspaceDirEntryDto[]>;
+  showWorkspacePathInFolder: (root: string, relPath: string) => Promise<void>;
   readWorkspaceFile: (path: string) => Promise<string>;
   writeWorkspaceFile: (path: string, content: string) => Promise<{ path: string }>;
   getLlmAuthStatus: () => Promise<LlmAuthStatusDto>;
@@ -652,6 +653,7 @@ const api: DesktopApi = {
   pickAndPreviewRedaction: () => ipcRenderer.invoke("security:pickAndPreview"),
   searchWorkspaceFiles: (query) => ipcRenderer.invoke("workspace:searchFiles", query),
   listWorkspaceDir: (root, relPath) => ipcRenderer.invoke("workspace:listDir", root, relPath ?? ""),
+  showWorkspacePathInFolder: (root, relPath) => ipcRenderer.invoke("workspace:showInFolder", root, relPath),
   readWorkspaceFile: (path) => ipcRenderer.invoke("workspace:readFile", path),
   writeWorkspaceFile: (path, content) => ipcRenderer.invoke("workspace:writeFile", path, content),
   getLlmAuthStatus: () => ipcRenderer.invoke("llm:authStatus"),

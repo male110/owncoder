@@ -1325,6 +1325,9 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
       }
       if (!result.ok) {
         const recovery = classifyRecoveryError(result.output);
+        // 关键修复：将 recovery 生成的增强输出（含导航信息）更新回 result，
+        // 确保模型收到的 tool message 包含修复后的提示，避免重复调用
+        result = { ...result, output: recovery.output };
         opts.onEvent?.({
           type: "recovery",
           errorType: recovery.type,
@@ -1368,6 +1371,7 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
         tool_call_id: r.id,
         name: r.call.name,
         content: r.result.output,
+        is_error: !r.result.ok,
       };
       messages.push(toolMessage);
       const successfulRead = r.result.ok && r.result.metadata?.kind === "read_file";

@@ -175,7 +175,9 @@ export function buildLogBlocks(
       if (t.role === "user") continue;
       if (t.role === "tool") {
         const toolArgs = t.id ? toolArgsById.get(t.id) : undefined;
-        process.push(toolArgs ? { ...t, toolArgs } : t);
+        // 后备：如果没有从 parts 中找到，使用 turn 自带的 toolArgs（历史数据）
+        const finalArgs = toolArgs ?? t.toolArgs;
+        process.push(finalArgs ? { ...t, toolArgs: finalArgs } : t);
         continue;
       }
       if (t.content.startsWith("Error:") || !t.content.trim()) continue;

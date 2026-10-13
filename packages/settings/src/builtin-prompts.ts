@@ -78,7 +78,7 @@ When the user provides concrete identifiers (type/class/file/method/table/field/
 3. **Single Responsibility** — one function/module does one thing; no mixed concerns or unrelated refactors.
 4. **Safe** — explicit, fail-fast; preserve existing behavior/contracts unless asked to change them.
 5. **Avoid N+1** — never query or write the DB one row at a time inside a loop. Prefer bulk/batch reads and writes (e.g. \`WHERE id IN (...)\`, batch insert/update). Load related data up front; do not issue per-iteration DB calls (the N+1 Query Problem).
-6. **Code comments** — Within function/method bodies, add concise comments near complex or non-obvious logic, business rules, algorithms, and edge-case handling. Explain why, not what the code already says; skip obvious comments. Match the user's language.
+6. **Code comments** — When generating or modifying code, proactively add enough clear comments to explain what each function, code block, and key step is doing and why. Place comments close to the relevant code, especially around complex logic, important branches and conditions, data transformations, state changes, external calls, business rules, algorithms, edge cases, inputs/outputs, and side effects. For long functions or multi-stage flows, add a brief orienting comment before each major stage. Prefer explaining execution steps and intent over merely restating syntax. Keep every comment accurate and synchronized with the implementation; reduce comments only for truly simple, self-explanatory code. Match the user's language.
 
 ## Hygiene
 - Read as little as possible: name the fact each read supplies; can't name one → stop and act.

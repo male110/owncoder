@@ -1149,7 +1149,9 @@ async function installNpmLanguageServer(
   cwd: string,
 ): Promise<string | null> {
   if (!entry.npmPackage || process.env.OWNCODER_DISABLE_LSP_AUTO_INSTALL === "1") return null;
-  const installRoot = path.join(cwd, ".owncoder", "lsp");
+  const installRoot = process.env.APPDATA
+    ? path.join(process.env.APPDATA, "@owncoder", "desktop", "lsp")
+    : path.join(cwd, ".owncoder", "lsp");
   const packages = Array.isArray(entry.npmPackage) ? entry.npmPackage : [entry.npmPackage];
   const cacheKey = `${installRoot}:${packages.join(",")}`;
   const existing = installPromiseCache.get(cacheKey);
@@ -1215,11 +1217,36 @@ function resolveLocalBin(cwd: string, command: string): string | null {
   const suffixes = isWin ? ["", ".cmd", ".exe", ".ps1"] : [""];
   let dir = path.resolve(cwd);
 
+  // 全局 LSP 目录候选列表
+  const globalBinDirs: string[] = [];
+  
+  // 1. OwnCoder 全局 LSP 目录
+  if (process.env.APPDATA) {
+    globalBinDirs.push(
+      path.join(process.env.APPDATA, "@owncoder", "desktop", "lsp", "node_modules", ".bin")
+    );
+  }
+  
+  // 2. VSCode 扩展目录（作为备用）
+  if (process.env.USERPROFILE) {
+    const vscodeExtensionsDir = path.join(process.env.USERPROFILE, ".vscode", "extensions");
+    if (existsSync(vscodeExtensionsDir)) {
+      globalBinDirs.push(
+        path.join(vscodeExtensionsDir, "node_modules", ".bin")
+      );
+    }
+  }
+
   for (;;) {
-    for (const binDir of [
+    const binDirs = [
       path.join(dir, "node_modules", ".bin"),
       path.join(dir, ".owncoder", "lsp", "node_modules", ".bin"),
-    ]) {
+    ];
+    
+    // 将全局目录添加到查找列表前面（优先级更高）
+    binDirs.unshift(...globalBinDirs);
+
+    for (const binDir of binDirs) {
       for (const suffix of suffixes) {
         const candidate = path.join(binDir, command + suffix);
         if (existsSync(candidate)) return candidate;

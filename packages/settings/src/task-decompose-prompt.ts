@@ -70,6 +70,7 @@ Do not fabricate missing details. When there is no relevant task history, use an
 
 - \`steps\` are ordered, concrete actions or phases that must be performed to complete the current task.
 - All related work for the same goal belongs to one task and must not be split across multiple tasks.
+- For information already confirmed in the historical context, carry it into the task and write it clearly. For example, if it is already known from the historical information that the file to be modified this time is xx, directly state in the task that the file to be modified is xx; do not explore further. As a principle, as long as the information has already been confirmed in the history, write it clearly here.
 
 ## Purpose of Task Decomposition
 
@@ -106,4 +107,5 @@ You are their leader, so you must decompose tasks well; afterward, they only nee
     }
   ]
 }
-\`\`\``
+\`\`\`
+`;

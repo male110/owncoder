@@ -13,7 +13,7 @@ const tools: ToolDef[] = [
     function: {
       name: "read_file",
       description: "Read a file",
-      parameters: { type: "object", properties: { path: { type: "string" } } },
+      parameters: { type: "object", properties: { file_path: { type: "string" } } },
     },
   },
 ];
@@ -61,6 +61,16 @@ describe("openaiChatCodec", () => {
     expect(body.max_tokens).toBe(16384);
     expect(body.tools).toBe(tools);
     expect(body.tool_choice).toBe("auto");
+  });
+
+  it("OpenAI 兼容中转保留错误正文但不发送 Anthropic 专用错误字段", () => {
+    const output = "Error: Whole-file reads are limited. Use read_outline.";
+    const body = openaiChatCodec.encodeRequest({
+      model: "claude-sonnet-4",
+      stream: false,
+      messages: [{ role: "tool", tool_call_id: "call-large", content: output, is_error: true }],
+    }) as { messages: unknown[] };
+    expect(body.messages).toEqual([{ role: "tool", tool_call_id: "call-large", content: output }]);
   });
 
   it("omits stream_options on non-stream requests", () => {
@@ -118,7 +128,7 @@ describe("openaiChatCodec", () => {
     });
     parser.feed({
       data: JSON.stringify({
-        choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: "path\":\"a.ts\"}" } }] }, finish_reason: "tool_calls" }],
+        choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: "file_path\":\"a.ts\"}" } }] }, finish_reason: "tool_calls" }],
       }),
     });
     const result = parser.finish();
@@ -129,7 +139,7 @@ describe("openaiChatCodec", () => {
       {
         id: "call_1",
         type: "function",
-        function: { name: "read_file", arguments: '{"path":"a.ts"}' },
+        function: { name: "read_file", arguments: '{"file_path":"a.ts"}' },
       },
     ]);
   });

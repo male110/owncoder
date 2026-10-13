@@ -17,9 +17,10 @@ interface TreeNodeProps {
   onOpenFile: (path: string) => void;
   expandedDirs: Record<string, boolean>;
   onToggleDir: (path: string) => void;
+  onContextMenu: (entry: WorkspaceDirEntryDto, event: React.MouseEvent) => void;
 }
 
-function TreeNode({ root, entry, depth, onOpenFile, expandedDirs, onToggleDir }: TreeNodeProps) {
+function TreeNode({ root, entry, depth, onOpenFile, expandedDirs, onToggleDir, onContextMenu }: TreeNodeProps) {
   const open = entry.kind === "dir" && expandedDirs[entry.path] === true;
   const [children, setChildren] = useState<WorkspaceDirEntryDto[] | null>(null);
   const [loading, setLoading] = useState(false);
@@ -58,6 +59,7 @@ function TreeNode({ root, entry, depth, onOpenFile, expandedDirs, onToggleDir }:
           style={{ paddingLeft: 8 + depth * 12 }}
           title={entry.path}
           onClick={toggleDir}
+          onContextMenu={(event) => onContextMenu(entry, event)}
         >
           <svg
             className="file-tree-chev"
@@ -94,6 +96,7 @@ function TreeNode({ root, entry, depth, onOpenFile, expandedDirs, onToggleDir }:
                   onOpenFile={onOpenFile}
                   expandedDirs={expandedDirs}
                   onToggleDir={onToggleDir}
+                  onContextMenu={onContextMenu}
                 />
               ))}
           </div>
@@ -109,6 +112,7 @@ function TreeNode({ root, entry, depth, onOpenFile, expandedDirs, onToggleDir }:
       style={{ paddingLeft: 8 + depth * 12 }}
       title={entry.path}
       onDoubleClick={() => onOpenFile(entry.path)}
+      onContextMenu={(event) => onContextMenu(entry, event)}
     >
       <span className="file-tree-chev-spacer" />
       <span className="file-tree-icon">📄</span>
@@ -120,7 +124,58 @@ function TreeNode({ root, entry, depth, onOpenFile, expandedDirs, onToggleDir }:
 export function ProjectFileTree({ root, onOpenFile, expandedDirs, onToggleDir }: Props) {
   const [entries, setEntries] = useState<WorkspaceDirEntryDto[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [menu, setMenu] = useState<{ entry: WorkspaceDirEntryDto; x: number; y: number } | null>(null);
   const { t } = useI18n();
+
+  useEffect(() => {
+    if (!menu) return;
+    const close = () => setMenu(null);
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") close();
+    };
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [menu]);
+
+  const handleContextMenu = (entry: WorkspaceDirEntryDto, event: React.MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setMenu({ entry, x: event.clientX, y: event.clientY });
+  };
+
+  const openEntry = (entry: WorkspaceDirEntryDto) => {
+    if (entry.kind === "dir") {
+      if (expandedDirs[entry.path] !== true) onToggleDir(entry.path);
+    } else {
+      onOpenFile(entry.path);
+    }
+    setMenu(null);
+  };
+
+  const copyPath = async (entry: WorkspaceDirEntryDto, absolute: boolean) => {
+    const relativePath = entry.path.replace(/\\/g, "/");
+    const separator = root.includes("\\") ? "\\" : "/";
+    const absolutePath = `${root.replace(/[\\/]+$/, "")}${separator}${relativePath.replace(/\//g, separator)}`;
+    try {
+      await navigator.clipboard.writeText(absolute ? absolutePath : relativePath);
+    } catch {
+      // Clipboard permissions may be unavailable in restricted renderer contexts.
+    } finally {
+      setMenu(null);
+    }
+  };
+
+  const showInFolder = async (entry: WorkspaceDirEntryDto) => {
+    try {
+      await window.owncoder.showWorkspacePathInFolder(root, entry.path);
+    } finally {
+      setMenu(null);
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -144,7 +199,7 @@ export function ProjectFileTree({ root, onOpenFile, expandedDirs, onToggleDir }:
   if (entries.length === 0) return <p className="nav-empty nested">{t("空目录")}</p>;
 
   return (
-    <div className="file-tree">
+    <div className="file-tree" onContextMenu={(event) => event.preventDefault()}>
       {entries.map((entry) => (
         <TreeNode
           key={entry.path}
@@ -154,8 +209,25 @@ export function ProjectFileTree({ root, onOpenFile, expandedDirs, onToggleDir }:
           onOpenFile={onOpenFile}
           expandedDirs={expandedDirs}
           onToggleDir={onToggleDir}
+          onContextMenu={handleContextMenu}
         />
       ))}
+      {menu ? (
+        <div
+          className="file-tree-context-menu"
+          style={{
+            left: Math.max(8, Math.min(menu.x, window.innerWidth - 208)),
+            top: Math.max(8, Math.min(menu.y, window.innerHeight - 152)),
+          }}
+          onMouseDown={(event) => event.stopPropagation()}
+          onContextMenu={(event) => event.preventDefault()}
+        >
+          <button type="button" onClick={() => openEntry(menu.entry)}>{t("打开")}</button>
+          <button type="button" onClick={() => void copyPath(menu.entry, false)}>{t("复制相对路径")}</button>
+          <button type="button" onClick={() => void copyPath(menu.entry, true)}>{t("复制绝对路径")}</button>
+          <button type="button" onClick={() => void showInFolder(menu.entry)}>{t("在资源管理器中打开")}</button>
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -98,7 +98,7 @@ Layer 3: 卡住检测（干预）
 ```typescript
 export const DEFAULT_TERMINATION_CONFIG: TerminationConfig = {
   // 硬限制
-  maxIterations: 30,
+  maxIterations: 39,
   maxTotalToolCalls: 100,
   maxTokensPerTurn: Number.MAX_SAFE_INTEGER, // token 预算检查已禁用，仅保留字段兼容
   maxCostPerTurn: 15.0,
@@ -225,7 +225,7 @@ updateStateAfterResponse(state, {
 updateStateAfterTools(state, [
   {
     name: "read_file",
-    arguments: { path: "src/foo.ts" },
+    arguments: { file_path: "src/foo.ts" },
     result: "file content...",
   },
 ]);
@@ -263,9 +263,9 @@ state.iteration = 30
 
 ```typescript
 // 重复调用同一工具 3 次
-read_file({ path: "foo.ts" })
-read_file({ path: "foo.ts" })
-read_file({ path: "foo.ts" })
+read_file({ file_path: "foo.ts" })
+read_file({ file_path: "foo.ts" })
+read_file({ file_path: "foo.ts" })
 
 // → 终止原因: "Stuck in tool loop: read_file called 3 times"
 // → aborted: false

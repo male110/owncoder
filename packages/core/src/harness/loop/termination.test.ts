@@ -143,9 +143,9 @@ describe("Termination Logic", () => {
         maxRetries: 0,
       });
       state.toolCallHistory.push(
-        { name: "read_file", arguments: { path: "src/login.ts" }, result: "same", iteration: 0 },
-        { name: "read_file", arguments: { path: "src/login.ts" }, result: "same", iteration: 1 },
-        { name: "read_file", arguments: { path: "src/login.ts" }, result: "same", iteration: 2 },
+        { name: "read_file", arguments: { file_path: "src/login.ts" }, result: "same", iteration: 0 },
+        { name: "read_file", arguments: { file_path: "src/login.ts" }, result: "same", iteration: 1 },
+        { name: "read_file", arguments: { file_path: "src/login.ts" }, result: "same", iteration: 2 },
       );
       const result = checkTermination(state, DEFAULT_TERMINATION_CONFIG);
       expect(result.shouldTerminate).toBe(true);
@@ -160,9 +160,9 @@ describe("Termination Logic", () => {
         maxRetries: 0,
       });
       state.toolCallHistory.push(
-        { name: "read_file", arguments: { path: "src/login.ts", offset: 1 }, result: "line 1", iteration: 0 },
-        { name: "read_file", arguments: { path: "src/login.ts", offset: 2 }, result: "line 2", iteration: 1 },
-        { name: "read_file", arguments: { path: "src/login.ts", offset: 3 }, result: "line 3", iteration: 2 },
+        { name: "read_file", arguments: { file_path: "src/login.ts", offset: 1 }, result: "line 1", iteration: 0 },
+        { name: "read_file", arguments: { file_path: "src/login.ts", offset: 2 }, result: "line 2", iteration: 1 },
+        { name: "read_file", arguments: { file_path: "src/login.ts", offset: 3 }, result: "line 3", iteration: 2 },
       );
       const result = checkTermination(state, DEFAULT_TERMINATION_CONFIG);
       expect(result.shouldTerminate).toBe(false);
@@ -178,7 +178,7 @@ describe("Termination Logic", () => {
       for (let i = 0; i < 3; i++) {
         state.toolCallHistory.push({
           name: "read_file",
-          arguments: { path: "src/foo.ts", offset: 0 },
+          arguments: { file_path: "src/foo.ts", offset: 0 },
           result: "file content...",
           iteration: i,
         });
@@ -194,9 +194,9 @@ describe("Termination Logic", () => {
       const state = createLoopState();
       // Different offsets = legitimate pagination
       state.toolCallHistory.push(
-        { name: "read_file", arguments: { path: "src/foo.ts", offset: 0 }, result: "...", iteration: 0 },
-        { name: "read_file", arguments: { path: "src/foo.ts", offset: 100 }, result: "...", iteration: 1 },
-        { name: "read_file", arguments: { path: "src/foo.ts", offset: 200 }, result: "...", iteration: 2 },
+        { name: "read_file", arguments: { file_path: "src/foo.ts", offset: 0 }, result: "...", iteration: 0 },
+        { name: "read_file", arguments: { file_path: "src/foo.ts", offset: 100 }, result: "...", iteration: 1 },
+        { name: "read_file", arguments: { file_path: "src/foo.ts", offset: 200 }, result: "...", iteration: 2 },
       );
       const result = checkTermination(state, DEFAULT_TERMINATION_CONFIG);
       expect(result.shouldTerminate).toBe(false);
@@ -204,9 +204,9 @@ describe("Termination Logic", () => {
     it("should NOT detect loop for different files (same tool)", () => {
       const state = createLoopState();
       state.toolCallHistory.push(
-        { name: "read_file", arguments: { path: "src/foo.ts" }, result: "...", iteration: 0 },
-        { name: "read_file", arguments: { path: "src/bar.ts" }, result: "...", iteration: 1 },
-        { name: "read_file", arguments: { path: "src/baz.ts" }, result: "...", iteration: 2 },
+        { name: "read_file", arguments: { file_path: "src/foo.ts" }, result: "...", iteration: 0 },
+        { name: "read_file", arguments: { file_path: "src/bar.ts" }, result: "...", iteration: 1 },
+        { name: "read_file", arguments: { file_path: "src/baz.ts" }, result: "...", iteration: 2 },
       );
       const result = checkTermination(state, DEFAULT_TERMINATION_CONFIG);
       expect(result.shouldTerminate).toBe(false);
@@ -215,8 +215,8 @@ describe("Termination Logic", () => {
       const state = createLoopState();
       // Old calls (outside window)
       state.toolCallHistory.push(
-        { name: "read_file", arguments: { path: "src/old.ts" }, result: "...", iteration: 0 },
-        { name: "read_file", arguments: { path: "src/old.ts" }, result: "...", iteration: 1 },
+        { name: "read_file", arguments: { file_path: "src/old.ts" }, result: "...", iteration: 0 },
+        { name: "read_file", arguments: { file_path: "src/old.ts" }, result: "...", iteration: 1 },
       );
       // Recent calls (inside window) - different tool
       state.toolCallHistory.push(
@@ -284,7 +284,7 @@ describe("Termination Logic", () => {
       const state = createLoopState();
       updateStateAfterResponse(state, {
         content: "Let me read the authentication module first.",
-        toolCalls: [{ id: "1", type: "function" as const, function: { name: "read_file", arguments: JSON.stringify({ path: "auth.ts" }) } }],
+        toolCalls: [{ id: "1", type: "function" as const, function: { name: "read_file", arguments: JSON.stringify({ file_path: "auth.ts" }) } }],
         finishReason: null,
         tokens: 50,
         cost: 0.005,
@@ -304,7 +304,7 @@ describe("Termination Logic", () => {
       // 50% similar - below 80% threshold
       updateStateAfterResponse(state, {
         content: "The authentication module uses JWT tokens for session management.",
-        toolCalls: [{ id: "1", type: "function" as const, function: { name: "read_file", arguments: JSON.stringify({ path: "auth.ts" }) } }],
+        toolCalls: [{ id: "1", type: "function" as const, function: { name: "read_file", arguments: JSON.stringify({ file_path: "auth.ts" }) } }],
         finishReason: null,
         tokens: 50,
         cost: 0.005,
@@ -418,7 +418,7 @@ describe("Termination Logic", () => {
       updateStateAfterTools(state, [
         {
           name: "read_file",
-          arguments: { path: "src/foo.ts" },
+          arguments: { file_path: "src/foo.ts" },
           result: "file content",
         },
         {
@@ -700,15 +700,15 @@ describe("Termination Logic", () => {
         const config = { ...DEFAULT_TERMINATION_CONFIG, maxSameToolRepeat: 2 };
         // Call 1
         updateStateAfterTools(state, [
-          { name: "read_file", arguments: { path: "foo.ts" }, result: "..." }
+          { name: "read_file", arguments: { file_path: "foo.ts" }, result: "..." }
         ]);
         // Call 2 (repeat 1)
         updateStateAfterTools(state, [
-          { name: "read_file", arguments: { path: "foo.ts" }, result: "..." }
+          { name: "read_file", arguments: { file_path: "foo.ts" }, result: "..." }
         ]);
         // Call 3 (repeat 2) - should trigger at exactly 3 calls
         updateStateAfterTools(state, [
-          { name: "read_file", arguments: { path: "foo.ts" }, result: "..." }
+          { name: "read_file", arguments: { file_path: "foo.ts" }, result: "..." }
         ]);
         state.lastToolCalls = [
           { id: "x", type: "function", function: { name: "read_file", arguments: "{}" } }
@@ -721,11 +721,11 @@ describe("Termination Logic", () => {
         const config = { ...DEFAULT_TERMINATION_CONFIG, maxSameToolRepeat: 2 };
         // Call 1
         updateStateAfterTools(state, [
-          { name: "read_file", arguments: { path: "foo.ts" }, result: "..." }
+          { name: "read_file", arguments: { file_path: "foo.ts" }, result: "..." }
         ]);
         // Call 2 (repeat 1) - should NOT trigger yet
         updateStateAfterTools(state, [
-          { name: "read_file", arguments: { path: "foo.ts" }, result: "..." }
+          { name: "read_file", arguments: { file_path: "foo.ts" }, result: "..." }
         ]);
         state.lastToolCalls = [
           { id: "x", type: "function", function: { name: "read_file", arguments: "{}" } }
@@ -787,7 +787,7 @@ describe("Termination Logic", () => {
         // Fill history with exactly 6 calls (window size)
         for (let i = 0; i < 6; i++) {
           updateStateAfterTools(state, [
-            { name: "read_file", arguments: { path: `file${i}.ts` }, result: "..." }
+            { name: "read_file", arguments: { file_path: `file${i}.ts` }, result: "..." }
           ]);
         }
         state.lastToolCalls = [
@@ -988,7 +988,7 @@ describe("Termination Logic", () => {
       for (let i = 0; i < 3; i++) {
         updateStateAfterResponse(state, {
           content: `Reading file (attempt ${i + 1})`,
-          toolCalls: [{ id: `${i}`, type: "function", function: { name: "read_file", arguments: '{"path":"src/foo.ts"}' } }],
+          toolCalls: [{ id: `${i}`, type: "function", function: { name: "read_file", arguments: '{"file_path":"src/foo.ts"}' } }],
           finishReason: "stop",
           tokens: 50,
           cost: 0.005,
@@ -996,7 +996,7 @@ describe("Termination Logic", () => {
         updateStateAfterTools(state, [
           {
             name: "read_file",
-            arguments: { path: "src/foo.ts", offset: 0 },
+            arguments: { file_path: "src/foo.ts", offset: 0 },
             result: "same file content",
           },
         ]);

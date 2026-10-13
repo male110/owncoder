@@ -53,7 +53,7 @@ describe("FILE_MODIFYING_TOOLS / getDirtyFiles", () => {
         { name: "append_file", arguments: { path: "src/big.ts" } },
         { name: "semantic_diff", arguments: { filePath: "src/big.ts" } },
         { name: "write_file", arguments: { path: "src/a.ts" } },
-        { name: "read_file", arguments: { path: "src/b.ts" } },
+        { name: "read_file", arguments: { file_path: "src/b.ts" } },
       ]),
     ).toEqual(["src/big.ts", "src/a.ts"]);
   });

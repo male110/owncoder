@@ -629,11 +629,11 @@ export function allEnhancedTools(opts?: {
         parameters: {
           type: "object",
           properties: {
-            path: { type: "string", description: "Relative path from workspace root" },
+            file_path: { type: "string", description: "Relative path from workspace root" },
             offset: { type: "integer", minimum: 1, description: "1-based start line; required for large files after read_outline" },
             limit: { type: "integer", minimum: 1, description: "Maximum lines to return; required with offset for large files" },
           },
-          required: ["path"],
+          required: ["file_path"],
         },
       },
     },

@@ -67,12 +67,12 @@ hello OwnCoder
       {
         id: "1",
         type: "function",
-        function: { name: "read_file", arguments: '{"path":"a.ts"}' },
+        function: { name: "read_file", arguments: '{"file_path":"a.ts"}' },
       },
     ],
   });
   assert.equal(calls[0]?.name, "read_file");
-  assert.equal(calls[0]?.arguments.path, "a.ts");
+  assert.equal(calls[0]?.arguments.file_path, "a.ts");
 }
 
 // parser: XML

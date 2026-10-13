@@ -19,7 +19,7 @@ function archivedRound(partial: {
     taskDecomposition: partial.taskDecomposition ?? { goal: "分析模块结构" },
     llmReport: partial.llmReport ?? "完整报告正文 UNIQUE_TAIL",
     evidence: [{ summary: "src/ 入口", path: "src/index.ts" }],
-    toolCalls: [{ toolName: "read_file", arguments: { path: "src/index.ts" } }],
+    toolCalls: [{ toolName: "read_file", arguments: { file_path: "src/index.ts" } }],
   });
 }
 

@@ -27,19 +27,19 @@ test("parseToolCallsFromAssistant: single tool call is parsed correctly", () => 
   const calls = parseToolCallsFromAssistant({
     content: null,
     toolCalls: [
-      { id: "1", type: "function", function: { name: "read_file", arguments: '{"path":"test.ts"}' } },
+      { id: "1", type: "function", function: { name: "read_file", arguments: '{"file_path":"test.ts"}' } },
     ],
   });
   assert.equal(calls.length, 1);
   assert.equal(calls[0]!.name, "read_file");
-  assert.equal(calls[0]!.arguments.path, "test.ts");
+  assert.equal(calls[0]!.arguments.file_path, "test.ts");
 });
 
 test("parseToolCallsFromAssistant: multiple tool calls are parsed in order", () => {
   const calls = parseToolCallsFromAssistant({
     content: null,
     toolCalls: [
-      { id: "1", type: "function", function: { name: "read_file", arguments: '{"path":"a.ts"}' } },
+      { id: "1", type: "function", function: { name: "read_file", arguments: '{"file_path":"a.ts"}' } },
       { id: "2", type: "function", function: { name: "write_file", arguments: '{"path":"b.ts","content":"x"}' } },
     ],
   });

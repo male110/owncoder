@@ -40,7 +40,56 @@ describe("超链接点击", () => {
     },
   );
 
-  it.each(["http://example.com/", "https://example.com/path?q=1#part"])(
+  it("拆分 Windows 本地文件链接末尾的行号", () => {
+    const href = "E:/owncoder/packages/settings/src/builtin-prompts.ts:81";
+    const onOpenFile = vi.fn();
+    const element = Markdown({ content: `<a href="${href}" target="_blank" rel="noreferrer">builtin-prompts.ts</a>`, onOpenFile, workspaceRoot: "E:/owncoder" });
+    const render = element.type as (props: typeof element.props) => Element;
+    const link = findLink(render(element.props))!;
+    const preventDefault = vi.fn();
+    link.props.onClick!({ preventDefault });
+    expect(preventDefault).toHaveBeenCalledOnce();
+    expect(onOpenFile).toHaveBeenCalledWith("packages/settings/src/builtin-prompts.ts", 81);
+  });
+
+  it("不将文件名本身包含冒号数字的情况误判为行号", () => {
+    const href = "C:/logs/log:2024.txt";
+    const { link, onOpenFile } = linkFor(href);
+    const preventDefault = vi.fn();
+    link.props.onClick!({ preventDefault });
+    expect(preventDefault).toHaveBeenCalledOnce();
+    expect(onOpenFile).toHaveBeenCalledWith("C:/logs/log:2024.txt");
+    expect(openExternal).not.toHaveBeenCalled();
+  });
+
+  it("接受极大但合理的行号", () => {
+    const href = "src/large-file.ts:999999";
+    const { link, onOpenFile } = linkFor(href);
+    const preventDefault = vi.fn();
+    link.props.onClick!({ preventDefault });
+    expect(preventDefault).toHaveBeenCalledOnce();
+    expect(onOpenFile).toHaveBeenCalledWith("src/large-file.ts", 999999);
+  });
+
+  it("拒绝非法行号 :0", () => {
+    const href = "src/file.ts:0";
+    const { link, onOpenFile } = linkFor(href);
+    const preventDefault = vi.fn();
+    link.props.onClick!({ preventDefault });
+    expect(preventDefault).toHaveBeenCalledOnce();
+    expect(onOpenFile).toHaveBeenCalledWith("src/file.ts:0");
+  });
+
+  it("拒绝超出范围的行号", () => {
+    const href = "src/file.ts:1000001";
+    const { link, onOpenFile } = linkFor(href);
+    const preventDefault = vi.fn();
+    link.props.onClick!({ preventDefault });
+    expect(preventDefault).toHaveBeenCalledOnce();
+    expect(onOpenFile).toHaveBeenCalledWith("src/file.ts:1000001");
+  });
+
+  it.each(["http://example.com/", "https://example.com/path?q=1#part", "https://example.com:81/path"])(
     "网址交给默认浏览器：%s", (url) => {
       const { link, onOpenFile } = linkFor(url);
       const preventDefault = vi.fn();

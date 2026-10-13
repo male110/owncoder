@@ -31,6 +31,8 @@ export interface ChatMessage {
   attachments?: ChatAttachment[];
   tool_calls?: ToolCall[];
   tool_call_id?: string;
+  /** 工具执行失败；由支持错误标记的协议映射到原生字段。 */
+  is_error?: boolean;
   name?: string;
 }
 

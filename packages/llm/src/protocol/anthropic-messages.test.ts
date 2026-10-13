@@ -12,7 +12,7 @@ const tools: ToolDef[] = [
     function: {
       name: "read_file",
       description: "Read a file",
-      parameters: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
+      parameters: { type: "object", properties: { file_path: { type: "string" } }, required: ["file_path"] },
     },
   },
 ];
@@ -66,7 +66,7 @@ describe("anthropicMessagesCodec encode", () => {
           {
             id: "call/1!",
             type: "function",
-            function: { name: "read_file", arguments: '{"path":"a.ts"}' },
+            function: { name: "read_file", arguments: '{"file_path":"a.ts"}' },
           },
         ],
       },
@@ -90,7 +90,7 @@ describe("anthropicMessagesCodec encode", () => {
       {
         name: "read_file",
         description: "Read a file",
-        input_schema: { type: "object", properties: { path: { type: "string" } }, required: ["path"] },
+        input_schema: { type: "object", properties: { file_path: { type: "string" } }, required: ["file_path"] },
       },
     ]);
     expect(body.tool_choice).toEqual({ type: "auto" });
@@ -102,7 +102,7 @@ describe("anthropicMessagesCodec encode", () => {
       role: "assistant",
       content: [
         { type: "text", text: "ok" },
-        { type: "tool_use", id: "call_1_", name: "read_file", input: { path: "a.ts" } },
+        { type: "tool_use", id: "call_1_", name: "read_file", input: { file_path: "a.ts" } },
       ],
     });
     expect(body.messages[2]).toEqual({
@@ -110,6 +110,22 @@ describe("anthropicMessagesCodec encode", () => {
       content: [{ type: "tool_result", tool_use_id: "call_1_", content: "file body" }],
     });
     expect(body.messages.at(-1)?.role).toBe("user");
+  });
+
+  it("保留失败工具结果的关联 ID、错误正文和 is_error 标记", () => {
+    const output = 'Error: Whole-file reads are limited to 10000 bytes. Use read_outline.';
+    const body = encodeAnthropicMessages({
+      model: "claude-sonnet-4",
+      stream: false,
+      messages: [
+        { role: "user", content: "读取大文件" },
+        { role: "assistant", tool_calls: [{ id: "call/large!", type: "function", function: { name: "read_file", arguments: '{"file_path":"styles.css"}' } }] },
+        { role: "tool", tool_call_id: "call/large!", content: output, is_error: true },
+      ],
+    });
+    expect(body.messages.at(-1)?.content).toEqual([
+      { type: "tool_result", tool_use_id: "call_large_", content: output, is_error: true },
+    ]);
   });
 
   it("encodes multi-image attachments as source.base64 blocks and non-images as plain text", async () => {
@@ -241,7 +257,7 @@ describe("anthropicMessagesCodec decode", () => {
       content: [
         { type: "thinking", thinking: "plan" },
         { type: "text", text: "calling" },
-        { type: "tool_use", id: "toolu_1", name: "read_file", input: { path: "a.ts" } },
+        { type: "tool_use", id: "toolu_1", name: "read_file", input: { file_path: "a.ts" } },
       ],
     });
     expect(decoded.id).toBe("msg_1");
@@ -252,7 +268,7 @@ describe("anthropicMessagesCodec decode", () => {
       {
         id: "toolu_1",
         type: "function",
-        function: { name: "read_file", arguments: '{"path":"a.ts"}' },
+        function: { name: "read_file", arguments: '{"file_path":"a.ts"}' },
       },
     ]);
     expect(decoded.usage).toEqual({
@@ -326,7 +342,7 @@ describe("anthropicMessagesCodec stream", () => {
       data: JSON.stringify({
         type: "content_block_delta",
         index: 2,
-        delta: { type: "input_json_delta", partial_json: '{"path":' },
+        delta: { type: "input_json_delta", partial_json: '{"file_path":' },
       }),
     });
     parser.feed({
@@ -357,7 +373,7 @@ describe("anthropicMessagesCodec stream", () => {
     expect(result.choices[0]?.message.tool_calls?.[0]).toEqual({
       id: "toolu_1",
       type: "function",
-      function: { name: "read_file", arguments: '{"path":"a.ts"}' },
+      function: { name: "read_file", arguments: '{"file_path":"a.ts"}' },
     });
     expect(result.usage?.prompt_tokens).toBe(3);
     expect(result.usage?.completion_tokens).toBe(8);
@@ -378,7 +394,7 @@ describe("anthropicMessagesCodec stream", () => {
       data: JSON.stringify({
         type: "content_block_delta",
         index: 0,
-        delta: { type: "input_json_delta", partial_json: '{"path":"a.ts"}' },
+        delta: { type: "input_json_delta", partial_json: '{"file_path":"a.ts"}' },
       }),
     });
     parser.feed({
@@ -386,7 +402,7 @@ describe("anthropicMessagesCodec stream", () => {
       data: JSON.stringify({ type: "content_block_stop", index: 0 }),
     });
 
-    expect(parser.finish().choices[0]?.message.tool_calls?.[0]?.function.arguments).toBe('{"path":"a.ts"}');
+    expect(parser.finish().choices[0]?.message.tool_calls?.[0]?.function.arguments).toBe('{"file_path":"a.ts"}');
   });
 
   it("keeps parallel Anthropic tool arguments isolated by content block index", () => {

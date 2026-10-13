@@ -25,7 +25,7 @@ type AnthropicContentBlock =
   | { type: "text"; text: string }
   | { type: "image"; source: { type: "base64"; media_type: string; data: string } }
   | { type: "tool_use"; id: string; name: string; input: unknown }
-  | { type: "tool_result"; tool_use_id: string; content: string }
+  | { type: "tool_result"; tool_use_id: string; content: string; is_error?: boolean }
   | { type: "thinking"; thinking: string };
 
 type AnthropicMessage = {
@@ -118,6 +118,7 @@ export function encodeAnthropicMessages(input: ProtocolEncodeInput): AnthropicRe
         type: "tool_result",
         tool_use_id: sanitizeToolUseId(msg.tool_call_id || msg.name || "tool_use"),
         content: msg.content ?? "",
+        ...(msg.is_error === undefined ? {} : { is_error: msg.is_error }),
       });
       continue;
     }

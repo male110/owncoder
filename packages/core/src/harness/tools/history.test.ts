@@ -85,7 +85,7 @@ test("toolRecallHistory 返回完整 LLM 报告，不按字段截断", async () 
     taskDecomposition: { goal: "分析模块结构" },
     llmReport: longReport,
     evidence: [{ summary: "src/ 入口", path: "src/index.ts" }],
-    toolCalls: [{ toolName: "read_file", arguments: { path: "src/index.ts" } }],
+    toolCalls: [{ toolName: "read_file", arguments: { file_path: "src/index.ts" } }],
   });
 
   const result = await toolRecallHistory(

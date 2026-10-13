@@ -26,11 +26,11 @@ describe("googleGeminiCodec", () => {
   it("decodes text and function calls", () => {
     const result = googleGeminiCodec.decodeResponse({
       responseId: "resp_1",
-      candidates: [{ content: { parts: [{ text: "done" }, { functionCall: { name: "read_file", args: { path: "a.ts" } } }] }, finishReason: "STOP" }],
+      candidates: [{ content: { parts: [{ text: "done" }, { functionCall: { name: "read_file", args: { file_path: "a.ts" } } }] }, finishReason: "STOP" }],
       usageMetadata: { promptTokenCount: 2, candidatesTokenCount: 3, totalTokenCount: 5 },
     });
     expect(result.choices[0]?.message.content).toBe("done");
-    expect(result.choices[0]?.message.tool_calls?.[0]?.function).toEqual({ name: "read_file", arguments: '{"path":"a.ts"}' });
+    expect(result.choices[0]?.message.tool_calls?.[0]?.function).toEqual({ name: "read_file", arguments: '{"file_path":"a.ts"}' });
   });
 
   it("parses Gemini SSE chunks", () => {

@@ -102,6 +102,7 @@ export function App() {
   const [editorTabActionsHost, setEditorTabActionsHost] = useState<HTMLDivElement | null>(null);
   /** 各打开文件的 dirty 状态，供 tab 关闭确认与脏点标记。 */
   const [editorDirtyByPath, setEditorDirtyByPath] = useState<Record<string, boolean>>({});
+  const [editorLocation, setEditorLocation] = useState<{ path: string; line: number; requestId: number } | null>(null);
 
   // ── Hooks ────────────────────────────────────────────────────────────────────
   const {
@@ -196,8 +197,11 @@ export function App() {
   }, [editorDirtyByPath, handleCloseEditorTab]);
 
   /** 普通打开文件：激活/追加 tab，并取消该路径上的 diff 模式。 */
-  const openEditorFile = useCallback((path: string) => {
+  const openEditorFile = useCallback((path: string, line?: number) => {
     setEditorPath(path);
+    if (line !== undefined) {
+      setEditorLocation((current) => ({ path, line, requestId: (current?.requestId ?? 0) + 1 }));
+    }
   }, [setEditorPath]);
 
   const fileNameOf = useCallback((path: string) => {
@@ -606,6 +610,7 @@ export function App() {
                         <EditorPane
                           path={tabPath}
                           active={active}
+                          revealLine={editorLocation?.path === tabPath ? editorLocation : undefined}
                           hidePathTitle
                           actionsHost={active ? editorTabActionsHost : null}
                           {...(diff

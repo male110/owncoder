@@ -242,19 +242,34 @@ function ComposerImpl({
     const cleanups: Array<() => void> = [];
     for (const [open, ref] of [[modelMenuOpen, modelMenuRef], [reactMenuOpen, reactMenuRef]] as const) {
       if (!open) continue;
+      const menu = ref.current?.querySelector<HTMLElement>(".model-menu");
       const body = ref.current?.querySelector<HTMLElement>(".model-menu-body");
       const list = body?.querySelector<HTMLElement>(".model-menu-providers-list");
       const models = body?.querySelector<HTMLElement>(".model-menu-models");
-      if (!body || !list || !models) continue;
+      if (!menu || !body || !list || !models) continue;
       const updatePosition = () => {
+        const pickerRect = ref.current?.getBoundingClientRect();
+        if (!pickerRect) return;
+        const gap = 6;
+        const margin = 8;
+        const spaceAbove = Math.max(0, pickerRect.top - gap - margin);
+        const spaceBelow = Math.max(0, window.innerHeight - pickerRect.bottom - gap - margin);
+        const downward = spaceBelow > spaceAbove;
+        const availableHeight = downward ? spaceBelow : spaceAbove;
+        menu.style.top = downward ? "calc(100% + 6px)" : "auto";
+        menu.style.bottom = downward ? "auto" : "calc(100% + 6px)";
+        // 模型列表保持在输入框上方（或下方）的可用空间内，超出部分滚动。
+        models.style.maxHeight = `${Math.min(300, availableHeight)}px`;
+        const settings = body.querySelector<HTMLElement>(".model-menu-settings");
+        list.style.maxHeight = `${Math.max(0, Math.min(300, availableHeight - (settings?.offsetHeight ?? 0) - 2))}px`;
         const active = list.querySelector<HTMLElement>('[aria-selected="true"]');
         if (!active) return;
         const bodyTop = body.getBoundingClientRect().top;
         const activeRect = active.getBoundingClientRect();
         const center = activeRect.top - bodyTop + activeRect.height / 2;
         const desiredTop = center - models.getBoundingClientRect().height / 2;
-        const minTop = 8 - bodyTop;
-        const maxTop = window.innerHeight - 8 - bodyTop - models.offsetHeight;
+        const minTop = (downward ? pickerRect.bottom + gap : margin) - bodyTop;
+        const maxTop = (downward ? window.innerHeight - margin : pickerRect.top - gap) - bodyTop - models.offsetHeight;
         models.style.top = `${Math.max(minTop, Math.min(desiredTop, maxTop))}px`;
       };
       models.scrollTop = 0;
@@ -265,12 +280,12 @@ function ComposerImpl({
       list.addEventListener("scroll", updatePosition);
       window.addEventListener("resize", updatePosition);
       ref.current?.addEventListener("animationend", updatePosition);
-      const menu = ref.current;
+      const menuEl = ref.current;
       cleanups.push(() => {
         observer.disconnect();
         list.removeEventListener("scroll", updatePosition);
         window.removeEventListener("resize", updatePosition);
-        menu?.removeEventListener("animationend", updatePosition);
+        menuEl?.removeEventListener("animationend", updatePosition);
       });
     }
     return () => cleanups.forEach((cleanup) => cleanup());

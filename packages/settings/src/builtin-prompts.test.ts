@@ -7,6 +7,16 @@ import {
 import { BUILTIN_WORKFLOW, mergeWorkflow } from "./index.js";
 import { BUILTIN_TASK_DECOMPOSE_PROMPT } from "./task-decompose-prompt.js";
 
+describe("agent code comment guidance", () => {
+  it("asks for comments that explain key steps and their purpose by default", () => {
+    expect(BUILTIN_AGENT_PROMPT).toMatch(/proactively add enough clear comments/);
+    expect(BUILTIN_AGENT_PROMPT).toMatch(/what each function, code block, and key step is doing and why/);
+    expect(BUILTIN_AGENT_PROMPT).toMatch(/before each major stage/);
+    expect(BUILTIN_AGENT_PROMPT).toMatch(/accurate and synchronized with the implementation/);
+    expect(BUILTIN_AGENT_PROMPT).toMatch(/truly simple, self-explanatory code/);
+  });
+});
+
 describe("web search prompt guidance", () => {
   it("puts web_search in the agent and plan loops before Stop", () => {
     for (const prompt of [BUILTIN_AGENT_PROMPT, BUILTIN_PLAN_PROMPT]) {

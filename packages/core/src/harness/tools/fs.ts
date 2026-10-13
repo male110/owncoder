@@ -359,8 +359,12 @@ export async function toolRead(
     if (offset <= 0 || limit <= 0) {
       if (stat.size >= WHOLE_FILE_READ_BYTES) {
         const relForSize = normalizeRel(ctx.workspaceRoot, abs);
+        // 复用已有的大纲读取，让只保留文本结果的中转也能给模型提供导航信息。
+        // 仍返回失败，不把导航信息冒充完整源码读取成功。
+        const outline = await toolReadOutline(ctx, relForSize);
         return fail(
-          `File "${relForSize}" is ${stat.size} bytes. Whole-file reads are limited to ${WHOLE_FILE_READ_BYTES} bytes. Call read_outline first, then decide which lines to read with read_symbol or read_file(offset, limit). Do not retry a whole-file read.`,
+          `File "${relForSize}" is ${stat.size} bytes. Whole-file reads are limited to ${WHOLE_FILE_READ_BYTES} bytes. Call read_outline first, then decide which lines to read with read_symbol or read_file(offset, limit). Do not retry a whole-file read.\n` +
+          `已自动尝试 read_outline；下方仅为导航信息，不是完整源码。下一次 read_file 必须同时指定 offset 和 limit，例如 ${JSON.stringify({ file_path: relForSize, offset: 1, limit: 60 })}；按目标位置调整行范围。\n\n${outline.output}`,
         );
       }
     }

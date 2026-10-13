@@ -72,7 +72,7 @@ export type TerminationCheck = TerminationResult | ContinueResult;
 
 export interface TerminationConfig {
   // Hard limits (safety nets)
-  maxIterations: number;              // Default: 30 (vs LangChain 15, your old 200)
+  maxIterations: number;              // Default: 39 (vs LangChain 15, your old 200)
   maxTotalToolCalls: number;          // Default: 100
   /** Kept for API compat; token budget check is disabled (cost is the sole spend guard). */
   maxTokensPerTurn: number;           // Default: Number.MAX_SAFE_INTEGER (effectively unlimited)
@@ -110,7 +110,7 @@ export interface TerminationConfig {
 }
 
 export const DEFAULT_TERMINATION_CONFIG: TerminationConfig = {
-  maxIterations: 30,
+  maxIterations: 39,
   maxTotalToolCalls: 100,
   maxTokensPerTurn: Number.MAX_SAFE_INTEGER,
   maxCostPerTurn: 15.0,
@@ -601,7 +601,7 @@ function normalizeArgs(args: Record<string, unknown>): Record<string, unknown> {
     if (value === null || value === undefined) continue;
     
     // Normalize paths (case-insensitive, remove trailing slashes)
-    if (key === "path" && typeof value === "string") {
+    if ((key === "path" || key === "file_path") && typeof value === "string") {
       normalized[key] = value.toLowerCase().replace(/[\/\\]+$/, "");
       continue;
     }

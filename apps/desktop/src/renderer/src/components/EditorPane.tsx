@@ -106,6 +106,8 @@ type EditorPaneProps = {
   actionsHost?: HTMLElement | null;
   /** 当前页签是否可见。 */
   active?: boolean;
+  /** 定位到指定行；requestId 用于同一文件的重复定位。 */
+  revealLine?: { line: number; requestId: number };
 } & (
   | {
       /** 普通编辑模式 */
@@ -134,6 +136,7 @@ export function EditorPane({
   hidePathTitle = false,
   actionsHost = null,
   active = true,
+  revealLine,
 }: EditorPaneProps) {
   const [value, setValue] = useState("");
   const [original, setOriginal] = useState("");
@@ -220,6 +223,16 @@ export function EditorPane({
   useEffect(() => {
     setMdViewMode("preview");
   }, [path]);
+
+  useEffect(() => {
+    if (!active || !revealLine) return;
+    if (isMarkdown) setMdViewMode("source");
+    const editor = editorRef.current;
+    if (!editor) return;
+    editor.setPosition({ lineNumber: revealLine.line, column: 1 });
+    editor.revealLineInCenter(revealLine.line);
+    editor.focus();
+  }, [active, isMarkdown, revealLine]);
 
   const save = useCallback(async () => {
     setSaving(true);
@@ -447,6 +460,10 @@ export function EditorPane({
               ed.updateOptions({ readOnly: !sourceVisibleRef.current });
               if (sourceVisibleRef.current) {
                 ed.layout();
+                if (revealLine) {
+                  ed.setPosition({ lineNumber: revealLine.line, column: 1 });
+                  ed.revealLineInCenter(revealLine.line);
+                }
                 ed.focus();
               }
               ed.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {

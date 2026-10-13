@@ -231,8 +231,8 @@ async function runTool(ctx: ToolContext, call: ParsedToolCall): Promise<ToolResu
     switch (name) {
       // ── Original tools ──
       case "read_file": {
-        if (typeof args.path !== "string" || !args.path.trim()) {
-          return fail('read_file 参数错误：必须提供非空字符串 path，例如 {"path":"src/main.ts"}；参数名是 path。');
+        if (typeof args.file_path !== "string" || !args.file_path.trim()) {
+          return fail('read_file 参数错误：必须提供非空字符串 file_path，例如 {"file_path":"src/main.ts"}；参数名是 file_path。');
         }
         for (const key of ["offset", "limit"] as const) {
           const value = args[key];
@@ -240,7 +240,7 @@ async function runTool(ctx: ToolContext, call: ParsedToolCall): Promise<ToolResu
             return fail(`read_file 参数错误：${key} 必须是大于等于 1 的整数，不能使用字符串或 null。`);
           }
         }
-        return await toolRead(ctx, args.path, num(args.offset, 0), num(args.limit, 0));
+        return await toolRead(ctx, args.file_path, num(args.offset, 0), num(args.limit, 0));
       }
       case "read_symbol":
         return await toolReadSymbol(ctx, str(args.path), str(args.symbol), num(args.padding, 12));
