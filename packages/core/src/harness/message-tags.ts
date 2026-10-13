@@ -25,7 +25,7 @@ export function wrapWithTag(tag: string, content: string): string {
  * This is the base prompt (BUILTIN_PLAN_PROMPT or BUILTIN_AGENT_PROMPT).
  */
 export function tagSystemInstructions(content: string): string {
-  return wrapWithTag("system_instructions", content);
+  return wrapWithTag("", content);
 }
 
 /**

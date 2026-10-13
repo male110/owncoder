@@ -356,18 +356,6 @@ export async function toolRead(
   let rangedTotalLines: number | undefined;
   try {
     stat = await fs.stat(abs);
-    if (offset <= 0 || limit <= 0) {
-      if (stat.size >= WHOLE_FILE_READ_BYTES) {
-        const relForSize = normalizeRel(ctx.workspaceRoot, abs);
-        // 复用已有的大纲读取，让只保留文本结果的中转也能给模型提供导航信息。
-        // 仍返回失败，不把导航信息冒充完整源码读取成功。
-        const outline = await toolReadOutline(ctx, relForSize);
-        return fail(
-          `File "${relForSize}" is ${stat.size} bytes. Whole-file reads are limited to ${WHOLE_FILE_READ_BYTES} bytes. Call read_outline first, then decide which lines to read with read_symbol or read_file(offset, limit). Do not retry a whole-file read.\n` +
-          `已自动尝试 read_outline；下方仅为导航信息，不是完整源码。下一次 read_file 必须同时指定 offset 和 limit，例如 ${JSON.stringify({ file_path: relForSize, offset: 1, limit: 60 })}；按目标位置调整行范围。\n\n${outline.output}`,
-        );
-      }
-    }
     if (offset > 0 && limit > 0) {
       const startLine = Math.floor(offset);
       const endLine = startLine + Math.floor(limit) - 1;
@@ -389,10 +377,11 @@ export async function toolRead(
     if (e.code === "ENOENT") {
       const basename = path.split(/[/\\]/).pop() ?? path;
       return fail(
-        `File not found: "${path}". ` +
-        `Do NOT retry the same path — the file may be in a different location or named differently. ` +
-        `Search for it first: use grep("${basename}") or search_symbols("${basename}") to locate the actual path, ` +
-        `then read the confirmed path.`,
+        `⚠️ DO NOT retry read_file("${path}") — this path does not exist.\n\n` +
+        `File not found: "${path}"\n\n` +
+        `Required: Search first, then read the confirmed path:\n` +
+        `  grep("${basename}") or search_symbols("${basename}")\n\n` +
+        `⚠️ Retrying the same non-existent path will fail again.`,
       );
     }
     if (e.code === "EISDIR") {
@@ -608,7 +597,11 @@ export async function toolReadOutline(
   } catch (e: any) {
     if (e.code === "ENOENT") {
       return fail(
-        `File not found: "${path}". Use search_symbols or grep to locate the actual path, then read the outline of the confirmed path.`,
+        `⚠️ DO NOT retry read_outline("${path}") — this path does not exist.\n\n` +
+        `File not found: "${path}"\n\n` +
+        `Required: Search first, then read the outline of the confirmed path:\n` +
+        `  search_symbols("${path.split(/[/\\]/).pop() ?? path}") or grep("${path.split(/[/\\]/).pop() ?? path}")\n\n` +
+        `⚠️ Retrying the same non-existent path will fail again.`,
       );
     }
     if (e.code === "EISDIR") {
@@ -952,12 +945,12 @@ function resolvePathFromReadSet(
   
   return {
     error: 
-      `${toolName} requires an explicit "path" parameter. The path field is missing or empty.${hint}\n\n` +
+      `${toolName} requires an explicit "file_path" parameter. The file_path field is missing or empty.${hint}\n\n` +
       `This typically happens when:\n` +
       `1. Content is too large and JSON payload was truncated (less likely now with 16K max_tokens)\n` +
-      `2. The path parameter was accidentally omitted\n\n` +
+      `2. The file_path parameter was accidentally omitted\n\n` +
       `Solutions:\n` +
-      `- Always include the "path" parameter explicitly in the tool call\n` +
+      `- Always include the "file_path" parameter explicitly in the tool call\n` +
       `- For very large files: use write_file for first part (<60KB), then append_file for rest\n` +
       `- If you intended to write to a recently-read file, specify its path explicitly`,
   };

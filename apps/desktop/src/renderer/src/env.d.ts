@@ -10,6 +10,21 @@ declare module "monaco-editor/esm/vs/language/typescript/ts.worker" {
   export default worker;
 }
 
+declare module "monaco-editor/esm/vs/language/json/json.worker" {
+  const worker: unknown;
+  export default worker;
+}
+
+declare module "monaco-editor/esm/vs/language/css/css.worker" {
+  const worker: unknown;
+  export default worker;
+}
+
+declare module "monaco-editor/esm/vs/language/html/html.worker" {
+  const worker: unknown;
+  export default worker;
+}
+
 declare global {
   interface Window {
     owncoder: DesktopApi;

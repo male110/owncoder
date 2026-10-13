@@ -285,7 +285,7 @@ export function getDirtyFiles(
   const dirty: string[] = [];
   for (const call of calls) {
     if (!FILE_MODIFYING_TOOLS.has(call.name)) continue;
-    const path = (call.arguments?.path ?? call.arguments?.file ?? call.arguments?.target) as string | undefined;
+    const path = (call.arguments?.file_path ?? call.arguments?.file ?? call.arguments?.target) as string | undefined;
     if (path) dirty.push(path);
   }
   return [...new Set(dirty)];

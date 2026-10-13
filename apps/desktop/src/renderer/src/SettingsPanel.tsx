@@ -1059,8 +1059,7 @@ function ProviderDetail({
   const [apiFormat, setApiFormat] = useState<ApiFormat>(
     provider.apiFormat === "openai-chat" ||
       provider.apiFormat === "openai-responses" ||
-      provider.apiFormat === "anthropic-messages" ||
-      provider.apiFormat === "google-gemini"
+      provider.apiFormat === "anthropic-messages"
       ? provider.apiFormat
       : "openai-chat",
   );
@@ -1080,8 +1079,7 @@ function ProviderDetail({
     setApiFormat(
       provider.apiFormat === "openai-chat" ||
         provider.apiFormat === "openai-responses" ||
-        provider.apiFormat === "anthropic-messages" ||
-        provider.apiFormat === "google-gemini"
+        provider.apiFormat === "anthropic-messages"
         ? provider.apiFormat
         : "openai-chat",
     );
@@ -1126,7 +1124,15 @@ function ProviderDetail({
       }));
       patch((d) => {
         const idx = (d.providers ?? []).findIndex((p) => p.id === provider.id);
-        if (idx >= 0) d.providers![idx]!.models = models;
+        if (idx < 0) return;
+
+        d.providers![idx]!.models = models;
+        const currentModels = new Map(models.map((model) => [model.id, model]));
+        d.selectedModels = (d.selectedModels ?? []).flatMap((selected) => {
+          if (selected.providerId !== provider.id) return [selected];
+          const current = currentModels.get(selected.id);
+          return current ? [{ ...selected, name: current.name }] : [];
+        });
       });
     } catch (e) {
       setFetchError(e instanceof Error ? e.message : String(e));
@@ -1255,7 +1261,6 @@ function ProviderDetail({
           <option value="openai-chat">OpenAI Chat Completions</option>
           <option value="openai-responses">OpenAI Responses</option>
           <option value="anthropic-messages">Anthropic Messages</option>
-          <option value="google-gemini">Google Gemini</option>
         </select>
         <span className="hint">{tr("协议与 Base URL 独立：自建或代理端点也可选 Anthropic Messages。")}</span>
       </label>
@@ -1488,7 +1493,6 @@ function NewProviderForm({
           <option value="openai-chat">OpenAI Chat Completions</option>
           <option value="openai-responses">OpenAI Responses</option>
           <option value="anthropic-messages">Anthropic Messages</option>
-          <option value="google-gemini">Google Gemini</option>
         </select>
         <span className="hint">{tr("协议与 Base URL 独立：自建或代理端点也可选 Anthropic Messages。")}</span>
       </label>

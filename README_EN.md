@@ -135,13 +135,77 @@ Verification passes → Delivery
 
 ### More Token-Saving Techniques
 
-- **On-demand code reads**: Symbol search, file outlines, and partial reads provide relevant code without loading entire files into context.
-- **Reuse relevant history**: Retrieve history related to the current task to reduce repeated background and exploration.
-- **Use context caching**: Cache hits can reduce charges for repeated input; billing details depend on the model provider.
+#### 1. Prompt Structure Optimization: Maximizing Cache Hit Rate
 
-The screenshot below shows one example with approximately 95% cache hits. Actual hit rates vary by model service, context, and task.
+**Principle**: Many model services support Prompt Caching, charging lower rates for repeated input tokens. OwnCoder's prompt assembly strategy is specifically designed for cache optimization.
+
+**Implementation**:
+- **Immutable content first**: System prompt (with tool definitions), platform info, and project rules are placed at the beginning of the message sequence
+- **Dynamic content last**: User input, task decomposition results, and current session data are placed at the end
+- **Byte-level stability**: Fixed sections maintain strict consistent ordering and formatting to ensure cache prefix matches across turns
+
+**Code locations**:
+```
+packages/core/src/harness/loop/context.ts (buildInitialContext)
+  1. systemPrompt (system prompt + tool definitions)
+  2. platformInfo (platform info: OS, path separators)
+  3. projectContext (project rules, tech stack, project size)
+  4. userMessage (user input - changes per turn)
+  5. taskDecompose (task decomposition result - changes per turn)
+```
+
+**Results**: System prompt and tool definitions automatically benefit from caching; repeated project context can achieve 60-80% hit rates. The screenshot below shows one example with approximately 95% cache hits. Actual hit rates vary by model service, context, and task.
 
 ![Context cache hit example](%E5%B1%8F%E5%B9%95%E6%88%AA%E5%9B%BE%202026-09-17%20235326.png)
+
+#### 2. Dual-Model Workflow: Decoupling Planning and Execution
+
+**Principle**: Task decomposition consumes fewer tokens but requires strong planning ability; execution includes many tool calls and iterations but requires lower reasoning. Split models by workload.
+
+**Configuration**:
+- In **Settings → General**, check **Separate execution-stage configuration**
+- **Task decomposition model**: Choose a model with strong reasoning (e.g., GPT-4, Claude 3.5 Sonnet)
+- **Execution model**: Choose a reliable coding model with lower cost (e.g., GPT-4o-mini, Claude 3.5 Haiku)
+
+**Implementation location**:
+```
+packages/core/src/harness/loop/stages.ts (resolveStageModel)
+  - When stageType === "react", use workflow.harness.reactModel
+  - For other stages (including task_decompose), use workflow default model
+```
+
+**Expected savings**: Execution usually accounts for 70-80% of token consumption. Moving it to a cheaper model significantly reduces total cost.
+
+#### 3. Zero-Narrative Tool Calls: Output is Cost
+
+**Principle**: LLM services charge by output tokens, with output rates typically 2-3x input rates. Reducing model "explanatory text" and making the model call tools directly greatly reduces output cost.
+
+**Prompt rules** (in `packages/settings/src/builtin-prompts.ts`):
+```
+## Key Rule: Zero-Narrative Tool Calls
+By default, call tools directly to complete the task. Output no text other than tool calls.
+
+Forbidden outputs:
+- Transitional phrases, planning narration, progress commentary, greetings, explanations.
+- "Let me first...", "Now I'll start...", "Next...", "I'll search...", "First I need..."
+- Any explanatory text between tool calls.
+
+Requirements:
+- When action is needed, call a tool immediately.
+- Zero text between tool calls.
+- Do not restate tool results unless reporting final results.
+```
+
+**Execution discipline**:
+- ❌ Wrong: `"I'll now start modifying the file..."` [then call tool]
+- ✅ Correct: `[Call apply_patch tool directly]`
+
+**Practical effect**: Model only outputs text when user decisions are needed or final results are reported; intermediate execution uses tool calls only. For multi-step tasks, output tokens can be reduced by 60-80%.
+
+#### 4. Additional Optimizations
+
+- **On-demand code reads**: Symbol search, file outlines, and partial reads provide relevant code without loading entire files into context.
+- **Reuse relevant history**: Retrieve history related to the current task to reduce repeated background and exploration.
 
 ---
 

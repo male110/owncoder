@@ -56,7 +56,7 @@
         <h2>敏感信息，发往模型前就被挡住</h2>
         <p class="section-desc">
           数据库口令、API Key、SSH 私钥不会因为一次 Agent 读文件就离开你的机器。
-          OwnCoder 在请求发出前自动检测并替换为 <code>[REDACTED]</code>。
+          OwnCoder 在请求发出前自动检测并替换为 <code>***</code>。
         </p>
       </div>
 
@@ -94,9 +94,9 @@
           </div>
 <pre><code><span class="tok-key">DB_HOST</span>=localhost
 <span class="tok-key">DB_USER</span>=app
-<span class="tok-key">DB_PASSWORD</span>=<span class="tok-redacted">[REDACTED]</span>
-<span class="tok-key">OPENAI_API_KEY</span>=<span class="tok-redacted">[REDACTED]</span>
-<span class="tok-key">SSH_PRIVATE_KEY</span>=<span class="tok-redacted">[REDACTED]</span></code></pre>
+<span class="tok-key">DB_PASSWORD</span>=<span class="tok-redacted">***</span>
+<span class="tok-key">OPENAI_API_KEY</span>=<span class="tok-redacted">***</span>
+<span class="tok-key">SSH_PRIVATE_KEY</span>=<span class="tok-redacted">***</span></code></pre>
         </div>
       </div>
     </section>
@@ -137,35 +137,33 @@
     <section id="features" class="section container">
       <div class="section-head">
         <p class="eyebrow">核心能力</p>
-        <h2>安全之外，同样好用</h2>
-        <p class="section-desc">Plan 与 Agent 双模式、执行级验证、内联变更审查——把 AI 编程做成可审查、可回退的工程流程。</p>
+        <h2>安全之外，更省token</h2>
+        <p class="section-desc">三大省 Token 优化：双模型分阶段使用、缓存命中率最大化、让 LLM 多做事少说话。</p>
       </div>
 
       <div class="grid-3">
+
+
+
         <article class="card">
-          <h3>Plan + Agent</h3>
-          <p>Plan 只读分析与方案；Agent 可编辑文件、执行命令、跑测试。先想清楚，再动手改。</p>
+          <h3>双模型省 Token</h3>
+          <p><strong>原理：</strong>任务分解阶段消耗 Token 较少但需要强规划能力；执行阶段包含大量工具调用和迭代但对推理要求相对较低。</p>
+          <p><strong>配置：</strong>Plan 阶段用高能力模型（GPT-4 / Claude 3.5 Sonnet），Agent 执行阶段切换至成本更低的模型（GPT-4o-mini / Claude 3.5 Haiku / DeepSeek / 通义）。</p>
+          <p><strong>收益：</strong>执行阶段通常占总 Token 消耗的 70-80%。将其交给成本更低的模型可显著降低总费用，同时让高能力模型专注于关键决策。</p>
         </article>
         <article class="card">
-          <h3>执行级验证</h3>
-          <p>改完自动跑类型检查、Lint 与关联测试；失败则进入自动修复循环，而不是“看起来能跑”。</p>
+          <h3>提示词结构优化：最大化缓存命中率</h3>
+          <p><strong>原理：</strong>许多模型服务商支持提示缓存（Prompt Cache），对重复出现的输入 Token 按更低价格计费。OwnCoder 的提示词拼接策略专门针对缓存优化设计。</p>
+          <p><strong>实现：</strong>不变内容前置（系统提示词 + 工具定义、平台信息、项目规则），变动内容后置（用户输入、任务分解结果）；固定部分拼接顺序与格式严格一致，确保跨轮次缓存前缀完全匹配。</p>
+          <p><strong>效果：</strong>系统提示词和工具定义自动享受缓存；重复的项目上下文命中率可达 60-80%。实测缓存命中率可达 95%，让高频使用场景更经济。</p>
         </article>
         <article class="card">
-          <h3>内联变更审查</h3>
-          <p>每次操作后展示逐文件 diff，支持单文件保留 / 撤销，以及全部保留 / 全部撤销。</p>
+          <h3>让 LLM 多做事，少说话</h3>
+          <p><strong>原理：</strong>输出 Token 通常是输入的 2-3 倍价格。让 LLM 多做工作（通过工具调用）、少说话（减少解释性文字），可大幅降低输出成本。</p>
+          <p><strong>纪律：</strong>关键规则是零叙事工具调用——默认直接调用工具完成任务，除工具调用外不输出任何文字。禁止过渡语、计划叙述、进度评论、寒暄、解释；禁止"让我先…""现在开始…""接下来…""我来搜索…""首先需要…"；禁止工具调用之间的任何说明文字。</p>
+          <p><strong>效果：</strong>多步骤任务的输出 Token 可降低 60-80%。</p>
         </article>
-        <article class="card">
-          <h3>写入与命令防护</h3>
-          <p>三层写入策略阻止误改关键路径；危险命令需二次确认，超时默认拒绝（fail-closed）。</p>
-        </article>
-        <article class="card">
-          <h3>高缓存命中</h3>
-          <p>面向真实账单优化上下文，缓存命中率可观，让日常迭代更省 token。</p>
-        </article>
-        <article class="card">
-          <h3>开放模型接入</h3>
-          <p>兼容任意 OpenAI Chat Completions 接口：DeepSeek、通义、智谱、Moonshot 等均可自配。</p>
-        </article>
+
       </div>
     </section>
 

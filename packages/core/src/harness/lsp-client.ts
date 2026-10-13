@@ -1220,14 +1220,22 @@ function resolveLocalBin(cwd: string, command: string): string | null {
   // 全局 LSP 目录候选列表
   const globalBinDirs: string[] = [];
   
-  // 1. OwnCoder 全局 LSP 目录
+  // 1. 预打包的常见 LSP（最高优先级）
+  if (process.env.OWNCODER_LSP_PREINSTALLED_PATH) {
+    const preinstalledBin = path.join(process.env.OWNCODER_LSP_PREINSTALLED_PATH, "node_modules", ".bin");
+    if (existsSync(preinstalledBin)) {
+      globalBinDirs.push(preinstalledBin);
+    }
+  }
+  
+  // 2. OwnCoder 按需下载的 LSP 目录
   if (process.env.APPDATA) {
     globalBinDirs.push(
       path.join(process.env.APPDATA, "@owncoder", "desktop", "lsp", "node_modules", ".bin")
     );
   }
   
-  // 2. VSCode 扩展目录（作为备用）
+  // 3. VSCode 扩展目录（作为备用）
   if (process.env.USERPROFILE) {
     const vscodeExtensionsDir = path.join(process.env.USERPROFILE, ".vscode", "extensions");
     if (existsSync(vscodeExtensionsDir)) {

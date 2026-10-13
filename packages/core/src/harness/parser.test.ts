@@ -7,19 +7,19 @@ import {
 } from "./parser.ts";
 
 test("softParseArgs: truncated payload is flagged and jsonrepair attempts repair", () => {
-  const raw = `{"path":"file.ts","content":"some text that was truncated`;
+  const raw = `{"file_path":"file.ts","content":"some text that was truncated`;
   const args = softParseArgs(raw);
   assert.equal(args._truncated, true);
   // jsonrepair closes the string so the fragment becomes parseable
-  assert.equal(typeof args.path, "string");
-  assert.equal(args.path, "file.ts");
+  assert.equal(typeof args.file_path, "string");
+  assert.equal(args.file_path, "file.ts");
 });
 
 test("softParseArgs: valid JSON is not flagged as truncated", () => {
-  const raw = `{"path":"file.ts","content":"complete"}`;
+  const raw = `{"file_path":"file.ts","content":"complete"}`;
   const args = softParseArgs(raw);
   assert.equal(args._truncated, undefined);
-  assert.equal(args.path, "file.ts");
+  assert.equal(args.file_path, "file.ts");
   assert.equal(args.content, "complete");
 });
 
@@ -40,7 +40,7 @@ test("parseToolCallsFromAssistant: multiple tool calls are parsed in order", () 
     content: null,
     toolCalls: [
       { id: "1", type: "function", function: { name: "read_file", arguments: '{"file_path":"a.ts"}' } },
-      { id: "2", type: "function", function: { name: "write_file", arguments: '{"path":"b.ts","content":"x"}' } },
+      { id: "2", type: "function", function: { name: "write_file", arguments: '{"file_path":"b.ts","content":"x"}' } },
     ],
   });
   assert.equal(calls.length, 2);

@@ -231,7 +231,7 @@ export class MessageProjector {
     options?: { assistantSuffix?: string; metadata?: MessageMetadata },
   ): ChatTurn[] {
     const turns: ChatTurn[] = [];
-    const toolNames = new Map<string, string>();
+    const tools = new Map<string, { name: string; input: Record<string, unknown> }>();
     let textChunks: string[] = [];
 
     const flushText = (suffix = "") => {
@@ -258,16 +258,17 @@ export class MessageProjector {
       }
       if (part.type === "tool_use") {
         flushText();
-        toolNames.set(part.id, part.name);
+        tools.set(part.id, { name: part.name, input: part.input });
         continue;
       }
       if (part.type === "tool_result") {
         flushText();
-        const toolName = toolNames.get(part.tool_use_id) ?? "unknown";
+        const tool = tools.get(part.tool_use_id);
         turns.push({
           role: "tool",
           id: part.tool_use_id,
-          toolName,
+          toolName: tool?.name ?? "unknown",
+          toolArgs: tool?.input,
           content: part.is_error && !part.content.trim().startsWith("Error:")
             ? `Error: ${part.content || "tool failed"}`
             : part.content,

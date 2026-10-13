@@ -96,7 +96,7 @@ export function toolStatusLabel(
   const label = name && verb[name] ? t(verb[name]) : toolLabel(name);
   const pathHint =
     args && typeof args === "object"
-      ? (args.path as string) ||
+      ? (args.file_path as string) ||
         (args.filePath as string) ||
         (args.query as string) ||
         (args.pattern as string)

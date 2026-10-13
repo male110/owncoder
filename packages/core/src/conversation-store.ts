@@ -188,8 +188,27 @@ function slimToolArgs(args: unknown): Record<string, unknown> | undefined {
         typeof item === "string" ? truncateText(item, MAX_TOOL_ARG_STRING_CHARS) : item,
       );
     } else {
-      // Nested objects (rarely needed for history UI) stay as a tiny marker.
-      out[key] = { omitted: true, reason: "nested_arg_omitted" };
+      // 保留一层嵌套对象的简化版本，递归处理其字段
+      const nested = value as Record<string, unknown>;
+      const slimNested: Record<string, unknown> = {};
+      let fieldCount = 0;
+      for (const [nestedKey, nestedValue] of Object.entries(nested)) {
+        if (fieldCount >= 20) break; // 限制嵌套对象的字段数量
+        if (typeof nestedValue === "string") {
+          slimNested[nestedKey] = truncateText(nestedValue, MAX_TOOL_ARG_STRING_CHARS);
+        } else if (typeof nestedValue === "number" || typeof nestedValue === "boolean" || nestedValue == null) {
+          slimNested[nestedKey] = nestedValue;
+        } else if (Array.isArray(nestedValue)) {
+          slimNested[nestedKey] = nestedValue.slice(0, 10).map((item) =>
+            typeof item === "string" ? truncateText(item, 200) : typeof item === "number" || typeof item === "boolean" || item == null ? item : { omitted: true }
+          );
+        } else {
+          // 二层嵌套用标记替换
+          slimNested[nestedKey] = { omitted: true, reason: "deeply_nested" };
+        }
+        fieldCount++;
+      }
+      out[key] = slimNested;
     }
   }
   return out;

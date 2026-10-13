@@ -86,6 +86,23 @@ describe("buildChatItems", () => {
 });
 
 describe("buildLogBlocks process panel", () => {
+  it("任务结束移除实时事件后仍使用 history 参数，包括合法空参数", () => {
+    const turns: ChatTurnDto[] = [
+      userTurn("检查参数"),
+      { id: "outline", role: "tool", toolName: "read_outline", toolArgs: { path: "src/index.ts" }, content: "完成" },
+      { id: "status", role: "tool", toolName: "git_status", toolArgs: {}, content: "完成" },
+      { role: "assistant", content: "检查结束" },
+    ];
+    for (const [sending, liveCount] of [[true, 2], [false, 0]] as const) {
+      const blocks = buildLogBlocks(turns, sending, liveCount);
+      const tools = blocks.flatMap((block) => block.kind === "tools" || block.kind === "process" ? block.items : []);
+      expect(tools.map((turn) => ({ id: turn.id, args: turn.toolArgs }))).toEqual([
+        { id: "outline", args: { path: "src/index.ts" } },
+        { id: "status", args: {} },
+      ]);
+    }
+  });
+
   it("keeps all tool steps in a completed round process block", () => {
     const turns: ChatTurnDto[] = [
       userTurn("fix bug"),

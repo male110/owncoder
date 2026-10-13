@@ -48,8 +48,8 @@ function stripPlanMarker(content: string): string {
 
 function summarizeArgs(name: string, args: Record<string, unknown>): string {
   const pick = (k: string) => (typeof args[k] === "string" ? String(args[k]) : undefined);
-  if (name === "read_file" || name === "write_file" || name === "list_dir" || name === "apply_patch") {
-    const p = pick("path") ?? pick("filePath") ?? "";
+  if (name === "read_file" || name === "write_file" || name === "list_dir" || name === "apply_patch" || name === "read_outline" || name === "read_symbol") {
+    const p = pick("path") ?? pick("filePath") ?? pick("file_path") ?? "";
     // Show only the last 2 path segments to keep it compact
     const parts = p.replace(/\\/g, "/").split("/").filter(Boolean);
     return parts.slice(-2).join("/");
@@ -81,6 +81,42 @@ function parseDiffStat(output: string): { added: number; removed: number } | nul
     else if (line.startsWith("-") && !line.startsWith("---")) removed++;
   }
   return added + removed > 0 ? { added, removed } : null;
+}
+
+// ── 工具参数格式化辅助函数：处理 omitted 标记 ────────────────────────────────
+
+function formatToolArgs(args: Record<string, unknown>): string {
+  // 递归处理参数，将 omitted 标记替换为友好提示
+  function processValue(value: unknown): unknown {
+    if (value == null) return value;
+    if (typeof value !== "object") return value;
+    
+    // 检查是否是 omitted 标记
+    if (
+      typeof (value as { omitted?: unknown }).omitted === "boolean" &&
+      (value as { omitted: boolean }).omitted === true
+    ) {
+      const reason = (value as { reason?: string }).reason;
+      if (reason === "nested_arg_omitted") return "<嵌套对象已省略>";
+      if (reason === "deeply_nested") return "<深层嵌套已省略>";
+      return "<内容已省略>";
+    }
+    
+    // 处理数组
+    if (Array.isArray(value)) {
+      return value.map(processValue);
+    }
+    
+    // 处理对象
+    const processed: Record<string, unknown> = {};
+    for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
+      processed[key] = processValue(val);
+    }
+    return processed;
+  }
+  
+  const processed = processValue(args);
+  return JSON.stringify(processed, null, 2);
 }
 
 // ── LiveToolCard (current turn) ───────────────────────────────────────────────
@@ -153,10 +189,12 @@ function LiveToolCardImpl({ tool }: { tool: PendingTool }) {
 
       {open && (tool.output || running || Object.keys(tool.args).length > 0) ? (
         <div className="tool-card-body" ref={bodyRef}>
-          <div className="tool-card-content-wrap">
-            <div className="tool-card-result-label">参数</div>
-            <pre>{JSON.stringify(tool.args, null, 2)}</pre>
-          </div>
+          {Object.keys(tool.args).length > 0 ? (
+            <div className="tool-card-content-wrap">
+              <div className="tool-card-result-label">参数</div>
+              <pre>{formatToolArgs(tool.args)}</pre>
+            </div>
+          ) : null}
           {tool.output ? (
             <div className="tool-card-content-wrap">
               <div className="tool-card-result-label">{t("结果")}</div>

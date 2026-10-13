@@ -37,6 +37,9 @@
     "react-virtuoso": "^4.18.13",
     "semver": "7.8.5",
     "sqlite-vec": "^0.1.9",
+    "typescript": "^5.8.2",
+    "typescript-language-server": "^4.3.3",
+    "vscode-langservers-extracted": "^4.10.0",
     "zustand": "^5.0.3"
   },
   "devDependencies": {
@@ -104,6 +107,18 @@
       {
         "from": "node_modules/npm",
         "to": "lsp-npm"
+      },
+      {
+        "from": "node_modules/typescript-language-server",
+        "to": "lsp-preinstalled/node_modules/typescript-language-server"
+      },
+      {
+        "from": "node_modules/typescript",
+        "to": "lsp-preinstalled/node_modules/typescript"
+      },
+      {
+        "from": "node_modules/vscode-langservers-extracted",
+        "to": "lsp-preinstalled/node_modules/vscode-langservers-extracted"
       },
       {
         "from": "assets/embedding-model",

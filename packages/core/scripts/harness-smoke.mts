@@ -83,9 +83,9 @@ hello OwnCoder
   assert.equal(calls[0]?.name, "grep");
 }
 
-// parser: recover `path` when arguments JSON is malformed by a large `content`
+// parser: recover `file_path` when arguments JSON is malformed by a large `content`
 // string with raw newlines + nested code fences (a common weak-model failure
-// mode). JSON.parse fails, but `path` must still be rescued so write_file
+// mode). JSON.parse fails, but `file_path` must still be rescued so write_file
 // doesn't reject it with "requires a non-empty file path".
 {
   const calls = parseToolCallsFromAssistant({
@@ -97,19 +97,38 @@ hello OwnCoder
         function: {
           name: "write_file",
           arguments:
-            '{"path":"docs/TDD.md","content":"# TDD\n```rust\nlet x = \'a\';\n```\n"}',
+            '{"file_path":"docs/TDD.md","content":"# TDD\n```rust\nlet x = \'a\';\n```\n"}',
         },
       },
     ],
   });
   assert.equal(calls[0]?.name, "write_file");
-  assert.equal(calls[0]?.arguments.path, "docs/TDD.md");
+  assert.equal(calls[0]?.arguments.file_path, "docs/TDD.md");
 }
 
+// parser: backward compatibility - convert legacy `path` to `file_path`
+{
+  const calls = parseToolCallsFromAssistant({
+    content: null,
+    toolCalls: [
+      {
+        id: "1",
+        type: "function",
+        function: {
+          name: "write_file",
+          arguments:
+            '{"path":"docs/legacy.md","content":"# Legacy\n"}',
+        },
+      },
+    ],
+  });
+  assert.equal(calls[0]?.name, "write_file");
+  assert.equal(calls[0]?.arguments.file_path, "docs/legacy.md");
+}
 
-// parser: recover `path` for apply_patch when arguments JSON is broken by a
+// parser: recover `file_path` for apply_patch when arguments JSON is broken by a
 // patch payload with raw newlines + unescaped quotes (a common weak-model
-// failure mode that drops path and triggers "requires a non-empty file path").
+// failure mode that drops file_path and triggers "requires a non-empty file path").
 {
   const calls = parseToolCallsFromAssistant({
     content: null,
@@ -120,18 +139,18 @@ hello OwnCoder
         function: {
           name: "apply_patch",
           arguments:
-            '{"path":"src/foo.ts","patch":"<<<<<<< SEARCH\nconst x = "bug";\n=======\n"}',
+            '{"file_path":"src/foo.ts","patch":"<<<<<<< SEARCH\nconst x = "bug";\n=======\n"}',
         },
       },
     ],
   });
   assert.equal(calls[0]?.name, "apply_patch");
-  assert.equal(calls[0]?.arguments.path, "src/foo.ts");
+  assert.equal(calls[0]?.arguments.file_path, "src/foo.ts");
 }
 
-// parser: recover `path` when the key has no quotes AND an unescaped quote in
+// parser: recover `file_path` when the key has no quotes AND an unescaped quote in
 // another field breaks JSON.parse even after repair — forces the fallback into
-// extractSingleLineStringFields, which must quote the bare key to rescue path.
+// extractSingleLineStringFields, which must quote the bare key to rescue file_path.
 {
   const calls = parseToolCallsFromAssistant({
     content: null,
@@ -141,12 +160,12 @@ hello OwnCoder
         type: "function",
         function: {
           name: "apply_patch",
-          arguments: '{path:"src/a.ts",patch:"a"b"}',
+          arguments: '{file_path:"src/a.ts",patch:"a"b"}',
         },
       },
     ],
   });
-  assert.equal(calls[0]?.arguments.path, "src/a.ts");
+  assert.equal(calls[0]?.arguments.file_path, "src/a.ts");
 }
 
 console.log("harness-smoke: ok");

@@ -71,6 +71,10 @@ function bootstrap(): void {
   process.env.OWNCODER_LSP_NPM_CLI = app.isPackaged
     ? join(process.resourcesPath, "lsp-npm", "bin", "npm-cli.js")
     : join(require.resolve("npm"), "..", "bin", "npm-cli.js");
+  // 预打包的常见 LSP 目录
+  process.env.OWNCODER_LSP_PREINSTALLED_PATH = app.isPackaged
+    ? join(process.resourcesPath, "lsp-preinstalled")
+    : "";
 }
 
 bootstrap();

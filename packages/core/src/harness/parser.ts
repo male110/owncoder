@@ -245,27 +245,40 @@ function extractSingleLineStringFields(text: string): Record<string, unknown> | 
 }
 
 /**
- * Rescue the `path` field from a truncated JSON tool-call argument string.
+ * Rescue the `file_path` field from a truncated JSON tool-call argument string.
  *
  * When `write_file` or `apply_patch` is called with a very long `content` /
  * `patch` the LLM output is cut mid-string. jsonrepair often fails or drops
- * the `path` key in that case. This function reads the first few hundred
- * characters of the raw argument string (where `path` always appears first)
- * and extracts it with a focused regex — producing at minimum `{ path }` so
+ * the `file_path` key in that case. This function reads the first few hundred
+ * characters of the raw argument string (where `file_path` always appears first)
+ * and extracts it with a focused regex — producing at minimum `{ file_path }` so
  * `resolvePathFromReadSet` never has to guess.
+ * Also supports legacy `path` field for backward compatibility.
  */
 function rescuePathField(text: string): Record<string, unknown> | null {
-  // Only look at the first 500 chars — path is always the first field.
+  // Only look at the first 500 chars — file_path is always the first field.
   const head = text.slice(0, 500);
-  // Match: "path" : "value" — value may contain forward-slashes and dots.
-  const m = head.match(/"path"\s*:\s*"((?:[^"\\]|\\.)*)"/);
-  if (!m) return null;
-  try {
-    const path = JSON.parse(`"${m[1]!}"`);
-    return typeof path === "string" && path.trim() ? { path } : null;
-  } catch {
-    return m[1] ? { path: m[1] } : null;
+  // Try file_path first (current standard)
+  let m = head.match(/"file_path"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+  if (m) {
+    try {
+      const filePath = JSON.parse(`"${m[1]!}"`);
+      return typeof filePath === "string" && filePath.trim() ? { file_path: filePath } : null;
+    } catch {
+      return m[1] ? { file_path: m[1] } : null;
+    }
   }
+  // Fall back to legacy "path" and convert to file_path
+  m = head.match(/"path"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+  if (m) {
+    try {
+      const path = JSON.parse(`"${m[1]!}"`);
+      return typeof path === "string" && path.trim() ? { file_path: path } : null;
+    } catch {
+      return m[1] ? { file_path: m[1] } : null;
+    }
+  }
+  return null;
 }
 
 /**

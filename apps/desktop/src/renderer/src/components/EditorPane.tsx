@@ -4,6 +4,9 @@ import Editor, { DiffEditor, loader } from "@monaco-editor/react";
 import * as monaco from "monaco-editor";
 import editorWorker from "./monaco-editor.worker?worker";
 import tsWorker from "./monaco-typescript.worker?worker";
+import jsonWorker from "./monaco-json.worker?worker";
+import cssWorker from "./monaco-css.worker?worker";
+import htmlWorker from "./monaco-html.worker?worker";
 import { useUiStore } from "../store/ui-store";
 import { Markdown } from "./Markdown";
 import { useI18n } from "../i18n";
@@ -42,6 +45,15 @@ self.MonacoEnvironment = {
   getWorker(_, label) {
     if (label === "typescript" || label === "javascript") {
       return new tsWorker();
+    }
+    if (label === "json") {
+      return new jsonWorker();
+    }
+    if (label === "css" || label === "scss" || label === "less") {
+      return new cssWorker();
+    }
+    if (label === "html" || label === "handlebars" || label === "razor") {
+      return new htmlWorker();
     }
     return new editorWorker();
   },

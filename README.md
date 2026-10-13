@@ -135,13 +135,77 @@ corp-secret:\s*\S+
 
 ### 更多 Token 优化手段
 
-- **按需读取代码**：使用符号搜索、文件大纲和局部读取提供相关代码，减少整文件进入上下文。
-- **复用相关历史**：检索与当前任务相关的历史，减少重复提供背景和重复探索。
-- **利用上下文缓存**：缓存命中可降低重复输入的费用，具体计费方式以模型服务商为准。
+#### 1. 提示词结构优化：最大化缓存命中率
 
-下图记录了一次约 95% 的缓存命中情况，仅作为使用示例；实际命中率会随模型服务、上下文和任务变化。
+**原理**：许多模型服务商支持提示缓存（Prompt Cache），对重复出现的输入 Token 按更低价格计费。OwnCoder 的提示词拼接策略专门针对缓存优化设计。
+
+**实现方式**：
+- **不变内容前置**：系统提示词（含工具定义）、平台信息、项目规则等固定内容放在消息序列前部
+- **变动内容后置**：用户输入、任务分解结果、当前会话等动态内容放在后部
+- **字节级稳定性**：固定部分的拼接顺序和格式保持严格一致，确保跨轮次的缓存前缀完全匹配
+
+**代码位置**：
+```
+packages/core/src/harness/loop/context.ts (buildInitialContext)
+  1. systemPrompt (系统提示词 + 工具定义)
+  2. platformInfo (平台信息：操作系统、路径分隔符)
+  3. projectContext (项目规则、技术栈、项目大小)
+  4. userMessage (用户输入 - 每轮变化)
+  5. taskDecompose (任务分解结果 - 每轮变化)
+```
+
+**效果**：系统提示词和工具定义自动享受缓存；重复的项目上下文命中率可达 60-80%。下图记录了一次约 95% 的缓存命中情况，仅作为使用示例；实际命中率会随模型服务、上下文和任务变化。
 
 ![上下文缓存命中示例](%E5%B1%8F%E5%B9%95%E6%88%AA%E5%9B%BE%202026-09-17%20235326.png)
+
+#### 2. 双模型分工：规划与执行解耦
+
+**原理**：任务分解阶段消耗的 Token 较少但需要强规划能力；执行阶段包含大量工具调用和迭代但对推理要求相对较低。
+
+**配置方式**：
+- 在 **设置 → 常规** 中勾选 **执行阶段单独配置**
+- **任务分解模型**：选择推理能力强的模型（如 GPT-4、Claude 3.5 Sonnet）
+- **执行阶段模型**：选择编码可靠、价格更低的模型（如 GPT-4o-mini、Claude 3.5 Haiku）
+
+**实现位置**：
+```
+packages/core/src/harness/loop/stages.ts (resolveStageModel)
+  - stageType === "react" 时使用 workflow.harness.reactModel
+  - 其他阶段（含 task_decompose）使用 workflow 默认模型
+```
+
+**预期收益**：执行阶段通常占据 70-80% 的 Token 消耗，将其交给成本更低的模型可显著降低总费用。
+
+#### 3. 零叙事工具调用：输出即成本
+
+**原理**：LLM 服务按输出 Token 计费，且输出价格通常是输入的 2-3 倍。减少模型的"解释性文字"，让模型直接调用工具完成任务，可以大幅降低输出成本。
+
+**提示词规则**（位于 `packages/settings/src/builtin-prompts.ts`）：
+```
+## Key Rule: Zero-Narrative Tool Calls
+By default, call tools directly to complete the task. Output no text other than tool calls.
+
+Forbidden outputs:
+- Transitional phrases, planning narration, progress commentary, greetings, explanations.
+- "Let me first...", "Now I'll start...", "Next...", "I'll search...", "First I need..."
+- Any explanatory text between tool calls.
+
+Requirements:
+- When action is needed, call a tool immediately.
+- Zero text between tool calls.
+- Do not restate tool results unless reporting final results.
+```
+
+**执行纪律**：
+- ❌ 错误：`"我现在开始修改文件..."` [然后调用工具]
+- ✅ 正确：`[直接调用 apply_patch 工具]`
+
+**实际效果**：模型只在需要用户决策或报告最终结果时输出文字，中间执行过程全部使用工具调用。对于多步骤任务，输出 Token 可降低 60-80%。
+
+#### 4. 其他优化措施
+
+- **按需读取代码**：使用符号搜索、文件大纲和局部读取提供相关代码，减少整文件进入上下文。
+- **复用相关历史**：检索与当前任务相关的历史，减少重复提供背景和重复探索。
 
 ---
 

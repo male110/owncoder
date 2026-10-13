@@ -35,10 +35,10 @@
         with code analysis and indexing done entirely locally—no source upload, no cloud indexing.
       </p>
       <div class="hero-actions">
-        <a class="btn btn-primary" href="https://gitee.com/f6688/owncoder/releases" target="_blank" rel="noopener noreferrer">
+        <a class="btn btn-primary" href="https://github.com/male110/owncoder/releases" target="_blank" rel="noopener noreferrer">
           Download for Windows
         </a>
-        <a class="btn btn-ghost" href="https://gitee.com/f6688/owncoder" target="_blank" rel="noopener noreferrer">
+        <a class="btn btn-ghost" href="https://github.com/male110/owncoder" target="_blank" rel="noopener noreferrer">
           View Source
         </a>
       </div>
@@ -56,7 +56,7 @@
         <h2>Sensitive data blocked before reaching models</h2>
         <p class="section-desc">
           Database passwords, API keys, SSH private keys won't leave your machine just because an agent read a file. 
-          OwnCoder automatically detects and replaces them with <code>[REDACTED]</code> before sending requests.
+          OwnCoder automatically detects and replaces them with <code>***</code> before sending requests.
         </p>
       </div>
 
@@ -94,9 +94,9 @@
           </div>
 <pre><code><span class="tok-key">DB_HOST</span>=localhost
 <span class="tok-key">DB_USER</span>=app
-<span class="tok-key">DB_PASSWORD</span>=<span class="tok-redacted">[REDACTED]</span>
-<span class="tok-key">OPENAI_API_KEY</span>=<span class="tok-redacted">[REDACTED]</span>
-<span class="tok-key">SSH_PRIVATE_KEY</span>=<span class="tok-redacted">[REDACTED]</span></code></pre>
+<span class="tok-key">DB_PASSWORD</span>=<span class="tok-redacted">***</span>
+<span class="tok-key">OPENAI_API_KEY</span>=<span class="tok-redacted">***</span>
+<span class="tok-key">SSH_PRIVATE_KEY</span>=<span class="tok-redacted">***</span></code></pre>
         </div>
       </div>
     </section>
@@ -137,35 +137,33 @@
     <section id="features" class="section container">
       <div class="section-head">
         <p class="eyebrow">Core Capabilities</p>
-        <h2>Beyond security, equally powerful</h2>
-        <p class="section-desc">Plan and Agent dual modes, execution-level verification, inline change review—turning AI coding into an auditable, reversible engineering workflow.</p>
+        <h2>Beyond security, lower token costs</h2>
+        <p class="section-desc">Three token optimization strategies: dual-model phased usage, cache hit rate maximization, and getting the LLM to do more and say less.</p>
       </div>
 
       <div class="grid-3">
+
+
+
         <article class="card">
-          <h3>Plan + Agent</h3>
-          <p>Plan mode for read-only analysis and proposals; Agent mode for editing files, running commands, and tests. Think first, then act.</p>
+          <h3>Dual-Model Token Savings</h3>
+          <p><strong>Principle:</strong> Task decomposition consumes fewer tokens but requires strong planning; execution stages involve heavy tool calls and iteration but lower reasoning requirements.</p>
+          <p><strong>Setup:</strong> Use high-capability models (GPT-4 / Claude 3.5 Sonnet) for Plan phase, switch to cost-effective models (GPT-4o-mini / Claude 3.5 Haiku / DeepSeek / Tongyi) for Agent execution.</p>
+          <p><strong>Impact:</strong> Execution stages typically account for 70-80% of total token consumption. Offloading them to cheaper models significantly reduces costs while keeping high-capability models focused on critical decisions.</p>
         </article>
         <article class="card">
-          <h3>Execution-Level Verification</h3>
-          <p>Auto-runs type checks, linting, and related tests after changes; enters auto-fix loop on failure instead of "looks like it works."</p>
+          <h3>Prompt Structure Optimization: Maximize Cache Hit Rate</h3>
+          <p><strong>Principle:</strong> Many model providers support prompt caching (Prompt Cache), billing repeated input tokens at lower rates. OwnCoder's prompt assembly strategy is specifically designed for cache optimization.</p>
+          <p><strong>Implementation:</strong> Static content upfront (system prompt + tool definitions, platform info, project rules), dynamic content at the end (user input, task decomposition); fixed portions maintain strict order and format consistency, ensuring cross-turn cache prefix matches.</p>
+          <p><strong>Impact:</strong> System prompts and tool definitions automatically benefit from caching; repeated project context hits 60-80% cache rates. Measured cache hit rates reach 95%, making high-frequency usage more economical.</p>
         </article>
         <article class="card">
-          <h3>Inline Change Review</h3>
-          <p>Shows file-by-file diffs after each operation, with per-file keep/undo and batch keep/undo all support.</p>
+          <h3>Do More, Say Less</h3>
+          <p><strong>Principle:</strong> Output tokens are typically 2-3× more expensive than input tokens. Getting the LLM to do more work (via tool calls) and say less (fewer explanatory words) dramatically lowers output costs.</p>
+          <p><strong>Discipline:</strong> Key rule is zero-narrative tool calls—default to calling tools directly to complete tasks, outputting no text except tool calls. Forbidden: transitional phrases, plan narration, progress commentary, greetings, explanations; forbidden phrases include "Let me first...", "Now I'll start...", "Next...", "I'll search...", "First I need..."; forbidden: any explanatory text between tool calls.</p>
+          <p><strong>Impact:</strong> Output tokens for multi-step tasks can drop 60-80%.</p>
         </article>
-        <article class="card">
-          <h3>Write & Command Protection</h3>
-          <p>Three-tier write policies prevent accidental critical path modifications; dangerous commands require confirmation, timeout defaults to deny (fail-closed).</p>
-        </article>
-        <article class="card">
-          <h3>High Cache Hit Rate</h3>
-          <p>Context optimized for real billing scenarios, impressive cache hit rates make daily iteration more token-efficient.</p>
-        </article>
-        <article class="card">
-          <h3>Open Model Integration</h3>
-          <p>Compatible with any OpenAI Chat Completions API: DeepSeek, Tongyi, Zhipu, Moonshot, etc.—bring your own config.</p>
-        </article>
+
       </div>
     </section>
 
@@ -174,15 +172,15 @@
         <p class="eyebrow">Get Started</p>
         <h2>Build security defaults into your workflow</h2>
         <p>
-          Currently supports Windows primarily. Download the installer from Gitee Releases, 
+          Currently supports Windows primarily. Download the installer from GitHub Releases, 
           configure your own model API in settings, and start coding.
         </p>
         <div class="hero-actions">
-          <a class="btn btn-primary" href="https://gitee.com/f6688/owncoder/releases" target="_blank" rel="noopener noreferrer">
+          <a class="btn btn-primary" href="https://github.com/male110/owncoder/releases" target="_blank" rel="noopener noreferrer">
             Download Now
           </a>
-          <a class="btn btn-ghost" href="https://gitee.com/f6688/owncoder" target="_blank" rel="noopener noreferrer">
-            Gitee Repository
+          <a class="btn btn-ghost" href="https://github.com/male110/owncoder" target="_blank" rel="noopener noreferrer">
+            GitHub Repository
           </a>
         </div>
         <p class="fineprint">License: PolyForm Noncommercial 1.0.0 (Free for non-commercial use; commercial use requires separate authorization)</p>

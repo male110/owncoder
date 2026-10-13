@@ -38,7 +38,7 @@ describe("补丁目标解析", () => {
   it("agent 和 plan 的参数契约一致", () => {
     for (const options of [{ mode: "agent" as const }, { mode: "plan" as const, planCanEdit: true }]) {
       const tool = allEnhancedTools(options).find((entry) => entry.function.name === "apply_patch");
-      expect(tool?.function.parameters.required).toEqual(["path", "patch"]);
+      expect(tool?.function.parameters.required).toEqual(["file_path", "patch"]);
     }
   });
 });
@@ -64,17 +64,17 @@ it("多文件读取后的执行链路：只修改明确目标，拒绝无路径�
     await writeFile(join(root, "other.txt"), "old\n");
     expect((await run({ patch: block })).ok).toBe(false);
     expect((await run({ patch: diff, _truncated: true })).ok).toBe(false);
-    expect((await run({ path: "other.txt", patch: diff })).ok).toBe(true);
+    expect((await run({ file_path: "other.txt", patch: diff })).ok).toBe(true);
     expect(await readFile(join(root, "target.txt"), "utf8")).toBe("old\n");
     expect(await readFile(join(root, "other.txt"), "utf8")).toBe("new\n");
-    expect((await run({ path: "target.txt", patch: diff })).ok).toBe(true);
+    expect((await run({ file_path: "target.txt", patch: diff })).ok).toBe(true);
     expect(await readFile(join(root, "target.txt"), "utf8")).toBe("new\n");
     expect(ctx.fileSnapshots).toHaveLength(2);
     expect(ctx.touchedPaths).toEqual(["other.txt", "target.txt"]);
     const otherBlock = "<<<<<<< SEARCH\nnew\n=======\nfinal\n>>>>>>> REPLACE";
-    expect((await run({ path: "other.txt", patch: otherBlock })).ok).toBe(true);
+    expect((await run({ file_path: "other.txt", patch: otherBlock })).ok).toBe(true);
     expect(await readFile(join(root, "other.txt"), "utf8")).toBe("final\n");
-    expect((await run({ path: "other.txt", patch: "--- a/other.txt\n+++ b/other.txt\n@@ -1 +0,0 @@\n-final\n" })).ok).toBe(true);
+    expect((await run({ file_path: "other.txt", patch: "--- a/other.txt\n+++ b/other.txt\n@@ -1 +0,0 @@\n-final\n" })).ok).toBe(true);
     expect(await readFile(join(root, "other.txt"), "utf8")).toBe("");
     expect((await run({ patch: `../outside.txt\n${block}` })).ok).toBe(false);
   } finally {

@@ -50,9 +50,9 @@ describe("FILE_MODIFYING_TOOLS / getDirtyFiles", () => {
   it("collects dirty paths from append_file and ignores semantic_diff", () => {
     expect(
       getDirtyFiles([
-        { name: "append_file", arguments: { path: "src/big.ts" } },
+        { name: "append_file", arguments: { file_path: "src/big.ts" } },
         { name: "semantic_diff", arguments: { filePath: "src/big.ts" } },
-        { name: "write_file", arguments: { path: "src/a.ts" } },
+        { name: "write_file", arguments: { file_path: "src/a.ts" } },
         { name: "read_file", arguments: { file_path: "src/b.ts" } },
       ]),
     ).toEqual(["src/big.ts", "src/a.ts"]);

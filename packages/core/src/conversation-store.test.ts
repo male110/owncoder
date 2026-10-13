@@ -403,9 +403,9 @@ describe("conversation store", () => {
       type: "tool_start",
       id: "w1",
       name: "write_file",
-      args: { path: "a.ts", content: "C".repeat(20_000) },
-    }) as { args: { path: string; content: string } };
-    expect(toolStart.args.path).toBe("a.ts");
+      args: { file_path: "a.ts", content: "C".repeat(20_000) },
+    }) as { args: { file_path: string; content: string } };
+    expect(toolStart.args.file_path).toBe("a.ts");
     expect(toolStart.args.content.length).toBeLessThan(20_000);
 
     const terminal = slimDurableEvent({

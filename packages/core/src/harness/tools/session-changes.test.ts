@@ -166,8 +166,8 @@ test("executeTool dispatches list_session_changes and undo_session_change", asyn
     const undoneResult = await executeTool(ctx, {
       id: "2",
       name: "undo_session_change",
-      arguments: { path: "src/a.ts" },
-      rawArguments: '{"path":"src/a.ts"}',
+      arguments: { file_path: "src/a.ts" },
+      rawArguments: '{"file_path":"src/a.ts"}',
     });
     assert.equal(undoneResult.ok, true);
     assert.equal(undone, "src/a.ts");

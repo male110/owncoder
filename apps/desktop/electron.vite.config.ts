@@ -71,6 +71,17 @@ export default defineConfig({
       },
     },
     plugins: [react()],
+    // 预优化 monaco-editor 依赖，避免首次加载时触发页面重载
+    optimizeDeps: {
+      include: [
+        "monaco-editor",
+        "monaco-editor/esm/vs/editor/editor.worker",
+        "monaco-editor/esm/vs/language/typescript/ts.worker",
+        "monaco-editor/esm/vs/language/json/json.worker",
+        "monaco-editor/esm/vs/language/css/css.worker",
+        "monaco-editor/esm/vs/language/html/html.worker",
+      ],
+    },
     server: {
       watch: {
         ignored: ["**/node_modules/**", "**/out/**", "**/release/**"],

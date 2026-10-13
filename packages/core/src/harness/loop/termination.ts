@@ -362,7 +362,6 @@ export function checkTermination(
 // Constants
 // ─────────────────────────────────────────────────────────────────────────────
 
-const TOOL_LOOP_WINDOW_SIZE = 6;               // Tool call history window for loop detection
 const OUTPUT_SIMILARITY_THRESHOLD = 0.8;       // 80% word overlap = similar
 const OUTPUT_SIMILARITY_RESET_THRESHOLD = 0.5; // 50% word overlap = reset counter
 const HASH_SHIFT_BITS = 5;                     // String hash shift amount
@@ -418,25 +417,34 @@ function detectToolLoop(
     return { isLoop: false };
   }
   
-  // Build fingerprint: tool:args
-  const recentCalls = history.slice(-TOOL_LOOP_WINDOW_SIZE);
-  const fingerprints = new Map<string, number>();
+  // 检查最近的 minCallsForDetection 次调用是否**连续相同**
+  // 只有连续的重复才算循环，中间有其他操作打断则不算
+  const recentCalls = history.slice(-minCallsForDetection);
   
-  for (const call of recentCalls) {
-    const fp = toolCallFingerprint(call.name, call.arguments, call.result);
-    fingerprints.set(fp, (fingerprints.get(fp) ?? 0) + 1);
-  }
+  // 计算第一个调用的指纹
+  const firstFp = toolCallFingerprint(
+    recentCalls[0].name,
+    recentCalls[0].arguments,
+    recentCalls[0].result
+  );
   
-  // Check if any fingerprint meets the threshold
-  // count >= maxRepeat + 1 means: first call + maxRepeat repetitions
-  for (const [fp, count] of fingerprints.entries()) {
-    if (count >= minCallsForDetection) {
-      const [toolName] = fp.split("::");
-      return { isLoop: true, toolName, count };
+  // 检查后续所有调用是否都与第一个相同
+  for (let i = 1; i < recentCalls.length; i++) {
+    const currentFp = toolCallFingerprint(
+      recentCalls[i].name,
+      recentCalls[i].arguments,
+      recentCalls[i].result
+    );
+    
+    if (currentFp !== firstFp) {
+      // 发现不同的调用，说明不是连续重复
+      return { isLoop: false };
     }
   }
   
-  return { isLoop: false };
+  // 所有调用都相同，确认为循环
+  const [toolName] = firstFp.split("::");
+  return { isLoop: true, toolName, count: minCallsForDetection };
 }
 
 /** CJK Unified Ideographs — used to detect runs that whitespace tokenization cannot split. */
@@ -590,8 +598,8 @@ function toolCallFingerprint(name: string, args: Record<string, unknown>, result
  * - other: keep as-is
  * 
  * Examples:
- * - { path: "src/foo.ts", offset: 0 } → { path: "src/foo.ts", offset: 0 }
- * - { path: "src/foo.ts", offset: 1 } → different (legitimate pagination)
+ * - { file_path: "src/foo.ts", offset: 0 } → { file_path: "src/foo.ts", offset: 0 }
+ * - { file_path: "src/foo.ts", offset: 1 } → different (legitimate pagination)
  * - { query: "Auth" } vs { query: "auth" } → same (case-insensitive)
  */
 function normalizeArgs(args: Record<string, unknown>): Record<string, unknown> {

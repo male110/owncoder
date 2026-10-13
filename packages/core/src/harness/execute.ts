@@ -243,16 +243,16 @@ async function runTool(ctx: ToolContext, call: ParsedToolCall): Promise<ToolResu
         return await toolRead(ctx, args.file_path, num(args.offset, 0), num(args.limit, 0));
       }
       case "read_symbol":
-        return await toolReadSymbol(ctx, str(args.path), str(args.symbol), num(args.padding, 12));
+        return await toolReadSymbol(ctx, str(args.file_path), str(args.symbol), num(args.padding, 12));
       case "read_outline":
-        return await toolReadOutline(ctx, str(args.path));
+        return await toolReadOutline(ctx, str(args.file_path));
       case "list_dir":
-        return await toolList(ctx, str(args.path ?? "."), bool(args.recursive));
+        return await toolList(ctx, str(args.file_path ?? "."), bool(args.recursive));
       case "grep":
         return await toolGrep(
           ctx,
           str(args.pattern),
-          str(args.path ?? "."),
+          str(args.file_path ?? "."),
           num(args.maxResults, 40),
         );
       case "graph_search":
@@ -275,11 +275,11 @@ async function runTool(ctx: ToolContext, call: ParsedToolCall): Promise<ToolResu
       // Truncated payloads for these are rejected before dispatch — see the
       // `args._truncated` guard at the top of runTool().
       case "apply_patch":
-        return await toolPatch(ctx, str(args.path), str(args.patch));
+        return await toolPatch(ctx, str(args.file_path), str(args.patch));
       case "write_file":
-        return await toolWrite(ctx, str(args.path), str(args.content), bool(args.allow_shrink));
+        return await toolWrite(ctx, str(args.file_path), str(args.content), bool(args.allow_shrink));
       case "append_file":
-        return await toolAppend(ctx, str(args.path), str(args.content));
+        return await toolAppend(ctx, str(args.file_path), str(args.content));
       case "bash":
         return await toolBash(ctx, str(args.command));
       case "git_status":
@@ -401,7 +401,7 @@ async function runTool(ctx: ToolContext, call: ParsedToolCall): Promise<ToolResu
       case "list_session_changes":
         return await toolListSessionChanges(ctx);
       case "undo_session_change":
-        return await toolUndoSessionChange(ctx, str(args.path));
+        return await toolUndoSessionChange(ctx, str(args.file_path));
 
       // ── MCP tools ──
       default:

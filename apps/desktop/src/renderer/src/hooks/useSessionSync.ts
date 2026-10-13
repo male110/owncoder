@@ -861,6 +861,10 @@ export function useSessionSync() {
           return;
         }
         
+        // 记住删除前的当前选中会话，用于判断是否需要保持选中状态
+        const currentFocusId = getFocusSessionId();
+        const isDeletingCurrentSession = id === currentFocusId;
+        
         const res = await window.owncoder.deleteChatSession(id);
         
         // Drop the deleted session's runtime from the chat store.
@@ -878,9 +882,16 @@ export function useSessionSync() {
         sessionStateMachine.cleanup(id);
         
         if (res.activeId) {
-          syncFocusSession(res.activeId);
-          chat.setHistory(res.history, res.activeId);
-          session.setSessionTitle(null); // 清空标题，让下一次切换或刷新时重新加载
+          // 如果删除的是当前选中的会话，使用后端返回的 activeId
+          // 如果删除的是其他会话，保持当前选中状态不变
+          const targetSessionId = isDeletingCurrentSession ? res.activeId : currentFocusId;
+          
+          if (targetSessionId !== currentFocusId) {
+            syncFocusSession(targetSessionId);
+            chat.setHistory(res.history, targetSessionId);
+            session.setSessionTitle(null); // 清空标题，让下一次切换或刷新时重新加载
+          }
+          // 如果保持当前会话不变，不需要切换或重新加载历史
         } else {
           // No sessions left: clear every session-derived field in both stores so
           // the UI doesn't end up with mismatched pointers or a stale title from

@@ -217,7 +217,7 @@ function formatCurrentTaskContext(task: TaskItem): string {
     "### Execution flow",
     "1. Read the <task> block above. Note ID / Description / Stop-exploration criteria.",
     "2. Call tools as needed:",
-    "   - Exploration tools (read_file / grep / search_symbols / lsp_* / repo_map / read_symbol / read_outline, etc.) — use to understand the codebase. When the user or task provides concrete identifiers, search those strings verbatim first. Locate the relevant code before reading it, then inspect the smallest surrounding range that establishes the behavior. Whole-file read_file is only for files under 10KB. Files 10KB or larger MUST call read_outline first; then use read_symbol only for one unique symbol, or read_file with both offset and limit from the outline's line range.",
+    "   - Exploration tools (read_file / grep / search_symbols / lsp_* / repo_map / read_symbol / read_outline, etc.) — use to understand the codebase. When the user or task provides concrete identifiers, search those strings verbatim first. Locate the relevant code before reading it, then inspect the smallest surrounding range that establishes the behavior. 对于大文件（如超过 10KB 的文件），建议先调用 read_outline 查看文件结构，然后使用 read_symbol 读取特定符号，或使用 read_file 同时传入 offset 和 limit 参数读取指定行范围（例如，大纲显示 L120-159 → 调用 read_file 时传入 offset=120 和 limit=40）。只传 offset 或只传 limit 会失败。",
     "   - Code Map exploration strategy (repo_map → codemap_search → codemap_impact / graph_search → read_file) — PREFER THIS ORDER when exploring unfamiliar code or tracing dependencies. Start with repo_map for repo structure, use codemap_search to locate concepts semantically, then codemap_impact/graph_search to trace callers/callees, and only read source files for the specific areas you need to modify. This minimizes token usage during exploration.",
     "   - External knowledge (web_search / web_fetch) — required for unknown APIs, docs, error messages, library behavior, version-specific details. Search before guessing.",
     "   - Implementation tools (apply_patch / write_file / append_file / type_check / bash) — use when ready to make changes.",
@@ -921,7 +921,7 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
           name: uc.name,
           content: `Error: ${msg}`,
         });
-        history.push({ role: "tool", id: uc.id, content: `Error: ${msg}`, toolName: uc.name });
+        history.push({ role: "tool", id: uc.id, content: `Error: ${msg}`, toolName: uc.name, toolArgs: uc.arguments });
       }
     }
 
@@ -1383,6 +1383,8 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
         id: r.id,
         content: historySummary,
         toolName: r.call.name,
+        // 任务结束后界面改用 history，必须保留与 tool_start 同一调用的参数。
+        toolArgs: r.call.arguments,
       });
       memory.addToolOutput(r.call.name, historySummary);
 
@@ -1528,7 +1530,7 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
         : `Skipped: document ${deliveredDocName} is awaiting user confirmation.`;
       opts.onEvent?.({ type: "tool_start", id, name: call.name, args: call.arguments });
       messages.push({ role: "tool", tool_call_id: id, name: call.name, content: output });
-      history.push({ role: "tool", id, content: output, toolName: call.name });
+      history.push({ role: "tool", id, content: output, toolName: call.name, toolArgs: call.arguments });
       opts.onEvent?.({ type: "tool_end", id, name: call.name, ok: true, skipped: true, output });
     };
 
@@ -1539,7 +1541,7 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
       const output = "Skipped: verified information evidence satisfies every exploration stop criterion; proceed with an edit, verification, blocker, or final result.";
       opts.onEvent?.({ type: "tool_start", id, name: call.name, args: call.arguments });
       messages.push({ role: "tool", tool_call_id: id, name: call.name, content: output });
-      history.push({ role: "tool", id, content: output, toolName: call.name });
+      history.push({ role: "tool", id, content: output, toolName: call.name, toolArgs: call.arguments });
       opts.onEvent?.({ type: "tool_end", id, name: call.name, ok: true, skipped: true, output });
     };
 

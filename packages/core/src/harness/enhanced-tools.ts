@@ -484,12 +484,12 @@ export const UNDO_SESSION_CHANGE_TOOL_DEF: ToolDef = {
     parameters: {
       type: "object",
       properties: {
-        path: {
+        file_path: {
           type: "string",
           description: "Single workspace-relative file path from list_session_changes / the Changes bar.",
         },
       },
-      required: ["path"],
+      required: ["file_path"],
     },
   },
 };
@@ -528,12 +528,12 @@ export const PARALLEL_SAFE_TOOLS: ReadonlySet<string> = new Set([
 const writeFileParams = () => ({
   type: "object" as const,
   properties: {
-    path: { type: "string", description: "Relative path from workspace root" },
+    file_path: { type: "string", description: "Relative path from workspace root" },
     content: { 
       type: "string", 
       description: 
         "Complete file content. " +
-        "WARNING: Content >50KB causes 'path field was lost' error. " +
+        "WARNING: Content >50KB causes 'file_path field was lost' error. " +
         "For large files: Use write_file for first part (<50KB), then append_file for rest."
     },
     allow_shrink: {
@@ -546,13 +546,13 @@ const writeFileParams = () => ({
         "Prefer apply_patch for partial edits.",
     },
   },
-  required: ["path", "content"] as string[],
+  required: ["file_path", "content"] as string[],
 });
 
 const appendFileParams = () => ({
   type: "object" as const,
   properties: {
-    path: { type: "string", description: "Relative path from workspace root" },
+    file_path: { type: "string", description: "Relative path from workspace root" },
     content: { 
       type: "string", 
       description: 
@@ -560,12 +560,12 @@ const appendFileParams = () => ({
         "Keep each append <50KB to avoid JSON payload issues."
     },
   },
-  required: ["path", "content"] as string[],
+  required: ["file_path", "content"] as string[],
 });
 const applyPatchParams = () => ({
   type: "object" as const,
   properties: {
-    path: { type: "string", description: "必填。要编辑的工作区相对路径；目标始终只取自此参数。" },
+    file_path: { type: "string", description: "必填。要编辑的工作区相对路径；目标始终只取自此参数。" },
     patch: { 
       type: "string", 
       description: 
@@ -583,12 +583,12 @@ const applyPatchParams = () => ({
         "- Replacement line endings follow the target file, preventing mixed LF/CRLF files\n" +
         "- Markers (<<<<<<< =======  >>>>>>>) must be on their own lines\n" +
         "- Can include multiple blocks in one patch, all targeting the same file\n" +
-        "- 必须提供 path 参数；补丁正文中的文件名或文件头不会决定目标文件\n" +
+        "- 必须提供 file_path 参数；补丁正文中的文件名或文件头不会决定目标文件\n" +
         "- Alternative: single-file Unified Diff；---/+++ 文件头仅作为补丁内容处理\n" +
         "- 不支持多文件、重命名或 Codex *** Begin Patch 格式；请拆分为独立调用"
     },
   },
-  required: ["path", "patch"] as string[],
+  required: ["file_path", "patch"] as string[],
 });
 const savePlanParams = () => ({
   type: "object" as const,
@@ -625,13 +625,13 @@ export function allEnhancedTools(opts?: {
       type: "function",
       function: {
         name: "read_file",
-        description: "Read a text file under the workspace. Whole-file reads (omit offset and limit) are allowed only when the file is under 10KB. Files 10KB or larger MUST call read_outline first, then read_symbol for one unique symbol or read_file with the line range (offset and limit) from the outline. A large-file read without a range is rejected; never fall back to reading the whole file. For log files and other files that have no useful outline or cannot be read by line range, use a bash command to read them in one shot instead of retrying whole-file read_file. Prefer relative paths. IMPORTANT: If the file is not found, do NOT retry the same path — use grep to locate the actual path first, then read the confirmed path.",
+        description: "读取已知路径的文本文件。文件大小未知时优先相对路径。建议对于大文件先调用 read_outline({file_path}) 获取概览，再按需读取指定行或符号；也可直接省略行范围读取完整文件。例：大纲 L120-159 对应 read_file({\"file_path\":\"src/example.ts\",\"offset\":120,\"limit\":40})；offset 是起始行号，limit 是要读取的行数（不是结束行号）。指定行范围时必须同时传入 offset 和 limit，缺一不可。文件不存在时先用 grep 定位实际路径，不要重试同一路径。",
         parameters: {
           type: "object",
           properties: {
             file_path: { type: "string", description: "Relative path from workspace root" },
-            offset: { type: "integer", minimum: 1, description: "1-based start line; required for large files after read_outline" },
-            limit: { type: "integer", minimum: 1, description: "Maximum lines to return; required with offset for large files" },
+            offset: { type: "integer", minimum: 1, description: "Starting line number (1-based); must be passed with limit when specifying line range. Example: outline shows L120-159, then offset=120" },
+            limit: { type: "integer", minimum: 1, description: "Number of lines to read (not ending line number); must be passed with offset when specifying line range. Example: outline shows L120-159, then limit=40 (because 159-120+1=40)" },
           },
           required: ["file_path"],
         },
@@ -650,11 +650,11 @@ export function allEnhancedTools(opts?: {
         parameters: {
           type: "object",
           properties: {
-            path: { type: "string", description: "Relative path from workspace root" },
+            file_path: { type: "string", description: "Relative path from workspace root" },
             symbol: { type: "string", description: "Exact unique symbol name in this file" },
             padding: { type: "integer", minimum: 0, maximum: 80, description: "Optional surrounding source lines (default 12)" },
           },
-          required: ["path", "symbol"],
+          required: ["file_path", "symbol"],
         },
       },
     },
@@ -663,16 +663,17 @@ export function allEnhancedTools(opts?: {
       function: {
         name: "read_outline",
         description:
-          "Read a file's symbol outline (skeleton) instead of its full text: one line per symbol with kind, " +
-          "line range, and signature. Typically 90%+ fewer tokens than read_file for source files. " +
-          "Returns the complete outline. This is the required first step for large files. Then use read_symbol for one uniquely matched symbol, " +
-          "or read_file with offset and limit from the returned line range. Non-source files (json/md/yaml) fall back to head lines.",
+          "获取文件大纲：每个符号的类型、起止行号和签名，返回完整大纲，通常比源码少 90% 以上 token。" +
+          "文件大小未知时建议优先使用，再按需读取指定行或符号；" +
+          "参数名是 file_path，例如 read_outline({\"file_path\":\"src/example.ts\"})。" +
+          "随后用 read_symbol 读取唯一符号，或 read_file 同时传入 offset 和 limit；大纲 L120-159 对应 offset=120、limit=40。" +
+          "非源码文件（json/md/yaml）返回文件头用于导航。",
         parameters: {
           type: "object",
           properties: {
-            path: { type: "string", description: "Relative path from workspace root" },
+            file_path: { type: "string", description: "Relative path from workspace root" },
           },
-          required: ["path"],
+          required: ["file_path"],
         },
       },
     },
@@ -684,7 +685,7 @@ export function allEnhancedTools(opts?: {
         parameters: {
           type: "object",
           properties: {
-            path: { type: "string", description: "Directory relative path, default ." },
+            file_path: { type: "string", description: "Directory relative path, default ." },
             recursive: { type: "boolean", description: "If true, list recursively (default false)." },
           },
         },
@@ -700,7 +701,7 @@ export function allEnhancedTools(opts?: {
           type: "object",
           properties: {
             pattern: { type: "string", description: "Regex or plain string to search for. Must be non-empty." },
-            path: { type: "string", description: "Subdirectory or file to search" },
+            file_path: { type: "string", description: "Subdirectory or file to search" },
             maxResults: { type: "integer", description: "Max matches to return (default 50)." },
           },
           required: ["pattern"],

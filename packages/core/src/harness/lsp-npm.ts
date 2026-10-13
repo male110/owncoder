@@ -48,13 +48,16 @@ export function resolveLspNodeEntry(binPath: string, command: string): string | 
 /** Windows 的 npm.cmd 不能通过 execFile 直接执行；使用 Node 执行 npm 入口。 */
 export async function runLspNpmInstall(args: string[], cwd: string): Promise<void> {
   let command = "npm";
-  let commandArgs = args;
+  // 添加国内镜像源支持，默认使用淘宝镜像，可通过环境变量自定义
+  const registry = process.env.OWNCODER_NPM_REGISTRY || "https://registry.npmmirror.com";
+  const registryArgs = ["--registry", registry];
+  let commandArgs = [...args, ...registryArgs];
   const bundledCli = process.env.OWNCODER_LSP_NPM_CLI;
   const runtime = lspNodeRuntime();
   if (bundledCli) {
     if (!existsSync(bundledCli)) throw new Error(`应用内 npm 资源缺失：${bundledCli}；请重新安装 OwnCoder。`);
     command = runtime.command;
-    commandArgs = [bundledCli, ...args];
+    commandArgs = [bundledCli, ...args, ...registryArgs];
   } else if (process.platform === "win32") {
     let npmPaths: string;
     try {
@@ -69,7 +72,7 @@ export async function runLspNpmInstall(args: string[], cwd: string): Promise<voi
       throw new Error("找到了 npm.cmd，但找不到对应的 node_modules/npm/bin/npm-cli.js；请修复或重新安装 Node.js/npm。");
     }
     command = runtime.command;
-    commandArgs = [npmCli, ...args];
+    commandArgs = [npmCli, ...args, ...registryArgs];
   }
   try {
     await execFileAsync(command, commandArgs, {

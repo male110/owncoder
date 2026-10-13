@@ -343,12 +343,6 @@ export async function buildDecomposeContext(
   if (historySections.length > 0) {
     sections.push(tagConversationHistory(historySections.join("\n\n")));
   }
-  const latestRound = persisted.at(-1);
-  if (latestRound?.taskDecompose) {
-    sections.push(
-      `### Resumable task state\n${JSON.stringify(latestRound.taskDecompose, null, 2)}`,
-    );
-  }
 
   if (opts.memoriesBlock?.trim()) {
     sections.push(

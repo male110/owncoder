@@ -430,7 +430,7 @@ describe("decompose→report/evidence 同轮持久化", () => {
     await persistRoundToolCalls(tmpDir, SESSION_ID, USER_INPUT, record!.index, [
       {
         toolName: "read_file",
-        arguments: { path: "src/very-large-file.ts", offset: 400, limit: 100 },
+        arguments: { file_path: "src/very-large-file.ts", offset: 400, limit: 100 },
         result: "a very large tool result that must not enter the decomposition context",
       },
       {
