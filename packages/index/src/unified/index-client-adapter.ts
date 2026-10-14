@@ -35,9 +35,14 @@ export class UnifiedIndexAdapter implements IndexClient {
   private extraIgnore: string[] = [];
   private buildPromise: Promise<void> | null = null;
   private readonlyMode = false;
+  private fileTypeListener: ((fileTypes: string[]) => void | Promise<void>) | undefined;
 
   constructor() {
     this.index = new UnifiedIndex();
+  }
+
+  onFileTypes(listener: (fileTypes: string[]) => void | Promise<void>): void {
+    this.fileTypeListener = listener;
   }
 
   async open(
@@ -446,6 +451,9 @@ export class UnifiedIndexAdapter implements IndexClient {
             console.log(`[UnifiedIndexAdapter] Building: ${current}/${total} ${file}`);
           }
         },
+        onFileTypes: (fileTypes) => {
+          void this.fileTypeListener?.([...fileTypes]);
+        },
       });
 
       this.index.updateBuildMetrics({
@@ -476,6 +484,11 @@ export class UnifiedIndexAdapter implements IndexClient {
         root,
         diff,
         [...this.index["options"].excludeDirs, ...this.extraIgnore],
+        {
+          onFileTypes: (fileTypes) => {
+            void this.fileTypeListener?.([...fileTypes]);
+          },
+        },
       );
 
       this.index.updateBuildMetrics({

@@ -1310,33 +1310,12 @@ async function resolveCatalogEntry(
   return null;
 }
 
-async function detectProjectFileTypes(cwd: string): Promise<Set<string>> {
-  const result = new Set<string>();
-  const queue = [path.resolve(cwd)];
-  let visited = 0;
-  while (queue.length && visited < 5000) {
-    const dir = queue.shift()!;
-    let entries;
-    try {
-      entries = await fs.readdir(dir, { withFileTypes: true });
-    } catch {
-      continue;
-    }
-    for (const entry of entries) {
-      if (entry.name === "node_modules" || entry.name === ".git" || entry.name === ".owncoder") continue;
-      const full = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        queue.push(full);
-      } else {
-        const ext = path.extname(entry.name).toLowerCase().slice(1);
-        if (ext) result.add(ext);
-        if (entry.name.toLowerCase() === "dockerfile") result.add("dockerfile");
-      }
-      visited++;
-      if (visited >= 5000) break;
-    }
-  }
-  return result;
+export async function installLspsForFileTypes(cwd: string, fileTypes: Iterable<string>): Promise<void> {
+  const discovered = new Set(Array.from(fileTypes, (type) => type.toLowerCase().replace(/^\./, "")));
+  const installs = Object.values(LANGUAGE_SERVER_CATALOG)
+    .filter((entry) => entry.npmPackage && entry.fileTypes.some((type) => discovered.has(type.toLowerCase())))
+    .map((entry) => installNpmLanguageServer(entry, cwd));
+  await Promise.all(installs);
 }
 
 /**
@@ -1348,19 +1327,10 @@ async function detectProjectFileTypes(cwd: string): Promise<Set<string>> {
  */
 export async function createDefaultLspManager(cwd: string): Promise<LspClientManager> {
   const manager = new LspClientManager(cwd);
-  const projectFileTypes = await detectProjectFileTypes(cwd);
   const resolved = await Promise.all(
     Object.entries(LANGUAGE_SERVER_CATALOG).map(async ([key, entry]) => {
       if (!entry.commands.length || !entry.fileTypes.length) return null;
-      const installOnlyProjectLanguages = process.env.OWNCODER_LSP_INSTALL_PROJECT_ONLY === "1";
-      const usedByProject = entry.fileTypes.some((fileType) => projectFileTypes.has(fileType.toLowerCase()));
-      if (!installOnlyProjectLanguages && !usedByProject) {
-        // Pre-download supported npm servers, but do not start every server in
-        // every project. Only servers matching project files are registered.
-        await installNpmLanguageServer(entry, cwd);
-        return null;
-      }
-      const config = await resolveCatalogEntry(entry, cwd, usedByProject);
+      const config = await resolveCatalogEntry(entry, cwd, false);
       return config ? ([key, config] as const) : null;
     }),
   );

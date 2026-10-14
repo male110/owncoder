@@ -78,6 +78,8 @@ export interface BuildOptions {
   scanConcurrency?: number;
   /** 即使mtime和size未变化,也强制重新索引这些相对路径。 */
   forcedPaths?: string[];
+  /** 扫描完成后报告工作区中实际发现的文件类型。 */
+  onFileTypes?: (fileTypes: Set<string>) => void;
 }
 
 /**
@@ -173,6 +175,9 @@ export function buildIndex(db: Database.Database, options: BuildOptions): BuildR
       },
     }));
     console.log(`[UnifiedIndex] Found ${currentMetas.length} indexable files`);
+    options.onFileTypes?.(
+      new Set(currentMetas.flatMap((meta) => meta.language ? [meta.language.toLowerCase()] : [])),
+    );
 
     const indexedFiles = getIndexedFiles(db);
     console.log(`[UnifiedIndex] ${indexedFiles.size} files already indexed`);
@@ -1055,6 +1060,7 @@ export async function updateIndexAsync(
   root: string,
   diff: ManifestDiff,
   excludeDirs?: string[],
+  hooks?: Pick<BuildOptions, "onFileTypes">,
 ): Promise<BuildResult> {
   // Recompute with meta walk inside buildIndexAsync; do not rescan full contents.
   return await buildIndexAsync(db, {
@@ -1064,5 +1070,6 @@ export async function updateIndexAsync(
     maxFileSize: MAX_FILE_SIZE,
     excludeDirs,
     forcedPaths: [...diff.added, ...diff.modified],
+    onFileTypes: hooks?.onFileTypes,
   });
 }

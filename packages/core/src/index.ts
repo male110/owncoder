@@ -2495,3 +2495,5 @@ export {
   type CompatibilityAdapter,
 } from "./compatibility-adapter.ts";
 
+export { installLspsForFileTypes } from "./harness/lsp-client.ts";
+

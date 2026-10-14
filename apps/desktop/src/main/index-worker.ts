@@ -12,6 +12,7 @@ type ParentMessage =
 type ChildMessage =
   | { type: "progress"; current: number; total: number; file: string }
   | { type: "ready"; files: number }
+  | { type: "fileTypes"; fileTypes: string[] }
   | { type: "error"; message: string }
   | { type: "log"; message: string };
 
@@ -26,6 +27,7 @@ function post(msg: ChildMessage): void {
 }
 
 const index = createIndexClient();
+index.onFileTypes?.((fileTypes) => post({ type: "fileTypes", fileTypes }));
 let busy = false;
 
 async function openRoot(root: string, extraIgnore?: string[]): Promise<void> {

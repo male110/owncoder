@@ -61,6 +61,8 @@ export interface IndexOpenOptions {
 
 export interface IndexClient {
   open(root: string, diff?: ManifestDiff, options?: IndexOpenOptions): Promise<void>;
+  /** 在扫描阶段报告工作区中实际发现的文件类型。 */
+  onFileTypes?(listener: (fileTypes: string[]) => void | Promise<void>): void;
   getTags(path: string): Promise<Tag[]>;
   buildRepoMap(opts: MapOpts): Promise<string>;
   graphSearch?(query: string, depth: number): Promise<GraphResult>;
@@ -90,6 +92,8 @@ class StubIndexClient implements IndexClient {
     this.root = root;
     this.kind = "ready";
   }
+
+  onFileTypes(_listener: (fileTypes: string[]) => void | Promise<void>): void {}
 
   async getTags(_path: string): Promise<Tag[]> {
     return [];

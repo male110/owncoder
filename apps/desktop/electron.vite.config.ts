@@ -7,6 +7,8 @@ const workspaceAliases = {
   "@owncoder/settings": resolve("../../packages/settings/src/index.ts"),
   "@owncoder/index": resolve("../../packages/index/src/index.ts"),
   "@owncoder/core": resolve("../../packages/core/src/index.ts"),
+  // core 深层导入需显式映射，否则会被拼接到 index.ts 后面变成 index.ts/harness/...
+  "@owncoder/core/harness/lsp-client.ts": resolve("../../packages/core/src/harness/lsp-client.ts"),
   // browser 子路径必须排在主入口之前，避免被 "@owncoder/llm" 前缀误匹配
   "@owncoder/llm/browser": resolve("../../packages/llm/src/browser.ts"),
   "@owncoder/llm": resolve("../../packages/llm/src/index.ts"),

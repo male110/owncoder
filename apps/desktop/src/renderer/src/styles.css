@@ -8,6 +8,9 @@
   /* Dark fg calibrated to IDEA / zcode references: soft off-white body text,
      neutral mid-gray for secondary/hint text (no blue cast). */
   --text: #d4d7dc;
+  --strong-text: #d4d7dc;
+  --heading-text: #dfe2e6;
+  --review-title-text: #c6c9ce;
   --muted: #8a8d92;
   --fg-muted: #8a8d92;
   --text-muted: #8a8d92;
@@ -93,6 +96,9 @@
   --rail: #f3f3f3;
   --border: #e5e5e5;
   --text: #242424;
+  --strong-text: #454545;
+  --heading-text: #383838;
+  --review-title-text: #555555;
   --muted: #808080;
   --fg-muted: #808080;
   --accent: #303030;
@@ -2260,8 +2266,14 @@ button.ghost.accent {
 
 .md-h {
   margin: 0.6em 0 0.3em;
+  color: var(--heading-text);
   font-weight: 650;
   letter-spacing: -0.01em;
+}
+
+.md-body strong {
+  color: var(--strong-text);
+  font-weight: 600;
 }
 
 .md-h:first-child {
@@ -4495,7 +4507,7 @@ button.ghost {
 }
 
 .review-bar-title {
-  color: var(--text);
+  color: var(--review-title-text);
 }
 
 .review-bar-count {

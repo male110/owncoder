@@ -17,6 +17,7 @@ export type IndexHostStatus = {
 type WorkerOut =
   | { type: "progress"; current: number; total: number; file: string }
   | { type: "ready"; files: number }
+  | { type: "fileTypes"; fileTypes: string[] }
   | { type: "error"; message: string }
   | { type: "log"; message: string };
 
@@ -77,6 +78,13 @@ export class IndexHost {
       }
       if (msg.type === "ready") {
         this.emit({ kind: "ready", root, files: msg.files });
+        return;
+      }
+      if (msg.type === "fileTypes") {
+        void import("@owncoder/core").then((core) => core.installLspsForFileTypes)
+          .then((fn) => fn(root, msg.fileTypes))
+          .then(({ installLspsForFileTypes }) => installLspsForFileTypes(root, msg.fileTypes))
+          .catch((error) => console.warn(`[LSP] 扫描类型安装失败: ${error instanceof Error ? error.message : String(error)}`));
         return;
       }
       if (msg.type === "error") {
