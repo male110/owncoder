@@ -714,8 +714,8 @@ export class SessionOrchestrator {
     return parts.join("\n\n");
   }
 
-  async getGitStatus(): Promise<GitStatus> {
-    const ws = this.state.workspace;
+  async getGitStatus(workspaceRoot?: string): Promise<GitStatus> {
+    const ws = workspaceRoot ? { root: workspaceRoot } : this.state.workspace;
     if (!ws) {
       return {
         isRepo: false,

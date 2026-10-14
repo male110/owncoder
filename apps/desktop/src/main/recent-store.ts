@@ -78,7 +78,7 @@ export class RecentStore {
   }
 
   /**
-   * Dedupe by root, map legacy built-in paths, and pin OwnCoderProject at the bottom.
+   * Dedupe by root and map legacy built-in paths without changing the saved order.
    */
   private normalizeState(state: RecentState): RecentState {
     const rewrite = (e: RecentWorkspace | null): RecentWorkspace | null =>
@@ -91,8 +91,8 @@ export class RecentStore {
     const lastWorkspace = rewrite(state.lastWorkspace);
 
     const seen = new Set<string>();
-    const regular: RecentWorkspace[] = [];
-    let builtin: RecentWorkspace | null = null;
+    const projects: RecentWorkspace[] = [];
+    let hasBuiltin = false;
 
     for (const raw of state.projects) {
       if (!raw?.root) continue;
@@ -105,27 +105,22 @@ export class RecentStore {
       if (seen.has(key)) continue;
       seen.add(key);
       if (isBuiltinProjectRoot(p.root, this.builtinRoot)) {
-        builtin = {
-          root: this.builtinRoot ?? p.root,
-          name: DEFAULT_WORKSPACE_FOLDER,
-          openedAt: p.openedAt,
-        };
-        continue;
+        hasBuiltin = true;
+        projects.push({ root: this.builtinRoot ?? p.root, name: DEFAULT_WORKSPACE_FOLDER, openedAt: p.openedAt });
+      } else {
+        projects.push(p);
       }
-      regular.push(p);
     }
 
-    // Always keep the built-in entry last when we know its path.
-    if (!builtin && this.builtinRoot && existsSync(this.builtinRoot)) {
-      builtin = {
+    if (!hasBuiltin && this.builtinRoot && existsSync(this.builtinRoot)) {
+      projects.push({
         root: this.builtinRoot,
         name: DEFAULT_WORKSPACE_FOLDER,
         openedAt: new Date(0).toISOString(),
-      };
+      });
     }
 
-    const projects = builtin ? [...regular, builtin].slice(0, 20) : regular.slice(0, 20);
-    return { lastWorkspace, projects };
+    return { lastWorkspace, projects: projects.slice(0, 20) };
   }
 
   private save(state: RecentState): void {
@@ -165,13 +160,13 @@ export class RecentStore {
     const openedAt = new Date().toISOString();
     const entry: RecentWorkspace = { root, name, openedAt };
     const prev = this.load();
-    // Only update lastWorkspace, keep projects order unchanged (normalize still pins built-in last).
+    // Only update lastWorkspace, keep projects order unchanged.
     this.save({ lastWorkspace: entry, projects: prev.projects });
   }
 
   /**
    * Ensure a project appears in the sidebar without switching the active workspace.
-   * Built-in OwnCoderProject is always appended last; other projects prepend.
+   * New built-in projects are appended; other new projects prepend.
    */
   ensureProject(root: string, name: string): void {
     const prev = this.load();
@@ -188,13 +183,20 @@ export class RecentStore {
   }
 
   listProjects(): RecentWorkspace[] {
-    // load() already normalizes order; filter missing roots but keep built-in last.
+    return this.load().projects.filter((p) => existsSync(p.root));
+  }
+
+  moveProject(root: string, targetRoot: string, after: boolean): RecentWorkspace[] {
     const state = this.load();
-    const projects = state.projects.filter((p) => existsSync(p.root));
-    // Re-pin built-in last after existence filter.
-    const builtin = projects.filter((p) => isBuiltinProjectRoot(p.root, this.builtinRoot));
-    const regular = projects.filter((p) => !isBuiltinProjectRoot(p.root, this.builtinRoot));
-    return [...regular, ...builtin];
+    const from = state.projects.findIndex((p) => normRoot(p.root) === normRoot(root));
+    const to = state.projects.findIndex((p) => normRoot(p.root) === normRoot(targetRoot));
+    if (from < 0 || to < 0 || from === to) return this.listProjects();
+    const projects = [...state.projects];
+    const [entry] = projects.splice(from, 1);
+    const targetIndex = projects.findIndex((p) => normRoot(p.root) === normRoot(targetRoot));
+    projects.splice(targetIndex + (after ? 1 : 0), 0, entry!);
+    this.save({ ...state, projects });
+    return this.listProjects();
   }
 
   removeProject(root: string): void {

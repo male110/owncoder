@@ -171,7 +171,7 @@ export function registerSessionHandlers(ctx: IpcContext): void {
 
   // ── Git ───────────────────────────────────────────────────────────────────
 
-  ipcMain.handle("git:status", () => session.getGitStatus());
+  ipcMain.handle("git:status", (_e, workspaceRoot?: string) => session.getGitStatus(workspaceRoot));
 
   // ── Rules ─────────────────────────────────────────────────────────────────
 

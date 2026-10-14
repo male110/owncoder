@@ -65,6 +65,7 @@ interface Props {
   onOpenSettings: () => void;
   onSelectProject: (root: string, focusSessionId?: string) => Promise<void>;
   onRemoveProject: (root: string) => Promise<void>;
+  onMoveProject: (root: string, targetRoot: string, after: boolean) => Promise<void>;
   onSwitchSession: (id: string, projectRoot?: string) => Promise<void>;
   onDeleteSession: (id: string, projectRoot: string) => void;
   /** Open a workspace-relative file path in the editor (double-click from file tree). */
@@ -90,11 +91,14 @@ export function AgentSidebar({
   onOpenSettings,
   onSelectProject,
   onRemoveProject,
+  onMoveProject,
   onSwitchSession,
   onDeleteSession,
   onOpenFile,
 }: Props) {
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [dragRoot, setDragRoot] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<{ root: string; after: boolean } | null>(null);
   const { t } = useI18n();
   const [visibleCountByProject, setVisibleCountByProject] = useState<Record<string, number>>({});
   /** Per-project sidebar view; default is sessions. */
@@ -179,8 +183,37 @@ export function AgentSidebar({
                 const hasMoreSessions = projectSessions.length > visibleCount;
                 const viewMode = getViewMode(p.root);
                 return (
-                  <div key={p.root} className="project-block">
-                    <div className="project-header">
+                  <div
+                    key={p.root}
+                    className={`project-block${dropTarget?.root === p.root ? ` drop-${dropTarget.after ? "after" : "before"}` : ""}`}
+                    onDragOver={(e) => {
+                      if (!dragRoot || dragRoot === p.root) return;
+                      e.preventDefault();
+                      e.dataTransfer.dropEffect = "move";
+                      const header = e.currentTarget.querySelector(".project-header")?.getBoundingClientRect();
+                      const after = header ? e.clientY >= header.top + header.height / 2 : false;
+                      if (dropTarget?.root !== p.root || dropTarget.after !== after) setDropTarget({ root: p.root, after });
+                    }}
+                    onDragLeave={(e) => {
+                      if (!e.currentTarget.contains(e.relatedTarget as Node)) setDropTarget(null);
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      if (dragRoot && dragRoot !== p.root) void onMoveProject(dragRoot, p.root, dropTarget?.root === p.root ? dropTarget.after : false);
+                      setDragRoot(null);
+                      setDropTarget(null);
+                    }}
+                  >
+                    <div
+                      className="project-header"
+                      onDragStart={(e) => {
+                        setDragRoot(p.root);
+                        e.dataTransfer.effectAllowed = "move";
+                        e.dataTransfer.setData("text/plain", p.root);
+                      }}
+                      onDragEnd={() => { setDragRoot(null); setDropTarget(null); }}
+                    >
+
                       <button
                         type="button"
                         className="project-chevron"
@@ -200,7 +233,9 @@ export function AgentSidebar({
                       <button
                         type="button"
                         className="project-row"
+                        aria-current={workspace?.root === p.root ? "true" : undefined}
                         title={p.root}
+                        draggable={!disabled}
                         onClick={async () => {
                           await onSelectProject(p.root);
                         }}

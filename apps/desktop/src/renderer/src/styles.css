@@ -5,10 +5,12 @@
   --panel: #12141a;
   --rail: #0e1013;
   --border: #262a32;
-  /* Mainstream dark fg (GitHub Dark / VS Code-adjacent); dialed back for eye comfort */
-  --text: #e6edf3;
-  --muted: #848b96;
-  --fg-muted: #848b96;
+  /* Dark fg calibrated to IDEA / zcode references: soft off-white body text,
+     neutral mid-gray for secondary/hint text (no blue cast). */
+  --text: #d4d7dc;
+  --muted: #8a8d92;
+  --fg-muted: #8a8d92;
+  --text-muted: #8a8d92;
   --fg: var(--text);
   --accent: #6b9cc4;
   --accent-dim: #17202a;
@@ -82,64 +84,64 @@
   font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
 }
 
-/* Codex-inspired light: quiet canvas, warm content surface, restrained blue-gray accent. */
+/* ChatGPT 风格浅色主题：白色画布、中性灰导航与克制的层次。 */
 :root[data-theme="codex"] {
   color-scheme: light;
-  --bg: #f4f2ee;
-  --bg-alt: #fbfaf8;
-  --panel: #fbfaf8;
-  --rail: #ebe9e4;
-  --border: #d8d5cf;
-  --text: #242321;
-  --muted: #77736c;
-  --fg-muted: #77736c;
-  --accent: #3f6172;
-  --accent-dim: #e3ebed;
-  --chip: #e9e7e2;
+  --bg: #ffffff;
+  --bg-alt: #ffffff;
+  --panel: #ffffff;
+  --rail: #f3f3f3;
+  --border: #e5e5e5;
+  --text: #242424;
+  --muted: #808080;
+  --fg-muted: #808080;
+  --accent: #303030;
+  --accent-dim: #ededed;
+  --chip: #f3f3f3;
   --success: #397257;
   --error: #ad4c4c;
-  --hover: #e5e3de;
-  --hover-strong: #dedbd5;
-  --surface-1: #fbfaf8;
-  --surface-2: #f0eeea;
-  --surface-3: #eceae5;
-  --surface-4: #fbfaf8;
-  --surface-5: #f5f3ef;
-  --surface-6: #e8e6e1;
-  --scrollbar-thumb: #c9c5bd;
-  --scrollbar-thumb-hover: #aaa59c;
-  --title-mark-from: #5d7b87;
-  --title-mark-to: #36535f;
-  --primary-border: #9db2b9;
+  --hover: #eaeaea;
+  --hover-strong: #e2e2e2;
+  --surface-1: #ffffff;
+  --surface-2: #f7f7f7;
+  --surface-3: #f0f0f0;
+  --surface-4: #ffffff;
+  --surface-5: #fafafa;
+  --surface-6: #ededed;
+  --scrollbar-thumb: #d4d4d4;
+  --scrollbar-thumb-hover: #b4b4b4;
+  --title-mark-from: #6a6a6a;
+  --title-mark-to: #383838;
+  --primary-border: #c5c5c5;
   --danger-bg: #f9e8e6;
   --danger-text: #9c4242;
   --warn-text: #966a28;
-  --elevated: #fffefa;
-  --elevated-hover: #f0eeea;
-  --editor-bg: #f8f7f4;
-  --editor-head: #eeece7;
-  --user-bubble: #e3ebed;
-  --user-bubble-border: #c4d3d7;
-  --code-inline-bg: #e9e7e2;
-  --table-head-bg: #eeece7;
-  --session-active: #d2e0e4;
-  --session-active-hover: #c6d7dc;
+  --elevated: #ffffff;
+  --elevated-hover: #f3f3f3;
+  --editor-bg: #fafafa;
+  --editor-head: #f3f3f3;
+  --user-bubble: #f4f4f4;
+  --user-bubble-border: transparent;
+  --code-inline-bg: #f0f0f0;
+  --table-head-bg: #f5f5f5;
+  --session-active: #e7e7e7;
+  --session-active-hover: #dedede;
   --danger-btn-bg: #f9e8e6;
   --danger-btn-border: #dfb5b0;
-  --surface-tint: #eeece7;
-  --confirm-hover: #e5e3de;
-  --decompose-bg: #e6f0e9;
-  --decompose-fallback-bg: #f5ecdc;
-  --subagent-status-bg: #e8e6e1;
+  --surface-tint: #f5f5f5;
+  --confirm-hover: #eaeaea;
+  --decompose-bg: #ffffff;
+  --decompose-fallback-bg: #fffcf5;
+  --subagent-status-bg: #f0f0f0;
   --pin-hover-bg: #f3ecdc;
-  --security-output-bg: #eeece7;
+  --security-output-bg: #f5f5f5;
   --change-added-bg: #e4f0e8;
   --auth-ok-border: #a4c1ae;
   --auth-ok-text: #397257;
   --auth-warn-border: #d8bb86;
   --auth-warn-text: #8b5e24;
-  --wf-node-from: #fbfaf8;
-  --wf-node-hover-border: #aebfc4;
+  --wf-node-from: #ffffff;
+  --wf-node-hover-border: #c5c5c5;
   --overlay-01: rgba(36, 35, 33, 0.025);
   --overlay-02: rgba(36, 35, 33, 0.04);
   --overlay-03: rgba(36, 35, 33, 0.055);
@@ -158,7 +160,7 @@
   --scrim-strong: rgba(36, 35, 33, 0.48);
   --watermark: rgba(36, 35, 33, 0.045);
   --shadow-menu: 0 10px 24px rgba(36, 35, 33, 0.12);
-  --shadow-composer: 0 8px 24px rgba(36, 35, 33, 0.09);
+  --shadow-composer: 0 8px 32px rgba(0, 0, 0, 0.04), 0 2px 6px rgba(0, 0, 0, 0.025);
   --shadow-dropdown: 0 8px 24px rgba(36, 35, 33, 0.14), 0 2px 6px rgba(36, 35, 33, 0.06);
 }
 
@@ -590,6 +592,10 @@ body,
   gap: 4px;
 }
 
+.project-block.drop-before { box-shadow: inset 0 2px 0 var(--accent); }
+.project-block.drop-after { box-shadow: inset 0 -2px 0 var(--accent); }
+
+
 .project-chevron {
   flex-shrink: 0;
   display: flex;
@@ -648,7 +654,9 @@ body,
 .project-header > .project-row {
   flex: 1;
   min-width: 0;
+  cursor: grab;
 }
+.project-header > .project-row:active { cursor: grabbing; }
 
 .project-row:hover,
 .session-row:hover {
@@ -725,7 +733,8 @@ body,
   flex-shrink: 0;
 }
 
-.project-header:hover .project-remove {
+.project-header:hover .project-remove,
+.project-header:focus-within .project-remove {
   opacity: 1;
 }
 
@@ -842,7 +851,7 @@ body,
   border-radius: 8px;
 }
 
-/* 高亮整块 session-wrap，使状态图标落在边框/背景内；选中态需一眼可辨但仍克制 */
+/* 会话使用中性选中背景，让项目分组保持更高的视觉权重。 */
 .session-wrap.active {
   background: var(--session-active);
   box-shadow: inset 3px 0 0 var(--accent);
@@ -924,7 +933,9 @@ body,
 }
 
 .session-wrap:hover .session-delete,
-.session-wrap:hover .session-pin {
+.session-wrap:hover .session-pin,
+.session-wrap:focus-within .session-delete,
+.session-wrap:focus-within .session-pin {
   opacity: 1;
 }
 
@@ -1347,6 +1358,8 @@ button.ghost.accent {
   animation: model-menu-in 0.15s ease-out;
 }
 
+:root[data-theme="codex"] .model-menu { width: 140px; }
+
 @keyframes model-menu-in {
   from { opacity: 0; transform: translateY(4px) scale(0.98); }
   to   { opacity: 1; transform: translateY(0) scale(1); }
@@ -1414,6 +1427,12 @@ button.ghost.accent {
   overflow-y: auto;
   box-sizing: border-box;
   z-index: 1;
+}
+
+:root[data-theme="codex"] .model-menu-models {
+  width: max-content;
+  max-width: min(280px, calc(100vw - 156px));
+  min-width: auto;
 }
 
 .model-menu-provider-item {
@@ -1515,6 +1534,13 @@ button.ghost.accent {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-weight: 400;
+}
+
+:root[data-theme="codex"] .model-menu-name { flex: 0 1 auto; }
+
+:root[data-theme="codex"] .model-menu-models .mode-check {
+  color: inherit;
+  flex-shrink: 0;
 }
 
 .model-menu-hint {
@@ -3516,6 +3542,39 @@ button.ghost.accent {
   position: relative;
 }
 
+:root[data-theme="codex"] .composer-top {
+  margin-bottom: 8px;
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+:root[data-theme="codex"] .ws-picker {
+  min-width: 0;
+  max-width: 100%;
+}
+
+:root[data-theme="codex"] .ws-project-info {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+}
+
+.ws-icon-dark { display: inline; }
+:root[data-theme="codex"] .ws-icon-dark { display: none; }
+.ws-icon svg { display: none; }
+:root[data-theme="codex"] .ws-icon svg { display: block; }
+:root:not([data-theme="codex"]) .ws-project-path { display: none; }
+
+:root[data-theme="codex"] .ws-project-path {
+  color: var(--muted);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .ws-trigger {
   display: inline-flex;
   align-items: center;
@@ -3529,8 +3588,68 @@ button.ghost.accent {
   cursor: pointer;
 }
 
-.ws-icon {
+:root[data-theme="codex"] .ws-trigger {
+  max-width: 100%;
+  border-color: transparent;
+  background: transparent;
+  border-radius: 6px;
+  padding: 5px 7px;
+  min-height: 30px;
+  font: inherit;
   font-size: 12px;
+  line-height: 20px;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+:root[data-theme="codex"] .ws-trigger:hover,
+:root[data-theme="codex"] .ws-trigger[aria-expanded="true"] {
+  background: var(--surface-5);
+  border-color: var(--border);
+}
+
+:root[data-theme="codex"] .ws-trigger:focus-visible,
+:root[data-theme="codex"] .ws-menu button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+:root:not([data-theme="codex"]) .ws-trigger .ws-project-info {
+  display: inline;
+  flex: initial;
+}
+
+:root[data-theme="codex"] .ws-trigger .ws-project-info {
+  flex-direction: row;
+  align-items: baseline;
+  gap: 8px;
+  overflow: hidden;
+}
+
+:root:not([data-theme="codex"]) .ws-trigger .ws-menu-name {
+  display: inline;
+}
+
+:root[data-theme="codex"] .ws-trigger .ws-menu-name {
+  flex: 0 1 auto;
+  font-weight: 500;
+}
+
+:root[data-theme="codex"] .ws-trigger .ws-project-path {
+  flex: 0 2 auto;
+  min-width: 0;
+  max-width: 200px;
+}
+
+:root[data-theme="codex"] .ws-icon {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  color: var(--muted);
+}
+
+:root[data-theme="codex"] .ws-trigger .mode-chevron {
+  flex: none;
+  color: var(--muted);
 }
 
 .ws-branch-chip {
@@ -3538,16 +3657,37 @@ button.ghost.accent {
   align-items: center;
   gap: 6px;
   border: 1px solid var(--border);
-  background: var(--chip);
-  color: var(--text);
+  background: transparent;
+  color: var(--muted);
   border-radius: 999px;
   padding: 5px 10px;
-  font-size: 12px;
-  font-weight: 600;
-  max-width: 260px;
+  font-size: 11px;
+  font-weight: 400;
+}
+
+:root[data-theme="codex"] .ws-branch-chip {
+  border-radius: 5px;
+  padding: 3px 7px;
+  line-height: 16px;
+  min-width: 0;
+  max-width: min(220px, 100%);
+}
+
+:root[data-theme="codex"] .ws-branch-name {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+@media (max-width: 640px) {
+  :root[data-theme="codex"] .ws-trigger .ws-project-path {
+    display: none;
+  }
+
+  :root[data-theme="codex"] .ws-picker {
+    flex: 0 1 auto;
+    max-width: 100%;
+  }
 }
 
 .ws-branch-chip.dirty {
@@ -3556,13 +3696,16 @@ button.ghost.accent {
 
 /* Light mode: deepen branch label for stronger contrast on the warm chip. */
 :root[data-theme="codex"] .ws-branch-chip {
-  color: #1a1917;
-  border-color: #c4c0b8;
-  background: #e3e0d9;
+  color: #52647b;
+  border-color: #e2e7ee;
+  background: #f3f6fa;
+  font-weight: 500;
 }
 
 :root[data-theme="codex"] .ws-branch-chip.dirty {
-  color: #8a5a12;
+  color: #8b641f;
+  background: #fff8e9;
+  border-color: #efe1bd;
 }
 
 .ws-branch-dot {
@@ -3590,6 +3733,10 @@ button.ghost.accent {
   border-radius: 12px;
   box-shadow: var(--shadow-menu);
   z-index: 25;
+}
+
+:root[data-theme="codex"] .ws-menu {
+  width: min(360px, calc(100vw - 48px));
 }
 
 .ws-menu button {
@@ -7053,7 +7200,11 @@ button.ghost.tiny.danger:hover {
 }
 
 :root[data-theme="codex"] .app-titlebar-mark {
-  box-shadow: 0 1px 2px rgba(36, 35, 33, 0.14);
+  background: var(--hover);
+  border: 1px solid var(--border);
+  box-sizing: border-box;
+  color: var(--text);
+  box-shadow: none;
 }
 
 :root[data-theme="codex"] .app-theme-toggle {
@@ -7086,12 +7237,14 @@ button.ghost.tiny.danger:hover {
 }
 
 :root[data-theme="codex"] .nav-rail {
+  --hover: #eaeaea;
+  --hover-strong: #e2e2e2;
   background: var(--rail);
-  border-right-color: rgba(36, 35, 33, 0.09);
+  border-right-color: var(--border);
 }
 
 :root[data-theme="codex"] .nav-item {
-  color: #77736c;
+  color: #444444;
 }
 
 :root[data-theme="codex"] .nav-item:hover {
@@ -7105,13 +7258,7 @@ button.ghost.tiny.danger:hover {
 }
 
 :root[data-theme="codex"] .nav-rail:not(.collapsed) .nav-item.primary::before {
-  content: "";
-  width: 3px;
-  height: 16px;
-  margin-left: -10px;
-  margin-right: 7px;
-  border-radius: 99px;
-  background: var(--accent);
+  content: none;
 }
 
 :root[data-theme="codex"] .nav-primary {
@@ -7130,30 +7277,169 @@ button.ghost.tiny.danger:hover {
   background: transparent;
 }
 
+/* 浅色侧栏：轻量分组，中性灰突出当前项目与会话。 */
+:root[data-theme="codex"] .project-header > .project-row { padding-left: 2px; }
+:root[data-theme="codex"] .project-path { font-size: 11px; }
+:root[data-theme="codex"] .session-status-icon {
+  position: absolute;
+  left: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  margin-left: 0;
+}
+:root[data-theme="codex"] .session-status-icon.running {
+  top: calc(50% - 6px);
+  transform: none;
+}
+:root[data-theme="codex"] .session-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 7px 30px 7px 26px;
+  color: color-mix(in srgb, var(--text) 76%, var(--muted));
+}
+:root[data-theme="codex"] .session-time {
+  font-size: 10px;
+  white-space: nowrap;
+}
+:root[data-theme="codex"] .project-block,
 :root[data-theme="codex"] .project-block.current {
-  background: rgba(63, 97, 114, 0.055);
-  border-color: rgba(63, 97, 114, 0.18);
-  border-left-color: var(--accent);
+  margin-bottom: 2px;
+  padding: 3px 4px;
+  background: transparent;
+  border: 0;
 }
 
-:root[data-theme="codex"] .project-row:hover,
-:root[data-theme="codex"] .session-row:hover,
+:root[data-theme="codex"] .project-header {
+  min-height: 36px;
+  margin-bottom: 2px;
+  background: transparent;
+  transition: background 0.15s ease;
+}
+
+:root[data-theme="codex"] .project-header:hover,
+:root[data-theme="codex"] .project-header:focus-within {
+  background: var(--hover);
+}
+
+:root[data-theme="codex"] .project-header:has(.project-row[aria-current="true"]) {
+  background: var(--session-active);
+}
+
+:root[data-theme="codex"] .project-header > .project-row {
+  padding-top: 7px;
+  padding-bottom: 7px;
+  background: transparent;
+}
+
+:root[data-theme="codex"] .project-name {
+  color: #3c3c3c;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+:root[data-theme="codex"] .project-path {
+  color: var(--muted);
+}
+
+:root[data-theme="codex"] .project-chevron,
+:root[data-theme="codex"] .project-view-btn {
+  color: #858585;
+}
+
+:root[data-theme="codex"] .project-view-btn:not(.active) {
+  opacity: 0.75;
+}
+
+:root[data-theme="codex"] .project-view-btn.active {
+  background: transparent;
+  color: var(--text);
+}
+
+:root[data-theme="codex"] .project-chevron:hover,
+:root[data-theme="codex"] .project-view-btn:hover {
+  background: var(--hover-strong);
+  color: var(--text);
+}
+
+:root[data-theme="codex"] .session-list {
+  padding-left: 20px;
+  gap: 2px;
+}
+
+:root[data-theme="codex"] .session-wrap {
+  border-radius: 6px;
+  transition: background 0.15s ease;
+}
+
+:root[data-theme="codex"] .session-wrap:hover,
 :root[data-theme="codex"] .file-tree-row:hover {
-  background: rgba(36, 35, 33, 0.055);
+  background: var(--hover);
 }
 
 :root[data-theme="codex"] .session-wrap.active {
-  background: rgba(63, 97, 114, 0.18);
-  box-shadow: inset 3px 0 0 var(--accent);
+  background: var(--session-active);
+  box-shadow: none;
+}
+
+:root[data-theme="codex"] .session-wrap.active::before {
+  content: none;
 }
 
 :root[data-theme="codex"] .session-wrap.active:hover {
-  background: rgba(63, 97, 114, 0.24);
+  background: var(--session-active-hover);
 }
 
-:root[data-theme="codex"] .agent-body {
-  padding-top: 12px;
+:root[data-theme="codex"] .session-wrap .session-row {
+  min-height: 34px;
+  padding: 7px 30px 7px 26px;
+  background: transparent;
+  color: #4c4c4c;
 }
+
+:root[data-theme="codex"] .session-wrap.active .session-title {
+  color: var(--text);
+  font-weight: 500;
+}
+
+:root[data-theme="codex"] .session-time {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+:root[data-theme="codex"] .session-wrap.active .session-time {
+  color: #737373;
+}
+
+/* 删除确认出现时隐藏时间，为按钮保留空间且不改变标题宽度。 */
+:root[data-theme="codex"] .session-wrap:has(.session-delete-confirm) .session-time {
+  visibility: hidden;
+}
+
+:root[data-theme="codex"] .session-load-more {
+  margin: 2px 0 4px 16px;
+  color: var(--muted);
+}
+
+:root[data-theme="codex"] .session-load-more:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+:root[data-theme="codex"] .project-chevron:focus-visible,
+:root[data-theme="codex"] .project-row:focus-visible,
+:root[data-theme="codex"] .project-view-btn:focus-visible,
+:root[data-theme="codex"] .project-remove:focus-visible,
+:root[data-theme="codex"] .session-row:focus-visible,
+:root[data-theme="codex"] .session-delete:focus-visible,
+:root[data-theme="codex"] .session-delete-confirm button:focus-visible,
+:root[data-theme="codex"] .session-load-more:focus-visible {
+  outline: 2px solid #939393;
+  outline-offset: -2px;
+}
+
 
 :root[data-theme="codex"] .agent-body.with-editor .agent-chat {
   border-left-color: rgba(36, 35, 33, 0.1);
@@ -7164,43 +7450,43 @@ button.ghost.tiny.danger:hover {
 }
 
 :root[data-theme="codex"] .msg.user .msg-bubble {
-  background: #e3ebed;
-  border-color: #cbd9dc;
+  background: var(--user-bubble);
+  border-color: transparent;
   box-shadow: none;
 }
 
 :root[data-theme="codex"] .chat-log-status {
-  background: rgba(63, 97, 114, 0.07);
-  border-color: rgba(63, 97, 114, 0.16);
+  background: #f7f7f7;
+  border-color: var(--border);
 }
 
 :root[data-theme="codex"] .tool-card {
   position: relative;
-  background: rgba(251, 250, 248, 0.72);
-  border: 1px solid rgba(36, 35, 33, 0.09);
-  border-radius: 9px;
-  box-shadow: 0 1px 1px rgba(36, 35, 33, 0.025);
-  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+  background: #f8f9fa;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  box-shadow: none;
+  transition: border-color 0.15s ease, background 0.15s ease;
 }
 
 :root[data-theme="codex"] .tool-card:hover {
-  border-color: rgba(63, 97, 114, 0.22);
-  background: #fbfaf8;
-  box-shadow: 0 2px 5px rgba(36, 35, 33, 0.05);
+  border-color: #d4d4d4;
+  background: #fafafa;
+  box-shadow: none;
 }
 
 :root[data-theme="codex"] .tool-card.ok {
-  border-left: 3px solid #8bb89d;
+  border-left: 1px solid var(--border);
 }
 
 :root[data-theme="codex"] .tool-card.err,
 :root[data-theme="codex"] .tool-card.error {
-  border-left: 3px solid #c97972;
+  border-color: #dca6a1;
 }
 
 :root[data-theme="codex"] .tool-card.running {
-  border-left: 3px solid var(--accent);
-  background: #f6f9f8;
+  border-left: 1px solid #b5b5b5;
+  background: #fafafa;
 }
 
 :root[data-theme="codex"] .tool-card-head:hover {
@@ -7208,19 +7494,20 @@ button.ghost.tiny.danger:hover {
 }
 
 :root[data-theme="codex"] .tool-card-head {
-  min-height: 38px;
-  padding: 7px 11px 7px 10px;
-  gap: 8px;
+  min-height: 29px;
+  padding: 4px 9px;
+  gap: 7px;
+  line-height: 20px;
   color: var(--text);
 }
 
 :root[data-theme="codex"] .tool-card-icon {
-  width: 17px;
-  height: 17px;
+  width: 14px;
+  height: 14px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  flex: 0 0 17px;
+  flex: 0 0 14px;
   color: var(--accent);
   font-size: 11px;
 }
@@ -7235,6 +7522,9 @@ button.ghost.tiny.danger:hover {
 
 :root[data-theme="codex"] .tool-card-label {
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--text);
   font-size: 12px;
   font-weight: 600;
@@ -7254,29 +7544,37 @@ button.ghost.tiny.danger:hover {
 
 :root[data-theme="codex"] .tool-card-preview {
   font-size: 11px;
-  opacity: 0.82;
+  opacity: 1;
+}
+
+:root[data-theme="codex"] .tool-read-params {
+  margin-left: 8px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 400;
 }
 
 :root[data-theme="codex"] .tool-status,
 :root[data-theme="codex"] .tool-exit {
   border: 1px solid transparent;
-  padding: 2px 7px;
-  border-radius: 999px;
+  padding: 1px 5px;
+  border-radius: 4px;
   font-size: 10px;
-  line-height: 1.3;
+  line-height: 14px;
+  white-space: nowrap;
 }
 
 :root[data-theme="codex"] .tool-status.done,
 :root[data-theme="codex"] .tool-exit.ok {
-  background: #e3f0e7;
-  border-color: #c4ddcc;
-  color: #397257;
+  background: rgba(61, 186, 122, 0.1);
+  border-color: transparent;
+  color: var(--success);
 }
 
 :root[data-theme="codex"] .tool-status.running {
-  background: #e3ebed;
-  border-color: #c4d4d8;
-  color: #3f6172;
+  background: #f3f3f3;
+  border-color: transparent;
+  color: var(--text);
 }
 
 :root[data-theme="codex"] .tool-status.error,
@@ -7287,9 +7585,9 @@ button.ghost.tiny.danger:hover {
 }
 
 :root[data-theme="codex"] .tool-status.skipped {
-  background: #eceae5;
-  border-color: #dad7d0;
-  color: #77736c;
+  background: #f3f3f3;
+  border-color: transparent;
+  color: var(--muted);
 }
 
 :root[data-theme="codex"] .activity-chev {
@@ -7299,12 +7597,13 @@ button.ghost.tiny.danger:hover {
 }
 
 :root[data-theme="codex"] .tool-card-body {
-  margin: 0 10px 9px 35px;
-  padding: 9px 10px;
+  margin: 0 9px 7px 30px;
+  padding: 7px 9px;
   border: 1px solid rgba(36, 35, 33, 0.09);
   border-radius: 7px;
-  background: #f3f1ed;
-  color: #3f3d38;
+  background: #f7f7f7;
+  color: #444444;
+  overflow-wrap: anywhere;
 }
 
 :root[data-theme="codex"] .tool-card-result-label {
@@ -7323,21 +7622,326 @@ button.ghost.tiny.danger:hover {
 }
 
 :root[data-theme="codex"] .pending-tools {
-  gap: 4px;
+  gap: 3px;
+}
+
+
+/* Live tool calls read as activity rows; expanded output remains a separate detail surface. */
+:root[data-theme="codex"] .tool-card.live {
+  --tool-row-icon: var(--muted);
+
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  overflow: visible;
+  animation: none;
+}
+
+:root[data-theme="codex"] .tool-card.live:hover,
+:root[data-theme="codex"] .tool-card.live.running,
+:root[data-theme="codex"] .tool-card.live.error {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+:root[data-theme="codex"] .tool-card.live .tool-card-head {
+  min-width: 0;
+  min-height: 34px;
+  padding: 5px 6px;
+  gap: 9px;
+  flex-wrap: wrap;
+  border-radius: 5px;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 24px;
+}
+
+:root[data-theme="codex"] .tool-card.live .tool-card-head:hover {
+  background: var(--surface-5);
+}
+
+:root[data-theme="codex"] .tool-card.live .tool-card-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 18px;
+  width: 18px;
+  height: 18px;
+  color: var(--tool-row-icon);
+}
+
+
+:root[data-theme="codex"] .tool-card.live .tool-verb {
+  flex: none;
+  color: var(--muted);
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+:root[data-theme="codex"] .tool-card.live .tool-status {
+  flex: none;
+  margin-left: 8px;
+}
+
+:root[data-theme="codex"] .tool-card.live .tool-card-label {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: visible;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 24px;
+}
+
+:root[data-theme="codex"] .tool-card.live .tool-path {
+  color: var(--text);
+  font-weight: 400;
+}
+
+:root[data-theme="codex"] .tool-card.live .tool-read-params {
+  margin-left: 8px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 400;
+}
+
+:root[data-theme="codex"] .tool-card.live .tool-diff-stat {
+  flex: none;
+  white-space: nowrap;
+  font-size: 11px;
+}
+
+:root[data-theme="codex"] .tool-card.live .activity-chev {
+  flex: none;
+  width: 12px;
+  color: var(--muted);
+  opacity: 0;
+}
+
+:root[data-theme="codex"] .tool-card.live .tool-card-head:hover .activity-chev,
+:root[data-theme="codex"] .tool-card.live .tool-card-head:focus-visible .activity-chev,
+:root[data-theme="codex"] .tool-card.live .tool-card-head[aria-expanded="true"] .activity-chev {
+  opacity: 1;
+}
+
+:root[data-theme="codex"] .tool-card.live .tool-card-body {
+  margin: 0 6px 6px 33px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface-2);
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 640px) {
+  :root[data-theme="codex"] .tool-card.live .activity-chev { opacity: 1; }
 }
 
 :root[data-theme="codex"] .composer {
   background: var(--panel);
-  border-color: rgba(36, 35, 33, 0.15);
+  border-color: #e8e8e8;
+
+  flex-shrink: 0;
+  box-shadow: var(--shadow-composer);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+:root[data-theme="codex"] .composer:focus-within {
+  border-color: #cfcfcf;
   box-shadow: var(--shadow-composer);
 }
 
-:root[data-theme="codex"] .composer-top {
-  border-bottom-color: rgba(36, 35, 33, 0.09);
+:root[data-theme="codex"] .ws-trigger:hover {
+  background: var(--hover);
+}
+
+:root[data-theme="codex"] .composer textarea::placeholder {
+  color: #a0a0a0;
+  opacity: 1;
+}
+
+:root[data-theme="codex"] .composer-bar {
+  flex-wrap: wrap;
+  row-gap: 10px;
+}
+
+:root[data-theme="codex"] .composer-settings-row {
+  min-width: 0;
+  max-width: 100%;
+  flex-wrap: wrap;
+}
+
+:root[data-theme="codex"] .composer :is(.model-chip, .mode-trigger, .upload-trigger) {
+  background: transparent;
+  border-color: transparent;
+  color: #555555;
+  box-shadow: none;
+}
+
+:root[data-theme="codex"] .composer :is(.model-chip, .mode-trigger, .upload-trigger):hover:not(:disabled) {
+  background: #f3f3f3;
+  border-color: transparent;
+}
+
+:root[data-theme="codex"] .composer .model-chip-decomposer {
+  border-left-width: 1px;
+  border-left-color: transparent;
+}
+
+:root[data-theme="codex"] .composer .model-chip-react {
+  border-left-width: 1px;
+  border-left-color: transparent;
+}
+
+:root[data-theme="codex"] :is(.composer button, .tool-card-head, .decompose-head):focus-visible {
+  outline: 2px solid #939393;
+  outline-offset: 3px;
+}
+
+:root[data-theme="codex"] .decompose-card {
+  border-color: var(--border);
+  border-radius: 12px;
+}
+
+:root[data-theme="codex"] .decompose-head {
+  padding: 10px 12px;
+  background: #fafafa;
+}
+
+:root[data-theme="codex"] .decompose-head:hover {
+  background: #f3f3f3;
+}
+
+:root[data-theme="codex"] :is(.decompose-icon, .decompose-title, .decompose-step-id, .decompose-need-id) {
+  color: #555555;
+}
+
+:root[data-theme="codex"] .decompose-body {
+  padding: 12px;
+  gap: 12px;
+  line-height: 1.65;
+  border-top-color: var(--border);
+  scrollbar-gutter: stable;
+}
+
+:root[data-theme="codex"] .decompose-steps {
+  gap: 8px;
+}
+
+:root[data-theme="codex"] .decompose-step {
+  padding: 9px 10px;
+  border-color: #ededed;
+  border-radius: 8px;
+  background: #fafafa;
+}
+
+:root[data-theme="codex"] .decompose-step-head {
+  column-gap: 10px;
+  row-gap: 4px;
+}
+
+:root[data-theme="codex"] :is(.decompose-step-desc, .decompose-intent, .decompose-task-head) {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+:root[data-theme="codex"] .decompose-step-deps {
+  flex-shrink: 1;
+  overflow-wrap: anywhere;
+}
+
+:root[data-theme="codex"] .decompose-task-head {
+  flex-wrap: wrap;
+}
+
+:root[data-theme="codex"] .decompose-card.fallback {
+  border-color: #eadab5;
+}
+
+:root[data-theme="codex"] .fallback .decompose-head {
+  background: #fff8e9;
+}
+
+/* 浅色主题保留配色，首页与输入框沿用共用布局。 */
+:root[data-theme="codex"] .agent-main {
+  background: #ffffff;
+  border-radius: 18px 0 0 0;
+}
+
+:root[data-theme="codex"] .app-titlebar {
+  background: var(--rail);
+}
+
+
+:root[data-theme="codex"] .hero-watermark {
+  display: none;
+}
+
+:root[data-theme="codex"] .hero-empty h1 {
+  font-size: clamp(24px, 2.6vw, 36px);
+  font-weight: 500;
+  letter-spacing: -0.025em;
+  margin-bottom: 8px;
+}
+
+:root[data-theme="codex"] .hero-sub {
+  font-size: 13px;
+  color: #929292;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+
+:root[data-theme="codex"] .composer-bar .send {
+  background: #292929;
+}
+
+:root[data-theme="codex"] .composer-bar .send:disabled {
+  background: #929292;
+  opacity: 1;
+}
+
+:root[data-theme="codex"] .composer .model-chip {
+  max-width: 100%;
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+:root[data-theme="codex"] .composer :is(.model-picker, .model-picker-decomposer, .model-picker-react) {
+  min-width: 0;
+  max-width: 100%;
+}
+
+:root[data-theme="codex"] .composer-actions {
+  flex-shrink: 0;
+}
+
+@media (max-width: 760px) {
+
+  :root[data-theme="codex"] .composer-bar {
+    gap: 4px;
+  }
+
+}
+
+:root[data-theme="codex"] :is(.fallback .decompose-icon, .fallback .decompose-title, .decompose-constraints, .decompose-fallback-note) {
+  color: #8b641f;
 }
 
 :root[data-theme="codex"] .composer-bar .send {
-  background: var(--text);
+  background: #292929;
+  flex-shrink: 0;
+}
+
+:root[data-theme="codex"] .composer-bar .send:disabled {
+  background: #929292;
+  color: #ffffff;
+  opacity: 1;
 }
 
 :root[data-theme="codex"] .composer-bar .send:hover:not(:disabled) {

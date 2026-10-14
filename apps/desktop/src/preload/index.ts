@@ -380,6 +380,7 @@ export interface DesktopApi {
     projects?: ProjectDto[];
   }>;
   listProjects: () => Promise<ProjectDto[]>;
+  moveProject: (root: string, targetRoot: string, after: boolean) => Promise<ProjectDto[]>;
   removeProject: (root: string) => Promise<ProjectDto[]>;
   getWorkspace: () => Promise<WorkspaceInfo | null>;
   /** Current app version (from package.json), shown in the titlebar. */
@@ -439,7 +440,7 @@ export interface DesktopApi {
     history: ChatTurnDto[];
     changes: PendingChangesDto;
   }>;
-  getGitStatus: () => Promise<GitStatusDto>;
+  getGitStatus: (workspaceRoot?: string) => Promise<GitStatusDto>;
   listMcpTools: () => Promise<McpToolDto[]>;
   listPlans: (sessionId?: string) => Promise<PlanInfoDto[]>;
   readPlan: (path: string) => Promise<string>;
@@ -586,6 +587,7 @@ const api: DesktopApi = {
   reopenLastWorkspace: () => ipcRenderer.invoke("workspace:reopenLast"),
   getRecentWorkspace: () => ipcRenderer.invoke("workspace:getRecent"),
   listProjects: () => ipcRenderer.invoke("workspace:listProjects"),
+  moveProject: (root, targetRoot, after) => ipcRenderer.invoke("workspace:moveProject", root, targetRoot, after),
   removeProject: (root: string) => ipcRenderer.invoke("workspace:removeProject", root),
   getWorkspace: () => ipcRenderer.invoke("workspace:get"),
   getAppVersion: () => ipcRenderer.invoke("app:version"),
@@ -611,7 +613,7 @@ const api: DesktopApi = {
   keepChange: (path, sessionId) => ipcRenderer.invoke("changes:keep", path, sessionId),
   undoChange: (path, sessionId) => ipcRenderer.invoke("changes:undo", path, sessionId),
   undoAllChanges: (sessionId) => ipcRenderer.invoke("changes:undoAll", sessionId),
-  getGitStatus: () => ipcRenderer.invoke("git:status"),
+  getGitStatus: (workspaceRoot?: string) => ipcRenderer.invoke("git:status", workspaceRoot),
   listMcpTools: () => ipcRenderer.invoke("mcp:listTools"),
   listPlans: (sessionId?: string) => ipcRenderer.invoke("plans:list", sessionId),
   readPlan: (path) => ipcRenderer.invoke("plans:read", path),

@@ -108,7 +108,7 @@ export function App() {
   const {
     refreshChanges, refreshGit, refreshPlans, refreshActivePlan,
     refreshSessions, applySessionState, applyOpened,
-    onAddProject, onSelectProject, onRemoveProject, onToggleExpand,
+    onAddProject, onSelectProject, onRemoveProject, onMoveProject, onToggleExpand,
     onNewSession, onSwitchSession, onDeleteSession,
     pendingNewSession, pendingNewSessionRef, createPendingSession,
   } = useSessionSync();
@@ -535,6 +535,7 @@ export function App() {
           onSelectProject={(root, focusSessionId) => onSelectProject(root, focusSessionId)}
           onToggleExpand={onToggleExpand}
           onRemoveProject={(root) => onRemoveProject(root)}
+          onMoveProject={onMoveProject}
           onSwitchSession={(id, projectRoot) => onSwitchSession(id, projectRoot)}
           onDeleteSession={(id, projectRoot) => void onDeleteSession(id, projectRoot)}
           onOpenFile={openEditorFile}

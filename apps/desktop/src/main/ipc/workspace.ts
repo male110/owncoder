@@ -73,6 +73,9 @@ export function registerWorkspaceHandlers(ctx: IpcContext): void {
 
   ipcMain.handle("workspace:listProjects", () => recentStore.listProjects());
 
+  ipcMain.handle("workspace:moveProject", (_e, root: string, targetRoot: string, after: boolean) =>
+    recentStore.moveProject(root, targetRoot, after));
+
   ipcMain.handle("workspace:removeProject", (_e, root: string) => {
     recentStore.removeProject(root);
     return recentStore.listProjects();

@@ -85,6 +85,8 @@ export const en = {
   "正在停止…": "Stopping…",
   "选择项目目录，输入任务描述开始": "Choose a project folder, then describe your task to begin",
   "拖动调整左侧宽度": "Drag to resize the left pane",
+  "拖动排序项目；方向键调整位置": "Drag to reorder; use arrow keys to move",
+  "调整项目顺序": "Reorder project",
   "已打开文件": "Open files",
   "对比": "Diff",
   "关闭 {{name}}": "Close {{name}}",

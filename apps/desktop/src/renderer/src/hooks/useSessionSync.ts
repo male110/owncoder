@@ -33,6 +33,7 @@ export function useSessionSync() {
   const workspaceRef = useRef(useSessionStore.getState().workspace);
   const sessionListSyncVersionRef = useRef(0);
   const projectsSyncVersionRef = useRef(0);
+  const gitSyncVersionRef = useRef(0);
   const navigationVersionRef = useRef(0);
   const navigationTailRef = useRef<Promise<void>>(Promise.resolve());
   const switchSessionInternalRef = useRef<(id: string, version: number, rollbackId?: string | null, projectRoot?: string) => Promise<unknown>>(
@@ -79,13 +80,14 @@ export function useSessionSync() {
 
   const refreshGit = useCallback(async (expectedRoot?: string) => {
     const rootAtStart = expectedRoot ?? workspaceRef.current?.root ?? null;
+    const version = ++gitSyncVersionRef.current;
     try {
-      const status = await window.owncoder.getGitStatus();
-      if (!rootAtStart || workspaceRef.current?.root === rootAtStart) {
+      const status = await window.owncoder.getGitStatus(rootAtStart ?? undefined);
+      if (version === gitSyncVersionRef.current && (workspaceRef.current?.root ?? null) === rootAtStart) {
         session.setGitStatus(status);
       }
     } catch {
-      if (!rootAtStart || workspaceRef.current?.root === rootAtStart) {
+      if (version === gitSyncVersionRef.current && (workspaceRef.current?.root ?? null) === rootAtStart) {
         session.setGitStatus(null);
       }
     }
@@ -335,7 +337,8 @@ export function useSessionSync() {
     opts?: { sanitize?: boolean; navigationVersion?: number },
   ) => {
     const navigationVersion = opts?.navigationVersion ?? ++navigationVersionRef.current;
-    if (suppressReapplyRef.current) return;
+    // 新建草稿期间只选择项目，不恢复后端已有会话的焦点和历史。
+    if (suppressReapplyRef.current || pendingNewSessionRef.current) return;
     
     try {
       const state = await applySessionState(targetWorkspace, navigationVersion);
@@ -429,13 +432,13 @@ export function useSessionSync() {
 
   // ── Project & session actions ─────────────────────────────────────────────
 
-  const onAddProject = useCallback(async () => {
-    const ws = await window.owncoder.openWorkspaceDialog();
-    if (ws) await applyOpened();
-  }, [applyOpened]);
 
   const onSelectProject = useCallback((root: string, focusSessionId?: string) => enqueueNavigation(async (navigationVersion) => {
     const projects = useSessionStore.getState().projects;
+    if (workspaceRef.current?.root !== root) {
+      ++gitSyncVersionRef.current;
+      session.setGitStatus(null);
+    }
 
     // In pending-new mode, just record the user's project choice without
     // switching the backend workspace or loading an existing session.
@@ -451,6 +454,7 @@ export function useSessionSync() {
       workspaceRef.current = targetWs;
       const cached = useSessionStore.getState().sessionsByProject[root] ?? [];
       session.setSessions(cached);
+      await refreshGit(root);
       return;
     }
 
@@ -537,6 +541,25 @@ export function useSessionSync() {
       }
     }
   }), [applyOpenedInternal, enqueueNavigation, isNavigationCurrent, refreshGit]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const onAddProject = useCallback(async () => {
+    const ws = await window.owncoder.openWorkspaceDialog();
+    if (!ws) return;
+    if (pendingNewSessionRef.current) {
+      // 与选择已有项目保持一致，覆盖草稿原先选择的项目归属。
+      await onSelectProject(ws.root);
+      await refreshProjects();
+    } else {
+      await applyOpened(ws);
+    }
+  }, [applyOpened, onSelectProject, refreshProjects]);
+
+  const onMoveProject = useCallback(async (root: string, targetRoot: string, after: boolean) => {
+    const projects = await window.owncoder.moveProject(root, targetRoot, after);
+    // Invalidate an in-flight refresh so it cannot restore the previous order.
+    ++projectsSyncVersionRef.current;
+    session.setProjects(projects);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const onToggleExpand = useCallback((root: string) => {
     session.setExpanded((e) => ({ ...e, [root]: !(e[root] !== false) }));
@@ -976,6 +999,7 @@ export function useSessionSync() {
     onSelectProject,
     onToggleExpand,
     onRemoveProject,
+    onMoveProject,
     onNewSession,
     onSwitchSession,
     onDeleteSession,

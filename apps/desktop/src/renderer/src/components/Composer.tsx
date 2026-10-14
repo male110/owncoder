@@ -252,6 +252,12 @@ function ComposerImpl({
         if (!pickerRect) return;
         const gap = 6;
         const margin = 8;
+        if (document.documentElement.dataset.theme === "codex") {
+          const menuWidth = 140 + models.offsetWidth;
+          menu.style.left = `${Math.max(margin - pickerRect.left, Math.min(0, window.innerWidth - margin - pickerRect.left - menuWidth))}px`;
+        } else {
+          menu.style.left = "";
+        }
         const spaceAbove = Math.max(0, pickerRect.top - gap - margin);
         const spaceBelow = Math.max(0, window.innerHeight - pickerRect.bottom - gap - margin);
         const downward = spaceBelow > spaceAbove;
@@ -513,13 +519,20 @@ function ComposerImpl({
           <button
             type="button"
             className="ws-trigger"
+            aria-expanded={wsMenuOpen}
             onClick={() => setWsMenuOpen((v) => !v)}
-            title={t("切换工作区")}
+            title={workspaceRoot ?? t("切换工作区")}
           >
             <span className="ws-icon" aria-hidden>
-              📁
+              <span className="ws-icon-dark">📁</span>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 7V5a2 2 0 0 1 2-2h5l2 3h7a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" />
+              </svg>
             </span>
-            {workspaceName ?? t("未打开工作区")}
+            <span className="ws-project-info">
+              <span className="ws-menu-name">{workspaceName ?? t("未打开工作区")}</span>
+              {workspaceRoot ? <span className="ws-project-path">{workspaceRoot}</span> : null}
+            </span>
             <span className="mode-chevron" aria-hidden>
               ▾
             </span>
@@ -546,7 +559,10 @@ function ComposerImpl({
                       }
                     }}
                   >
-                    <span className="ws-menu-name">{p.name}</span>
+                    <span className="ws-project-info">
+                      <span className="ws-menu-name">{p.name}</span>
+                      <span className="ws-project-path">{p.root}</span>
+                    </span>
                     {p.root === workspaceRoot ? (
                       <span className="ws-menu-check" aria-hidden>
                         ✓
@@ -577,7 +593,7 @@ function ComposerImpl({
             title={gitStatus.summary}
           >
             <span className="ws-branch-dot" aria-hidden />
-            {gitStatus.branch}
+            <span className="ws-branch-name">{gitStatus.branch}</span>
           </span>
         ) : null}
       </div>
