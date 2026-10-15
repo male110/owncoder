@@ -585,7 +585,7 @@ const applyPatchParams = () => ({
         "- Can include multiple blocks in one patch, all targeting the same file\n" +
         "- 必须提供 file_path 参数；补丁正文中的文件名或文件头不会决定目标文件\n" +
         "- Alternative: single-file Unified Diff；---/+++ 文件头仅作为补丁内容处理\n" +
-        "- 不支持多文件、重命名或 Codex *** Begin Patch 格式；请拆分为独立调用"
+        "- 不支持多文件、重命名或 Assistant *** Begin Patch 格式；请拆分为独立调用"
     },
   },
   required: ["file_path", "patch"] as string[],

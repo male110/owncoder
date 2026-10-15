@@ -1,10 +1,10 @@
 /** UI chrome theme: dark (default) or muted professional light. */
-export type UiTheme = "dark" | "codex";
+export type UiTheme = "dark" | "light";
 
 export const THEME_STORAGE_KEY = "owncoder:ui:theme";
 
 export function isUiTheme(value: unknown): value is UiTheme {
-  return value === "dark" || value === "codex";
+  return value === "dark" || value === "light";
 }
 
 export function readStoredTheme(): UiTheme {
@@ -28,7 +28,7 @@ export function persistTheme(theme: UiTheme): void {
 export function applyThemeToDocument(theme: UiTheme): void {
   const root = document.documentElement;
   root.setAttribute("data-theme", theme);
-  root.style.colorScheme = theme === "codex" ? "light" : "dark";
+  root.style.colorScheme = theme === "light" ? "light" : "dark";
 }
 
 export function syncNativeChrome(theme: UiTheme): void {

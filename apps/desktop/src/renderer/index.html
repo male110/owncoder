@@ -12,9 +12,9 @@
       (function () {
         try {
           var theme = localStorage.getItem("owncoder:ui:theme");
-          if (theme !== "dark" && theme !== "codex") theme = "dark";
+          if (theme !== "dark" && theme !== "light") theme = "dark";
           document.documentElement.setAttribute("data-theme", theme);
-          document.documentElement.style.colorScheme = theme === "codex" ? "light" : "dark";
+          document.documentElement.style.colorScheme = theme === "light" ? "light" : "dark";
         } catch (_) {
           document.documentElement.setAttribute("data-theme", "dark");
           document.documentElement.style.colorScheme = "dark";
@@ -35,7 +35,7 @@
         background: #0c0d0f;
         color: #848b96;
       }
-      :root[data-theme="codex"] .boot-status {
+      :root[data-theme="light"] .boot-status {
         background: #f6f7f9;
         color: #6b7789;
       }

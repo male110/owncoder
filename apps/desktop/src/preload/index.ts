@@ -553,7 +553,7 @@ export interface DesktopApi {
   /** Notify the main process that the settings panel opened/closed. */
   setSettingsPanelOpen: (open: boolean) => void;
   /** Sync frameless window chrome (titleBarOverlay / background) with UI theme. */
-  setChromeTheme: (theme: "dark" | "codex") => Promise<void>;
+  setChromeTheme: (theme: "dark" | "light") => Promise<void>;
   /** 界面语言信息：系统区域设置 + 用户偏好（"system" 跟随系统）。 */
   getLocaleInfo: () => Promise<{ osLocale: string; pref: "system" | "zh" | "en" }>;
   /** 设置界面语言偏好；主进程对话框文案同步生效。 */

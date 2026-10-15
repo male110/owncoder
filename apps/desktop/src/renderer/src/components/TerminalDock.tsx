@@ -11,7 +11,7 @@ const TERMINAL_THEMES = {
   dark: { background: "#0d1014", foreground: "#d8dee9", cursor: "#6b9cc4" },
   // Light theme: darken default + ANSI whites so typed commands stay readable
   // on the warm canvas (shells often paint input with white/brightWhite).
-  codex: {
+  light: {
     background: "#ebe8e4",
     foreground: "#1a1917",
     cursor: "#2f4d5c",

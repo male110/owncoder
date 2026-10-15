@@ -957,7 +957,7 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
         return finalizeSuccess({ lastAssistant: fallback, aborted: false, awaitingUserConfirmation: true, correctionCount });
       }
 
-      // ── Codex-style: finish_reason as primary loop control signal ──
+      // ── Assistant-style: finish_reason as primary loop control signal ──
       // "length" → response was truncated by token limit; the model may have
       // been mid-generation (possibly mid tool-call). Force continuation so
       // the model can resume from where it left off.

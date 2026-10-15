@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readdirSync, renameSync, rmSync } from "node:fs";
 import { join } from "node:path";
 
-/** Built-in sandbox workspace (ZCode-style); always available under userData. */
+/** Built-in sandbox workspace (built-in style); always available under userData. */
 export const DEFAULT_WORKSPACE_FOLDER = "OwnCoderProject";
 /** Pre-rename built-in folder name (owncode → owncoder). */
 export const LEGACY_DEFAULT_WORKSPACE_FOLDER = "OwnCodeProject";

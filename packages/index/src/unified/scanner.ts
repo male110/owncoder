@@ -33,7 +33,7 @@ const ALWAYS_SKIP_DIRS = new Set([
   ".output",
   ".cache",
   ".owncoder",
-  ".kiro",
+  ".ide-cache",
   "__pycache__",
   ".venv",
   "venv",

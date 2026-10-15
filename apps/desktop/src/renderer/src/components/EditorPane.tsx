@@ -158,7 +158,7 @@ export function EditorPane({
   const [mdViewMode, setMdViewMode] = useState<MdViewMode>("preview");
   const { t } = useI18n();
   const theme = useUiStore((s) => s.theme);
-  const monacoTheme = theme === "codex" ? "vs" : "vs-dark";
+  const monacoTheme = theme === "light" ? "vs" : "vs-dark";
   const isMarkdown = useMemo(() => isMarkdownPath(path), [path]);
   const dirty = value !== original;
   const saveRef = useRef<() => Promise<void>>(async () => {});

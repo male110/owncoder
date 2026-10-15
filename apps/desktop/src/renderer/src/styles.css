@@ -5,7 +5,7 @@
   --panel: #12141a;
   --rail: #0e1013;
   --border: #262a32;
-  /* Dark fg calibrated to IDEA / zcode references: soft off-white body text,
+  /* Dark fg calibrated to IDEA / built-in theme references: soft off-white body text,
      neutral mid-gray for secondary/hint text (no blue cast). */
   --text: #d4d7dc;
   --strong-text: #d4d7dc;
@@ -87,8 +87,8 @@
   font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
 }
 
-/* ChatGPT 风格浅色主题：白色画布、中性灰导航与克制的层次。 */
-:root[data-theme="codex"] {
+/* ChatGPT 椋庢牸娴呰壊涓婚锛氱櫧鑹茬敾甯冦€佷腑鎬х伆瀵艰埅涓庡厠鍒剁殑灞傛銆?*/
+:root[data-theme="light"] {
   color-scheme: light;
   --bg: #ffffff;
   --bg-alt: #ffffff;
@@ -222,7 +222,7 @@ body,
   background: var(--bg);
 }
 
-/* Frameless dark titlebar — same surface as workspace */
+/* Frameless dark titlebar 鈥?same surface as workspace */
 .app-titlebar {
   height: 40px;
   flex-shrink: 0;
@@ -857,7 +857,7 @@ body,
   border-radius: 8px;
 }
 
-/* 会话使用中性选中背景，让项目分组保持更高的视觉权重。 */
+/* 浼氳瘽浣跨敤涓€ч€変腑鑳屾櫙锛岃椤圭洰鍒嗙粍淇濇寔鏇撮珮鐨勮瑙夋潈閲嶃€?*/
 .session-wrap.active {
   background: var(--session-active);
   box-shadow: inset 3px 0 0 var(--accent);
@@ -877,7 +877,7 @@ body,
   color: var(--text);
 }
 
-/* ── Session status icons (leftmost in sidebar) ── */
+/* 鈹€鈹€ Session status icons (leftmost in sidebar) 鈹€鈹€ */
 
 .session-status-icon {
   flex-shrink: 0;
@@ -1320,7 +1320,7 @@ button.ghost.accent {
   font-size: 13px;
 }
 
-/* Model picker dropdown — ChatGPT / Claude style */
+/* Model picker dropdown 鈥?ChatGPT / Claude style */
 .model-picker {
   position: relative;
   z-index: 5;
@@ -1364,7 +1364,7 @@ button.ghost.accent {
   animation: model-menu-in 0.15s ease-out;
 }
 
-:root[data-theme="codex"] .model-menu { width: 140px; }
+:root[data-theme="light"] .model-menu { width: 140px; }
 
 @keyframes model-menu-in {
   from { opacity: 0; transform: translateY(4px) scale(0.98); }
@@ -1379,7 +1379,7 @@ button.ghost.accent {
   font-size: 13px;
 }
 
-/* 平台列决定锚点位置，模型浮层独立计算高度。 */
+/* 骞冲彴鍒楀喅瀹氶敋鐐逛綅缃紝妯″瀷娴眰鐙珛璁＄畻楂樺害銆?*/
 .model-menu-body {
   position: relative;
   overflow: visible;
@@ -1422,7 +1422,6 @@ button.ghost.accent {
   position: absolute;
   left: 140px;
   top: 0;
-  height: max-content;
   width: calc(100% - 140px);
   list-style: none;
   margin: 0;
@@ -1435,7 +1434,7 @@ button.ghost.accent {
   z-index: 1;
 }
 
-:root[data-theme="codex"] .model-menu-models {
+:root[data-theme="light"] .model-menu-models {
   width: max-content;
   max-width: min(280px, calc(100vw - 156px));
   min-width: auto;
@@ -1519,7 +1518,7 @@ button.ghost.accent {
   background: rgba(99, 179, 255, 0.1);
 }
 
-/* 单模型时，基础背景与模型列表父容器一致；悬停仍保留交互反馈。 */
+/* 鍗曟ā鍨嬫椂锛屽熀纭€鑳屾櫙涓庢ā鍨嬪垪琛ㄧ埗瀹瑰櫒涓€鑷达紱鎮仠浠嶄繚鐣欎氦浜掑弽棣堛€?*/
 .model-menu-models li button.single-model.selected {
   background: var(--bg-alt);
 }
@@ -1542,9 +1541,9 @@ button.ghost.accent {
   font-weight: 400;
 }
 
-:root[data-theme="codex"] .model-menu-name { flex: 0 1 auto; }
+:root[data-theme="light"] .model-menu-name { flex: 0 1 auto; }
 
-:root[data-theme="codex"] .model-menu-models .mode-check {
+:root[data-theme="light"] .model-menu-models .mode-check {
   color: inherit;
   flex-shrink: 0;
 }
@@ -1585,7 +1584,7 @@ button.ghost.accent {
   background: var(--glass-bg-strong);
 }
 
-/* Thinking effort picker dropdown — unified style */
+/* Thinking effort picker dropdown 鈥?unified style */
 .thinking-picker {
   position: relative;
 }
@@ -2085,8 +2084,7 @@ button.ghost.accent {
   cursor: default;
 }
 
-/* Item spacing is provided by .chat-log.wide { gap }; do NOT add margin here —
-   react-virtuoso measures border-box height and ignores margin, so a per-item
+/* Item spacing is provided by .chat-log.wide { gap }; do NOT add margin here 鈥?   react-virtuoso measures border-box height and ignores margin, so a per-item
    margin makes the computed scroll height shorter than the real one and the
    user can't scroll all the way to the top. */
 
@@ -2098,7 +2096,7 @@ button.ghost.accent {
   padding-top: 4px;
 }
 
-/* In-flight / explicit status line ("正在分解任务…", "思考中…", tool calls) */
+/* In-flight / explicit status line ("姝ｅ湪鍒嗚В浠诲姟鈥?, "鎬濊€冧腑鈥?, tool calls) */
 .chat-log-status {
   display: flex;
   align-items: center;
@@ -2140,7 +2138,7 @@ button.ghost.accent {
   padding: 10px 14px;
   font-size: 14px;
   line-height: 1.5;
-  /* Markdown 已负责换行/块级排版；pre-wrap 会保留 JSX 缩进空白，导致大片空行与溢出 */
+  /* Markdown 宸茶礋璐ｆ崲琛?鍧楃骇鎺掔増锛沺re-wrap 浼氫繚鐣?JSX 缂╄繘绌虹櫧锛屽鑷村ぇ鐗囩┖琛屼笌婧㈠嚭 */
   min-width: 0;
   max-width: 100%;
   overflow-x: auto;
@@ -2153,7 +2151,7 @@ button.ghost.accent {
 }
 
 .msg.user .msg-bubble .md-p {
-  /* 保留段落内换行，但不保留块级元素之间的 JSX 缩进空白 */
+  /* 淇濈暀娈佃惤鍐呮崲琛岋紝浣嗕笉淇濈暀鍧楃骇鍏冪礌涔嬮棿鐨?JSX 缂╄繘绌虹櫧 */
   white-space: pre-line;
 }
 
@@ -2443,7 +2441,7 @@ button.ghost.accent {
   border-radius: 8px;
   background: var(--surface-3);
   overflow: hidden;
-  /* 不设 margin-bottom，由 chat-log.wide 的 gap 统一控制 */
+  /* 涓嶈 margin-bottom锛岀敱 chat-log.wide 鐨?gap 缁熶竴鎺у埗 */
 }
 
 .thinking-block.streaming {
@@ -2452,14 +2450,14 @@ button.ghost.accent {
   animation: pulseGlow 2s ease-in-out infinite;
 }
 
-/* 蓝色思考块 - 任务分解阶段 */
+/* 钃濊壊鎬濊€冨潡 - 浠诲姟鍒嗚В闃舵 */
 .thinking-block.stage-decompose.streaming {
   border-color: color-mix(in srgb, #4a9eff 22%, var(--border));
   background: linear-gradient(135deg, var(--surface-3) 0%, color-mix(in srgb, #4a9eff 6%, transparent) 100%);
   animation: pulseGlowBlue 2s ease-in-out infinite;
 }
 
-/* 绿色思考块 - 循环执行阶段 */
+/* 缁胯壊鎬濊€冨潡 - 寰幆鎵ц闃舵 */
 .thinking-block.stage-react.streaming {
   border-color: color-mix(in srgb, #10b981 22%, var(--border));
   background: linear-gradient(135deg, var(--surface-3) 0%, color-mix(in srgb, #10b981 6%, transparent) 100%);
@@ -2563,7 +2561,7 @@ button.ghost.accent {
   display: none;
 }
 
-/* ── Process steps (collapsed tool/intermediate chain, completed rounds) ── */
+/* 鈹€鈹€ Process steps (collapsed tool/intermediate chain, completed rounds) 鈹€鈹€ */
 .process-block {
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -2643,13 +2641,13 @@ button.ghost.accent {
   display: none;
 }
 
-/* ── Decompose card (task_decompose result) ──────────────────────────────── */
+/* 鈹€鈹€ Decompose card (task_decompose result) 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€ */
 .decompose-card {
   border: 1px solid rgba(120, 200, 160, 0.18);
   border-radius: 8px;
   background: var(--decompose-bg);
   overflow: hidden;
-  /* 不设 margin-bottom，由 chat-log.wide 的 gap 统一控制 */
+  /* 涓嶈 margin-bottom锛岀敱 chat-log.wide 鐨?gap 缁熶竴鎺у埗 */
 }
 
 .decompose-card.fallback {
@@ -2936,7 +2934,7 @@ button.ghost.accent {
 }
 
 .subagent-step-label::before {
-  content: "▸";
+  content: "鈻?;
   font-size: 10px;
   color: var(--accent);
 }
@@ -3076,7 +3074,7 @@ button.ghost.accent {
   color: var(--text);
 }
 
-/* "结果" label placed above the pre in live tool result cards */
+/* "缁撴灉" label placed above the pre in live tool result cards */
 .tool-card-result-label {
   font-size: 11px;
   color: var(--muted);
@@ -3390,7 +3388,7 @@ button.ghost.accent {
   box-shadow: var(--shadow-composer);
 }
 
-/* 常驻状态栏：sending 时固定显示在 Composer 上方，覆盖所有空窗期 */
+/* 甯搁┗鐘舵€佹爮锛歴ending 鏃跺浐瀹氭樉绀哄湪 Composer 涓婃柟锛岃鐩栨墍鏈夌┖绐楁湡 */
 .agent-status-bar {
   max-width: 860px;
   width: calc(100% - 48px);
@@ -3405,7 +3403,7 @@ button.ghost.accent {
   font-size: 12px;
   color: var(--accent);
   animation: statusBarFadeIn 0.2s ease;
-  /* 高度固定，消失时不引起布局跳动 */
+  /* 楂樺害鍥哄畾锛屾秷澶辨椂涓嶅紩璧峰竷灞€璺冲姩 */
   min-height: 32px;
 }
 
@@ -3432,7 +3430,7 @@ button.ghost.accent {
   white-space: nowrap;
 }
 
-/* 待执行消息队列条 */
+/* 寰呮墽琛屾秷鎭槦鍒楁潯 */
 .queued-messages-bar {
   max-width: 860px;
   width: calc(100% - 48px);
@@ -3522,21 +3520,21 @@ button.ghost.accent {
 }
 
 /* Light-mode: boost contrast for queued-messages text */
-:root[data-theme="codex"] .queued-messages-bar {
+:root[data-theme="light"] .queued-messages-bar {
   color: #55504a;
   background: rgba(255, 180, 60, 0.12);
 }
-:root[data-theme="codex"] .queued-messages-label {
+:root[data-theme="light"] .queued-messages-label {
   color: #9e6e1a;
 }
-:root[data-theme="codex"] .queued-messages-item {
+:root[data-theme="light"] .queued-messages-item {
   color: #4a4540;
   opacity: 1;
 }
-:root[data-theme="codex"] .queued-messages-item::before {
+:root[data-theme="light"] .queued-messages-item::before {
   color: #9e6e1a;
 }
-:root[data-theme="codex"] .queued-messages-remove {
+:root[data-theme="light"] .queued-messages-remove {
   color: #55504a;
 }
 
@@ -3554,18 +3552,18 @@ button.ghost.accent {
   position: relative;
 }
 
-:root[data-theme="codex"] .composer-top {
+:root[data-theme="light"] .composer-top {
   margin-bottom: 8px;
   padding-bottom: 0;
   border-bottom: 0;
 }
 
-:root[data-theme="codex"] .ws-picker {
+:root[data-theme="light"] .ws-picker {
   min-width: 0;
   max-width: 100%;
 }
 
-:root[data-theme="codex"] .ws-project-info {
+:root[data-theme="light"] .ws-project-info {
   display: flex;
   flex-direction: column;
   flex: 1;
@@ -3574,12 +3572,12 @@ button.ghost.accent {
 }
 
 .ws-icon-dark { display: inline; }
-:root[data-theme="codex"] .ws-icon-dark { display: none; }
+:root[data-theme="light"] .ws-icon-dark { display: none; }
 .ws-icon svg { display: none; }
-:root[data-theme="codex"] .ws-icon svg { display: block; }
-:root:not([data-theme="codex"]) .ws-project-path { display: none; }
+:root[data-theme="light"] .ws-icon svg { display: block; }
+:root:not([data-theme="light"]) .ws-project-path { display: none; }
 
-:root[data-theme="codex"] .ws-project-path {
+:root[data-theme="light"] .ws-project-path {
   color: var(--muted);
   font-size: 11px;
   overflow: hidden;
@@ -3600,7 +3598,7 @@ button.ghost.accent {
   cursor: pointer;
 }
 
-:root[data-theme="codex"] .ws-trigger {
+:root[data-theme="light"] .ws-trigger {
   max-width: 100%;
   border-color: transparent;
   background: transparent;
@@ -3613,53 +3611,53 @@ button.ghost.accent {
   transition: background 0.15s ease, border-color 0.15s ease;
 }
 
-:root[data-theme="codex"] .ws-trigger:hover,
-:root[data-theme="codex"] .ws-trigger[aria-expanded="true"] {
+:root[data-theme="light"] .ws-trigger:hover,
+:root[data-theme="light"] .ws-trigger[aria-expanded="true"] {
   background: var(--surface-5);
   border-color: var(--border);
 }
 
-:root[data-theme="codex"] .ws-trigger:focus-visible,
-:root[data-theme="codex"] .ws-menu button:focus-visible {
+:root[data-theme="light"] .ws-trigger:focus-visible,
+:root[data-theme="light"] .ws-menu button:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
-:root:not([data-theme="codex"]) .ws-trigger .ws-project-info {
+:root:not([data-theme="light"]) .ws-trigger .ws-project-info {
   display: inline;
   flex: initial;
 }
 
-:root[data-theme="codex"] .ws-trigger .ws-project-info {
+:root[data-theme="light"] .ws-trigger .ws-project-info {
   flex-direction: row;
   align-items: baseline;
   gap: 8px;
   overflow: hidden;
 }
 
-:root:not([data-theme="codex"]) .ws-trigger .ws-menu-name {
+:root:not([data-theme="light"]) .ws-trigger .ws-menu-name {
   display: inline;
 }
 
-:root[data-theme="codex"] .ws-trigger .ws-menu-name {
+:root[data-theme="light"] .ws-trigger .ws-menu-name {
   flex: 0 1 auto;
   font-weight: 500;
 }
 
-:root[data-theme="codex"] .ws-trigger .ws-project-path {
+:root[data-theme="light"] .ws-trigger .ws-project-path {
   flex: 0 2 auto;
   min-width: 0;
   max-width: 200px;
 }
 
-:root[data-theme="codex"] .ws-icon {
+:root[data-theme="light"] .ws-icon {
   display: inline-flex;
   align-items: center;
   flex: none;
   color: var(--muted);
 }
 
-:root[data-theme="codex"] .ws-trigger .mode-chevron {
+:root[data-theme="light"] .ws-trigger .mode-chevron {
   flex: none;
   color: var(--muted);
 }
@@ -3677,7 +3675,7 @@ button.ghost.accent {
   font-weight: 400;
 }
 
-:root[data-theme="codex"] .ws-branch-chip {
+:root[data-theme="light"] .ws-branch-chip {
   border-radius: 5px;
   padding: 3px 7px;
   line-height: 16px;
@@ -3685,18 +3683,18 @@ button.ghost.accent {
   max-width: min(220px, 100%);
 }
 
-:root[data-theme="codex"] .ws-branch-name {
+:root[data-theme="light"] .ws-branch-name {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
 
 @media (max-width: 640px) {
-  :root[data-theme="codex"] .ws-trigger .ws-project-path {
+  :root[data-theme="light"] .ws-trigger .ws-project-path {
     display: none;
   }
 
-  :root[data-theme="codex"] .ws-picker {
+  :root[data-theme="light"] .ws-picker {
     flex: 0 1 auto;
     max-width: 100%;
   }
@@ -3707,14 +3705,14 @@ button.ghost.accent {
 }
 
 /* Light mode: deepen branch label for stronger contrast on the warm chip. */
-:root[data-theme="codex"] .ws-branch-chip {
+:root[data-theme="light"] .ws-branch-chip {
   color: #52647b;
   border-color: #e2e7ee;
   background: #f3f6fa;
   font-weight: 500;
 }
 
-:root[data-theme="codex"] .ws-branch-chip.dirty {
+:root[data-theme="light"] .ws-branch-chip.dirty {
   color: #8b641f;
   background: #fff8e9;
   border-color: #efe1bd;
@@ -3747,7 +3745,7 @@ button.ghost.accent {
   z-index: 25;
 }
 
-:root[data-theme="codex"] .ws-menu {
+:root[data-theme="light"] .ws-menu {
   width: min(360px, calc(100vw - 48px));
 }
 
@@ -3833,6 +3831,193 @@ button.ghost.accent {
   position: relative;
 }
 
+/* 附件缩略图容器 */
+.composer-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+/* 小缩略图样式 */
+.attachment-thumb {
+  position: relative;
+  display: inline-block;
+  width: 60px;
+  height: 60px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--chip);
+  border: 1px solid var(--border);
+}
+
+.attachment-thumb.uploading {
+  opacity: 0.6;
+}
+
+.attachment-thumb.error {
+  border-color: var(--danger-btn-border);
+  background: rgba(224, 112, 112, 0.08);
+}
+
+/* 图片预览按钮 */
+.attachment-preview-btn {
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+
+.attachment-preview-btn img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.attachment-preview-btn:hover::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.1);
+}
+
+/* 上传中加载指示器 */
+.attachment-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.3);
+}
+
+.attachment-loading::after {
+  content: '⟳';
+  font-size: 20px;
+  color: #fff;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* 非图片文件标签 */
+.attachment-file-label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  font-size: 11px;
+  color: var(--muted);
+  text-align: center;
+  padding: 4px;
+}
+
+/* 删除按钮 */
+.attachment-remove {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 20px;
+  height: 20px;
+  border: 0;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.7);
+  color: #fff;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.attachment-thumb:hover .attachment-remove {
+  opacity: 1;
+}
+
+.attachment-remove:hover {
+  background: rgba(0, 0, 0, 0.85);
+}
+
+/* 重试按钮 */
+.attachment-action {
+  position: absolute;
+  bottom: 2px;
+  right: 2px;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 4px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 14px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.attachment-action:hover {
+  background: var(--accent-hover);
+}
+
+/* 图片预览 Lightbox */
+.attachment-lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: rgba(0, 0, 0, 0.9);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+  cursor: pointer;
+}
+
+.attachment-lightbox img {
+  max-width: 90%;
+  max-height: 90%;
+  object-fit: contain;
+  cursor: default;
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+}
+
+.attachment-lightbox-close {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  width: 40px;
+  height: 40px;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+  font-size: 24px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
+}
+
+.attachment-lightbox-close:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+
 .mention-menu {
   position: absolute;
   left: 0;
@@ -3869,7 +4054,7 @@ button.ghost.accent {
   background: var(--elevated-hover);
 }
 
-/* 输入框右键菜单 */
+/* 杈撳叆妗嗗彸閿彍鍗?*/
 .ctx-menu {
   position: fixed;
   z-index: 40;
@@ -3998,7 +4183,7 @@ button.ghost.accent {
   align-items: center;
 }
 
-/* 新版本提示条：固定在窗口右上角（标题栏下方），不打断主界面 */
+/* 鏂扮増鏈彁绀烘潯锛氬浐瀹氬湪绐楀彛鍙充笂瑙掞紙鏍囬鏍忎笅鏂癸級锛屼笉鎵撴柇涓荤晫闈?*/
 .update-banner {
   position: fixed;
   top: 50px;
@@ -4169,7 +4354,7 @@ button.ghost.accent {
   flex-shrink: 0;
 }
 
-/* 分阶段模型选择框样式 */
+/* 鍒嗛樁娈垫ā鍨嬮€夋嫨妗嗘牱寮?*/
 .model-picker-decomposer,
 .model-picker-react {
   position: relative;
@@ -4189,7 +4374,7 @@ button.ghost.accent {
   line-height: 1;
 }
 
-/* 设置界面的分阶段模型开关和说明 */
+/* 璁剧疆鐣岄潰鐨勫垎闃舵妯″瀷寮€鍏冲拰璇存槑 */
 .model-staged-toggle {
   padding: 12px;
   border-bottom: 1px solid var(--border);
@@ -4442,7 +4627,7 @@ button.ghost {
   font-weight: 400;
 }
 
-:root[data-theme="codex"] .terminal-ghost {
+:root[data-theme="light"] .terminal-ghost {
   color: #6a6660;
 }
 
@@ -4579,7 +4764,7 @@ button.ghost {
   gap: 8px;
 }
 
-/* 新的变更项样式 */
+/* 鏂扮殑鍙樻洿椤规牱寮?*/
 .change-item {
   display: flex;
   align-items: center;
@@ -4802,7 +4987,7 @@ button.ghost {
   gap: 8px;
 }
 
-/* (context panel removed — changes/plans now inline above composer) */
+/* (context panel removed 鈥?changes/plans now inline above composer) */
 
 .context-empty {
   padding: 20px 8px;
@@ -4890,7 +5075,7 @@ button.ghost {
   background: var(--scrim-strong);
   z-index: 50;
   /* Override the titlebar drag strip beneath so top-of-panel controls
-     (e.g. "← 返回工作区") stay clickable instead of being eaten by window drag. */
+     (e.g. "鈫?杩斿洖宸ヤ綔鍖?) stay clickable instead of being eaten by window drag. */
   -webkit-app-region: no-drag;
 }
 
@@ -5579,7 +5764,7 @@ button.ghost.tiny {
   color: var(--muted);
 }
 
-/* ── Model Tab ─────────────────────────────────────── */
+/* 鈹€鈹€ Model Tab 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€ */
 
 .settings-body-models {
   padding: 0;
@@ -6004,7 +6189,7 @@ button.ghost.tiny.danger:hover {
   background: rgba(224, 112, 112, 0.1);
 }
 
-/* ── TaskListBar (approved plan step driver) ── */
+/* 鈹€鈹€ TaskListBar (approved plan step driver) 鈹€鈹€ */
 .task-bar {
   max-width: 860px;
   width: calc(100% - 48px);
@@ -6072,7 +6257,7 @@ button.ghost.tiny.danger:hover {
   color: #6ed47a;
 }
 
-/* ── TaskRunPanel (verification summary + repair progress) ── */
+/* 鈹€鈹€ TaskRunPanel (verification summary + repair progress) 鈹€鈹€ */
 .task-run-panel {
   max-width: 860px;
   width: calc(100% - 48px);
@@ -6931,7 +7116,7 @@ button.ghost.tiny.danger:hover {
 }
 
 
-/* 压缩相关样式 */
+/* 鍘嬬缉鐩稿叧鏍峰紡 */
 .compressed {
   border-left: 3px solid var(--accent);
   background: color-mix(in srgb, var(--accent) 8%, transparent);
@@ -7078,7 +7263,7 @@ button.ghost.tiny.danger:hover {
   overflow: hidden;
   text-overflow: ellipsis;
 }
-/* ── Custom Confirm Dialog ────────────────────────────── */
+/* 鈹€鈹€ Custom Confirm Dialog 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€ */
 .custom-confirm-overlay {
   position: fixed;
   inset: 0;
@@ -7144,74 +7329,74 @@ button.ghost.tiny.danger:hover {
   opacity: 0.9;
 }
 
-/* ─── 浅色主题覆盖：危险确认条 ─── */
-:root[data-theme="codex"] .danger-confirm-bar {
+/* 鈹€鈹€鈹€ 娴呰壊涓婚瑕嗙洊锛氬嵄闄╃‘璁ゆ潯 鈹€鈹€鈹€ */
+:root[data-theme="light"] .danger-confirm-bar {
   border-color: rgba(200, 140, 40, 0.35);
   box-shadow: 0 4px 16px rgba(23, 32, 43, 0.1);
 }
 
-:root[data-theme="codex"] .danger-confirm-bar-command {
+:root[data-theme="light"] .danger-confirm-bar-command {
   border-color: rgba(200, 140, 40, 0.4);
   color: var(--text);
 }
 
-:root[data-theme="codex"] .danger-confirm-bar-desc {
+:root[data-theme="light"] .danger-confirm-bar-desc {
   color: var(--warn-text);
 }
 
-:root[data-theme="codex"] .danger-confirm-bar-allow {
+:root[data-theme="light"] .danger-confirm-bar-allow {
   border-color: #b07525;
   background: #b07525;
   color: #fff;
 }
 
-:root[data-theme="codex"] .danger-confirm-bar-allow:hover {
+:root[data-theme="light"] .danger-confirm-bar-allow:hover {
   border-color: #c7883b;
   background: #c7883b;
 }
 
-/* 浅色主题覆盖：终端危险标记 */
-:root[data-theme="codex"] .term-badge.pending {
+/* 娴呰壊涓婚瑕嗙洊锛氱粓绔嵄闄╂爣璁?*/
+:root[data-theme="light"] .term-badge.pending {
   background: rgba(200, 140, 40, 0.12);
   color: var(--warn-text);
 }
 
-:root[data-theme="codex"] .term-entry.pending_confirm {
+:root[data-theme="light"] .term-entry.pending_confirm {
   border-left-color: rgba(200, 140, 40, 0.5);
 }
 
-:root[data-theme="codex"] .terminal-statusbar-pending {
+:root[data-theme="light"] .terminal-statusbar-pending {
   color: var(--warn-text);
 }
 
-/* 浅色主题覆盖：会话删除按钮 */
-:root[data-theme="codex"] .session-delete-yes {
+/* 娴呰壊涓婚瑕嗙洊锛氫細璇濆垹闄ゆ寜閽?*/
+:root[data-theme="light"] .session-delete-yes {
   background: #fde8e8;
   color: var(--error);
 }
 
-:root[data-theme="codex"] .session-delete-yes:hover {
+:root[data-theme="light"] .session-delete-yes:hover {
   background: #f9d0d0;
   color: #9a2e2e;
 }
 
-/* 浅色主题覆盖：ask-user 卡片阴影 */
-:root[data-theme="codex"] .ask-user-card {
+/* 娴呰壊涓婚瑕嗙洊锛歛sk-user 鍗＄墖闃村奖 */
+:root[data-theme="light"] .ask-user-card {
   box-shadow: 0 4px 16px rgba(23, 32, 43, 0.1);
 }
 
-/* 浅色主题覆盖：工具提示阴影 */
-:root[data-theme="codex"] .important-snippets-tooltip {
+/* 娴呰壊涓婚瑕嗙洊锛氬伐鍏锋彁绀洪槾褰?*/
+:root[data-theme="light"] .important-snippets-tooltip {
   box-shadow: 0 2px 8px rgba(23, 32, 43, 0.1);
 }
 
 /* Light theme polish: use surfaces and hairline separators instead of stacked cards. */
-:root[data-theme="codex"] .app-titlebar {
+:root[data-theme="light"] .app-titlebar {
   background: var(--bg);
   border-bottom-color: rgba(36, 35, 33, 0.08);
 }
 
-:root[data-theme="codex"] .app-titlebar-mark {
+:root[data-theme="light"] .app-titlebar-mark {
   background: var(--hover);
   border: 1px solid var(--border);
   box-sizing: border-box;
@@ -7219,91 +7404,91 @@ button.ghost.tiny.danger:hover {
   box-shadow: none;
 }
 
-:root[data-theme="codex"] .app-theme-toggle {
+:root[data-theme="light"] .app-theme-toggle {
   background: transparent;
   border: 0;
   box-shadow: none;
 }
 
-:root[data-theme="codex"] .app-theme-btn {
+:root[data-theme="light"] .app-theme-btn {
   color: #89847c;
   background: transparent;
   box-shadow: none;
 }
 
-:root[data-theme="codex"] .app-theme-btn:hover {
+:root[data-theme="light"] .app-theme-btn:hover {
   color: var(--text);
   background: var(--hover);
 }
 
-:root[data-theme="codex"] .app-theme-btn.active {
+:root[data-theme="light"] .app-theme-btn.active {
   border: 1px solid var(--primary-border);
   color: var(--accent);
   background: transparent;
   box-shadow: inset 0 1px 0 var(--overlay-04), 0 1px 3px var(--input-inset);
 }
 
-:root[data-theme="codex"] .app-theme-btn.active:hover {
+:root[data-theme="light"] .app-theme-btn.active:hover {
   background: transparent;
   color: var(--accent);
 }
 
-:root[data-theme="codex"] .nav-rail {
+:root[data-theme="light"] .nav-rail {
   --hover: #eaeaea;
   --hover-strong: #e2e2e2;
   background: var(--rail);
   border-right-color: var(--border);
 }
 
-:root[data-theme="codex"] .nav-item {
+:root[data-theme="light"] .nav-item {
   color: #444444;
 }
 
-:root[data-theme="codex"] .nav-item:hover {
+:root[data-theme="light"] .nav-item:hover {
   background: rgba(36, 35, 33, 0.055);
 }
 
-:root[data-theme="codex"] .nav-item.primary,
-:root[data-theme="codex"] .nav-item.primary:hover {
+:root[data-theme="light"] .nav-item.primary,
+:root[data-theme="light"] .nav-item.primary:hover {
   background: transparent;
   color: var(--text);
 }
 
-:root[data-theme="codex"] .nav-rail:not(.collapsed) .nav-item.primary::before {
+:root[data-theme="light"] .nav-rail:not(.collapsed) .nav-item.primary::before {
   content: none;
 }
 
-:root[data-theme="codex"] .nav-primary {
+:root[data-theme="light"] .nav-primary {
   background: var(--text);
   border-color: var(--text);
   color: var(--bg-alt);
   box-shadow: 0 1px 2px rgba(36, 35, 33, 0.12);
 }
 
-:root[data-theme="codex"] .nav-primary:hover {
+:root[data-theme="light"] .nav-primary:hover {
   background: #383735;
   border-color: #383735;
 }
 
-:root[data-theme="codex"] .nav-secondary {
+:root[data-theme="light"] .nav-secondary {
   background: transparent;
 }
 
-/* 浅色侧栏：轻量分组，中性灰突出当前项目与会话。 */
-:root[data-theme="codex"] .project-header > .project-row { padding-left: 2px; }
-:root[data-theme="codex"] .project-path { font-size: 11px; }
-:root[data-theme="codex"] .session-status-icon {
+/* 娴呰壊渚ф爮锛氳交閲忓垎缁勶紝涓€х伆绐佸嚭褰撳墠椤圭洰涓庝細璇濄€?*/
+:root[data-theme="light"] .project-header > .project-row { padding-left: 2px; }
+:root[data-theme="light"] .project-path { font-size: 11px; }
+:root[data-theme="light"] .session-status-icon {
   position: absolute;
   left: 8px;
   top: 50%;
   transform: translateY(-50%);
   margin-left: 0;
 }
-:root[data-theme="codex"] .session-status-icon.running {
+:root[data-theme="light"] .session-status-icon.running {
   top: calc(50% - 6px);
   transform: none;
 }
-:root[data-theme="codex"] .session-row {
+:root[data-theme="light"] .session-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
@@ -7312,167 +7497,167 @@ button.ghost.tiny.danger:hover {
   padding: 7px 30px 7px 26px;
   color: color-mix(in srgb, var(--text) 76%, var(--muted));
 }
-:root[data-theme="codex"] .session-time {
+:root[data-theme="light"] .session-time {
   font-size: 10px;
   white-space: nowrap;
 }
-:root[data-theme="codex"] .project-block,
-:root[data-theme="codex"] .project-block.current {
+:root[data-theme="light"] .project-block,
+:root[data-theme="light"] .project-block.current {
   margin-bottom: 2px;
   padding: 3px 4px;
   background: transparent;
   border: 0;
 }
 
-:root[data-theme="codex"] .project-header {
+:root[data-theme="light"] .project-header {
   min-height: 36px;
   margin-bottom: 2px;
   background: transparent;
   transition: background 0.15s ease;
 }
 
-:root[data-theme="codex"] .project-header:hover,
-:root[data-theme="codex"] .project-header:focus-within {
+:root[data-theme="light"] .project-header:hover,
+:root[data-theme="light"] .project-header:focus-within {
   background: var(--hover);
 }
 
-:root[data-theme="codex"] .project-header:has(.project-row[aria-current="true"]) {
+:root[data-theme="light"] .project-header:has(.project-row[aria-current="true"]) {
   background: var(--session-active);
 }
 
-:root[data-theme="codex"] .project-header > .project-row {
+:root[data-theme="light"] .project-header > .project-row {
   padding-top: 7px;
   padding-bottom: 7px;
   background: transparent;
 }
 
-:root[data-theme="codex"] .project-name {
+:root[data-theme="light"] .project-name {
   color: #3c3c3c;
   font-size: 13px;
   font-weight: 500;
 }
 
-:root[data-theme="codex"] .project-path {
+:root[data-theme="light"] .project-path {
   color: var(--muted);
 }
 
-:root[data-theme="codex"] .project-chevron,
-:root[data-theme="codex"] .project-view-btn {
+:root[data-theme="light"] .project-chevron,
+:root[data-theme="light"] .project-view-btn {
   color: #858585;
 }
 
-:root[data-theme="codex"] .project-view-btn:not(.active) {
+:root[data-theme="light"] .project-view-btn:not(.active) {
   opacity: 0.75;
 }
 
-:root[data-theme="codex"] .project-view-btn.active {
+:root[data-theme="light"] .project-view-btn.active {
   background: transparent;
   color: var(--text);
 }
 
-:root[data-theme="codex"] .project-chevron:hover,
-:root[data-theme="codex"] .project-view-btn:hover {
+:root[data-theme="light"] .project-chevron:hover,
+:root[data-theme="light"] .project-view-btn:hover {
   background: var(--hover-strong);
   color: var(--text);
 }
 
-:root[data-theme="codex"] .session-list {
+:root[data-theme="light"] .session-list {
   padding-left: 20px;
   gap: 2px;
 }
 
-:root[data-theme="codex"] .session-wrap {
+:root[data-theme="light"] .session-wrap {
   border-radius: 6px;
   transition: background 0.15s ease;
 }
 
-:root[data-theme="codex"] .session-wrap:hover,
-:root[data-theme="codex"] .file-tree-row:hover {
+:root[data-theme="light"] .session-wrap:hover,
+:root[data-theme="light"] .file-tree-row:hover {
   background: var(--hover);
 }
 
-:root[data-theme="codex"] .session-wrap.active {
+:root[data-theme="light"] .session-wrap.active {
   background: var(--session-active);
   box-shadow: none;
 }
 
-:root[data-theme="codex"] .session-wrap.active::before {
+:root[data-theme="light"] .session-wrap.active::before {
   content: none;
 }
 
-:root[data-theme="codex"] .session-wrap.active:hover {
+:root[data-theme="light"] .session-wrap.active:hover {
   background: var(--session-active-hover);
 }
 
-:root[data-theme="codex"] .session-wrap .session-row {
+:root[data-theme="light"] .session-wrap .session-row {
   min-height: 34px;
   padding: 7px 30px 7px 26px;
   background: transparent;
   color: #4c4c4c;
 }
 
-:root[data-theme="codex"] .session-wrap.active .session-title {
+:root[data-theme="light"] .session-wrap.active .session-title {
   color: var(--text);
   font-weight: 500;
 }
 
-:root[data-theme="codex"] .session-time {
+:root[data-theme="light"] .session-time {
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
 
-:root[data-theme="codex"] .session-wrap.active .session-time {
+:root[data-theme="light"] .session-wrap.active .session-time {
   color: #737373;
 }
 
-/* 删除确认出现时隐藏时间，为按钮保留空间且不改变标题宽度。 */
-:root[data-theme="codex"] .session-wrap:has(.session-delete-confirm) .session-time {
+/* 鍒犻櫎纭鍑虹幇鏃堕殣钘忔椂闂达紝涓烘寜閽繚鐣欑┖闂翠笖涓嶆敼鍙樻爣棰樺搴︺€?*/
+:root[data-theme="light"] .session-wrap:has(.session-delete-confirm) .session-time {
   visibility: hidden;
 }
 
-:root[data-theme="codex"] .session-load-more {
+:root[data-theme="light"] .session-load-more {
   margin: 2px 0 4px 16px;
   color: var(--muted);
 }
 
-:root[data-theme="codex"] .session-load-more:hover {
+:root[data-theme="light"] .session-load-more:hover {
   background: var(--hover);
   color: var(--text);
 }
 
-:root[data-theme="codex"] .project-chevron:focus-visible,
-:root[data-theme="codex"] .project-row:focus-visible,
-:root[data-theme="codex"] .project-view-btn:focus-visible,
-:root[data-theme="codex"] .project-remove:focus-visible,
-:root[data-theme="codex"] .session-row:focus-visible,
-:root[data-theme="codex"] .session-delete:focus-visible,
-:root[data-theme="codex"] .session-delete-confirm button:focus-visible,
-:root[data-theme="codex"] .session-load-more:focus-visible {
+:root[data-theme="light"] .project-chevron:focus-visible,
+:root[data-theme="light"] .project-row:focus-visible,
+:root[data-theme="light"] .project-view-btn:focus-visible,
+:root[data-theme="light"] .project-remove:focus-visible,
+:root[data-theme="light"] .session-row:focus-visible,
+:root[data-theme="light"] .session-delete:focus-visible,
+:root[data-theme="light"] .session-delete-confirm button:focus-visible,
+:root[data-theme="light"] .session-load-more:focus-visible {
   outline: 2px solid #939393;
   outline-offset: -2px;
 }
 
 
-:root[data-theme="codex"] .agent-body.with-editor .agent-chat {
+:root[data-theme="light"] .agent-body.with-editor .agent-chat {
   border-left-color: rgba(36, 35, 33, 0.1);
 }
 
-:root[data-theme="codex"] .chat-log-scroller {
+:root[data-theme="light"] .chat-log-scroller {
   gap: 12px;
 }
 
-:root[data-theme="codex"] .msg.user .msg-bubble {
+:root[data-theme="light"] .msg.user .msg-bubble {
   background: var(--user-bubble);
   border-color: transparent;
   box-shadow: none;
 }
 
-:root[data-theme="codex"] .chat-log-status {
+:root[data-theme="light"] .chat-log-status {
   background: #f7f7f7;
   border-color: var(--border);
 }
 
-:root[data-theme="codex"] .tool-card {
+:root[data-theme="light"] .tool-card {
   position: relative;
   background: #f8f9fa;
   border: 1px solid var(--border);
@@ -7481,31 +7666,31 @@ button.ghost.tiny.danger:hover {
   transition: border-color 0.15s ease, background 0.15s ease;
 }
 
-:root[data-theme="codex"] .tool-card:hover {
+:root[data-theme="light"] .tool-card:hover {
   border-color: #d4d4d4;
   background: #fafafa;
   box-shadow: none;
 }
 
-:root[data-theme="codex"] .tool-card.ok {
+:root[data-theme="light"] .tool-card.ok {
   border-left: 1px solid var(--border);
 }
 
-:root[data-theme="codex"] .tool-card.err,
-:root[data-theme="codex"] .tool-card.error {
+:root[data-theme="light"] .tool-card.err,
+:root[data-theme="light"] .tool-card.error {
   border-color: #dca6a1;
 }
 
-:root[data-theme="codex"] .tool-card.running {
+:root[data-theme="light"] .tool-card.running {
   border-left: 1px solid #b5b5b5;
   background: #fafafa;
 }
 
-:root[data-theme="codex"] .tool-card-head:hover {
+:root[data-theme="light"] .tool-card-head:hover {
   background: transparent;
 }
 
-:root[data-theme="codex"] .tool-card-head {
+:root[data-theme="light"] .tool-card-head {
   min-height: 29px;
   padding: 4px 9px;
   gap: 7px;
@@ -7513,7 +7698,7 @@ button.ghost.tiny.danger:hover {
   color: var(--text);
 }
 
-:root[data-theme="codex"] .tool-card-icon {
+:root[data-theme="light"] .tool-card-icon {
   width: 14px;
   height: 14px;
   display: inline-flex;
@@ -7524,15 +7709,15 @@ button.ghost.tiny.danger:hover {
   font-size: 11px;
 }
 
-:root[data-theme="codex"] .tool-card-icon.ok {
+:root[data-theme="light"] .tool-card-icon.ok {
   color: var(--success);
 }
 
-:root[data-theme="codex"] .tool-card-icon.err {
+:root[data-theme="light"] .tool-card-icon.err {
   color: var(--error);
 }
 
-:root[data-theme="codex"] .tool-card-label {
+:root[data-theme="light"] .tool-card-label {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -7543,31 +7728,31 @@ button.ghost.tiny.danger:hover {
   line-height: 1.35;
 }
 
-:root[data-theme="codex"] .tool-verb {
+:root[data-theme="light"] .tool-verb {
   color: var(--text);
   font-weight: 650;
 }
 
-:root[data-theme="codex"] .tool-path,
-:root[data-theme="codex"] .tool-card-preview {
+:root[data-theme="light"] .tool-path,
+:root[data-theme="light"] .tool-card-preview {
   color: var(--muted);
   font-weight: 400;
 }
 
-:root[data-theme="codex"] .tool-card-preview {
+:root[data-theme="light"] .tool-card-preview {
   font-size: 11px;
   opacity: 1;
 }
 
-:root[data-theme="codex"] .tool-read-params {
+:root[data-theme="light"] .tool-read-params {
   margin-left: 8px;
   color: var(--muted);
   font-size: 10px;
   font-weight: 400;
 }
 
-:root[data-theme="codex"] .tool-status,
-:root[data-theme="codex"] .tool-exit {
+:root[data-theme="light"] .tool-status,
+:root[data-theme="light"] .tool-exit {
   border: 1px solid transparent;
   padding: 1px 5px;
   border-radius: 4px;
@@ -7576,39 +7761,39 @@ button.ghost.tiny.danger:hover {
   white-space: nowrap;
 }
 
-:root[data-theme="codex"] .tool-status.done,
-:root[data-theme="codex"] .tool-exit.ok {
+:root[data-theme="light"] .tool-status.done,
+:root[data-theme="light"] .tool-exit.ok {
   background: rgba(61, 186, 122, 0.1);
   border-color: transparent;
   color: var(--success);
 }
 
-:root[data-theme="codex"] .tool-status.running {
+:root[data-theme="light"] .tool-status.running {
   background: #f3f3f3;
   border-color: transparent;
   color: var(--text);
 }
 
-:root[data-theme="codex"] .tool-status.error,
-:root[data-theme="codex"] .tool-exit.err {
+:root[data-theme="light"] .tool-status.error,
+:root[data-theme="light"] .tool-exit.err {
   background: #f9e6e3;
   border-color: #e5bbb6;
   color: #a33f3b;
 }
 
-:root[data-theme="codex"] .tool-status.skipped {
+:root[data-theme="light"] .tool-status.skipped {
   background: #f3f3f3;
   border-color: transparent;
   color: var(--muted);
 }
 
-:root[data-theme="codex"] .activity-chev {
+:root[data-theme="light"] .activity-chev {
   flex: 0 0 12px;
   color: #9a968e;
   font-size: 10px;
 }
 
-:root[data-theme="codex"] .tool-card-body {
+:root[data-theme="light"] .tool-card-body {
   margin: 0 9px 7px 30px;
   padding: 7px 9px;
   border: 1px solid rgba(36, 35, 33, 0.09);
@@ -7618,29 +7803,29 @@ button.ghost.tiny.danger:hover {
   overflow-wrap: anywhere;
 }
 
-:root[data-theme="codex"] .tool-card-result-label {
+:root[data-theme="light"] .tool-card-result-label {
   color: #77736c;
   font-size: 10px;
 }
 
-:root[data-theme="codex"] .tool-card-copy-btn {
+:root[data-theme="light"] .tool-card-copy-btn {
   background: #e7e4de;
   color: #77736c;
 }
 
-:root[data-theme="codex"] .tool-card-copy-btn:hover {
+:root[data-theme="light"] .tool-card-copy-btn:hover {
   background: #dcd9d2;
   color: var(--text);
 }
 
-:root[data-theme="codex"] .pending-tools {
+:root[data-theme="light"] .pending-tools {
   gap: 3px;
 }
 
 
 /* Live tool calls read as activity rows; expanded output remains a separate detail surface. */
-:root[data-theme="codex"] .thinking-block,
-:root[data-theme="codex"] .tool-card.live {
+:root[data-theme="light"] .thinking-block,
+:root[data-theme="light"] .tool-card.live {
   --tool-row-icon: var(--muted);
 
   border: 0;
@@ -7651,16 +7836,16 @@ button.ghost.tiny.danger:hover {
   animation: none;
 }
 
-:root[data-theme="codex"] .tool-card.live:hover,
-:root[data-theme="codex"] .tool-card.live.running,
-:root[data-theme="codex"] .tool-card.live.error {
+:root[data-theme="light"] .tool-card.live:hover,
+:root[data-theme="light"] .tool-card.live.running,
+:root[data-theme="light"] .tool-card.live.error {
   border: 0;
   background: transparent;
   box-shadow: none;
 }
 
-:root[data-theme="codex"] .thinking-head,
-:root[data-theme="codex"] .tool-card.live .tool-card-head {
+:root[data-theme="light"] .thinking-head,
+:root[data-theme="light"] .tool-card.live .tool-card-head {
   min-width: 0;
   min-height: 34px;
   padding: 5px 6px;
@@ -7672,13 +7857,13 @@ button.ghost.tiny.danger:hover {
   line-height: 24px;
 }
 
-:root[data-theme="codex"] .thinking-head:hover,
-:root[data-theme="codex"] .tool-card.live .tool-card-head:hover {
+:root[data-theme="light"] .thinking-head:hover,
+:root[data-theme="light"] .tool-card.live .tool-card-head:hover {
   background: var(--surface-5);
 }
 
-:root[data-theme="codex"] .thinking-block .thinking-icon,
-:root[data-theme="codex"] .tool-card.live .tool-card-icon {
+:root[data-theme="light"] .thinking-block .thinking-icon,
+:root[data-theme="light"] .tool-card.live .tool-card-icon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -7689,20 +7874,20 @@ button.ghost.tiny.danger:hover {
 }
 
 
-:root[data-theme="codex"] .thinking-block .thinking-label,
-:root[data-theme="codex"] .tool-card.live .tool-verb {
+:root[data-theme="light"] .thinking-block .thinking-label,
+:root[data-theme="light"] .tool-card.live .tool-verb {
   flex: none;
   color: var(--muted);
   font-weight: 400;
   white-space: nowrap;
 }
 
-:root[data-theme="codex"] .tool-card.live .tool-status {
+:root[data-theme="light"] .tool-card.live .tool-status {
   flex: none;
   margin-left: 8px;
 }
 
-:root[data-theme="codex"] .tool-card.live .tool-card-label {
+:root[data-theme="light"] .tool-card.live .tool-card-label {
   flex: 0 1 auto;
   min-width: 0;
   overflow: visible;
@@ -7714,43 +7899,43 @@ button.ghost.tiny.danger:hover {
   line-height: 24px;
 }
 
-:root[data-theme="codex"] .tool-card.live .tool-path {
+:root[data-theme="light"] .tool-card.live .tool-path {
   color: var(--text);
   font-weight: 400;
 }
 
-:root[data-theme="codex"] .tool-card.live .tool-read-params {
+:root[data-theme="light"] .tool-card.live .tool-read-params {
   margin-left: 8px;
   color: var(--muted);
   font-size: 10px;
   font-weight: 400;
 }
 
-:root[data-theme="codex"] .tool-card.live .tool-diff-stat {
+:root[data-theme="light"] .tool-card.live .tool-diff-stat {
   flex: none;
   white-space: nowrap;
   font-size: 11px;
 }
 
-:root[data-theme="codex"] .thinking-head .activity-chev,
-:root[data-theme="codex"] .tool-card.live .activity-chev {
+:root[data-theme="light"] .thinking-head .activity-chev,
+:root[data-theme="light"] .tool-card.live .activity-chev {
   flex: none;
   width: 12px;
   color: var(--muted);
   opacity: 0;
 }
 
-:root[data-theme="codex"] .thinking-head:hover .activity-chev,
-:root[data-theme="codex"] .thinking-head:focus-visible .activity-chev,
-:root[data-theme="codex"] .thinking-head[aria-expanded="true"] .activity-chev,
-:root[data-theme="codex"] .tool-card.live .tool-card-head:hover .activity-chev,
-:root[data-theme="codex"] .tool-card.live .tool-card-head:focus-visible .activity-chev,
-:root[data-theme="codex"] .tool-card.live .tool-card-head[aria-expanded="true"] .activity-chev {
+:root[data-theme="light"] .thinking-head:hover .activity-chev,
+:root[data-theme="light"] .thinking-head:focus-visible .activity-chev,
+:root[data-theme="light"] .thinking-head[aria-expanded="true"] .activity-chev,
+:root[data-theme="light"] .tool-card.live .tool-card-head:hover .activity-chev,
+:root[data-theme="light"] .tool-card.live .tool-card-head:focus-visible .activity-chev,
+:root[data-theme="light"] .tool-card.live .tool-card-head[aria-expanded="true"] .activity-chev {
   opacity: 1;
 }
 
-:root[data-theme="codex"] .thinking-body,
-:root[data-theme="codex"] .tool-card.live .tool-card-body {
+:root[data-theme="light"] .thinking-body,
+:root[data-theme="light"] .tool-card.live .tool-card-body {
   margin: 0 6px 6px 33px;
   padding: 8px 10px;
   border: 1px solid var(--border);
@@ -7759,16 +7944,16 @@ button.ghost.tiny.danger:hover {
   overflow-wrap: anywhere;
 }
 
-:root[data-theme="codex"] .thinking-block.streaming .thinking-label::after {
+:root[data-theme="light"] .thinking-block.streaming .thinking-label::after {
   background: currentColor;
 }
 
 @media (max-width: 640px) {
-  :root[data-theme="codex"] .thinking-head .activity-chev,
-  :root[data-theme="codex"] .tool-card.live .activity-chev { opacity: 1; }
+  :root[data-theme="light"] .thinking-head .activity-chev,
+  :root[data-theme="light"] .tool-card.live .activity-chev { opacity: 1; }
 }
 
-:root[data-theme="codex"] .composer {
+:root[data-theme="light"] .composer {
   background: var(--panel);
   border-color: #e8e8e8;
 
@@ -7777,77 +7962,77 @@ button.ghost.tiny.danger:hover {
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
-:root[data-theme="codex"] .composer:focus-within {
+:root[data-theme="light"] .composer:focus-within {
   border-color: #cfcfcf;
   box-shadow: var(--shadow-composer);
 }
 
-:root[data-theme="codex"] .ws-trigger:hover {
+:root[data-theme="light"] .ws-trigger:hover {
   background: var(--hover);
 }
 
-:root[data-theme="codex"] .composer textarea::placeholder {
+:root[data-theme="light"] .composer textarea::placeholder {
   color: #a0a0a0;
   opacity: 1;
 }
 
-:root[data-theme="codex"] .composer-bar {
+:root[data-theme="light"] .composer-bar {
   flex-wrap: wrap;
   row-gap: 10px;
 }
 
-:root[data-theme="codex"] .composer-settings-row {
+:root[data-theme="light"] .composer-settings-row {
   min-width: 0;
   max-width: 100%;
   flex-wrap: wrap;
 }
 
-:root[data-theme="codex"] .composer :is(.model-chip, .mode-trigger, .upload-trigger) {
+:root[data-theme="light"] .composer :is(.model-chip, .mode-trigger, .upload-trigger) {
   background: transparent;
   border-color: transparent;
   color: #555555;
   box-shadow: none;
 }
 
-:root[data-theme="codex"] .composer :is(.model-chip, .mode-trigger, .upload-trigger):hover:not(:disabled) {
+:root[data-theme="light"] .composer :is(.model-chip, .mode-trigger, .upload-trigger):hover:not(:disabled) {
   background: #f3f3f3;
   border-color: transparent;
 }
 
-:root[data-theme="codex"] .composer .model-chip-decomposer {
+:root[data-theme="light"] .composer .model-chip-decomposer {
   border-left-width: 1px;
   border-left-color: transparent;
 }
 
-:root[data-theme="codex"] .composer .model-chip-react {
+:root[data-theme="light"] .composer .model-chip-react {
   border-left-width: 1px;
   border-left-color: transparent;
 }
 
-:root[data-theme="codex"] :is(.composer button, .tool-card-head, .decompose-head):focus-visible {
+:root[data-theme="light"] :is(.composer button, .tool-card-head, .decompose-head):focus-visible {
   outline: 2px solid #939393;
   outline-offset: 3px;
 }
 
-:root[data-theme="codex"] .decompose-card {
+:root[data-theme="light"] .decompose-card {
   border-color: var(--border);
   border-radius: 12px;
 }
 
-:root[data-theme="codex"] .decompose-head {
+:root[data-theme="light"] .decompose-head {
   padding: 10px 12px;
   background: #fafafa;
 }
 
-:root[data-theme="codex"] .decompose-head:hover {
+:root[data-theme="light"] .decompose-head:hover {
   background: #f3f3f3;
 }
 
-:root[data-theme="codex"] :is(.decompose-icon, .decompose-title, .decompose-step-id, .decompose-need-id) {
+:root[data-theme="light"] :is(.decompose-icon, .decompose-title, .decompose-step-id, .decompose-need-id) {
   color: #555555;
 }
 
-:root[data-theme="codex"] .decompose-body {
+:root[data-theme="light"] .decompose-body {
   padding: 12px;
   gap: 12px;
   line-height: 1.65;
@@ -7855,67 +8040,67 @@ button.ghost.tiny.danger:hover {
   scrollbar-gutter: stable;
 }
 
-:root[data-theme="codex"] .decompose-steps {
+:root[data-theme="light"] .decompose-steps {
   gap: 8px;
 }
 
-:root[data-theme="codex"] .decompose-step {
+:root[data-theme="light"] .decompose-step {
   padding: 9px 10px;
   border-color: #ededed;
   border-radius: 8px;
   background: #fafafa;
 }
 
-:root[data-theme="codex"] .decompose-step-head {
+:root[data-theme="light"] .decompose-step-head {
   column-gap: 10px;
   row-gap: 4px;
 }
 
-:root[data-theme="codex"] :is(.decompose-step-desc, .decompose-intent, .decompose-task-head) {
+:root[data-theme="light"] :is(.decompose-step-desc, .decompose-intent, .decompose-task-head) {
   min-width: 0;
   overflow-wrap: anywhere;
 }
 
-:root[data-theme="codex"] .decompose-step-deps {
+:root[data-theme="light"] .decompose-step-deps {
   flex-shrink: 1;
   overflow-wrap: anywhere;
 }
 
-:root[data-theme="codex"] .decompose-task-head {
+:root[data-theme="light"] .decompose-task-head {
   flex-wrap: wrap;
 }
 
-:root[data-theme="codex"] .decompose-card.fallback {
+:root[data-theme="light"] .decompose-card.fallback {
   border-color: #eadab5;
 }
 
-:root[data-theme="codex"] .fallback .decompose-head {
+:root[data-theme="light"] .fallback .decompose-head {
   background: #fff8e9;
 }
 
-/* 浅色主题保留配色，首页与输入框沿用共用布局。 */
-:root[data-theme="codex"] .agent-main {
+/* 娴呰壊涓婚淇濈暀閰嶈壊锛岄椤典笌杈撳叆妗嗘部鐢ㄥ叡鐢ㄥ竷灞€銆?*/
+:root[data-theme="light"] .agent-main {
   background: #ffffff;
   border-radius: 18px 0 0 0;
 }
 
-:root[data-theme="codex"] .app-titlebar {
+:root[data-theme="light"] .app-titlebar {
   background: var(--rail);
 }
 
 
-:root[data-theme="codex"] .hero-watermark {
+:root[data-theme="light"] .hero-watermark {
   display: none;
 }
 
-:root[data-theme="codex"] .hero-empty h1 {
+:root[data-theme="light"] .hero-empty h1 {
   font-size: clamp(24px, 2.6vw, 36px);
   font-weight: 500;
   letter-spacing: -0.025em;
   margin-bottom: 8px;
 }
 
-:root[data-theme="codex"] .hero-sub {
+:root[data-theme="light"] .hero-sub {
   font-size: 13px;
   color: #929292;
   max-width: 100%;
@@ -7923,137 +8108,137 @@ button.ghost.tiny.danger:hover {
 }
 
 
-:root[data-theme="codex"] .composer-bar .send {
+:root[data-theme="light"] .composer-bar .send {
   background: #292929;
 }
 
-:root[data-theme="codex"] .composer-bar .send:disabled {
+:root[data-theme="light"] .composer-bar .send:disabled {
   background: #929292;
   opacity: 1;
 }
 
-:root[data-theme="codex"] .composer .model-chip {
+:root[data-theme="light"] .composer .model-chip {
   max-width: 100%;
   min-width: 0;
   white-space: normal;
   overflow-wrap: anywhere;
 }
 
-:root[data-theme="codex"] .composer :is(.model-picker, .model-picker-decomposer, .model-picker-react) {
+:root[data-theme="light"] .composer :is(.model-picker, .model-picker-decomposer, .model-picker-react) {
   min-width: 0;
   max-width: 100%;
 }
 
-:root[data-theme="codex"] .composer-actions {
+:root[data-theme="light"] .composer-actions {
   flex-shrink: 0;
 }
 
 @media (max-width: 760px) {
 
-  :root[data-theme="codex"] .composer-bar {
+  :root[data-theme="light"] .composer-bar {
     gap: 4px;
   }
 
 }
 
-:root[data-theme="codex"] :is(.fallback .decompose-icon, .fallback .decompose-title, .decompose-constraints, .decompose-fallback-note) {
+:root[data-theme="light"] :is(.fallback .decompose-icon, .fallback .decompose-title, .decompose-constraints, .decompose-fallback-note) {
   color: #8b641f;
 }
 
-:root[data-theme="codex"] .composer-bar .send {
+:root[data-theme="light"] .composer-bar .send {
   background: #292929;
   flex-shrink: 0;
 }
 
-:root[data-theme="codex"] .composer-bar .send:disabled {
+:root[data-theme="light"] .composer-bar .send:disabled {
   background: #929292;
   color: #ffffff;
   opacity: 1;
 }
 
-:root[data-theme="codex"] .composer-bar .send:hover:not(:disabled) {
+:root[data-theme="light"] .composer-bar .send:hover:not(:disabled) {
   background: var(--accent);
 }
 
-:root[data-theme="codex"] .editor-pane {
+:root[data-theme="light"] .editor-pane {
   background: var(--editor-bg);
 }
 
-:root[data-theme="codex"] .editor-pane-head {
+:root[data-theme="light"] .editor-pane-head {
   background: var(--editor-head);
   border-bottom-color: rgba(36, 35, 33, 0.09);
 }
 
-:root[data-theme="codex"] .hero-watermark {
+:root[data-theme="light"] .hero-watermark {
   color: rgba(36, 35, 33, 0.035);
 }
 
-:root[data-theme="codex"] .settings-overlay {
+:root[data-theme="light"] .settings-overlay {
   background: rgba(36, 35, 33, 0.28);
 }
 
-:root[data-theme="codex"] .custom-confirm-dialog {
+:root[data-theme="light"] .custom-confirm-dialog {
   box-shadow: 0 12px 32px rgba(36, 35, 33, 0.18);
 }
 
 /* Error banners need their own contrast in the light theme. The base colors
    are intentionally optimized for the dark canvas and become too pale here. */
-:root[data-theme="codex"] .error-banner {
+:root[data-theme="light"] .error-banner {
   border-color: #e1aaa5;
   background: #fff1ef;
   color: #4b2928;
 }
 
-:root[data-theme="codex"] .error-banner-icon {
+:root[data-theme="light"] .error-banner-icon {
   color: #a33f3b;
 }
 
-:root[data-theme="codex"] .error-banner-body strong {
+:root[data-theme="light"] .error-banner-body strong {
   color: #7f2927;
 }
 
-:root[data-theme="codex"] .error-banner-body p {
+:root[data-theme="light"] .error-banner-body p {
   color: #4b2928;
 }
 
-:root[data-theme="codex"] .error-detail {
+:root[data-theme="light"] .error-detail {
   border: 1px solid #edc8c3;
   background: #fbe8e5;
   color: #633936;
 }
 
-:root[data-theme="codex"] .error-detail-toggle {
+:root[data-theme="light"] .error-detail-toggle {
   color: #8e403b;
 }
 
-:root[data-theme="codex"] .error-detail-toggle:hover {
+:root[data-theme="light"] .error-detail-toggle:hover {
   color: #68211f;
 }
 
-:root[data-theme="codex"] .error-banner-actions .ghost {
+:root[data-theme="light"] .error-banner-actions .ghost {
   border-color: #d7aaa5;
   background: #fff9f8;
   color: #71312e;
 }
 
-:root[data-theme="codex"] .error-banner-actions .ghost:hover {
+:root[data-theme="light"] .error-banner-actions .ghost:hover {
   background: #fbe4e1;
   border-color: #c98d87;
   color: #5e211e;
 }
 
-:root[data-theme="codex"] .error-banner-actions .ghost.accent {
+:root[data-theme="light"] .error-banner-actions .ghost.accent {
   border-color: #a33f3b;
   background: #a33f3b;
   color: #fff;
 }
 
-:root[data-theme="codex"] .error-banner-actions .ghost.accent:hover {
+:root[data-theme="light"] .error-banner-actions .ghost.accent:hover {
   border-color: #8d302d;
   background: #8d302d;
 }
 
-/* ── i18n：标题栏界面语言选择器 ─────────────────────────────────────────── */
+/* 鈹€鈹€ i18n锛氭爣棰樻爮鐣岄潰璇█閫夋嫨鍣?鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€ */
 .app-locale-select {
   height: 24px;
   margin-right: 8px;
@@ -8067,6 +8252,6 @@ button.ghost.tiny.danger:hover {
   cursor: pointer;
 }
 
-:root[data-theme="codex"] .app-locale-select {
+:root[data-theme="light"] .app-locale-select {
   border-color: rgba(0, 0, 0, 0.18);
 }

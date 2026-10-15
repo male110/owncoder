@@ -100,11 +100,11 @@ export function TitleBar({ title, gitSummary, gitDirty }: Props) {
           </button>
           <button
             type="button"
-            className={`app-theme-btn${theme === "codex" ? " active" : ""}`}
+            className={`app-theme-btn${theme === "light" ? " active" : ""}`}
             title={t("浅色主题")}
             aria-label={t("切换到浅色主题")}
-            aria-pressed={theme === "codex"}
-            onClick={() => selectTheme("codex")}
+            aria-pressed={theme === "light"}
+            onClick={() => selectTheme("light")}
           >
             <SunIcon />
           </button>

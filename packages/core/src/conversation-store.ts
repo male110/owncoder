@@ -44,7 +44,7 @@ const locks = new Map<string, Promise<unknown>>();
  * (full-session transcript + tool payloads) and single turns grew past 300MB. */
 const MAX_FINAL_JSON_CHARS = 1_500_000;
 const MAX_ASSISTANT_CONTENT_CHARS = 200_000;
-/** Durable event payloads must stay pageable. Like Cursor transcripts, we
+/** Durable event payloads must stay pageable. Durable transcripts remain
  * persist tool call metadata but not tool result bodies; other string fields
  * stay bounded. */
 const MAX_EVENT_PAYLOAD_CHARS = 250_000;
@@ -230,7 +230,7 @@ function slimStringFields(value: unknown, max: number, depth = 0): unknown {
 
 /**
  * Bound a single durable turn-event payload before it hits SQLite.
- * Peer pattern (Cursor transcripts): persist tool call metadata, not tool
+ * Peer persistence pattern: persist tool call metadata, not tool
  * result bodies. Keeps ids/names/ok for UI reconstruction; drops outputs /
  * terminal streams that can balloon the conversation DB.
  */

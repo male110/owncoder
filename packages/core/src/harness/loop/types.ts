@@ -397,7 +397,7 @@ export interface AgentLoopOpts {
 
   /**
    * Tool whitelist — when set, only tools whose `function.name` is in this list
-   * are available to the loop. This is the opencode-style permission sandbox:
+   * are available to the loop. This is the role-based permission sandbox:
    * the role declares what it may use, and everything else is denied at the
    * mechanism level, not merely asked-for in the prompt.
    */

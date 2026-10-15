@@ -185,7 +185,7 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
       : []),
   ];
 
-  // ── Permission sandbox (opencode-style): filter tools by role ──
+  // ── Permission sandbox: filter tools by role ──
   // When a role declares an explicit allowedTools whitelist, only those tools
   // survive — everything else is denied at the mechanism level. When a role
   // only sets readOnly, fall back to a blacklist of known mutating tools.
@@ -257,7 +257,7 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
   // lands AFTER all stable system messages (fewShot, platform info, project
   // rules), keeping the LLM cache prefix byte-stable across turns.
 
-  // ── Few-shot examples: removed (Codex-style minimal system, no curated examples) ──
+  // ── Few-shot examples: removed (Assistant-style minimal system, no curated examples) ──
 
   memory.setGoal(opts.userMessage.slice(0, 200));
 

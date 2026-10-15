@@ -42,8 +42,8 @@ build/
 *.ai
 *.tif
 .bugfix/
-.zcode/
-_tmp_opencode/
+.tmp-z-ide/
+_tmp_o_ide/
 
 # Deprecated Rust implementation (replaced by TypeScript)
 crates/

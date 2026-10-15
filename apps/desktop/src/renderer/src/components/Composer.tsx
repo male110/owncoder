@@ -143,6 +143,22 @@ function ComposerImpl({
   const [mentionIndex, setMentionIndex] = useState(0);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [attachments, setAttachments] = useState<Array<{ file: File; status: "uploading" | "error" | "success"; result?: ChatAttachmentDto; error?: string }>>([]);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  // 为图片附件生成本地预览地址；上传成功后优先使用服务器返回的 url
+  const objectUrls = useMemo(() => {
+    const map = new Map<File, string>();
+    for (const item of attachments) {
+      if (item.file.type.startsWith("image/")) map.set(item.file, URL.createObjectURL(item.file));
+    }
+    return map;
+  }, [attachments]);
+  useEffect(() => {
+    return () => {
+      for (const url of objectUrls.values()) URL.revokeObjectURL(url);
+    };
+  }, [objectUrls]);
+  const attachmentImageSrc = (item: { file: File; result?: ChatAttachmentDto }) =>
+    item.status === "success" && item.result?.url ? item.result.url : objectUrls.get(item.file) ?? null;
   const uploadStatus = attachments.some((item) => item.status === "uploading")
     ? "uploading"
     : attachments.some((item) => item.status === "error")
@@ -252,7 +268,7 @@ function ComposerImpl({
         if (!pickerRect) return;
         const gap = 6;
         const margin = 8;
-        if (document.documentElement.dataset.theme === "codex") {
+        if (document.documentElement.dataset.theme === "light") {
           const menuWidth = 140 + models.offsetWidth;
           menu.style.left = `${Math.max(margin - pickerRect.left, Math.min(0, window.innerWidth - margin - pickerRect.left - menuWidth))}px`;
         } else {
@@ -600,6 +616,42 @@ function ComposerImpl({
       ) : null}
 
       <div className="composer-input-wrap">
+        {attachments.length > 0 ? (
+          <div className="composer-attachments">
+            {attachments.map((item) => {
+              const src = attachmentImageSrc(item);
+              return (
+                <div key={`${item.file.name}-${item.file.lastModified}`} className={`attachment-thumb ${item.status} ${src ? "is-image" : ""}`}>
+                  {src ? (
+                    <button
+                      type="button"
+                      className="attachment-preview-btn"
+                      title={t("点击预览")}
+                      onClick={() => setPreviewUrl(src)}
+                    >
+                      <img src={src} alt={item.file.name} />
+                      {item.status === "uploading" ? <span className="attachment-loading" aria-hidden /> : null}
+                    </button>
+                  ) : (
+                    <span className="attachment-file-label">{item.status === "uploading" ? t("上传中") : t("文件")}</span>
+                  )}
+                  {item.status === "error" ? (
+                    <button type="button" className="attachment-action" title={t("重试")} onClick={() => void uploadFile(item.file)}>↻</button>
+                  ) : null}
+                  <button
+                    type="button"
+                    className="attachment-remove"
+                    aria-label={t("移除附件")}
+                    title={t("移除附件")}
+                    onClick={() => setAttachments((xs) => xs.filter((x) => x !== item))}
+                  >
+                    ×
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        ) : null}
         <textarea
           ref={textareaRef}
           value={draft}
@@ -714,7 +766,7 @@ function ComposerImpl({
         >
           ＋ <span>上传</span>
         </button>
-        {attachments.map((item) => <div key={`${item.file.name}-${item.file.lastModified}`} className={`upload-chip ${item.status === "error" ? "error" : ""}`} role="status"><span className="upload-chip-name">{item.status === "uploading" ? `上传中：${item.file.name}` : item.status === "error" ? `上传失败：${item.file.name}` : item.file.name}</span>{item.status === "error" ? <button type="button" onClick={() => void uploadFile(item.file)}>{t("重试")}</button> : null}<button type="button" aria-label="移除附件" onClick={() => setAttachments((xs) => xs.filter((x) => x !== item))}>×</button></div>)}
+
         <div className="mode-picker" ref={modeMenuRef}>
           <button
             type="button"
@@ -1089,6 +1141,14 @@ function ComposerImpl({
           </button>
         </div>
       </div>
+      {previewUrl ? (
+        <div className="attachment-lightbox" role="dialog" aria-label={t("图片预览")} onClick={() => setPreviewUrl(null)}>
+          <img src={previewUrl} alt={t("图片预览")} onClick={(e) => e.stopPropagation()} />
+          <button type="button" className="attachment-lightbox-close" aria-label={t("关闭预览")} onClick={() => setPreviewUrl(null)}>
+            ×
+          </button>
+        </div>
+      ) : null}
     </form>
   );
 }

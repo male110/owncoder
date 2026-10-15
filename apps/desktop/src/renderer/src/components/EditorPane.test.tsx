@@ -47,7 +47,7 @@ vi.mock("@monaco-editor/react", () => ({
 vi.mock("monaco-editor", () => ({ KeyMod: { CtrlCmd: 2048 }, KeyCode: { KeyS: 49 } }));
 vi.mock("./monaco-editor.worker?worker", () => ({ default: vi.fn() }));
 vi.mock("./monaco-typescript.worker?worker", () => ({ default: vi.fn() }));
-vi.mock("../store/ui-store", () => ({ useUiStore: () => "codex" }));
+vi.mock("../store/ui-store", () => ({ useUiStore: () => "light" }));
 vi.mock("../i18n", () => ({ useI18n: () => ({ t: (text: string) => text }) }));
 vi.mock("./Markdown", () => ({ Markdown: "mock-markdown" }));
 

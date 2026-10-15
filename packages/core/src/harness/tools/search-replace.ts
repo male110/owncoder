@@ -340,7 +340,7 @@ function findLeadingWhitespaceFlexibleMatch(
  * The anchor (first SEARCH line) still has to line up at a real line start, and
  * every line's non-whitespace body must still match exactly — only trailing
  * whitespace may differ. This mirrors the trailing-whitespace normalisation used
- * by mature edit tools (Aider/opencode) and never guesses across different code.
+ * by mature edit tools and never guesses across different code.
  */
 function findTrailingWhitespaceFlexibleMatch(content: string, search: string): TextMatch | undefined {
   const contentLines = splitLinesKeepEnds(content);

@@ -536,8 +536,8 @@ app.whenReady().then(async () => {
 
   // Keep native frameless chrome (overlay + window background) in sync with UI theme.
   ipcMain.handle("app:setChromeTheme", (_e, theme: unknown) => {
-    if (!mainWindow || (theme !== "dark" && theme !== "codex")) return;
-    const isLight = theme === "codex";
+    if (!mainWindow || (theme !== "dark" && theme !== "light")) return;
+    const isLight = theme === "light";
     const background = isLight ? "#f4f2ee" : "#0c0d0f";
     const symbol = isLight ? "#6f6b64" : "#848b96";
     mainWindow.setBackgroundColor(background);
