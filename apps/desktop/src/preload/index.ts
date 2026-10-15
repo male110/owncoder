@@ -29,6 +29,8 @@ export type ChatTurnDto = {
   role: "user" | "assistant" | "tool" | "system";
   /** 会话内唯一 turn id（工具调用优先用 toolCallId；历史兼容可缺省） */
   id?: string;
+  /** 所属对话轮次（用户输入+回复对）的持久化 turn id，用于整轮删除。 */
+  turnId?: string;
   content: string;
   attachments?: ChatAttachmentDto[];
   parts?: MessagePartDto[];
@@ -489,6 +491,8 @@ export interface DesktopApi {
   getChatHistoryPage: (sessionId: string, beforeSeq?: number, limit?: number) => Promise<ChatHistoryPageDto>;
   clearChat: (sessionId?: string) => Promise<boolean>;
   cancelChat: (sessionId?: string) => Promise<boolean>;
+  /** Delete one complete turn (user input + its reply) from a session. */
+  deleteChatTurn: (turnId: string, sessionId?: string) => Promise<boolean>;
   uploadFile: (input: { name: string; type: string; data: Uint8Array; provider?: string }) => Promise<{
     url: string;
     name: string;
@@ -663,6 +667,7 @@ const api: DesktopApi = {
   getChatHistoryPage: (sessionId, beforeSeq, limit) => ipcRenderer.invoke("chat:historyPage", sessionId, beforeSeq, limit),
   clearChat: (sessionId) => ipcRenderer.invoke("chat:clear", sessionId),
   cancelChat: (sessionId) => ipcRenderer.invoke("chat:cancel", sessionId),
+  deleteChatTurn: (turnId, sessionId) => ipcRenderer.invoke("chat:deleteTurn", turnId, sessionId),
   fetchModelList: (baseUrl: string, apiKey?: string, apiFormat?: "openai-chat" | "openai-responses" | "anthropic-messages" | "google-gemini") =>
     ipcRenderer.invoke("models:fetchList", baseUrl, apiKey, apiFormat),
   setSettingsPanelOpen: (open: boolean) => ipcRenderer.send("app:settingsPanelState", open),

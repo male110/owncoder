@@ -3,6 +3,7 @@ import type { ChatSessionMetaDto, ProjectDto } from "../../../preload/index";
 import type { WorkspaceInfo } from "@owncoder/shared";
 import type { SessionStatus } from "../store/chat-store";
 import { ProjectFileTree } from "./ProjectFileTree";
+import { isDefaultSessionTitle } from "../utils/sessionTitle";
 import { t } from "../../../shared/i18n/core";
 import { useI18n } from "../i18n";
 
@@ -399,7 +400,7 @@ export function AgentSidebar({
                                 }}
                                 disabled={disabled}
                               >
-                                <span className="session-title">{s.title === "新会话" ? t("新会话") : s.title}</span>
+                                <span className="session-title">{isDefaultSessionTitle(s.title) ? t("新会话") : s.title}</span>
                                 <span className="session-time">{relativeTime(s.updatedAt)}</span>
                               </button>
 

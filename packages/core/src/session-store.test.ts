@@ -127,6 +127,62 @@ describe("session store history sanitization", () => {
     expect((await loadSessionById(r, first.meta.id))?.updatedAt).toBe(first.meta.updatedAt);
   });
 
+  it("freezes a non-default title across ordinary saves", async () => {
+    const r = await root();
+    const { meta } = await createSessionFile(r, { title: "XXX" });
+
+    // Ordinary persist (no explicit title) after the user sends "我帅吗" must
+    // keep the user-visible title "XXX" — it must not drift to the message text.
+    const saved = await saveSessionById(r, meta.id, {
+      mode: "agent",
+      history: [
+        { role: "user", content: "我帅吗" },
+        { role: "assistant", content: "当然" },
+      ],
+      terminalLog: [],
+      lastPlanPath: null,
+      todoAnchor: null,
+      lastCheckpointId: null,
+      documentWorkflow: null,
+    });
+
+    expect(saved.title).toBe("XXX");
+    expect((await loadSessionById(r, meta.id))?.title).toBe("XXX");
+    expect((await listSessionMetas(r)).sessions[0]?.title).toBe("XXX");
+  });
+
+  it("derives a title from history only while the title is still a default placeholder", async () => {
+    const r = await root();
+    const { meta } = await createSessionFile(r, { title: "新会话" });
+
+    const firstSave = await saveSessionById(r, meta.id, {
+      mode: "agent",
+      history: [{ role: "user", content: "我帅吗" }],
+      terminalLog: [],
+      lastPlanPath: null,
+      todoAnchor: null,
+      lastCheckpointId: null,
+      documentWorkflow: null,
+    });
+    expect(firstSave.title).toBe("我帅吗");
+
+    // Once named, later messages (and compaction shifting the first user turn)
+    // must not rewrite the fixed title.
+    const secondSave = await saveSessionById(r, meta.id, {
+      mode: "agent",
+      history: [
+        { role: "system", content: "[历史摘要，原始内容已压缩]" },
+        { role: "user", content: "再帮我做点别的" },
+      ],
+      terminalLog: [],
+      lastPlanPath: null,
+      todoAnchor: null,
+      lastCheckpointId: null,
+      documentWorkflow: null,
+    });
+    expect(secondSave.title).toBe("我帅吗");
+  });
+
   it("deleteSessionFile drops the session json and index entry", async () => {
     const r = await root();
     const { meta } = await createSessionFile(r, { title: "keep" });

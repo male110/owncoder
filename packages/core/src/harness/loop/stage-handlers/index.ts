@@ -79,9 +79,7 @@ export async function injectHistoryAndUserMessage(ctx: SchedulerContext): Promis
   const { opts, messages, history, state } = ctx;
   const { tagUserInput } = await import("../../message-tags.js");
   const outboundUserMessage = opts.userMessage;
-  const sessionAttachments = history
-    .flatMap((turn) => turn.attachments ?? [])
-    .concat(opts.attachments ?? [])
+  const currentAttachments = (opts.attachments ?? [])
     .filter((attachment, index, all) => all.findIndex((item) => item.url === attachment.url) === index);
 
   let recentFileHints = "";
@@ -119,7 +117,7 @@ export async function injectHistoryAndUserMessage(ctx: SchedulerContext): Promis
     messages.push({
       role: "user",
       content: tagUserInput(contextLines.join("\n")),
-      attachments: sessionAttachments,
+      attachments: currentAttachments,
     });
 
     writeEventLog({
@@ -139,7 +137,7 @@ export async function injectHistoryAndUserMessage(ctx: SchedulerContext): Promis
           ? `## 当前任务\n\n${outboundUserMessage}\n\n${recentFileHints}`
           : `## 当前任务\n\n${outboundUserMessage}`,
       ),
-      attachments: sessionAttachments,
+      attachments: currentAttachments,
     });
 
     writeEventLog({
@@ -151,7 +149,7 @@ export async function injectHistoryAndUserMessage(ctx: SchedulerContext): Promis
     });
   }
 
-  pushCurrentUserMessageOnce(history, opts.userMessage, sessionAttachments);
+  pushCurrentUserMessageOnce(history, opts.userMessage, currentAttachments);
 }
 
 /**

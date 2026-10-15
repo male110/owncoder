@@ -80,6 +80,7 @@ import {
   beginTurn,
   appendTurnEvent,
   completeTurn,
+  deleteTurn,
   migrateLegacyHistory,
   loadRecentTurns,
   loadOlderTurns,
@@ -848,6 +849,40 @@ export class SessionOrchestrator {
       r.history = [];
       void this.persist(sessionId);
     }
+  }
+
+  /**
+   * Delete one complete turn (user input + assistant reply + tool process).
+   * Removes it from the durable conversation store, the runtime LLM context,
+   * and the session JSON. No-op (returns false) when the turn does not exist.
+   */
+  async deleteTurnPair(turnId: string, sessionId?: string): Promise<boolean> {
+    if (!turnId) return false;
+    const sid = sessionId ?? this.state.activeSessionId ?? undefined;
+    const r = sid ? this.rtOpt(sid) : undefined;
+    const root = r?.workspaceRoot
+      ?? (sid ? this.sessionRoots.get(sid) : null)
+      ?? this.state.workspace?.root
+      ?? null;
+    if (!root || !sid) return false;
+
+    const removed = await deleteTurn(root, sid, turnId);
+    if (!removed) return false;
+
+    // Drop the turn from the in-memory LLM context as well, so subsequent
+    // turns no longer reference the mistaken input/reply. Only the user row
+    // carries turnId; the loop's assistant/tool rows for this turn follow it
+    // up to the next user row, so remove by that round boundary.
+    if (r) {
+      const start = r.history.findIndex((h) => h.role === "user" && h.turnId === turnId);
+      if (start >= 0) {
+        let end = start + 1;
+        while (end < r.history.length && r.history[end]!.role !== "user") end++;
+        r.history = [...r.history.slice(0, start), ...r.history.slice(end)];
+      }
+      await this.persist(sid);
+    }
+    return true;
   }
 
   setMode(mode: AgentMode, sessionId?: string): void {
@@ -2040,6 +2075,7 @@ export class SessionOrchestrator {
     const userTurn: ChatTurn = {
       role: "user",
       content: trimmed,
+      turnId,
       ...(attachments.length ? { attachments } : {}),
     };
     await beginTurn(workspaceRoot, sid, userTurn, turnId);

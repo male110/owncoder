@@ -75,6 +75,7 @@ function slimChatTurn(turn: unknown): ChatTurn | null {
     content: row.role === "tool" ? truncateText(row.content, MAX_TOOL_OUTPUT_CHARS) : truncateText(row.content, MAX_ASSISTANT_CONTENT_CHARS),
   };
   if (typeof row.id === "string") slim.id = row.id;
+  if (typeof row.turnId === "string") slim.turnId = row.turnId;
   if (typeof row.toolName === "string") slim.toolName = row.toolName;
   if (row.toolArgs && typeof row.toolArgs === "object" && !Array.isArray(row.toolArgs)) {
     slim.toolArgs = slimToolArgs(row.toolArgs);
@@ -506,6 +507,23 @@ export async function loadTurn(root: string, sessionId: string, turnId: string):
 }
 
 /**
+ * Delete one complete turn (user input + assistant reply + tool events).
+ * Returns true when a turn row was removed. Events are removed explicitly so
+ * the operation does not rely on the per-connection foreign_keys pragma.
+ */
+export async function deleteTurn(root: string, sessionId: string, turnId: string): Promise<boolean> {
+  return serial(lockKey(root, sessionId), async () => {
+    const db = await dbFor(root, sessionId);
+    const tx = db.transaction(() => {
+      db.prepare("DELETE FROM events WHERE turn_id = ?").run(turnId);
+      const info = db.prepare("DELETE FROM turns WHERE turn_id = ?").run(turnId);
+      return info.changes > 0;
+    });
+    return tx();
+  });
+}
+
+/**
  * Flatten durable conversation turns into UI ChatTurn rows.
  * Dedupes user/assistant copies *within one turn* that can appear both as
  * turn.user and as legacy_message / final.history payloads. Does not collapse
@@ -520,7 +538,10 @@ export function projectConversationTurns(turns: ConversationTurn[]): ChatTurn[] 
   const projected: ChatTurn[] = [];
   for (const turn of turns) {
     const local: ChatTurn[] = [];
-    const pushUnique = (item: ChatTurn) => {
+    const pushUnique = (raw: ChatTurn) => {
+      // Stamp the owning durable turn id so the UI can delete the whole
+      // user-input + reply pair in one operation.
+      const item: ChatTurn = raw.turnId ? raw : { ...raw, turnId: turn.turnId };
       if (item.role === "user" || item.role === "assistant") {
         const dup = local.some(
           (h) =>

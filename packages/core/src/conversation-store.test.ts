@@ -155,8 +155,8 @@ describe("conversation store", () => {
       },
     ];
     expect(projectConversationTurns(turns)).toEqual([
-      user("hello"),
-      assistant("world"),
+      { ...user("hello"), turnId: "live-1" },
+      { ...assistant("world"), turnId: "live-1" },
     ]);
   });
 
@@ -213,10 +213,10 @@ describe("conversation store", () => {
       },
     ];
     expect(projectConversationTurns(turns)).toEqual([
-      user("run tools"),
-      { role: "tool", id: "c1", toolName: "bash", toolArgs: { command: "ls" }, content: "ok" },
-      { role: "tool", id: "c2", toolName: "web_fetch", toolArgs: { url: "https://x" }, content: "html" },
-      { role: "tool", id: "c3", toolName: "ask_user", toolArgs: {}, content: "answered" },
+      { ...user("run tools"), turnId: "live-tools" },
+      { role: "tool", id: "c1", toolName: "bash", toolArgs: { command: "ls" }, content: "ok", turnId: "live-tools" },
+      { role: "tool", id: "c2", toolName: "web_fetch", toolArgs: { url: "https://x" }, content: "html", turnId: "live-tools" },
+      { role: "tool", id: "c3", toolName: "ask_user", toolArgs: {}, content: "answered", turnId: "live-tools" },
     ]);
   });
 
@@ -243,10 +243,10 @@ describe("conversation store", () => {
       },
     ];
     expect(projectConversationTurns(turns)).toEqual([
-      user("hello"),
-      { role: "tool", id: "t1", toolName: "bash", content: "ok" },
-      { role: "tool", id: "t2", toolName: "ask_user", content: "q" },
-      assistant("done"),
+      { ...user("hello"), turnId: "legacy-final" },
+      { role: "tool", id: "t1", toolName: "bash", content: "ok", turnId: "legacy-final" },
+      { role: "tool", id: "t2", toolName: "ask_user", content: "q", turnId: "legacy-final" },
+      { ...assistant("done"), turnId: "legacy-final" },
     ]);
   });
 
@@ -278,10 +278,10 @@ describe("conversation store", () => {
       },
     ];
     expect(projectConversationTurns(turns)).toEqual([
-      user("hello"),
-      assistant("one"),
-      user("hello"),
-      assistant("two"),
+      { ...user("hello"), turnId: "t1" },
+      { ...assistant("one"), turnId: "t1" },
+      { ...user("hello"), turnId: "t2" },
+      { ...assistant("two"), turnId: "t2" },
     ]);
   });
 
@@ -299,8 +299,8 @@ describe("conversation store", () => {
     await completeTurn(r, "s", "live-1", assistant("world"));
     const done = await loadRecentTurns(r, "s", 10);
     expect(projectConversationTurns(done.turns)).toEqual([
-      user("hello"),
-      assistant("world"),
+      { ...user("hello"), turnId: "live-1" },
+      { ...assistant("world"), turnId: "live-1" },
     ]);
   });
 
@@ -354,9 +354,9 @@ describe("conversation store", () => {
 
     const page = await loadRecentTurns(r, "s", 10);
     expect(projectConversationTurns(page.turns)).toEqual([
-      user("hello"),
-      { role: "tool", id: "t1", toolName: "bash", toolArgs: {}, content: "ok" },
-      assistant("done"),
+      { ...user("hello"), turnId: turn.turnId },
+      { role: "tool", id: "t1", toolName: "bash", toolArgs: {}, content: "ok", turnId: turn.turnId },
+      { ...assistant("done"), turnId: turn.turnId },
     ]);
   });
 
@@ -443,9 +443,9 @@ describe("conversation store", () => {
     expect(JSON.stringify(loaded)).not.toContain(huge);
 
     expect(projectConversationTurns([loaded!])).toEqual([
-      user("run"),
-      { role: "tool", id: "c9", toolName: "bash", content: payload?.output },
-      assistant("done"),
+      { ...user("run"), turnId: turn.turnId },
+      { role: "tool", id: "c9", toolName: "bash", content: payload?.output, turnId: turn.turnId },
+      { ...assistant("done"), turnId: turn.turnId },
     ]);
   });
 

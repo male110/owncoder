@@ -18,6 +18,7 @@ import type { ActivePlanMetaDto, ChatAttachmentDto } from "../../preload/index";
 import { useChatStore } from "./store/chat-store";
 import { getComposerDraftKey, useUiStore } from "./store/ui-store";
 import { customConfirm } from "./utils/customConfirm";
+import { isDefaultSessionTitle } from "./utils/sessionTitle";
 
 // ── Hooks ─────────────────────────────────────────────────────────────────────
 import { useSessionSync } from "./hooks/useSessionSync";
@@ -483,7 +484,7 @@ export function App() {
   return (
     <div className="app-frame">
       <TitleBar
-        title={showBlank || sessionTitle === "新会话" ? t("新会话") : sessionTitle}
+        title={showBlank || isDefaultSessionTitle(sessionTitle) ? t("新会话") : sessionTitle}
         gitSummary={
           gitStatus?.isRepo
             ? ["干净", "已改", "未跟踪", "有改动", "Git 状态获取失败"].reduce(

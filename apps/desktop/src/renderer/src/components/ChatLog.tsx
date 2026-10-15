@@ -245,7 +245,7 @@ function ThinkingBlockImpl({ content, streaming, stage }: { content: string; str
 
   return (
     <div className={`thinking-block ${streaming ? "streaming" : ""} ${stageClass}`}>
-      <button type="button" className="thinking-head" onClick={() => setOpen((v) => !v)}>
+      <button type="button" className="thinking-head" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
         <span className="thinking-icon">⊗</span>
         <span className="thinking-label">{streaming ? t("思考中…") : t("思考过程")}</span>
         <span className="activity-chev">{open ? "▾" : "▸"}</span>
@@ -385,8 +385,9 @@ function DecomposeCard({ decomposition }: { decomposition: DecompositionSnapshot
 
 // ── Bubbles ───────────────────────────────────────────────────────────────────
 
-function UserBubbleImpl({ turn }: { turn: ChatTurnDto }) {
+function UserBubbleImpl({ turn, onDelete }: { turn: ChatTurnDto; onDelete?: (turnId: string) => void }) {
   const [copied, setCopied] = useState(false);
+  const [confirming, setConfirming] = useState(false);
   const { t } = useI18n();
 
   const isCompressed = turn.isCompressed === true;
@@ -431,6 +432,39 @@ function UserBubbleImpl({ turn }: { turn: ChatTurnDto }) {
           <button type="button" className="msg-action-btn" onClick={() => void onCopy()} title={t("复制")}>
             {copied ? t("已复制") : t("复制")}
           </button>
+          {turn.turnId && onDelete ? (
+            confirming ? (
+              <>
+                <button
+                  type="button"
+                  className="msg-action-btn danger"
+                  onClick={() => {
+                    onDelete(turn.turnId!);
+                    setConfirming(false);
+                  }}
+                  title={t("确认删除")}
+                >
+                  {t("确认删除该输入及回复？")}
+                </button>
+                <button
+                  type="button"
+                  className="msg-action-btn"
+                  onClick={() => setConfirming(false)}
+                >
+                  {t("取消")}
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                className="msg-action-btn"
+                onClick={() => setConfirming(true)}
+                title={t("删除该输入及对应回复")}
+              >
+                {t("删除")}
+              </button>
+            )
+          ) : null}
         </div>
       </div>
     </div>
@@ -562,11 +596,12 @@ const LiveToolCard = memo(LiveToolCardImpl, (prev, next) =>
 );
 
 const UserBubble = memo(UserBubbleImpl, (prev, next) =>
-  prev.turn === next.turn ||
-  (prev.turn.id === next.turn.id &&
-    prev.turn.content === next.turn.content &&
-    prev.turn.isCompressed === next.turn.isCompressed &&
-    prev.turn.originalLength === next.turn.originalLength)
+  (prev.turn === next.turn ||
+    (prev.turn.id === next.turn.id &&
+      prev.turn.content === next.turn.content &&
+      prev.turn.isCompressed === next.turn.isCompressed &&
+      prev.turn.originalLength === next.turn.originalLength)) &&
+  prev.onDelete === next.onDelete
 );
 
 const ThinkingBlock = memo(ThinkingBlockImpl, (prev, next) =>
@@ -644,6 +679,7 @@ interface Props {
   sending: boolean;
   virtuosoRef?: React.RefObject<VirtuosoHandle | null>;
   onRegenerate?: () => void;
+  onDeleteTurn?: (turnId: string) => void;
   onOpenFile?: (path: string) => void;
   workspaceRoot?: string;
   /** Rendered above the first message inside the scroll viewport. */
@@ -660,6 +696,7 @@ export function ChatLog({
   sending,
   virtuosoRef,
   onRegenerate,
+  onDeleteTurn,
   onOpenFile,
   workspaceRoot,
   header,
@@ -739,7 +776,7 @@ export function ChatLog({
     nonDecomposeLiveEvents.length > 0;
 
   const renderBlock = useCallback((b: LogBlock, i: number) => {
-    if (b.kind === "user") return <UserBubble turn={b.turn} />;
+    if (b.kind === "user") return <UserBubble turn={b.turn} onDelete={onDeleteTurn} />;
     if (b.kind === "assistant") {
       return (
         <AssistantBubble
@@ -756,7 +793,7 @@ export function ChatLog({
     if (b.kind === "process") return <ProcessSteps items={b.items} />;
     // 进行中轮次的工具链由 LiveToolCard / liveStatus 展示，不在列表里重复。
     return null;
-  }, [lastAssistantIdx, sending, liveEvents.length, onRegenerate, onOpenFile]);
+  }, [lastAssistantIdx, sending, liveEvents.length, onRegenerate, onDeleteTurn, onOpenFile]);
 
   // History rows only — live status/stream render after Virtuoso inside the
   // shared scroller so streaming updates don't depend on Footer remounts.

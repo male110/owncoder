@@ -224,6 +224,8 @@ export interface ChatTurn {
   role: "user" | "assistant" | "tool" | "system";
   /** 会话内唯一 turn id（历史归档 / 向量检索关联用，向后兼容可选）。 */
   id?: string;
+  /** 所属对话轮次（用户输入+回复对）的持久化 turn id，用于整轮删除。 */
+  turnId?: string;
   /** 
    * 纯文本内容（向后兼容）
    * 当 parts 存在时，这是所有 parts 的纯文本连接

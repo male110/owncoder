@@ -16,6 +16,7 @@ import { useSessionStore } from "../store/session-store";
 import { useChatStore } from "../store/chat-store";
 import { getFocusSessionId, syncFocusSession } from "../store/focus-session";
 import { PENDING_DRAFT_KEY, useUiStore } from "../store/ui-store";
+import { isDefaultSessionTitle } from "../utils/sessionTitle";
 import { extractHistoryError, toAppError } from "../components/ErrorBanner";
 import { dropQueue, hydrateQueue, resumeQueue } from "./queue-controller";
 import { sessionStateMachine } from "../store/session-state-machine";
@@ -179,7 +180,9 @@ export function useSessionSync() {
     const titleSource = [...prevByProject, ...state.sessions];
     const merged = list.sessions.map((s) => {
       const prev = titleSource.find((p) => p.id === s.id);
-      if (prev && prev.title !== "新会话" && s.title === "新会话") {
+      // 后端标题仍是默认占位时，保留内存中已应用的临时/固定标题，
+      // 避免一次 refreshSessions 把侧栏标题打回"新会话"。
+      if (prev && !isDefaultSessionTitle(prev.title) && isDefaultSessionTitle(s.title)) {
         return { ...s, title: prev.title };
       }
       return { ...s, projectRoot: s.projectRoot || root };
@@ -709,7 +712,7 @@ export function useSessionSync() {
       
       // 修复：只有在会话真正为空且用户没有输入草稿时才重用
       // 如果用户已经输入了内容但历史被意外清空，也应该创建新会话
-      if (activeMeta?.title === "新会话" && 
+      if (isDefaultSessionTitle(activeMeta?.title) &&
           (!activeRuntime || activeRuntime.history.length === 0) &&
           !hasDraft &&
           !sessionStateMachine.isBusy(activeId)) {

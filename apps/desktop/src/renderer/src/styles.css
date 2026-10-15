@@ -7639,6 +7639,7 @@ button.ghost.tiny.danger:hover {
 
 
 /* Live tool calls read as activity rows; expanded output remains a separate detail surface. */
+:root[data-theme="codex"] .thinking-block,
 :root[data-theme="codex"] .tool-card.live {
   --tool-row-icon: var(--muted);
 
@@ -7658,6 +7659,7 @@ button.ghost.tiny.danger:hover {
   box-shadow: none;
 }
 
+:root[data-theme="codex"] .thinking-head,
 :root[data-theme="codex"] .tool-card.live .tool-card-head {
   min-width: 0;
   min-height: 34px;
@@ -7670,10 +7672,12 @@ button.ghost.tiny.danger:hover {
   line-height: 24px;
 }
 
+:root[data-theme="codex"] .thinking-head:hover,
 :root[data-theme="codex"] .tool-card.live .tool-card-head:hover {
   background: var(--surface-5);
 }
 
+:root[data-theme="codex"] .thinking-block .thinking-icon,
 :root[data-theme="codex"] .tool-card.live .tool-card-icon {
   display: inline-flex;
   align-items: center;
@@ -7681,10 +7685,11 @@ button.ghost.tiny.danger:hover {
   flex: 0 0 18px;
   width: 18px;
   height: 18px;
-  color: var(--tool-row-icon);
+  color: var(--tool-row-icon, var(--muted));
 }
 
 
+:root[data-theme="codex"] .thinking-block .thinking-label,
 :root[data-theme="codex"] .tool-card.live .tool-verb {
   flex: none;
   color: var(--muted);
@@ -7727,6 +7732,7 @@ button.ghost.tiny.danger:hover {
   font-size: 11px;
 }
 
+:root[data-theme="codex"] .thinking-head .activity-chev,
 :root[data-theme="codex"] .tool-card.live .activity-chev {
   flex: none;
   width: 12px;
@@ -7734,12 +7740,16 @@ button.ghost.tiny.danger:hover {
   opacity: 0;
 }
 
+:root[data-theme="codex"] .thinking-head:hover .activity-chev,
+:root[data-theme="codex"] .thinking-head:focus-visible .activity-chev,
+:root[data-theme="codex"] .thinking-head[aria-expanded="true"] .activity-chev,
 :root[data-theme="codex"] .tool-card.live .tool-card-head:hover .activity-chev,
 :root[data-theme="codex"] .tool-card.live .tool-card-head:focus-visible .activity-chev,
 :root[data-theme="codex"] .tool-card.live .tool-card-head[aria-expanded="true"] .activity-chev {
   opacity: 1;
 }
 
+:root[data-theme="codex"] .thinking-body,
 :root[data-theme="codex"] .tool-card.live .tool-card-body {
   margin: 0 6px 6px 33px;
   padding: 8px 10px;
@@ -7749,7 +7759,12 @@ button.ghost.tiny.danger:hover {
   overflow-wrap: anywhere;
 }
 
+:root[data-theme="codex"] .thinking-block.streaming .thinking-label::after {
+  background: currentColor;
+}
+
 @media (max-width: 640px) {
+  :root[data-theme="codex"] .thinking-head .activity-chev,
   :root[data-theme="codex"] .tool-card.live .activity-chev { opacity: 1; }
 }
 

@@ -220,6 +220,12 @@ export function SessionChatPanel({
     removeMessage(sessionId, index);
   }, [sessionId]);
 
+  const onDeleteTurn = useCallback((turnId: string) => {
+    void window.owncoder.deleteChatTurn(turnId, sessionId).then((ok) => {
+      if (ok) useChatStore.getState().removeTurnFromHistory(turnId, sessionId);
+    });
+  }, [sessionId]);
+
   return (
     <div className="session-chat-panel" style={isActive ? undefined : { display: "none" }}>
       {isEmpty ? (
@@ -262,6 +268,7 @@ export function SessionChatPanel({
             virtuosoRef={virtuosoRef}
             scrollerRef={scrollerRef}
             onRegenerate={() => void onRegenerate()}
+            onDeleteTurn={onDeleteTurn}
             onOpenFile={onOpenFile}
             workspaceRoot={workspaceRoot}
             header={historyHeader}

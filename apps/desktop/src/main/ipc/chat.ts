@@ -57,6 +57,9 @@ export function registerChatHandlers(ctx: IpcContext): void {
     return true;
   });
 
+  ipcMain.handle("chat:deleteTurn", async (_e, turnId: string, sessionId?: string) =>
+    session.deleteTurnPair(turnId, sessionId));
+
   ipcMain.handle("chat:cancel", (_e, sessionId?: string) => {
     session.cancelTurn(sessionId);
     return true;

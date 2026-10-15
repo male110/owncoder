@@ -12,6 +12,7 @@ import { useSessionStore } from "../store/session-store";
 import { getFocusSessionId } from "../store/focus-session";
 import { resolveComposerDraftText, useUiStore } from "../store/ui-store";
 import { isVerificationGateError, toAppError } from "../components/ErrorBanner";
+import { isDefaultSessionTitle } from "../utils/sessionTitle";
 import {
   dequeueMessage,
   enqueueMessage,
@@ -90,9 +91,8 @@ function applyProvisionalTitleIfNeeded(sid: string, text: string) {
   const curSessions = useSessionStore.getState().sessions;
   const currentItem = curSessions.find((s) => s.id === sid);
   
-  // 只在标题仍为"新会话"或空时更新，已设置的标题不再修改
-  const shouldUpdate = !currentItem?.title || currentItem.title === "新会话";
-  if (!shouldUpdate) return;
+  // 只在标题仍为默认占位（空 / "新会话" / "新建会话"）时更新，已设置的标题不再修改
+  if (!isDefaultSessionTitle(currentItem?.title)) return;
 
   const title = provisionalTitle(text);
   if (cur.activeSessionId === sid) cur.setSessionTitle(title);
@@ -115,7 +115,7 @@ function applyProvisionalTitleIfNeeded(sid: string, text: string) {
     const next = { ...projects };
     for (const [r, list] of Object.entries(projects)) {
       const listItem = list.find((s) => s.id === sid);
-      if (listItem && (!listItem.title || listItem.title === "新会话")) {
+      if (listItem && isDefaultSessionTitle(listItem.title)) {
         next[r] = list.map((it) => (it.id === sid ? { ...it, title } : it));
         changed = true;
       }
@@ -231,9 +231,9 @@ export function useChatActions(deps: {
       const curSessions = useSessionStore.getState().sessions;
       const currentItem = curSessions.find((item) => item.id === res.sessionId);
       
-      // 检查是否应该更新标题：仅当标题仍为"新会话"或空时
-      const shouldUpdateTitle = !currentItem?.title || currentItem.title === "新会话";
-      
+      // 检查是否应该更新标题：仅当标题仍为默认占位时
+      const shouldUpdateTitle = isDefaultSessionTitle(currentItem?.title);
+
       if (shouldUpdateTitle) {
         if (current.activeSessionId === res.sessionId) {
           current.setSessionTitle(res.sessionTitle);
@@ -255,7 +255,7 @@ export function useChatActions(deps: {
           const next = { ...projects };
           for (const [r, list] of Object.entries(projects)) {
             const listItem = list.find((item) => item.id === res.sessionId);
-            if (listItem && (!listItem.title || listItem.title === "新会话")) {
+            if (listItem && isDefaultSessionTitle(listItem.title)) {
               next[r] = list.map((item) =>
                 item.id === res.sessionId ? { ...item, title: res.sessionTitle! } : item,
               );

@@ -312,6 +312,8 @@ export interface ChatState {
 
 export interface ChatActions {
   setHistory: (turns: ChatTurnDto[] | ((prev: ChatTurnDto[]) => ChatTurnDto[]), sessionId?: string) => void;
+  /** Remove every ChatTurn row belonging to one durable turn (user input + reply pair). */
+  removeTurnFromHistory: (turnId: string, sessionId?: string) => void;
   prependHistory: (turns: ChatTurnDto[], beforeSeq: number | null, hasMore: boolean, sessionId?: string) => void;
   setHistoryPageState: (patch: Partial<Pick<ChatSessionRuntime, "historyBeforeSeq" | "historyHasMore" | "historyLoading">>, sessionId?: string) => void;
   setSending: (v: boolean, sessionId?: string) => void;
@@ -516,6 +518,20 @@ export const useChatStore = create<ChatState & ChatActions>()((set, get) => ({
     set((s) => {
       const rt = readRuntime(s, sid);
       const history = typeof turns === "function" ? turns(rt.history) : turns;
+      return applyRuntime(s, sid, { history });
+    }),
+
+  removeTurnFromHistory: (turnId, sid) =>
+    set((s) => {
+      if (!turnId) return {};
+      const rt = readRuntime(s, sid);
+      // Only the user row carries turnId; its assistant/tool rows follow up
+      // to the next user row. Remove by that round boundary.
+      const start = rt.history.findIndex((h) => h.role === "user" && h.turnId === turnId);
+      if (start < 0) return {};
+      let end = start + 1;
+      while (end < rt.history.length && rt.history[end]!.role !== "user") end++;
+      const history = [...rt.history.slice(0, start), ...rt.history.slice(end)];
       return applyRuntime(s, sid, { history });
     }),
 

@@ -75,6 +75,15 @@ export function titleFromHistory(history: ChatTurn[], fallback = "新会话"): s
   return user.content.trim().replace(/\s+/g, " ");
 }
 
+/** 默认占位标题（会话尚未被用户首条消息命名）。 */
+const DEFAULT_SESSION_TITLES = new Set(["新会话", "新建会话"]);
+
+/** 标题是否为默认占位（空 / "新会话" / "新建会话"）。只有默认标题才允许被自动改写。 */
+export function isDefaultSessionTitle(title: string | null | undefined): boolean {
+  const t = title?.trim();
+  return !t || DEFAULT_SESSION_TITLES.has(t);
+}
+
 function sortSessions(sessions: SessionMeta[]): SessionMeta[] {
   return [...sessions].sort((a, b) => {
     const ap = a.pinned ? 1 : 0;
@@ -259,8 +268,14 @@ export async function saveSessionById(
   // 普通持久化不代表用户提交了新消息，必须保留用于列表排序的活动时间。
   const updatedAt = activityUpdatedAt || previousMeta?.updatedAt || prev?.updatedAt
     || previousMeta?.createdAt || prev?.createdAt || now;
-  const title =
-    snap.title?.trim() || titleFromHistory(snap.history, prev?.title || "新会话");
+  // 标题固定策略：一旦会话拥有非默认标题，普通持久化不得再改写它。
+  // 因此仅当传入显式标题，或磁盘上仍是默认占位标题时，才用首条用户消息推导标题；
+  // 否则沿用已持久化的标题，避免回合结束后标题漂移成最近的用户消息。
+  const persistedTitle = prev?.title ?? previousMeta?.title ?? null;
+  const title = snap.title?.trim()
+    || (isDefaultSessionTitle(persistedTitle)
+      ? titleFromHistory(snap.history, persistedTitle?.trim() || "新会话")
+      : persistedTitle!);
   const full: PersistedSession = {
     version: 1,
     id,

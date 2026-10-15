@@ -122,6 +122,8 @@ export const en = {
   "需要确认命令（点击清除）": "Command awaiting confirmation (click to clear)",
   "确认删除": "Confirm delete",
   "删除任务": "Delete task",
+  "确认删除该输入及回复？": "Delete this input and its reply?",
+  "删除该输入及对应回复": "Delete this input and its reply",
 
   // ── 输入区 ────────────────────────────────────────────────────────────────
   "切换工作区": "Switch workspace",
