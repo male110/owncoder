@@ -14,12 +14,27 @@ const LEGACY_SINGLE_SESSION_FILE = ".owncode/session.json";
 const INDEX_FILE = "index.json";
 const MAX_TERMINAL = 80;
 
+// 同一项目共享一份索引，跨会话的读改写也必须串行，避免旧索引覆盖重命名。
+const indexQueues = new Map<string, Promise<unknown>>();
+function withIndexLock<T>(workspaceRoot: string, run: () => Promise<T>): Promise<T> {
+  const key = resolve(workspaceRoot);
+  const previous = indexQueues.get(key) ?? Promise.resolve();
+  const pending = previous.then(run, run);
+  indexQueues.set(key, pending);
+  void pending.finally(() => {
+    if (indexQueues.get(key) === pending) indexQueues.delete(key);
+  }).catch(() => {});
+  return pending;
+}
+
 export interface SessionMeta {
   id: string;
   title: string;
   updatedAt: string;
   createdAt: string;
   pinned?: boolean;
+  pinnedAt?: string;
+  customTitle?: boolean;
 }
 
 export interface PersistedSession {
@@ -89,6 +104,7 @@ function sortSessions(sessions: SessionMeta[]): SessionMeta[] {
     const ap = a.pinned ? 1 : 0;
     const bp = b.pinned ? 1 : 0;
     if (ap !== bp) return bp - ap;
+    if (ap) return (b.pinnedAt || "").localeCompare(a.pinnedAt || "");
     // 会话顺序由最近一次实际写入用户消息的时间决定，而不是创建时间。
     return (b.updatedAt || b.createdAt || "").localeCompare(a.updatedAt || a.createdAt || "");
   });
@@ -193,17 +209,44 @@ export async function listSessionMetas(workspaceRoot: string): Promise<{
   activeId: string | null;
   sessions: SessionMeta[];
 }> {
-  const index = await ensureSessionsMigrated(workspaceRoot);
-  return { activeId: index.activeId, sessions: sortSessions(index.sessions) };
+  return withIndexLock(workspaceRoot, async () => {
+    const index = await ensureSessionsMigrated(workspaceRoot);
+    return { activeId: index.activeId, sessions: sortSessions(index.sessions) };
+  });
 }
 
 export async function toggleSessionPin(workspaceRoot: string, id: string): Promise<SessionMeta[]> {
+  return withIndexLock(workspaceRoot, () => toggleSessionPinLocked(workspaceRoot, id));
+}
+
+async function toggleSessionPinLocked(workspaceRoot: string, id: string): Promise<SessionMeta[]> {
   const index = await readIndex(workspaceRoot);
   const session = index.sessions.find((s) => s.id === id);
   if (!session) throw new Error(`找不到会话：${id}`);
   session.pinned = !session.pinned;
+  session.pinnedAt = session.pinned
+    ? new Date(Math.max(Date.now(), ...index.sessions.map((s) => (Date.parse(s.pinnedAt || "") || 0) + 1))).toISOString()
+    : undefined;
   await writeIndex(workspaceRoot, index);
   return sortSessions(index.sessions);
+}
+
+export async function renameSession(workspaceRoot: string, id: string, title: string): Promise<SessionMeta> {
+  return withIndexLock(workspaceRoot, () => renameSessionLocked(workspaceRoot, id, title));
+}
+
+async function renameSessionLocked(workspaceRoot: string, id: string, title: string): Promise<SessionMeta> {
+  const name = title.trim();
+  if (!name) throw new Error("会话名称不能为空");
+  const index = await readIndex(workspaceRoot);
+  const meta = index.sessions.find((s) => s.id === id);
+  const saved = await loadSessionById(workspaceRoot, id);
+  if (!meta || !saved) throw new Error(`找不到会话：${id}`);
+  meta.title = name;
+  meta.customTitle = true;
+  await fs.writeFile(sessionFilePath(workspaceRoot, id), JSON.stringify({ ...saved, title: name }, null, 2) + "\n", "utf8");
+  await writeIndex(workspaceRoot, index);
+  return meta;
 }
 
 export async function loadSessionById(
@@ -221,6 +264,13 @@ export async function loadSessionById(
 }
 
 export async function createSessionFile(
+  workspaceRoot: string,
+  opts?: { title?: string; mode?: AgentMode },
+): Promise<{ meta: SessionMeta; session: PersistedSession }> {
+  return withIndexLock(workspaceRoot, () => createSessionFileLocked(workspaceRoot, opts));
+}
+
+async function createSessionFileLocked(
   workspaceRoot: string,
   opts?: { title?: string; mode?: AgentMode },
 ): Promise<{ meta: SessionMeta; session: PersistedSession }> {
@@ -261,6 +311,15 @@ export async function saveSessionById(
   },
   activityUpdatedAt?: string,
 ): Promise<SessionMeta> {
+  return withIndexLock(workspaceRoot, () => saveSessionByIdLocked(workspaceRoot, id, snap, activityUpdatedAt));
+}
+
+async function saveSessionByIdLocked(
+  workspaceRoot: string,
+  id: string,
+  snap: Omit<PersistedSession, "version" | "updatedAt" | "id">,
+  activityUpdatedAt?: string,
+): Promise<SessionMeta> {
   const prev = await loadSessionById(workspaceRoot, id);
   const index = await readIndex(workspaceRoot);
   const previousMeta = index.sessions.find((s) => s.id === id);
@@ -272,7 +331,7 @@ export async function saveSessionById(
   // 因此仅当传入显式标题，或磁盘上仍是默认占位标题时，才用首条用户消息推导标题；
   // 否则沿用已持久化的标题，避免回合结束后标题漂移成最近的用户消息。
   const persistedTitle = prev?.title ?? previousMeta?.title ?? null;
-  const title = snap.title?.trim()
+  const title = (previousMeta?.customTitle ? previousMeta.title : null) || snap.title?.trim()
     || (isDefaultSessionTitle(persistedTitle)
       ? titleFromHistory(snap.history, persistedTitle?.trim() || "新会话")
       : persistedTitle!);
@@ -308,6 +367,8 @@ export async function saveSessionById(
     createdAt: full.createdAt!,
     updatedAt,
     ...(previousMeta?.pinned !== undefined ? { pinned: previousMeta.pinned } : {}),
+    ...(previousMeta?.pinnedAt ? { pinnedAt: previousMeta.pinnedAt } : {}),
+    ...(previousMeta?.customTitle ? { customTitle: true } : {}),
   };
   const i = index.sessions.findIndex((s) => s.id === id);
   if (i >= 0) index.sessions[i] = meta;
@@ -318,6 +379,10 @@ export async function saveSessionById(
 }
 
 export async function setActiveSessionId(workspaceRoot: string, id: string): Promise<void> {
+  return withIndexLock(workspaceRoot, () => setActiveSessionIdLocked(workspaceRoot, id));
+}
+
+async function setActiveSessionIdLocked(workspaceRoot: string, id: string): Promise<void> {
   const index = await readIndex(workspaceRoot);
   if (!index.sessions.some((s) => s.id === id)) return;
   index.activeId = id;
@@ -325,6 +390,10 @@ export async function setActiveSessionId(workspaceRoot: string, id: string): Pro
 }
 
 export async function deleteSessionFile(workspaceRoot: string, id: string): Promise<string | null> {
+  return withIndexLock(workspaceRoot, () => deleteSessionFileLocked(workspaceRoot, id));
+}
+
+async function deleteSessionFileLocked(workspaceRoot: string, id: string): Promise<string | null> {
   const index = await readIndex(workspaceRoot);
   index.sessions = index.sessions.filter((s) => s.id !== id);
   try {

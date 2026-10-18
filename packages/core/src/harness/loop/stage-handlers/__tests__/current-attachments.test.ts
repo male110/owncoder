@@ -81,6 +81,24 @@ describe("附件仅随上传所在轮次发送", () => {
     if (withHistory) expect(ctx.history[0].attachments).toEqual([expiredAttachment]);
   });
 
+  it("任务分解不提供历史检索工具，仅发送一次带近期历史的请求", async () => {
+    const ctx = makeContext([], true, false);
+    ctx.opts.sessionId = "decompose-no-recall";
+    ctx.opts.historyVector = {
+      embedding: { embed: vi.fn().mockRejectedValue(new Error("不应检索历史")) },
+      store: {
+        archive: vi.fn(), hasContentHash: vi.fn(), search: vi.fn(),
+        countBySession: vi.fn(), deleteBySession: vi.fn(),
+      },
+    } as NonNullable<typeof ctx.opts.historyVector>;
+    await runTaskDecompose(ctx.opts, ctx.model, ctx.tracer, ctx.memory, ctx.reasoningTrace, ctx.budgets);
+    expect(chatCompletion).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(chatCompletion).mock.calls[0][2]?.tools).toBeUndefined();
+    expect(vi.mocked(chatCompletion).mock.calls[0][1][2]?.content).toContain("上一轮的结论");
+    expect(ctx.opts.historyVector.embedding.embed).not.toHaveBeenCalled();
+    expect(ctx.opts.historyVector.store.search).not.toHaveBeenCalled();
+  });
+
   it("有分解历史时也不重新附带历史附件", async () => {
     const ctx = makeContext([], true, true);
     await injectHistoryAndUserMessage(ctx);

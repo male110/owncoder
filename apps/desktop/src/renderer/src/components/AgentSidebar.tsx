@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChatSessionMetaDto, ProjectDto } from "../../../preload/index";
 import type { WorkspaceInfo } from "@owncoder/shared";
 import type { SessionStatus } from "../store/chat-store";
@@ -69,6 +69,8 @@ interface Props {
   onMoveProject: (root: string, targetRoot: string, after: boolean) => Promise<void>;
   onSwitchSession: (id: string, projectRoot?: string) => Promise<void>;
   onDeleteSession: (id: string, projectRoot: string) => void;
+  onPinSession?: (id: string, projectRoot: string) => Promise<void>;
+  onRenameSession?: (id: string, title: string, projectRoot: string) => Promise<void>;
   /** Open a workspace-relative file path in the editor (double-click from file tree). */
   onOpenFile?: (path: string) => void;
 }
@@ -95,9 +97,60 @@ export function AgentSidebar({
   onMoveProject,
   onSwitchSession,
   onDeleteSession,
+  onPinSession,
+  onRenameSession,
   onOpenFile,
 }: Props) {
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [menu, setMenu] = useState<{ session: ChatSessionMetaDto; root: string; x: number; y: number } | null>(null);
+  const [rename, setRename] = useState<{ id: string; root: string; title: string; originalTitle: string } | null>(null);
+  const [savingName, setSavingName] = useState(false);
+  const [actionError, setActionError] = useState("");
+  const renameFormRef = useRef<HTMLFormElement>(null);
+  const finishedRenameRef = useRef<typeof rename>(null);
+  const commitRename = useCallback(async () => {
+    if (!rename || savingName || finishedRenameRef.current === rename) return;
+    finishedRenameRef.current = rename;
+    const title = rename.title.trim();
+    if (!title || title === rename.originalTitle.trim() || !onRenameSession) {
+      setRename(null);
+      return;
+    }
+    setSavingName(true);
+    setActionError("");
+    try {
+      await onRenameSession(rename.id, title, rename.root);
+      setRename(null);
+    } catch {
+      finishedRenameRef.current = null;
+      setActionError("重命名失败，请重试");
+    } finally {
+      setSavingName(false);
+    }
+  }, [rename, savingName, onRenameSession]);
+  useEffect(() => {
+    if (!rename) return;
+    const submitOutside = (event: PointerEvent) => {
+      if (!renameFormRef.current?.contains(event.target as Node)) void commitRename();
+    };
+    document.addEventListener("pointerdown", submitOutside, true);
+    return () => document.removeEventListener("pointerdown", submitOutside, true);
+  }, [rename, commitRename]);
+  useEffect(() => {
+    if (!menu) return;
+    const close = () => setMenu(null);
+    const keydown = (event: KeyboardEvent) => { if (event.key === "Escape") close(); };
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", keydown);
+    document.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("keydown", keydown);
+      document.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
+    };
+  }, [menu]);
   const [dragRoot, setDragRoot] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<{ root: string; after: boolean } | null>(null);
   const { t } = useI18n();
@@ -121,6 +174,25 @@ export function AgentSidebar({
   };
   return (
     <aside className={`nav-rail${collapsed ? " collapsed" : ""}`}>
+      {actionError ? <p role="alert">{actionError}</p> : null}
+      {menu && !collapsed ? (
+        <div className="file-tree-context-menu" role="menu" aria-label="会话操作"
+          style={{ left: Math.max(8, Math.min(menu.x, window.innerWidth - 208)), top: Math.max(8, Math.min(menu.y, window.innerHeight - 120)) }}
+          onMouseDown={(event) => event.stopPropagation()} onContextMenu={(event) => event.preventDefault()}>
+          <button type="button" role="menuitem" disabled={!onRenameSession || savingName} onClick={() => {
+            setRename({ id: menu.session.id, root: menu.root, title: menu.session.title, originalTitle: menu.session.title });
+            setMenu(null);
+          }}>重命名</button>
+          <button type="button" role="menuitem" disabled={!onPinSession} onClick={() => {
+            void onPinSession?.(menu.session.id, menu.root).catch(() => setActionError("置顶操作失败，请重试"));
+            setMenu(null);
+          }}>{menu.session.pinned ? "取消置顶" : "置顶"}</button>
+          <button type="button" role="menuitem" disabled={isSessionRunning?.(menu.session.id) ?? false} onClick={() => {
+            setConfirmDeleteId(menu.session.id);
+            setMenu(null);
+          }}>删除</button>
+        </div>
+      ) : null}
       {collapsed ? (
         <>
           <div className="nav-header">
@@ -339,6 +411,13 @@ export function AgentSidebar({
                           {visibleSessions.map((s) => (
                             <div
                               key={s.id}
+                              onContextMenu={(event) => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                if (disabled) return;
+                                setActionError("");
+                                setMenu({ session: s, root: p.root, x: event.clientX, y: event.clientY });
+                              }}
                               className={
                                 isCurrent && s.id === activeSessionId
                                   ? "session-wrap active"
@@ -389,7 +468,23 @@ export function AgentSidebar({
                                 }
                                 return null;
                               })()}
-                               <button
+                              {rename?.id === s.id && rename.root === p.root ? (
+                                <form ref={renameFormRef} className="session-rename" onSubmit={(event) => {
+                                  event.preventDefault();
+                                  return commitRename();
+                                }}>
+                                  <input autoFocus aria-label="会话名称" title="Enter 保存，Esc 取消" value={rename.title} disabled={savingName}
+                                    onFocus={(event) => event.target.select()}
+                                    onBlur={() => void commitRename()}
+                                    onChange={(event) => setRename({ ...rename, title: event.target.value })}
+                                    onKeyDown={(event) => {
+                                      if (event.key === "Escape") {
+                                        finishedRenameRef.current = rename;
+                                        setRename(null);
+                                      }
+                                    }} />
+                                </form>
+                              ) : <button
                                 type="button"
                                 className="session-row"
                                 onClick={async () => {
@@ -400,9 +495,15 @@ export function AgentSidebar({
                                 }}
                                 disabled={disabled}
                               >
-                                <span className="session-title">{isDefaultSessionTitle(s.title) ? t("新会话") : s.title}</span>
+                                {s.pinned ? <span title="已置顶" aria-label="已置顶">📌</span> : null}
+                                <span className="session-title" onDoubleClick={(event) => {
+                                  event.stopPropagation();
+                                  if (disabled || savingName || !onRenameSession) return;
+                                  setRename({ id: s.id, root: p.root, title: s.title, originalTitle: s.title });
+                                  setMenu(null);
+                                }}>{isDefaultSessionTitle(s.title) ? t("新会话") : s.title}</span>
                                 <span className="session-time">{relativeTime(s.updatedAt)}</span>
-                              </button>
+                              </button>}
 
                               {confirmDeleteId === s.id ? (
                                 <span className="session-delete-confirm">

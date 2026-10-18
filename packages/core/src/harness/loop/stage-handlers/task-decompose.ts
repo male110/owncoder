@@ -11,7 +11,6 @@ import {
   chatCompletion,
   writeEventLog,
   type ChatMessage,
-  type ToolCall,
 } from "@owncoder/llm";
 import {
   BUILTIN_TASK_DECOMPOSE_PROMPT,
@@ -33,7 +32,6 @@ import { jsonrepair } from "jsonrepair";
 import { emitStage, resolveStageModel } from "../stages.ts";
 import type { AgentLoopOpts, ChatTurn } from "../types.ts";
 import type { TaskItem } from "../../../plans.ts";
-import { recallHistoryForTaskDecompose } from "../../tools/history.ts";
 import { documentIntentContext } from "../document-workflow.ts";
 import { agentIntentContext } from "../agent-intent.ts";
 import type { StageHandler } from "./types.ts";
@@ -41,7 +39,6 @@ import { clipBlock } from "./constants.ts";
 import {
   collectReadEvidenceFromTurns,
   collectToolCallsFromTurns,
-  loadRecentRounds,
   persistDecomposeRound,
   type PersistedDecompose,
 } from "../../../turn-rounds.ts";
@@ -224,28 +221,6 @@ export function extractStructuredHistory(
 /** 历史工具召回相关度下限：低于此值的历史片段丢弃（60%）。 */
 export const RELEVANT_HISTORY_SCORE_THRESHOLD = 0.6;
 
-/** 召回历史片段（含相关度，已按 score 降序且过滤阈值）。 */
-export interface RecalledHistoryChunk {
-  turnIndex: number;
-  role: string;
-  content: string;
-  /** [0,1] 相关度；越高越相关。 */
-  score: number;
-}
-
-/** 将历史工具召回的片段格式化为工具结果（整段不截断）。 */
-export function formatRecalledHistoryChunks(
-  chunks: Array<{ turnIndex: number; role: string; content: string; score?: number }>,
-): string {
-  return chunks
-    .map((chunk, idx) => {
-      const scorePart = typeof chunk.score === "number"
-        ? ` [score=${(chunk.score * 100).toFixed(0)}%]`
-        : "";
-      return `## Recalled ${idx + 1} [turnIndex=${chunk.turnIndex}] [${chunk.role}]${scorePart}\n${chunk.content}`;
-    })
-    .join("\n\n");
-}
 
 /**
  * 按相关度降序排列，并丢弃 score < threshold 的命中。
@@ -274,37 +249,53 @@ export function rankAndFilterByRelevance<T extends { score?: number }>(
  * Limits are now derived from context budget settings (contextWindow / inputRatio /
  * segments.historyRatio) via `budgets` instead of hardcoded constants.
  *
- * 历史拼装口径：仅注入最近 5 轮，整轮不截断。
+ * Compress persisted older rounds when the request exceeds the input budget or more than 13 rounds remain.
  */
 export async function buildDecomposeContext(
   opts: AgentLoopOpts,
   budgets: ReturnType<typeof contextBudgets>,
+  requestPrefix = "",
 ): Promise<string> {
   const limits = computeDecomposeLimits(budgets);
   const sections: string[] = [`Mode: ${opts.mode}`];
 
   const { tagConversationHistory } = await import("../../message-tags.js");
-  const { loadRecentRounds, formatRoundsForDecomposeHistory } = await import("../../../turn-rounds.ts");
-
-  // Prefer persisted rounds (has decompose JSON + evidence). Fall back to
-  // heuristic extraction from chat history for sessions predating the store.
-  const minRounds = 5;
+  const { loadDecomposeHistory, persistDecomposeHistory, formatRoundsForDecomposeHistory, summarizeOlderRounds } = await import("../../../turn-rounds.ts");
+  const recentWindowSize = 5;
+  const maxUncompressedRounds = 13;
+  // Input ratio excludes response tokens; reserve another 15% for estimation error and tool schemas.
+  const inputChars = Math.floor(budgets.total * opts.workflow.context.inputRatio / 100 * 0.85 * 3);
+  const estimateChars = (text: string) => text.length;
   let roundLines: string[] = [];
+  // Older checkpoints stored a heading and a count marker in each appended chunk.
+  const summaryBody = (text: string) => text
+    .replace(/^\s*### Earlier History Summary \(compressed\)\s*$/gm, "")
+    .replace(/^\*\(\d+ older rounds compressed\)\*\s*$/gm, "")
+    .trim();
+  const summarize = (rounds: Awaited<ReturnType<typeof loadDecomposeHistory>>["rounds"]) =>
+    summarizeOlderRounds(rounds);
+  let olderSummary = "";
+  let compression: { older: Awaited<ReturnType<typeof loadDecomposeHistory>>["rounds"]; recent: Awaited<ReturnType<typeof loadDecomposeHistory>>["rounds"]; previousIndex: number; pendingCount: number } | undefined;
+  let fullPendingLines: string[] = [];
   let source: "persisted" | "heuristic" = "heuristic";
-  let persisted: Awaited<ReturnType<typeof loadRecentRounds>> = [];
 
   if (opts.sessionId) {
-    persisted = await loadRecentRounds(opts.workspaceRoot, opts.sessionId, minRounds);
-    if (persisted.length > 0) {
+    const { rounds, checkpoint } = await loadDecomposeHistory(opts.workspaceRoot, opts.sessionId);
+    if (rounds.length > 0 || checkpoint) {
       source = "persisted";
-      // 最近 5 轮完整保留：含用户输入与召回的 evidence/fileChanges，不做每轮截断。
-      roundLines = formatRoundsForDecomposeHistory(persisted);
+      const pending = rounds.filter((round) => round.index > (checkpoint?.throughIndex ?? 0));
+      const older = pending.slice(0, -recentWindowSize);
+      const recent = pending.slice(-recentWindowSize);
+      olderSummary = summaryBody(checkpoint?.summary ?? "");
+      roundLines = formatRoundsForDecomposeHistory(recent, recentWindowSize);
+      fullPendingLines = formatRoundsForDecomposeHistory(pending, recentWindowSize);
+      if (older.length > 0) compression = { older, recent, previousIndex: checkpoint?.throughIndex ?? 0, pendingCount: pending.length };
     }
   }
 
-  if (roundLines.length === 0) {
+  if (roundLines.length === 0 && source === "heuristic") {
     // Fallback: heuristic extraction (no decompose JSON, no evidence).
-    const structuredHistory = extractStructuredHistory(opts.history, minRounds, true);
+    const structuredHistory = extractStructuredHistory(opts.history, recentWindowSize, true);
     roundLines = structuredHistory.slice().reverse().map((round, idx) => {
       const parts: string[] = [`## Round ${idx + 1}`, `[user] ${stripConversationHistoryTags(round.userInput)}`];
       if (round.taskDecompose) parts.push(`[decompose] ${round.taskDecompose}`);
@@ -331,16 +322,11 @@ export async function buildDecomposeContext(
     },
   });
 
-  const historySections: string[] = [];
-  if (roundLines.length > 0) {
-    historySections.push(
-      `### Recent conversation rounds (background)\n${roundLines.join("\n\n")}`,
-    );
-  }
-
-  if (historySections.length > 0) {
-    sections.push(tagConversationHistory(historySections.join("\n\n")));
-  }
+  // Quoted conversation text is data, not another history-section heading.
+  const historySections = (lines = roundLines, summary = olderSummary) => [
+    ...(lines.length ? [tagConversationHistory(`### Recent conversation rounds (background)\n${lines.join("\n\n").replace(/^### Earlier History Summary \(compressed\)$/gm, "[引用的旧摘要标题]")}`)] : []),
+    ...(summary ? [tagConversationHistory(`### Earlier History Summary (compressed)\n\n${summary}`)] : []),
+  ];
 
   if (opts.memoriesBlock?.trim()) {
     sections.push(
@@ -361,7 +347,39 @@ export async function buildDecomposeContext(
     sections.push(`### Document workflow\n${documentIntentContext(opts.documentWorkflow)}`);
   }
 
-  return sections.join("\n\n");
+  const assemble = (lines: string[], summary: string) => [sections[0], ...historySections(lines, summary), ...sections.slice(1)].join("\n\n");
+  // Budget decisions use the uncompressed candidate; the request itself never includes more than five details.
+  const fullContext = assemble(fullPendingLines.length ? fullPendingLines : roundLines, olderSummary);
+  if (compression && (compression.pendingCount > maxUncompressedRounds || estimateChars(requestPrefix + fullContext) > inputChars) && opts.sessionId) {
+    const { older, recent, previousIndex, pendingCount } = compression;
+    let nextSummary = olderSummary;
+    let count = 0;
+    for (let i = 0; i < older.length; i++) {
+      const candidate = [olderSummary, summarize(older.slice(0, count + 1))].filter(Boolean).join("\n\n");
+      const candidateLines = formatRoundsForDecomposeHistory([...older.slice(count + 1), ...recent], recentWindowSize);
+      const candidateContext = assemble(candidateLines, candidate);
+      nextSummary = candidate;
+      count++;
+      if (pendingCount - count <= maxUncompressedRounds && estimateChars(requestPrefix + candidateContext) <= inputChars) break;
+    }
+    try {
+      const saved = await persistDecomposeHistory(opts.workspaceRoot, opts.sessionId, previousIndex, older[count - 1]!.index, nextSummary);
+      if (saved) {
+        olderSummary = nextSummary;
+        compression = { ...compression, older: older.slice(count) };
+      }
+    } catch (error) {
+      writeEventLog({ category: "stage_error", message: "任务分解历史摘要持久化失败", details: { error: String(error) } });
+    }
+  }
+  // The window may hide uncompressed rounds even when compression has not been triggered.
+  // Include them in the single current summary without advancing the durable checkpoint.
+  const visibleSummary = [olderSummary, ...(compression ? [summarize(compression.older)] : [])].filter(Boolean).join("\n\n");
+  const context = assemble(roundLines, visibleSummary);
+  if (estimateChars(requestPrefix + context) > inputChars) {
+    writeEventLog({ category: "stage_error", message: "任务分解上下文超预算，保留最近五轮原文", details: { estimatedChars: estimateChars(requestPrefix + context), inputChars } });
+  }
+  return context;
 }
 
 // ── Decompose Answer Parsing ───────────────────────────────────────
@@ -1034,7 +1052,7 @@ export async function runTaskDecompose(
           currentAttachments.length > 0
             ? `## Uploaded image URLs (preserve these URLs in this task context)\n${currentAttachments.map((attachment) => `- ${attachment.url}`).join("\n")}`
             : "",
-          `## CONTEXT (background information)\n${await buildDecomposeContext(opts, budgets)}`,
+          `## CONTEXT (background information)\n${await buildDecomposeContext(opts, budgets, [systemPrompt, localePrompt, tagUserInput(opts.userMessage), ...currentAttachments.map((item) => item.url)].join("\n\n"))}`,
         ].filter(Boolean).join("\n\n"),
         attachments: currentAttachments,
       },
@@ -1045,148 +1063,25 @@ export async function runTaskDecompose(
     // JSON，体感极慢。固定 low：保留轻量意图判断，不跟主循环抢思考预算。
     // 不注册 onDelta/onThinkingDelta，reasoning 不进入聊天 UI。
     
-    // 历史召回工具：前两次任务分解提供，第三次开始不提供（避免循环重分解）
-    // opts.historyVector 存在时才提供工具（无向量索引时工具无法执行）
-    const recentContextRounds = opts.sessionId
-      ? await loadRecentRounds(opts.workspaceRoot, opts.sessionId, 5)
-      : [];
-    const recentHistoryBoundary = recentContextRounds.length >= 5
-      ? recentContextRounds[0]?.index ?? 0
-      : 0;
-    const historyRecallTool = opts.historyVector && opts.sessionId ? [{
-      type: "function" as const,
-      function: {
-        name: "recall_history_for_task_decompose",
-        description:
-          "Retrieve relevant archived history strictly before the recent five-round context window for task decomposition. " +
-          "Use a concise keyword or focused question describing the information needed. " +
-          "Returns up to five matches with relevance of at least 60%. " +
-          "Each match contains the full stored user input, task decomposition, LLM report, evidence metadata, and tool-call arguments (no tool results; fields are not truncated). " +
-          "Use this when the current context is insufficient and earlier conversation, findings, or decisions may help.",
-        parameters: {
-          type: "object",
-          properties: {
-            query: {
-              type: "string",
-              description: "Keyword or focused question describing the history to retrieve",
-            },
-          },
-          required: ["query"],
-        },
-      },
-    }] : [];
-    
-    // 工具调用循环：持续调用LLM直到获得最终JSON（无tool_calls）
-    const conversationMessages = [...decomposeMessages];
-    let planText = "";
-    let totalTokens = 0;
-    let toolCallCount = 0;
-    const maxToolCalls = 5; // 防止无限循环
-
-    while (toolCallCount < maxToolCalls) {
-      const planResult = await withRetry(
-        () => chatCompletion(model, conversationMessages, {
-          signal: opts.signal,
-          apiKey: opts.llmApiKey,
-          purpose: "task_decompose",
-          taskId: opts.sessionId,
-          thinking: { effort: "low" },
-          tools: historyRecallTool,
-        }),
-        { maxRetries: 1, baseDelay: 3000, signal: opts.signal },
-      );
-
-      // 提取响应中的content和tool_calls
-      const choice = (planResult.result as { 
-        choices?: Array<{ 
-          message?: { 
-            content?: string | null; 
-            tool_calls?: Array<{ 
-              id: string; 
-              type: string; 
-              function: { name: string; arguments: string };
-            }>;
-          }; 
-          finish_reason?: string;
-        }>; 
-        usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } 
-      }).choices?.[0];
-
-      if (!choice?.message) break;
-
-      const content = choice.message.content ?? "";
-      const toolCalls = choice.message.tool_calls;
-      
-      // 记录token使用
-      const planUsage = normalizeUsage(
-        (planResult.result as { usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } }).usage,
-        conversationMessages.map((message) => String(message.content ?? "")).join("\n"),
-        content,
-      );
-      tracer.recordTokenUsage(planUsage.promptTokens, planUsage.completionTokens);
-      totalTokens += planUsage.promptTokens + planUsage.completionTokens;
-
-      // 如果没有tool_calls，这是最终响应
-      if (!toolCalls || toolCalls.length === 0) {
-        planText = content;
-        break;
-      }
-
-      // 有tool_calls：执行工具
-      toolCallCount++;
-      
-      // 添加assistant消息（包含tool_calls）
-      conversationMessages.push({
-        role: "assistant",
-        tool_calls: toolCalls as ToolCall[],
-      });
-
-      // 执行所有tool_calls
-      for (const toolCall of toolCalls) {
-        let toolResult = "";
-        
-        if (toolCall.function.name === "recall_history_for_task_decompose") {
-          try {
-            const args = JSON.parse(toolCall.function.arguments);
-            const query = typeof args.query === "string" ? args.query : "";
-            const historyVector = opts.historyVector;
-            if (!historyVector || !opts.sessionId) {
-              toolResult = "No searchable session history is available.";
-            } else {
-              const result = await recallHistoryForTaskDecompose(
-                { ...historyVector, sessionId: opts.sessionId },
-                query,
-                recentHistoryBoundary,
-              );
-              toolResult = result.output;
-            }
-          } catch (err) {
-            toolResult = `Tool execution failed: ${err instanceof Error ? err.message : String(err)}`;
-          }
-        }
-
-        // 添加tool_result消息
-        conversationMessages.push({
-          role: "tool",
-          tool_call_id: toolCall.id,
-          content: toolResult,
-        } as ChatMessage);
-      }
-
-      // 继续循环以获得下一个响应
-    }
-
-    if (toolCallCount >= maxToolCalls) {
-      console.warn(`[task_decompose] 达到最大工具调用次数 (${maxToolCalls})，停止循环`);
-      writeEventLog({
-        category: "stage_error",
-        message: `task_decompose 工具调用循环次数过多 (≥${maxToolCalls})，已停止`,
-        details: {
-          sessionId: opts.sessionId,
-          toolCallCount,
-        },
-      });
-    }
+    const planResult = await withRetry(
+      () => chatCompletion(model, decomposeMessages, {
+        signal: opts.signal,
+        apiKey: opts.llmApiKey,
+        purpose: "task_decompose",
+        taskId: opts.sessionId,
+        thinking: { effort: "low" },
+      }),
+      { maxRetries: 1, baseDelay: 3000, signal: opts.signal },
+    );
+    const content = (planResult.result as { choices?: Array<{ message?: { content?: string | null } }> })
+      .choices?.[0]?.message?.content ?? "";
+    const planUsage = normalizeUsage(
+      (planResult.result as { usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } }).usage,
+      decomposeMessages.map((message) => String(message.content ?? "")).join("\n"),
+      content,
+    );
+    tracer.recordTokenUsage(planUsage.promptTokens, planUsage.completionTokens);
+    const planText = content;
 
     let answer = parseDecomposeAnswer(planText);
 
@@ -1513,6 +1408,7 @@ export const taskDecomposeHandler: StageHandler = {
           persisted,
           collectToolCallsFromTurns(opts.history),
           (opts.attachments ?? []).map((attachment) => attachment.url),
+          opts.turnId,
         );
         if (record) ctx.state.roundIndex = record.index;
       } catch (error) {

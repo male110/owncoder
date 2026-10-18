@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import { createReadStream } from "node:fs";
 import { createInterface } from "node:readline";
-import { dirname, extname, join } from "node:path";
+import { dirname, extname, isAbsolute, join } from "node:path";
 import { isPlanPath, writePlanFile, extractTitle, classifyPlanKind } from "../../plans.ts";
 import { getGitStatus } from "../../git.ts";
 import { snapshotFileBeforeWrite } from "../checkpoint.ts";
@@ -956,15 +956,20 @@ function resolvePathFromReadSet(
   };
 }
 
+function resolveEditPath(ctx: ToolContext, path: string): { abs: string; rel: string; external: boolean } {
+  const abs = toAbs(ctx.workspaceRoot, normalizeInputPath(path));
+  const rel = normalizeRel(ctx.workspaceRoot, abs);
+  const external = isAbsolute(path) && (rel === ".." || rel.startsWith("../") || isAbsolute(rel));
+  return { abs, rel: external ? abs : rel, external };
+}
+
 export async function toolPatch(ctx: ToolContext, path: string, patch: string): Promise<ToolResult> {
   const target = resolvePatchTarget(path, patch);
   if ("error" in target) return fail(target.error);
   path = target.path;
-  const rel = normalizeInputPath(path);
+  const { abs, rel, external } = resolveEditPath(ctx, path);
   const planBlock = assertPlanMutationAllowed(ctx, rel);
   if (planBlock) return planBlock;
-  const abs = toAbs(ctx.workspaceRoot, rel);
-  assertInside(ctx.workspaceRoot, abs);
   let original = "";
   let fileExists = false;
   try {
@@ -1058,14 +1063,16 @@ export async function toolPatch(ctx: ToolContext, path: string, patch: string): 
   }
 
   // Snapshot and write
-  if (ctx.fileSnapshots) {
+  if (!external && ctx.fileSnapshots) {
     await snapshotFileBeforeWrite(ctx.workspaceRoot, rel, ctx.fileSnapshots);
   }
   await fs.writeFile(abs, editResult.content, "utf8");
-  ctx.touchedPaths?.push(rel);
-  if (isPlanPath(rel)) ctx.lastPlanPath = rel;
-  ctx.index.invalidate(rel);
-  void ctx.index.ragUpdate?.(ctx.workspaceRoot, [], [rel], []);
+  if (!external) {
+    ctx.touchedPaths?.push(rel);
+    if (isPlanPath(rel)) ctx.lastPlanPath = rel;
+    ctx.index.invalidate(rel);
+    void ctx.index.ragUpdate?.(ctx.workspaceRoot, [], [rel], []);
+  }
   
   // Track edit in memory
   if (ctx.memory) {
@@ -1075,7 +1082,7 @@ export async function toolPatch(ctx: ToolContext, path: string, patch: string): 
   
   // Simple success message
   const changes = 'replacements' in editResult ? editResult.replacements : 'applied';
-  const successMsg = `Patched ${rel} (${changes} changes)`;
+  const successMsg = `Patched ${rel} (${changes} changes)${external ? " - outside workspace, not tracked for session undo" : ""}`;
   
   return okMutation(successMsg, rel);
 }
@@ -1104,7 +1111,7 @@ export async function toolWrite(
   if (!content) {
     return fail("write_file requires non-empty content; got an empty string. Pass the full file text in `content`. If you intended to clear the file, use apply_patch with an empty REPLACE block instead.");
   }
-  const rel = normalizeInputPath(path);
+  const { abs, rel, external } = resolveEditPath(ctx, path);
   const planBlock = assertPlanMutationAllowed(ctx, rel);
   if (planBlock) return planBlock;
   // 硬护栏：plan 模式下，文档交付物（PRD/TDD 等）不得写入 .owncoder/plans/，
@@ -1120,9 +1127,6 @@ export async function toolWrite(
       );
     }
   }
-  const abs = toAbs(ctx.workspaceRoot, rel);
-  assertInside(ctx.workspaceRoot, abs);
-
   // Read the current file (when present) so we can both report accurately and
   // refuse a suspicious shrink below.
   let existing: string | null = null;
@@ -1168,8 +1172,8 @@ export async function toolWrite(
     console.log(`[write_file] large shrink accepted for ${rel}: ${scale}`);
   }
 
-  // Create snapshot before writing
-  if (ctx.fileSnapshots) {
+  // Workspace checkpoints and index only cover workspace files.
+  if (!external && ctx.fileSnapshots) {
     await snapshotFileBeforeWrite(ctx.workspaceRoot, rel, ctx.fileSnapshots);
   }
   
@@ -1179,10 +1183,12 @@ export async function toolWrite(
   
   // Update tracking
   ctx.readSet.add(rel);
-  ctx.touchedPaths?.push(rel);
-  if (isPlanPath(rel)) ctx.lastPlanPath = rel;
-  ctx.index.invalidate(rel);
-  void ctx.index.ragUpdate?.(ctx.workspaceRoot, [], [rel], []);
+  if (!external) {
+    ctx.touchedPaths?.push(rel);
+    if (isPlanPath(rel)) ctx.lastPlanPath = rel;
+    ctx.index.invalidate(rel);
+    void ctx.index.ragUpdate?.(ctx.workspaceRoot, [], [rel], []);
+  }
   
   if (ctx.memory) {
     ctx.memory.addEdit(rel, "write_file", exists ? "(existing)" : "(new)", content.slice(0, 100));
@@ -1195,7 +1201,7 @@ export async function toolWrite(
     ? ` - shrank from ${existing!.length} chars via allow_shrink`
     : "";
   return okMutation(
-    `Wrote ${rel} (${content.length} chars)${exists ? " - overwritten" : " - created"}${shrinkNote}`,
+    `Wrote ${rel} (${content.length} chars)${exists ? " - overwritten" : " - created"}${shrinkNote}${external ? " - outside workspace, not tracked for session undo" : ""}`,
     rel,
   );
 }
@@ -1632,12 +1638,9 @@ export async function toolAppend(ctx: ToolContext, path: string, content: string
     return fail("append_file requires non-empty content to append");
   }
   
-  const rel = normalizeInputPath(path);
+  const { abs, rel, external } = resolveEditPath(ctx, path);
   const planBlock = assertPlanMutationAllowed(ctx, rel);
   if (planBlock) return planBlock;
-  
-  const abs = toAbs(ctx.workspaceRoot, rel);
-  assertInside(ctx.workspaceRoot, abs);
 
   // Check if file exists
   let originalSize = 0;
@@ -1648,8 +1651,8 @@ export async function toolAppend(ctx: ToolContext, path: string, content: string
     return fail(`File "${rel}" does not exist. Use write_file to create it first, then append_file to add content.`);
   }
   
-  // Create snapshot before appending
-  if (ctx.fileSnapshots) {
+  // Create snapshot before appending for workspace files only.
+  if (!external && ctx.fileSnapshots) {
     await snapshotFileBeforeWrite(ctx.workspaceRoot, rel, ctx.fileSnapshots);
   }
   
@@ -1658,10 +1661,12 @@ export async function toolAppend(ctx: ToolContext, path: string, content: string
   
   // Update tracking
   ctx.readSet.add(rel);
-  ctx.touchedPaths?.push(rel);
-  if (isPlanPath(rel)) ctx.lastPlanPath = rel;
-  ctx.index.invalidate(rel);
-  void ctx.index.ragUpdate?.(ctx.workspaceRoot, [], [rel], []);
+  if (!external) {
+    ctx.touchedPaths?.push(rel);
+    if (isPlanPath(rel)) ctx.lastPlanPath = rel;
+    ctx.index.invalidate(rel);
+    void ctx.index.ragUpdate?.(ctx.workspaceRoot, [], [rel], []);
+  }
   
   if (ctx.memory) {
     ctx.memory.addEdit(rel, "append_file", `(+${content.length} chars)`, content.slice(0, 100));
@@ -1669,5 +1674,5 @@ export async function toolAppend(ctx: ToolContext, path: string, content: string
   }
   
   const newSize = originalSize + Buffer.byteLength(content, "utf8");
-  return okMutation(`Appended to ${rel} (added ${content.length} chars, total now ${newSize} bytes)`, rel);
+  return okMutation(`Appended to ${rel} (added ${content.length} chars, total now ${newSize} bytes)${external ? " - outside workspace, not tracked for session undo" : ""}`, rel);
 }

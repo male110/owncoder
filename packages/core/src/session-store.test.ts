@@ -11,6 +11,7 @@ import {
   saveSessionById,
   setActiveSessionId,
   toggleSessionPin,
+  renameSession,
 } from "./session-store.ts";
 import { conversationStorePath } from "./conversation-store.ts";
 
@@ -83,6 +84,49 @@ describe("session store history sanitization", () => {
       attachments,
     });
     expect(loaded?.queuedMessages).toEqual([{ text: "queued", attachments }]);
+  });
+
+  it("自定义名称在普通保存后保留，空名称被拒绝", async () => {
+    const r = await root();
+    const { meta, session } = await createSessionFile(r);
+    await renameSession(r, meta.id, "  我的会话  ");
+    await saveSessionById(r, meta.id, { ...session, history: [{ role: "user", content: "自动标题" }] });
+    expect((await loadSessionById(r, meta.id))?.title).toBe("我的会话");
+    expect((await listSessionMetas(r)).sessions[0].title).toBe("我的会话");
+    await renameSession(r, meta.id, "新会话");
+    await saveSessionById(r, meta.id, { ...session, history: [{ role: "user", content: "自动标题" }] });
+    expect((await loadSessionById(r, meta.id))?.title).toBe("新会话");
+    await expect(renameSession(r, meta.id, "  ")).rejects.toThrow("会话名称不能为空");
+  });
+
+  it("其他会话并发保存时，重命名在重新读取和后续保存后仍保留", async () => {
+    const r = await root();
+    const first = await createSessionFile(r, { title: "旧名称" });
+    const second = await createSessionFile(r);
+    await Promise.all([
+      saveSessionById(r, second.meta.id, second.session),
+      renameSession(r, first.meta.id, "用户输入的名称"),
+    ]);
+    expect((await listSessionMetas(r)).sessions.find((s) => s.id === first.meta.id)?.title).toBe("用户输入的名称");
+    expect((await loadSessionById(r, first.meta.id))?.title).toBe("用户输入的名称");
+    await saveSessionById(r, first.meta.id, first.session);
+    expect((await loadSessionById(r, first.meta.id))?.title).toBe("用户输入的名称");
+    expect((await listSessionMetas(r)).sessions.find((s) => s.id === first.meta.id)?.customTitle).toBe(true);
+  });
+
+  it("多个置顶按置顶时间倒序，消息活动不改变置顶顺序", async () => {
+    const r = await root();
+    const first = await createSessionFile(r);
+    const second = await createSessionFile(r);
+    const third = await createSessionFile(r);
+    await toggleSessionPin(r, second.meta.id);
+    await toggleSessionPin(r, first.meta.id);
+    await saveSessionById(r, second.meta.id, second.session, "2099-01-01T00:00:00.000Z");
+    expect((await listSessionMetas(r)).sessions.map((s) => s.id)).toEqual([first.meta.id, second.meta.id, third.meta.id]);
+    await toggleSessionPin(r, first.meta.id);
+    expect((await listSessionMetas(r)).sessions[0].id).toBe(second.meta.id);
+    await toggleSessionPin(r, first.meta.id);
+    expect((await listSessionMetas(r)).sessions[0].id).toBe(first.meta.id);
   });
 
   it("lists sessions by the latest user-message update time", async () => {

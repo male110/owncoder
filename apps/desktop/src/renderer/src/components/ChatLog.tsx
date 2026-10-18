@@ -496,6 +496,7 @@ function AssistantBubbleImpl({
   onRegenerate,
   onOpenFile,
   workspaceRoot,
+  onDelete,
 }: {
   turn: ChatTurnDto;
   canRegenerate: boolean;
@@ -503,9 +504,11 @@ function AssistantBubbleImpl({
   onRegenerate?: () => void;
   onOpenFile?: (path: string) => void;
   workspaceRoot?: string;
+  onDelete?: (turnId: string) => void;
 }) {
   const { t } = useI18n();
   const [copied, setCopied] = useState(false);
+  const [confirming, setConfirming] = useState(false);
 
   const planPath      = extractPlanPath(turn.content);
   const displayContent = planPath ? stripPlanMarker(turn.content) : turn.content;
@@ -576,6 +579,39 @@ function AssistantBubbleImpl({
             {regenerating ? t("生成中…") : t("重新生成")}
           </button>
         ) : null}
+        {turn.turnId && onDelete ? (
+          confirming ? (
+            <>
+              <button
+                type="button"
+                className="msg-action-btn danger"
+                onClick={() => {
+                  onDelete(turn.turnId!);
+                  setConfirming(false);
+                }}
+                title={t("确认删除")}
+              >
+                {t("确认删除该回复及输入？")}
+              </button>
+              <button
+                type="button"
+                className="msg-action-btn"
+                onClick={() => setConfirming(false)}
+              >
+                {t("取消")}
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              className="msg-action-btn"
+              onClick={() => setConfirming(true)}
+              title={t("删除该回复及对应输入")}
+            >
+              {t("删除")}
+            </button>
+          )
+        ) : null}
         {isCompressed && (
           <span className="compression-badge" title={t("已压缩内容")}>
             {t("🗜️ 压缩")}
@@ -620,7 +656,8 @@ const AssistantBubble = memo(AssistantBubbleImpl, (prev, next) =>
   prev.regenerating === next.regenerating &&
   prev.onRegenerate === next.onRegenerate &&
   prev.onOpenFile === next.onOpenFile &&
-  prev.workspaceRoot === next.workspaceRoot
+  prev.workspaceRoot === next.workspaceRoot &&
+  prev.onDelete === next.onDelete
 );
 
 // ── ProcessSteps: 已完成轮次的过程步骤（工具链 + 中间过程文本）折叠控件 ──────
@@ -786,6 +823,7 @@ export function ChatLog({
           onRegenerate={onRegenerate}
           onOpenFile={onOpenFile}
           workspaceRoot={workspaceRoot}
+          onDelete={onDeleteTurn}
         />
       );
     }

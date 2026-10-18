@@ -1,6 +1,6 @@
 import { promises as fs } from "node:fs";
 import upath from "upath";
-import { join, relative, resolve } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import { fromMarkdown } from "mdast-util-from-markdown";
 
 export interface PlanInfo {
@@ -365,9 +365,8 @@ export async function listPlans(workspaceRoot: string): Promise<PlanInfo[]> {
 
 export async function readPlanFile(workspaceRoot: string, relPath: string): Promise<string> {
   assertPlanPath(relPath);
-  const abs = resolve(workspaceRoot, relPath);
-  const rootRel = relative(workspaceRoot, abs);
-  if (rootRel.startsWith("..")) throw new Error("path escapes workspace");
+  // 如果是绝对路径，直接使用；相对路径基于工作区解析
+  const abs = isAbsolute(relPath) ? relPath : resolve(workspaceRoot, relPath);
   return fs.readFile(abs, "utf8");
 }
 

@@ -81,13 +81,10 @@ describe("task decompose prompt JSON contract", () => {
     expect(BUILTIN_TASK_DECOMPOSE_PROMPT).not.toMatch(/Always reply/);
   });
 
-  it("仅在上下文不足且需要历史信息时允许检索历史", () => {
-    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(/## Historical Context/);
-    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(/current context is insufficient/);
-    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(/relevant to planning/);
-    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(/functions\.recall_history_for_task_decompose/);
-    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).not.toMatch(/(?<!functions\.)`recall_history`/);
-    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(/Prefer the supplied context whenever it is sufficient/);
+  it("仅使用已注入的近期历史和滚动摘要", () => {
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(/## History Context/);
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toMatch(/supplied recent conversation and rolling summary/);
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).not.toMatch(/recall_history|retrieve the related archived history/);
     expect(BUILTIN_TASK_DECOMPOSE_PROMPT).not.toMatch(/## Available Tools/);
     expect(BUILTIN_TASK_DECOMPOSE_PROMPT).not.toMatch(/web_search|search_symbols|code-map|file reading|file modification|testing/);
   });

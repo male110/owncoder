@@ -110,7 +110,7 @@ export function App() {
     refreshChanges, refreshGit, refreshPlans, refreshActivePlan,
     refreshSessions, applySessionState, applyOpened,
     onAddProject, onSelectProject, onRemoveProject, onMoveProject, onToggleExpand,
-    onNewSession, onSwitchSession, onDeleteSession,
+    onNewSession, onSwitchSession, onDeleteSession, onPinSession, onRenameSession,
     pendingNewSession, pendingNewSessionRef, createPendingSession,
   } = useSessionSync();
 
@@ -539,6 +539,8 @@ export function App() {
           onMoveProject={onMoveProject}
           onSwitchSession={(id, projectRoot) => onSwitchSession(id, projectRoot)}
           onDeleteSession={(id, projectRoot) => void onDeleteSession(id, projectRoot)}
+          onPinSession={onPinSession}
+          onRenameSession={onRenameSession}
           onOpenFile={openEditorFile}
         />
 

@@ -160,20 +160,9 @@ export function normalizeInputPath(p: string): string {
   return p && p.trim().length > 0 ? p : "." + sep;
 }
 
-export function assertInside(root: string, abs: string): void {
-  const rel = relative(root, abs);
-  const escapes =
-    rel === ".." ||
-    rel.startsWith(`..${sep}`) ||
-    /^[A-Za-z]:[\\/]/.test(rel) ||
-    rel.startsWith("/") ||
-    rel.startsWith("\\\\");
-  if (escapes) {
-    throw new Error(
-      `path escapes workspace: "${rel}" resolves outside workspace root "${root}". ` +
-      `Use a relative path inside the workspace.`,
-    );
-  }
+export function assertInside(_root: string, _abs: string): void {
+  // 路径边界检查已移除：允许访问任何路径
+  // 相对路径基于工作区解析，绝对路径直接使用
 }
 
 export function normalizeRel(root: string, abs: string): string {

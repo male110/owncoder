@@ -129,6 +129,8 @@ export interface PersistedToolCall {
 
 export interface TurnRoundRecord {
   index: number;
+  /** Durable conversation turn id, when available. */
+  turnId?: string;
   createdAt: string;
   updatedAt: string;
   userInput: string;
@@ -141,10 +143,16 @@ export interface TurnRoundRecord {
   toolCalls?: PersistedToolCall[];
 }
 
+export interface DecomposeHistoryCheckpoint {
+  throughIndex: number;
+  summary: string;
+}
+
 interface TurnRoundsFile {
   version: 1;
   sessionId: string;
   rounds: TurnRoundRecord[];
+  decomposeHistory?: DecomposeHistoryCheckpoint;
 }
 
 const writeQueues = new Map<string, Promise<unknown>>();
@@ -397,6 +405,7 @@ function sanitizeRound(raw: unknown, fallbackIndex: number): TurnRoundRecord | n
   const toolCalls = sanitizeToolCalls(obj.toolCalls);
   return {
     index,
+    turnId: typeof obj.turnId === "string" && obj.turnId ? obj.turnId : undefined,
     createdAt,
     updatedAt,
     userInput: clip(userInput, MAX_USER_INPUT_CHARS),
@@ -421,7 +430,12 @@ async function readFile(workspaceRoot: string, sessionId: string): Promise<TurnR
     const rounds = data.rounds
       .map((r, i) => sanitizeRound(r, i + 1))
       .filter((r): r is TurnRoundRecord => r !== null);
-    return { version: FILE_VERSION, sessionId, rounds };
+    const checkpoint = data.decomposeHistory;
+    const decomposeHistory = checkpoint && Number.isSafeInteger(checkpoint.throughIndex) &&
+      checkpoint.throughIndex > 0 && typeof checkpoint.summary === "string" && checkpoint.summary.trim()
+      ? { throughIndex: checkpoint.throughIndex, summary: checkpoint.summary }
+      : undefined;
+    return { version: FILE_VERSION, sessionId, rounds, decomposeHistory };
   } catch {
     return emptyFile(sessionId);
   }
@@ -433,7 +447,11 @@ async function writeFile(workspaceRoot: string, file: TurnRoundsFile): Promise<v
   const trimmed: TurnRoundsFile = {
     version: FILE_VERSION,
     sessionId: file.sessionId,
-    rounds: file.rounds.length > MAX_ROUNDS ? file.rounds.slice(-MAX_ROUNDS) : file.rounds,
+    // Uncompressed rounds must remain available until the next budget-triggered update.
+    rounds: file.rounds.length > MAX_ROUNDS && file.decomposeHistory
+      ? file.rounds.filter((round, i) => i >= file.rounds.length - MAX_ROUNDS || round.index > file.decomposeHistory!.throughIndex)
+      : file.rounds,
+    decomposeHistory: file.decomposeHistory,
   };
   await fs.writeFile(roundsFilePath(workspaceRoot, file.sessionId), JSON.stringify(trimmed, null, 2) + "\n", "utf8");
 }
@@ -498,6 +516,7 @@ export function formatRoundBlock(
   return parts.join("\n");
 }
 
+
 /**
  * Format persisted rounds for task_decompose history (newest first).
  *
@@ -512,7 +531,7 @@ export function formatRoundBlock(
  * 分解结果只保留最近一次（前一轮）：从最新轮向前查找第一个有分解结果的轮次，
  * 只有该轮保留分解信息，其余轮次省略分解结果。
  */
-export function formatRoundsForDecomposeHistory(roundsOldestFirst: TurnRoundRecord[]): string[] {
+export function formatRoundsForDecomposeHistory(roundsOldestFirst: TurnRoundRecord[], fullRecentCount = 0): string[] {
   const newestFirst = roundsOldestFirst.slice().reverse();
   let stillInInterruptedSuffix = true;
   
@@ -527,14 +546,95 @@ export function formatRoundsForDecomposeHistory(roundsOldestFirst: TurnRoundReco
   
   return newestFirst.map((round, idx) => {
     const includeProcessInfo =
-      idx === 0 || (stillInInterruptedSuffix && !round.assistantReport);
+      idx < fullRecentCount || idx === 0 || (stillInInterruptedSuffix && !round.assistantReport);
     if (round.assistantReport) {
       stillInInterruptedSuffix = false;
     }
     // 只有最近一次有分解结果的轮次才保留分解信息
-    const includeDecompose = lastDecomposeIndex !== -1 && idx === lastDecomposeIndex;
+    const includeDecompose = idx < fullRecentCount || (lastDecomposeIndex !== -1 && idx === lastDecomposeIndex);
     return formatRoundBlock(round, idx + 1, { includeProcessInfo, includeDecompose });
   });
+}
+
+/**
+ * 对本项目已加载的早期历史轮次生成结构化摘要。
+ *
+ * 提取关键信息：用户意图、约束条件、已完成工作、相关文件等，
+ * 而不是保留完整对话内容，从而在保留历史上下文的同时节省 token。
+ *
+ * @param roundsOldestFirst 早期轮次（已按时间从旧到新排序）
+ * @returns 结构化摘要文本
+ */
+export function summarizeOlderRounds(roundsOldestFirst: TurnRoundRecord[]): string {
+  if (roundsOldestFirst.length === 0) return "";
+
+  const summaryParts: string[] = [];
+
+  // 提取所有涉及的任务目标和用户意图
+  const intents: string[] = [];
+  const constraints: string[] = [];
+  const completedWork: string[] = [];
+  const involvedFiles = new Set<string>();
+  const keyFindings: string[] = [];
+
+  for (const round of roundsOldestFirst) {
+    // 提取任务意图
+    if (round.taskDecompose) {
+      if (round.taskDecompose.intent) {
+        intents.push(round.taskDecompose.intent);
+      }
+      // 提取用户约束
+      if (round.taskDecompose.userConstraints && round.taskDecompose.userConstraints.length > 0) {
+        constraints.push(...round.taskDecompose.userConstraints);
+      }
+    }
+
+    if (!round.taskDecompose?.intent && round.userInput) intents.push(clip(round.userInput, 300));
+
+    // 提取已完成的工作（从助手报告中）
+    if (round.assistantReport) {
+      completedWork.push(clip(round.assistantReport, 200));
+    }
+
+    // 收集涉及的文件路径
+    if (round.evidence) {
+      for (const ev of round.evidence) {
+        if (ev.path) involvedFiles.add(ev.path);
+        if (ev.summary) keyFindings.push(clip(ev.summary, 150));
+      }
+    }
+    if (round.fileChanges) {
+      for (const change of round.fileChanges) {
+        if (change.path) involvedFiles.add(change.path);
+      }
+    }
+  }
+
+  // 组装摘要
+  if (intents.length > 0) {
+    summaryParts.push(`**User Intents:**\n${intents.map((i, idx) => `${idx + 1}. ${clip(i, 300)}`).join("\n")}`);
+  }
+
+  if (constraints.length > 0) {
+    // 去重约束
+    const uniqueConstraints = [...new Set(constraints)].slice(0, 10);
+    summaryParts.push(`**User Constraints:**\n${uniqueConstraints.map((c, idx) => `${idx + 1}. ${c}`).join("\n")}`);
+  }
+
+  if (completedWork.length > 0) {
+    summaryParts.push(`**Completed Work (${completedWork.length} rounds):**\n${completedWork.slice(-5).map((w, idx) => `${idx + 1}. ${w}`).join("\n")}`);
+  }
+
+  if (involvedFiles.size > 0) {
+    const files = Array.from(involvedFiles).slice(0, 20);
+    summaryParts.push(`**Involved Files (${involvedFiles.size} total):**\n${files.map((f) => `- ${f}`).join("\n")}`);
+  }
+
+  if (keyFindings.length > 0) {
+    summaryParts.push(`**Key Findings:**\n${keyFindings.slice(-5).map((f, idx) => `${idx + 1}. ${f}`).join("\n")}`);
+  }
+
+  return summaryParts.join("\n\n");
 }
 
 /**
@@ -728,6 +828,36 @@ export function collectReadEvidenceFromTurns(
 }
 
 /** Last `limit` rounds, oldest-first. Waits for in-flight writes to the same session. */
+export async function loadDecomposeHistory(
+  workspaceRoot: string,
+  sessionId: string,
+): Promise<{ rounds: TurnRoundRecord[]; checkpoint?: DecomposeHistoryCheckpoint }> {
+  if (!isSafeSessionId(sessionId)) return { rounds: [] };
+  return withSessionLock(queueKey(workspaceRoot, sessionId), async () => {
+    const file = await readFile(workspaceRoot, sessionId);
+    return { rounds: file.rounds, checkpoint: file.decomposeHistory };
+  });
+}
+
+export async function persistDecomposeHistory(
+  workspaceRoot: string,
+  sessionId: string,
+  previousIndex: number,
+  throughIndex: number,
+  summary: string,
+): Promise<boolean> {
+  if (!isSafeSessionId(sessionId) || !summary.trim()) return false;
+  return withSessionLock(queueKey(workspaceRoot, sessionId), async () => {
+    const file = await readFile(workspaceRoot, sessionId);
+    if ((file.decomposeHistory?.throughIndex ?? 0) !== previousIndex ||
+        !file.rounds.some((round) => round.index === throughIndex)) return false;
+    if (throughIndex <= previousIndex) return false;
+    file.decomposeHistory = { throughIndex, summary };
+    await writeFile(workspaceRoot, file);
+    return true;
+  });
+}
+
 export async function loadRecentRounds(
   workspaceRoot: string,
   sessionId: string,
@@ -747,6 +877,7 @@ export async function persistDecomposeRound(
   decompose: PersistedDecompose,
   toolCalls: PersistedToolCall[] = [],
   attachmentUrls: string[] = [],
+  turnId?: string,
 ): Promise<TurnRoundRecord | null> {
   const input = userInput.trim();
   const cleaned = sanitizeDecompose(decompose);
@@ -757,7 +888,8 @@ export async function persistDecomposeRound(
     const now = new Date().toISOString();
     const last = file.rounds[file.rounds.length - 1];
     // Same user turn still open (decompose ran, report not written yet) → update in place.
-    if (last && last.userInput === clip(input, MAX_USER_INPUT_CHARS) && !last.assistantReport) {
+    if (last && last.userInput === clip(input, MAX_USER_INPUT_CHARS) && !last.assistantReport && (!last.turnId || !turnId || last.turnId === turnId)) {
+      last.turnId = turnId ?? last.turnId;
       last.taskDecompose = cleaned;
       if (attachmentUrls.length > 0) last.attachmentUrls = [...new Set(attachmentUrls.filter(Boolean))];
       if (toolCalls.length > 0) last.toolCalls = sanitizeToolCalls(toolCalls);
@@ -767,6 +899,7 @@ export async function persistDecomposeRound(
     }
     const record: TurnRoundRecord = {
       index: nextIndex(file.rounds),
+      turnId,
       createdAt: now,
       updatedAt: now,
       userInput: clip(input, MAX_USER_INPUT_CHARS),
@@ -915,8 +1048,43 @@ export async function dropLastRound(
     if (!last) return false;
     if (userInput && last.userInput !== clip(userInput.trim(), MAX_USER_INPUT_CHARS)) return false;
     file.rounds.pop();
+    if (file.decomposeHistory && file.decomposeHistory.throughIndex >= last.index) {
+      file.decomposeHistory = undefined;
+    }
     await writeFile(workspaceRoot, file);
     return true;
+  });
+}
+
+/** Remove a deleted chat turn from decomposition history, including legacy rounds without ids. */
+export async function deleteDecomposeRound(
+  workspaceRoot: string,
+  sessionId: string,
+  turnId: string,
+  userInput?: string,
+  startedAt?: string,
+): Promise<boolean> {
+  if (!isSafeSessionId(sessionId) || !turnId) return false;
+  return withSessionLock(queueKey(workspaceRoot, sessionId), async () => {
+    const file = await readFile(workspaceRoot, sessionId);
+    let target = file.rounds.find((round) => round.turnId === turnId);
+    if (!target && userInput) {
+      const candidates = file.rounds.filter((round) => !round.turnId && round.userInput === clip(userInput.trim(), MAX_USER_INPUT_CHARS));
+      if (candidates.length === 1) target = candidates[0];
+      else if (candidates.length > 1 && startedAt) {
+        const time = Date.parse(startedAt);
+        if (Number.isFinite(time)) {
+          target = candidates.sort((a, b) => Math.abs(Date.parse(a.createdAt) - time) - Math.abs(Date.parse(b.createdAt) - time))[0];
+        }
+      }
+    }
+    // The checkpoint is an aggregate, and may include a round already pruned
+    // from the file. Rebuild from surviving rounds rather than reuse stale text.
+    const hadCheckpoint = Boolean(file.decomposeHistory);
+    file.decomposeHistory = undefined;
+    if (target) file.rounds = file.rounds.filter((round) => round !== target);
+    if (target || hadCheckpoint) await writeFile(workspaceRoot, file);
+    return Boolean(target || hadCheckpoint);
   });
 }
 

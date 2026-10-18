@@ -1,4 +1,5 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { BUILTIN_WORKFLOW } from "@owncoder/settings";
@@ -79,5 +80,43 @@ it("多文件读取后的执行链路：只修改明确目标，拒绝无路径�
     expect((await run({ patch: `../outside.txt\n${block}` })).ok).toBe(false);
   } finally {
     await rm(root, { recursive: true, force: true });
+  }
+});
+
+it("file editors resolve relative paths in workspace and absolute paths outside it", async () => {
+  const root = await mkdtemp(join(tmpdir(), "owncoder-edit-root-"));
+  const outside = await mkdtemp(join(tmpdir(), "owncoder-edit-outside-"));
+  const target = join(outside, "target.txt");
+  const ctx = {
+    workspaceRoot: root,
+    mode: "agent",
+    workflow: BUILTIN_WORKFLOW,
+    index: { invalidate() {} },
+    readSet: new Set<string>(),
+    touchedPaths: [] as string[],
+    fileSnapshots: [] as { path: string }[],
+    maxOutputChars: 24_000,
+    bashMaxChars: 10_000,
+  } as unknown as ToolContext;
+  const run = (name: string, file_path: string, args: Record<string, unknown>) => executeTool(ctx, {
+    id: name, name, arguments: { file_path, ...args }, rawArguments: JSON.stringify({ file_path, ...args }),
+  });
+  try {
+    await writeFile(target, "old\n");
+    expect((await run("apply_patch", target, { patch: block })).ok).toBe(true);
+    expect(await readFile(target, "utf8")).toBe("new\n");
+    expect((await run("write_file", target, { content: "written\n" })).ok).toBe(true);
+    expect((await run("append_file", target, { content: "appended\n" })).ok).toBe(true);
+    expect(await readFile(target, "utf8")).toBe("written\nappended\n");
+    expect(ctx.fileSnapshots).toHaveLength(0);
+    expect(ctx.touchedPaths).toEqual([]);
+    expect((await run("write_file", "local.txt", { content: "local\n" })).ok).toBe(true);
+    expect((await run("append_file", "local.txt", { content: "more\n" })).ok).toBe(true);
+    expect(await readFile(join(root, "local.txt"), "utf8")).toBe("local\nmore\n");
+    expect(ctx.touchedPaths).toEqual(["local.txt", "local.txt"]);
+    expect(ctx.fileSnapshots).toHaveLength(1);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+    await rm(outside, { recursive: true, force: true });
   }
 });

@@ -17,6 +17,18 @@ describe("session-store activity order", () => {
     expect(useSessionStore.getState().sessionsByProject.test).toEqual(useSessionStore.getState().sessions);
   });
 
+  it("发送消息后仍按置顶时间排序", () => {
+    const sessions = [
+      { id: "old", title: "old", pinned: true, pinnedAt: "2026-01-01T00:00:00.000Z", updatedAt: "" },
+      { id: "new", title: "new", pinned: true, pinnedAt: "2026-02-01T00:00:00.000Z", updatedAt: "" },
+      { id: "normal", title: "normal", updatedAt: "" },
+    ];
+    useSessionStore.setState({ sessions, sessionsByProject: { test: sessions } });
+    useSessionStore.getState().touchSessionUpdatedAt("old", "2026-03-01T00:00:00.000Z");
+    expect(useSessionStore.getState().sessions.map((s) => s.id)).toEqual(["new", "old", "normal"]);
+    expect(useSessionStore.getState().sessionsByProject.test).toEqual(useSessionStore.getState().sessions);
+  });
+
   it("preserves pins and stable ties including missing times", () => {
     const sessions = [
       { id: "p", title: "p", pinned: true, updatedAt: "" },

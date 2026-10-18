@@ -287,6 +287,7 @@ export interface ChatSessionMetaDto {
   updatedAt: string;
   createdAt: string;
   pinned?: boolean;
+  pinnedAt?: string;
 }
 
 export interface ProjectDto {
@@ -403,7 +404,8 @@ export interface DesktopApi {
     history: ChatTurnDto[];
     list: { activeId: string | null; sessions: ChatSessionMetaDto[] };
   }>;
-  pinChatSession: (id: string) => Promise<{
+  renameChatSession: (id: string, title: string, projectRoot?: string) => Promise<ChatSessionMetaDto>;
+  pinChatSession: (id: string, projectRoot?: string) => Promise<{
     sessions: ChatSessionMetaDto[];
     list: { activeId: string | null; sessions: ChatSessionMetaDto[] };
   }>;
@@ -600,7 +602,8 @@ const api: DesktopApi = {
   createChatSession: (title) => ipcRenderer.invoke("sessions:create", title),
   switchChatSession: (id, projectRoot) => ipcRenderer.invoke("sessions:switch", id, projectRoot),
   deleteChatSession: (id, projectRoot) => ipcRenderer.invoke("sessions:delete", id, projectRoot),
-  pinChatSession: (id) => ipcRenderer.invoke("sessions:pin", id),
+  renameChatSession: (id, title, projectRoot) => ipcRenderer.invoke("sessions:rename", id, title, projectRoot),
+  pinChatSession: (id, projectRoot) => ipcRenderer.invoke("sessions:pin", id, projectRoot),
   setMode: (mode, sessionId) => ipcRenderer.invoke("session:setMode", mode, sessionId),
   setQueuedMessages: (messages, sessionId) => ipcRenderer.invoke("session:setQueuedMessages", messages, sessionId),
   approvePlan: (opts, sessionId) => ipcRenderer.invoke("session:approvePlan", opts, sessionId),

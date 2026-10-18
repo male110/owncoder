@@ -954,13 +954,26 @@ export function useSessionSync() {
     });
   }, [refreshSessions]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const onPinSession = useCallback(async (id: string) => {
-    const res = await window.owncoder.pinChatSession(id);
-    session.setSessions(res.list.sessions);
-    const ws = workspaceRef.current;
-    if (ws?.root) {
-      session.setSessionsByProject((prev) => ({ ...prev, [ws.root]: res.list.sessions }));
+  const onPinSession = useCallback(async (id: string, projectRoot: string) => {
+    const res = await window.owncoder.pinChatSession(id, projectRoot);
+    if (workspaceRef.current?.root === projectRoot) session.setSessions(res.list.sessions);
+    session.setSessionsByProject((prev) => ({ ...prev, [projectRoot]: res.list.sessions }));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const onRenameSession = useCallback(async (id: string, title: string, projectRoot: string) => {
+    const meta = await window.owncoder.renameChatSession(id, title, projectRoot);
+    // 重命名前发出的列表请求可能携带旧名称，不能再覆盖保存成功的结果。
+    ++sessionListSyncVersionRef.current;
+    ++projectsSyncVersionRef.current;
+    const current = useSessionStore.getState();
+    if (workspaceRef.current?.root === projectRoot) {
+      session.setSessions(current.sessions.map((s) => s.id === id ? meta : s));
+      if (current.activeSessionId === id) session.setSessionTitle(meta.title);
     }
+    session.setSessionsByProject((prev) => ({
+      ...prev,
+      [projectRoot]: (prev[projectRoot] ?? []).map((s) => s.id === id ? meta : s),
+    }));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Periodic idle-session prune ───────────────────────────────────────────
@@ -1007,6 +1020,7 @@ export function useSessionSync() {
     onSwitchSession,
     onDeleteSession,
     onPinSession,
+    onRenameSession,
     // Deferred session creation (方案B)
     pendingNewSession,
     pendingNewSessionRef,

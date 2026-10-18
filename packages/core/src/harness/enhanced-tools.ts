@@ -528,7 +528,7 @@ export const PARALLEL_SAFE_TOOLS: ReadonlySet<string> = new Set([
 const writeFileParams = () => ({
   type: "object" as const,
   properties: {
-    file_path: { type: "string", description: "Relative path from workspace root" },
+    file_path: { type: "string", description: "Relative to workspace root, or an absolute path to edit that exact file (including outside the workspace)" },
     content: { 
       type: "string", 
       description: 
@@ -552,7 +552,7 @@ const writeFileParams = () => ({
 const appendFileParams = () => ({
   type: "object" as const,
   properties: {
-    file_path: { type: "string", description: "Relative path from workspace root" },
+    file_path: { type: "string", description: "Relative to workspace root, or an absolute path to edit that exact file (including outside the workspace)" },
     content: { 
       type: "string", 
       description: 
@@ -565,7 +565,7 @@ const appendFileParams = () => ({
 const applyPatchParams = () => ({
   type: "object" as const,
   properties: {
-    file_path: { type: "string", description: "必填。要编辑的工作区相对路径；目标始终只取自此参数。" },
+    file_path: { type: "string", description: "必填。相对路径以工作区为基准；绝对路径直接编辑指定文件（可在工作区外）。目标始终只取自此参数。" },
     patch: { 
       type: "string", 
       description: 
@@ -821,22 +821,6 @@ export function allEnhancedTools(opts?: {
             beforeTurnIndex: { type: "integer", minimum: 0, description: "Only return archived chunks with turnIndex less than this value" },
           },
           required: ["query", "beforeTurnIndex"],
-        },
-      },
-    },
-    {
-      type: "function",
-      function: {
-        name: "recall_history_for_task_decompose",
-        description:
-          "Retrieve relevant archived history before the fixed recent five-round boundary. " +
-          "This entry point is reserved for task decomposition and accepts only a query.",
-        parameters: {
-          type: "object",
-          properties: {
-            query: { type: "string", description: "Keyword or focused question describing the history to retrieve" },
-          },
-          required: ["query"],
         },
       },
     },

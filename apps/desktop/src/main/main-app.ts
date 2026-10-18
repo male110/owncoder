@@ -1,6 +1,6 @@
 import { app, BrowserWindow, ipcMain, Menu, Notification } from "electron";
 import { existsSync } from "node:fs";
-import { basename, join, relative, resolve, sep } from "node:path";
+import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createCompatibilityAdapter } from "@owncoder/core";
 import { SettingsStore } from "./settings-store";
@@ -289,12 +289,11 @@ function requestDangerousConfirmation(command: string, sessionId?: string): Prom
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function resolveWorkspacePath(workspaceRoot: string, inputPath: string): string {
-  const abs = resolve(workspaceRoot, inputPath);
-  const rel = relative(workspaceRoot, abs);
-  if (rel.startsWith("..") || rel.split(sep).includes("..")) {
-    throw new Error("path escapes workspace");
+  // 如果是绝对路径，直接使用；相对路径基于工作区解析
+  if (isAbsolute(inputPath)) {
+    return inputPath;
   }
-  return abs;
+  return resolve(workspaceRoot, inputPath);
 }
 
 async function openWorkspaceRoot(root: string): Promise<{ root: string; name: string } | null> {

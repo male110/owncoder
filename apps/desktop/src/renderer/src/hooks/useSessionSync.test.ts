@@ -71,6 +71,25 @@ describe("新建对话的项目归属", () => {
     vi.unstubAllGlobals();
   });
 
+  it("重命名后忽略迟到的旧列表，重新加载仍读取保存的名称", async () => {
+    let resolveOld!: (value: unknown) => void;
+    ipc.listChatSessions.mockImplementationOnce(() => new Promise((resolve) => { resolveOld = resolve; }));
+    const refreshing = api.refreshSessions();
+    const renamed = { ...originalSession, title: "用户输入的名称", customTitle: true };
+    ipc.renameChatSession = vi.fn(async () => renamed);
+    await api.onRenameSession(originalSession.id, renamed.title, projectA.root);
+    resolveOld({ sessions: [originalSession] });
+    await refreshing;
+    expect(useSessionStore.getState().sessions[0].title).toBe(renamed.title);
+    expect(useSessionStore.getState().sessionsByProject[projectA.root][0].title).toBe(renamed.title);
+    expect(useSessionStore.getState().sessionTitle).toBe(renamed.title);
+    ipc.listChatSessions.mockResolvedValue({ sessions: [renamed] });
+    useSessionStore.setState({ sessions: [], sessionsByProject: {} });
+    await useSessionSync().refreshSessions();
+    expect(useSessionStore.getState().sessions[0].title).toBe(renamed.title);
+    expect(ipc.renameChatSession).toHaveBeenCalledWith(originalSession.id, renamed.title, projectA.root);
+  });
+
   it("选择已有项目后，首条消息在该项目创建会话", async () => {
     await api.onNewSession();
     await api.onSelectProject(projectB.root);

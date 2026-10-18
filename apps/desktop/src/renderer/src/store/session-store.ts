@@ -152,7 +152,9 @@ export const useSessionStore = create<SessionState & SessionActions>()((set, get
     set((s) => {
       const sortSessions = (items: ChatSessionMetaDto[]) => [...items].sort((a, b) =>
         Number(!!b.pinned) - Number(!!a.pinned)
-        || (b.updatedAt || "").localeCompare(a.updatedAt || ""),
+        || (a.pinned
+          ? (b.pinnedAt || "").localeCompare(a.pinnedAt || "")
+          : (b.updatedAt || "").localeCompare(a.updatedAt || "")),
       );
       const update = (items: ChatSessionMetaDto[]) => sortSessions(
         items.map((item) => item.id === sessionId ? { ...item, updatedAt } : item),

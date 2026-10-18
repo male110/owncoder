@@ -95,17 +95,17 @@
   --panel: #ffffff;
   --rail: #f3f3f3;
   --border: #e5e5e5;
-  --text: #242424;
-  --strong-text: #454545;
-  --heading-text: #383838;
-  --review-title-text: #555555;
-  --muted: #808080;
-  --fg-muted: #808080;
-  --accent: #303030;
+  --text: #1a1a1a;
+  --strong-text: #2a2a2a;
+  --heading-text: #1f1f1f;
+  --review-title-text: #333333;
+  --muted: #5a5a5a;
+  --fg-muted: #5a5a5a;
+  --accent: #1c1c1c;
   --accent-dim: #ededed;
   --chip: #f3f3f3;
-  --success: #397257;
-  --error: #ad4c4c;
+  --success: #2d5c44;
+  --error: #9c3838;
   --hover: #eaeaea;
   --hover-strong: #e2e2e2;
   --surface-1: #ffffff;
@@ -116,12 +116,12 @@
   --surface-6: #ededed;
   --scrollbar-thumb: #d4d4d4;
   --scrollbar-thumb-hover: #b4b4b4;
-  --title-mark-from: #6a6a6a;
-  --title-mark-to: #383838;
+  --title-mark-from: #4a4a4a;
+  --title-mark-to: #1f1f1f;
   --primary-border: #c5c5c5;
   --danger-bg: #f9e8e6;
-  --danger-text: #9c4242;
-  --warn-text: #966a28;
+  --danger-text: #8a3434;
+  --warn-text: #7a5520;
   --elevated: #ffffff;
   --elevated-hover: #f3f3f3;
   --editor-bg: #fafafa;
@@ -780,6 +780,25 @@ body,
 .file-tree-row:hover {
   background: var(--hover-strong);
 }
+
+.session-rename {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  gap: 4px;
+  min-width: 0;
+}
+.session-rename input {
+  min-width: 0;
+  width: 100%;
+  padding: 4px;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.file-tree-context-menu button:disabled { opacity: 0.5; cursor: default; }
 
 .file-tree-context-menu {
   position: fixed;
@@ -7437,7 +7456,7 @@ button.ghost.tiny.danger:hover {
   --hover: #eaeaea;
   --hover-strong: #e2e2e2;
   background: var(--rail);
-  border-right-color: var(--border);
+  border-right-color: #d0d0d0;
 }
 
 :root[data-theme="light"] .nav-item {
@@ -7495,10 +7514,9 @@ button.ghost.tiny.danger:hover {
   gap: 8px;
   min-height: 34px;
   padding: 7px 30px 7px 26px;
-  color: color-mix(in srgb, var(--text) 76%, var(--muted));
 }
 :root[data-theme="light"] .session-time {
-  font-size: 10px;
+  font-size: 11px;
   white-space: nowrap;
 }
 :root[data-theme="light"] .project-block,
@@ -7532,7 +7550,7 @@ button.ghost.tiny.danger:hover {
 }
 
 :root[data-theme="light"] .project-name {
-  color: #3c3c3c;
+  color: #303030;
   font-size: 13px;
   font-weight: 500;
 }
@@ -7543,11 +7561,11 @@ button.ghost.tiny.danger:hover {
 
 :root[data-theme="light"] .project-chevron,
 :root[data-theme="light"] .project-view-btn {
-  color: #858585;
+  color: #555555;
 }
 
 :root[data-theme="light"] .project-view-btn:not(.active) {
-  opacity: 0.75;
+  opacity: 1;
 }
 
 :root[data-theme="light"] .project-view-btn.active {
@@ -7593,7 +7611,11 @@ button.ghost.tiny.danger:hover {
   min-height: 34px;
   padding: 7px 30px 7px 26px;
   background: transparent;
-  color: #4c4c4c;
+  color: #303030;
+}
+
+:root[data-theme="light"] .session-title {
+  font-size: 13px;
 }
 
 :root[data-theme="light"] .session-wrap.active .session-title {
@@ -7602,12 +7624,12 @@ button.ghost.tiny.danger:hover {
 }
 
 :root[data-theme="light"] .session-time {
-  color: var(--muted);
+  color: #505050;
   font-variant-numeric: tabular-nums;
 }
 
 :root[data-theme="light"] .session-wrap.active .session-time {
-  color: #737373;
+  color: #444444;
 }
 
 /* 鍒犻櫎纭鍑虹幇鏃堕殣钘忔椂闂达紝涓烘寜閽繚鐣欑┖闂翠笖涓嶆敼鍙樻爣棰樺搴︺€?*/

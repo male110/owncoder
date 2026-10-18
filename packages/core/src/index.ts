@@ -76,11 +76,13 @@ import {
 import { getGitStatus, type GitStatus } from "./git.ts";
 import { McpManager } from "./mcp/client.ts";
 import { migrateHistory, needsMigration } from "./session-migration.ts";
+import { deleteDecomposeRound } from "./turn-rounds.ts";
 import {
   beginTurn,
   appendTurnEvent,
   completeTurn,
   deleteTurn,
+  loadTurn,
   migrateLegacyHistory,
   loadRecentTurns,
   loadOlderTurns,
@@ -102,6 +104,7 @@ import {
   sanitizeQueuedMessages,
   setActiveSessionId,
   toggleSessionPin,
+  renameSession,
   type QueuedMessage,
   type SessionMeta,
 } from "./session-store.ts";
@@ -866,8 +869,11 @@ export class SessionOrchestrator {
       ?? null;
     if (!root || !sid) return false;
 
+    const original = await loadTurn(root, sid, turnId);
+    if (!original) return false;
     const removed = await deleteTurn(root, sid, turnId);
     if (!removed) return false;
+    await deleteDecomposeRound(root, sid, turnId, original.user?.content, original.startedAt);
 
     // Drop the turn from the in-memory LLM context as well, so subsequent
     // turns no longer reference the mistaken input/reply. Only the user row
@@ -1460,10 +1466,29 @@ export class SessionOrchestrator {
     return { activeId: this.state.activeSessionId };
   }
 
-  async toggleChatSessionPin(id: string): Promise<SessionMeta[]> {
-    const ws = this.state.workspace;
-    if (!ws) throw new Error(ERR_NO_WORKSPACE);
-    return toggleSessionPin(ws.root, id);
+  async toggleChatSessionPin(id: string, projectRoot?: string): Promise<SessionMeta[]> {
+    const root = projectRoot ?? this.sessionRoots.get(id) ?? this.state.workspace?.root;
+    if (!root) throw new Error(ERR_NO_WORKSPACE);
+    const runtime = this.runtimes.get(id);
+    const run = () => toggleSessionPin(root, id);
+    const pending = runtime ? runtime.persistQueue.then(run, run) : run();
+    if (runtime) runtime.persistQueue = pending.then(() => undefined);
+    return pending;
+  }
+
+  async renameChatSession(id: string, title: string, projectRoot?: string): Promise<SessionMeta> {
+    const root = projectRoot ?? this.sessionRoots.get(id) ?? this.state.workspace?.root;
+    if (!root) throw new Error(ERR_NO_WORKSPACE);
+    const runtime = this.runtimes.get(id);
+    const run = async () => {
+      const meta = await renameSession(root, id, title);
+      if (runtime) runtime.sessionTitle = meta.title;
+      if (this.state.activeSessionId === id) this.state.sessionTitle = meta.title;
+      return meta;
+    };
+    const pending = runtime ? runtime.persistQueue.then(run, run) : run();
+    if (runtime) runtime.persistQueue = pending.then(() => undefined);
+    return pending;
   }
 
   /** Remove the last assistant reply (and tool steps) and resend the preceding user message. */

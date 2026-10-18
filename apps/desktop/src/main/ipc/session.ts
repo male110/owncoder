@@ -86,12 +86,17 @@ export function registerSessionHandlers(ctx: IpcContext): void {
     };
   });
 
-  ipcMain.handle("sessions:pin", async (_e, id: string) => {
-    const sessions = await session.toggleChatSessionPin(id);
-    const list = await session.listChatSessions();
+  ipcMain.handle("sessions:rename", async (_e, id: string, title: string, projectRoot?: string) => {
+    const meta = await session.renameChatSession(id, title, projectRoot);
+    return withProjectRoot(meta, projectRoot);
+  });
+
+  ipcMain.handle("sessions:pin", async (_e, id: string, projectRoot?: string) => {
+    const sessions = await session.toggleChatSessionPin(id, projectRoot);
+    const list = projectRoot ? await listSessionMetas(projectRoot) : await session.listChatSessions();
     return {
-      sessions: withProjectRoots(sessions),
-      list: { ...list, sessions: withProjectRoots(list.sessions) },
+      sessions: withProjectRoots(sessions, projectRoot),
+      list: { ...list, sessions: withProjectRoots(list.sessions, projectRoot) },
     };
   });
 

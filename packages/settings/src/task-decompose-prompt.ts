@@ -18,7 +18,7 @@ Only split independently deliverable and verifiable targets into separate tasks.
 Put task-specific constraints, relevant history and current progress into each task.
 
 ## History Context
-If the current context information is insufficient to judge the task to be completed or the task information is incomplete, you can call the tool \`recall_history_for_task_decompose\` to recall relevant historical information.
+Use the supplied recent conversation and rolling summary to understand prior decisions and unfinished work. Do not retrieve archived history.
 
 ## Understand What the User Wants to Do
 - Usually the user's conversation is continuous. You need to understand the user's goal combined with the history, not in isolation.

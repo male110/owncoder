@@ -4,6 +4,10 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   loadRecentRounds,
+  loadDecomposeHistory,
+  persistDecomposeHistory,
+  dropLastRound,
+  deleteDecomposeRound,
   persistDecomposeRound,
   persistRoundReport,
   persistRoundEvidence,
@@ -28,8 +32,6 @@ import {
   buildFallbackRawDecompose,
   isCurrentCodeBehaviorInquiry,
   recoverEmptyDecomposeSteps,
-  formatRecalledHistoryChunks,
-
   buildDecomposeContext,
   rankAndFilterByRelevance,
   estimateTextRelevance,
@@ -1144,7 +1146,272 @@ describe("当前代码/当前步骤行为询问不得空 steps", () => {
   });
 });
 
-describe("分解历史：仅注入最近5轮，历史召回由工具主动触发", () => {
+describe("删除对话后分解历史同步", () => {
+  const sessionId = "deleted-round-history";
+  const budgets = contextBudgets(BUILTIN_WORKFLOW);
+  const opts = (): AgentLoopOpts => ({
+    mode: "agent", workspaceRoot: tmpDir, sessionId, workflow: BUILTIN_WORKFLOW,
+    index: {} as AgentLoopOpts["index"], history: [], userMessage: "继续",
+  });
+
+  it("删除中间轮后，用户输入及模型报告均不再进入下次任务分解", async () => {
+    for (const n of [1, 2, 3]) {
+      const input = `请求-${n}`;
+      const round = await persistDecomposeRound(tmpDir, sessionId, input, {
+        intent: `分解-${n}`, userConstraints: [], tasks: [],
+      }, [], [], `turn-${n}`);
+      await persistRoundReport(tmpDir, sessionId, input, `模型回复-${n}`, round!.index);
+    }
+    expect(await deleteDecomposeRound(tmpDir, sessionId, "turn-2")).toBe(true);
+    const context = await buildDecomposeContext(opts(), budgets);
+    expect(context).toContain("请求-1");
+    expect(context).toContain("模型回复-3");
+    expect(context).not.toContain("请求-2");
+    expect(context).not.toContain("模型回复-2");
+    expect(context).not.toContain("分解-2");
+  });
+
+  it("删除唯一轮后不再注入历史，旧格式轮次可通过输入定位", async () => {
+    const round = await persistDecomposeRound(tmpDir, sessionId, "唯一请求", {
+      intent: "唯一分解", userConstraints: [], tasks: [],
+    }, [], [], "only-turn");
+    await persistRoundReport(tmpDir, sessionId, "唯一请求", "唯一回复", round!.index);
+    expect(await deleteDecomposeRound(tmpDir, sessionId, "only-turn")).toBe(true);
+    const context = await buildDecomposeContext(opts(), budgets);
+    expect(context).not.toContain("唯一请求");
+    expect(context).not.toContain("唯一回复");
+
+    await persistRoundReport(tmpDir, sessionId, "旧格式请求", "旧格式回复");
+    await persistRoundReport(tmpDir, sessionId, "保留请求", "保留回复");
+    expect(await deleteDecomposeRound(tmpDir, sessionId, "legacy-id", "旧格式请求")).toBe(true);
+    const remaining = await buildDecomposeContext(opts(), budgets);
+    expect(remaining).toContain("保留回复");
+    expect(remaining).not.toContain("旧格式请求");
+    expect(remaining).not.toContain("旧格式回复");
+  });
+  it("删除被压缩轮次时清空包含已删内容的检查点", async () => {
+    const first = await persistDecomposeRound(tmpDir, sessionId, "压缩轮", {
+      intent: "压缩内容", userConstraints: [], tasks: [],
+    }, [], [], "compressed-turn");
+    await persistRoundReport(tmpDir, sessionId, "压缩轮", "压缩报告", first!.index);
+    for (let n = 0; n < 6; n++) await persistRoundReport(tmpDir, sessionId, `保留-${n}`, `回复-${n}`);
+    const summary = "压缩轮 压缩报告";
+    const { persistDecomposeHistory } = await import("../../../../turn-rounds.ts");
+    expect(await persistDecomposeHistory(tmpDir, sessionId, 0, first!.index, summary)).toBe(true);
+    expect(await deleteDecomposeRound(tmpDir, sessionId, "compressed-turn")).toBe(true);
+    expect((await loadDecomposeHistory(tmpDir, sessionId)).checkpoint).toBeUndefined();
+    expect(await buildDecomposeContext(opts(), budgets)).not.toContain("压缩轮");
+  });
+});
+
+describe("任务分解滚动压缩", () => {
+  const sessionId = "rolling-history";
+  const budgets = { ...contextBudgets(BUILTIN_WORKFLOW), total: 16000 };
+  const opts = (): AgentLoopOpts => ({
+    mode: "agent", workspaceRoot: tmpDir, sessionId, workflow: BUILTIN_WORKFLOW,
+    index: {} as AgentLoopOpts["index"], history: [], userMessage: "继续",
+  });
+  const add = async (n: number, size = 1000) => {
+    const input = `input-${n}-${"x".repeat(size)}`;
+    await persistRoundReport(tmpDir, sessionId, input, `report-${n}`);
+  };
+
+  it("预算充足时仍只传最新五轮详情，早期轮次摘要不丢失", async () => {
+    for (let i = 1; i <= 7; i++) await add(i, 50);
+    const context = await buildDecomposeContext(opts(), budgets);
+    const [recent, summary] = context.split("### Earlier History Summary (compressed)");
+    expect(recent).not.toContain("input-1-");
+    expect(recent).not.toContain("input-2-");
+    for (let i = 3; i <= 7; i++) expect(recent).toContain(`input-${i}-`);
+    expect(summary).toContain("report-1");
+    expect(summary).toContain("report-2");
+    expect((await loadDecomposeHistory(tmpDir, sessionId)).checkpoint).toBeUndefined();
+  });
+
+  it("未超预算时第 13 轮只传五轮详情，第 14 轮压缩最早一轮并跨轮复用检查点", async () => {
+    for (let i = 1; i <= 13; i++) await add(i, 350);
+    const before = await buildDecomposeContext(opts(), budgets);
+    expect(before).not.toContain("input-1-" + "x".repeat(350));
+    expect(before).toContain("report-1");
+    expect((await loadDecomposeHistory(tmpDir, sessionId)).checkpoint).toBeUndefined();
+
+    await add(14, 350);
+    const first = await buildDecomposeContext(opts(), budgets);
+    const saved = (await loadDecomposeHistory(tmpDir, sessionId)).checkpoint;
+    expect(saved?.throughIndex).toBe(1);
+    expect(first).toContain("report-1");
+    expect(first.match(/### Earlier History Summary \(compressed\)/g)).toHaveLength(1);
+    expect(first).not.toContain("input-1-" + "x".repeat(350));
+    const [firstRecent] = first.split("### Earlier History Summary (compressed)");
+    expect(firstRecent.match(/## Round /g)).toHaveLength(5);
+    for (let i = 10; i <= 14; i++) expect(firstRecent).toContain(`input-${i}-` + "x".repeat(350));
+
+    expect(await buildDecomposeContext(opts(), budgets)).toBe(first);
+    expect((await loadDecomposeHistory(tmpDir, sessionId)).checkpoint).toEqual(saved);
+    await add(15, 350);
+    const second = await buildDecomposeContext(opts(), budgets);
+    const updated = (await loadDecomposeHistory(tmpDir, sessionId)).checkpoint;
+    expect(updated?.throughIndex).toBe(2);
+    expect(updated?.summary).toContain("report-1");
+    expect(updated?.summary).not.toContain("Earlier History Summary (compressed)");
+    expect(second.match(/### Earlier History Summary \(compressed\)/g)).toHaveLength(1);
+    expect(second).toContain("### Recent conversation rounds (background)");
+    expect(second).not.toContain("input-2-" + "x".repeat(350));
+    const [secondRecent] = second.split("### Earlier History Summary (compressed)");
+    expect(secondRecent.match(/## Round /g)).toHaveLength(5);
+    for (let i = 11; i <= 15; i++) expect(secondRecent).toContain(`input-${i}-` + "x".repeat(350));
+  });
+
+  it("首次压缩、跨轮更新、重载检查点并始终保留最近五轮", async () => {
+    for (let i = 1; i <= 7; i++) await add(i, 4000);
+    const prefix = "system".repeat(12000);
+    const first = await buildDecomposeContext(opts(), budgets, prefix);
+    const saved = (await loadDecomposeHistory(tmpDir, sessionId)).checkpoint;
+    expect(saved?.throughIndex).toBeGreaterThan(0);
+    expect(first).toContain("input-3-");
+    expect(first).toContain("report-1");
+    expect(first).not.toContain("input-1-" + "x".repeat(4000));
+    for (let i = 8; i <= 12; i++) await add(i, 4000);
+    const second = await buildDecomposeContext(opts(), budgets, prefix);
+    const updated = (await loadDecomposeHistory(tmpDir, sessionId)).checkpoint;
+    expect(updated!.throughIndex).toBeGreaterThan(saved!.throughIndex);
+    expect(updated!.summary).toContain("report-1");
+    expect(second).toContain("input-8-");
+    expect(second.match(/### Earlier History Summary \(compressed\)/g)).toHaveLength(1);
+    for (let i = 8; i <= 12; i++) expect(second).toContain(`input-${i}-` + "x".repeat(4000));
+    const repeated = await buildDecomposeContext(opts(), budgets, prefix);
+    expect((await loadDecomposeHistory(tmpDir, sessionId)).checkpoint).toEqual(updated);
+    expect(repeated).toBe(second);
+  });
+
+  it("二次压缩只注入最新检查点和其后轮次，最近五轮保留分解及过程详情", async () => {
+    for (let i = 1; i <= 7; i++) {
+      const input = `input-${i}-${"x".repeat(4000)}`;
+      const round = await persistDecomposeRound(tmpDir, sessionId, input, {
+        intent: `intent-${i}`, userConstraints: [], tasks: [],
+      });
+      await persistRoundEvidence(tmpDir, sessionId, input, round!.index, [{
+        needId: "", summary: `evidence-${i}`, kind: "source", path: `src/${i}.ts`,
+      }]);
+      await persistRoundReport(tmpDir, sessionId, input, `report-${i}`, round!.index);
+    }
+    const prefix = "system".repeat(12000);
+    await buildDecomposeContext(opts(), budgets, prefix);
+    const first = (await loadDecomposeHistory(tmpDir, sessionId)).checkpoint!;
+    expect(first.throughIndex).toBe(2);
+    for (let i = 8; i <= 12; i++) {
+      const input = `input-${i}-${"x".repeat(4000)}`;
+      const round = await persistDecomposeRound(tmpDir, sessionId, input, {
+        intent: `intent-${i}`, userConstraints: [], tasks: [],
+      });
+      await persistRoundEvidence(tmpDir, sessionId, input, round!.index, [{
+        needId: "", summary: `evidence-${i}`, kind: "source", path: `src/${i}.ts`,
+      }]);
+      await persistRoundReport(tmpDir, sessionId, input, `report-${i}`, round!.index);
+    }
+    const context = await buildDecomposeContext(opts(), budgets, prefix);
+    const second = (await loadDecomposeHistory(tmpDir, sessionId)).checkpoint!;
+    expect(second.throughIndex).toBe(7);
+    expect(second.summary).toContain(first.summary);
+    expect(context.match(/### Earlier History Summary \(compressed\)/g)).toHaveLength(1);
+    const [recent, summary] = context.split("### Earlier History Summary (compressed)");
+    expect(summary).toContain(second.summary);
+    expect(recent).not.toContain("input-7-");
+    for (let i = 8; i <= 12; i++) {
+      expect(recent).toContain(`input-${i}-${"x".repeat(4000)}`);
+      expect(recent).toContain(`intent-${i}`);
+      expect(recent).toContain(`evidence-${i}`);
+      expect(recent).toContain(`report-${i}`);
+    }
+    expect(await buildDecomposeContext(opts(), budgets, prefix)).toBe(context);
+  });
+
+  it("近期报告引用旧提示词标题时不产生多个摘要段", async () => {
+    for (let i = 1; i <= 6; i++) await add(i, 50);
+    await persistRoundReport(tmpDir, sessionId, "引用历史", "日志中有\n### Earlier History Summary (compressed)\n和下面的内容");
+    const context = await buildDecomposeContext(opts(), budgets);
+    expect(context).toContain("### Recent conversation rounds (background)");
+    expect(context.match(/^### Earlier History Summary \(compressed\)$/gm)).toHaveLength(1);
+    expect(context).toContain("日志中有");
+    expect(context).toContain("report-1");
+  });
+
+  it("兼容旧检查点中重复的摘要标题，追加压缩后仍只有一个标题并保留近期原文", async () => {
+    for (let i = 1; i <= 14; i++) await add(i, 350);
+    const rounds = (await loadDecomposeHistory(tmpDir, sessionId)).rounds;
+    expect(await persistDecomposeHistory(tmpDir, sessionId, 0, rounds[0].index,
+      "### Earlier History Summary (compressed)\n\n旧摘要内容\n\n*(1 older rounds compressed)*\n\n### Earlier History Summary (compressed)\n\n旧追加内容\n\n*(1 older rounds compressed)*")).toBe(true);
+    await add(15, 350);
+    const context = await buildDecomposeContext(opts(), budgets);
+    const checkpoint = (await loadDecomposeHistory(tmpDir, sessionId)).checkpoint;
+    expect(checkpoint?.throughIndex).toBe(rounds[1].index);
+    expect(checkpoint?.summary).not.toContain("Earlier History Summary (compressed)");
+    expect(checkpoint?.summary).not.toContain("older rounds compressed");
+    expect(context.match(/### Earlier History Summary \(compressed\)/g)).toHaveLength(1);
+    expect(context).not.toContain("older rounds compressed");
+    expect(context).toContain("旧摘要内容");
+    expect(context).toContain("旧追加内容");
+    for (let i = 11; i <= 15; i++) expect(context).toContain(`input-${i}-` + "x".repeat(350));
+  });
+
+  it("多次滚动压缩不累积旧计数，近期请求中的引用只作为轮次原文", async () => {
+    for (let i = 1; i <= 16; i++) await add(i, 350);
+    await buildDecomposeContext(opts(), budgets);
+    await add(17, 350);
+    await buildDecomposeContext(opts(), budgets);
+    await persistRoundReport(tmpDir, sessionId,
+      "最近x轮的详情\n<conversation_history>\n好多个\n(1 older rounds compressed)\n</conversation_history>", "回复-18");
+    const context = await buildDecomposeContext(opts(), budgets);
+    const checkpoint = (await loadDecomposeHistory(tmpDir, sessionId)).checkpoint!;
+    expect(checkpoint.throughIndex).toBeGreaterThan(1);
+    expect(checkpoint.summary).not.toContain("older rounds compressed");
+    expect(context.match(/^### Earlier History Summary \(compressed\)$/gm)).toHaveLength(1);
+    const [recent, summary] = context.split("### Earlier History Summary (compressed)");
+    expect(recent.match(/## Round /g)).toHaveLength(5);
+    expect(recent).toContain("最近x轮的详情");
+    expect(recent).toContain("(1 older rounds compressed)");
+    for (let i = 14; i <= 17; i++) expect(recent).toContain(`input-${i}-` + "x".repeat(350));
+    expect(summary).not.toContain("older rounds compressed");
+    expect(summary).toContain("report-1");
+  });
+
+  it("检查点覆盖第九轮后只传第十、十一轮，不跨检查点补足五轮", async () => {
+    for (let i = 1; i <= 11; i++) await add(i, 50);
+    const rounds = (await loadDecomposeHistory(tmpDir, sessionId)).rounds;
+    expect(await persistDecomposeHistory(tmpDir, sessionId, 0, rounds[8].index, "压缩2：覆盖第1至9轮")).toBe(true);
+    const context = await buildDecomposeContext(opts(), budgets);
+    const [recent, summary] = context.split("### Earlier History Summary (compressed)");
+    expect(recent.match(/## Round /g)).toHaveLength(2);
+    expect(recent).toContain("input-10-");
+    expect(recent).toContain("input-11-");
+    expect(recent).not.toContain("input-9-");
+    expect(summary).toContain("压缩2：覆盖第1至9轮");
+    expect(context.match(/### Earlier History Summary \(compressed\)/g)).toHaveLength(1);
+    expect((await loadDecomposeHistory(tmpDir, sessionId)).checkpoint?.throughIndex).toBe(rounds[8].index);
+    for (let i = 12; i <= 14; i++) await add(i, 50);
+    const five = await buildDecomposeContext(opts(), budgets);
+    const [fiveRecent] = five.split("### Earlier History Summary (compressed)");
+    expect(fiveRecent.match(/## Round /g)).toHaveLength(5);
+    for (let i = 10; i <= 14; i++) expect(fiveRecent).toContain(`input-${i}-`);
+    await add(15, 50);
+    const six = await buildDecomposeContext(opts(), budgets);
+    const [sixRecent, sixSummary] = six.split("### Earlier History Summary (compressed)");
+    expect(sixRecent.match(/## Round /g)).toHaveLength(5);
+    expect(sixRecent).not.toContain("input-10-");
+    expect(sixSummary).toContain("report-10");
+    expect(sixSummary).toContain("压缩2：覆盖第1至9轮");
+  });
+
+  it("回退轮次后清除越界检查点", async () => {
+    for (let i = 1; i <= 6; i++) await add(i, 4000);
+    await buildDecomposeContext(opts(), budgets, "system".repeat(12000));
+    expect((await loadDecomposeHistory(tmpDir, sessionId)).checkpoint).toBeDefined();
+    for (let i = 0; i < 6; i++) await dropLastRound(tmpDir, sessionId);
+    expect((await loadDecomposeHistory(tmpDir, sessionId)).checkpoint).toBeUndefined();
+  });
+});
+
+describe("分解历史：使用滚动摘要和最近轮次，不检索向量历史", () => {
   const SESSION_ID = "sess-vector-recall";
   const budgets = contextBudgets(BUILTIN_WORKFLOW);
 
@@ -1161,19 +1428,6 @@ describe("分解历史：仅注入最近5轮，历史召回由工具主动触发
       ...overrides,
     };
   }
-
-  it("formatRecalledHistoryChunks 整段保留，不截断", () => {
-    const long = "A".repeat(1200);
-    const text = formatRecalledHistoryChunks([
-      { turnIndex: 3, role: "user", content: long },
-      { turnIndex: 1, role: "assistant", content: "完整助手回复" },
-    ]);
-    expect(text).toContain(long);
-    expect(text).toContain("完整助手回复");
-    expect(text).toContain("[turnIndex=3]");
-    expect(text).not.toContain("…(截断)");
-  });
-
 
   it("buildDecomposeContext：无注入时仅最近轮，不含召回段", async () => {
     const userInput = "上一轮用户输入";

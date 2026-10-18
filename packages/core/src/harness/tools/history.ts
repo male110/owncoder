@@ -152,24 +152,6 @@ export async function toolRecallHistoryBefore(
   return recallHistoryBefore({ ...ctx.historyVector, sessionId: ctx.sessionId }, { query, beforeTurnIndex });
 }
 
-/** Task decomposition entry point; the caller supplies its fixed five-round boundary. */
-export async function recallHistoryForTaskDecompose(
-  source: HistoryRecallSource,
-  query: string,
-  beforeTurnIndex: number,
-): Promise<ToolResult> {
-  return recallHistoryBefore(source, { query, beforeTurnIndex });
-}
-
-export async function toolRecallHistoryForTaskDecompose(
-  ctx: ToolContext,
-  query: string,
-  beforeTurnIndex: number,
-): Promise<ToolResult> {
-  if (!ctx.historyVector) return ok("No searchable session history is available.");
-  return recallHistoryForTaskDecompose({ ...ctx.historyVector, sessionId: ctx.sessionId }, query, beforeTurnIndex);
-}
-
 export function historyRecallQuery(args: Record<string, unknown>): string {
   return str(args.query ?? args.keyword);
 }
