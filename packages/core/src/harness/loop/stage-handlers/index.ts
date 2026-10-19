@@ -22,7 +22,7 @@ import { emitStage } from "../stages.ts";
 import { normalizeUsage } from "../../observability.ts";
 import type { StageHandler, SchedulerContext } from "./types.ts";
 import { pushCurrentUserMessageOnce } from "./history.ts";
-import { taskDecomposeHandler } from "./task-decompose.ts";
+import { taskDecomposeHandler, buildDecomposeContext } from "./task-decompose.ts";
 import { exploreToolsHandler, executeToolsHandler } from "./tools.ts";
 import { verifyHandler, postVerifyHandler } from "./verify.ts";
 
@@ -128,8 +128,47 @@ export async function injectHistoryAndUserMessage(ctx: SchedulerContext): Promis
         source: currentTask?.relevantHistory ? "task" : state.turnInformationTask?.relevantHistory ? "turn_task" : "shared",
       },
     });
+  } else if (opts.mode === "plan") {
+    // plan 模式不经过任务分解节点，无法像 agent 模式那样由分解 LLM 消化历史。
+    // 这里复用任务分解阶段的历史处理逻辑（持久化轮次优先 → 最近五轮 → 滚动压缩 →
+    // 启发式回退，工具结果不注入），把此前轮次作为只读背景放在当前请求之前。
+    // 仅作用于 plan 模式；agent 模式历史已由分解阶段消化，不在此重复注入。
+    const historyBlock = (
+      await buildDecomposeContext(opts, ctx.budgets, "", { historyOnly: true })
+    ).trim();
+    if (historyBlock) {
+      const { tagConversationHistory } = await import("../../message-tags.js");
+      messages.push({ role: "user", content: tagConversationHistory(historyBlock) });
+      writeEventLog({
+        category: "other",
+        message: "plan 模式复用任务分解历史处理，注入此前轮次对话",
+        details: {
+          historyChars: historyBlock.length,
+          historyTurns: opts.history.length,
+        },
+      });
+    }
+
+    messages.push({
+      role: "user",
+      content: tagUserInput(
+        recentFileHints
+          ? `## 当前任务\n\n${outboundUserMessage}\n\n${recentFileHints}`
+          : `## 当前任务\n\n${outboundUserMessage}`,
+      ),
+      attachments: currentAttachments,
+    });
+
+    writeEventLog({
+      category: "other",
+      message: "plan 模式注入历史后的当前用户消息",
+      details: {
+        historyTurns: opts.history.length,
+        injectedHistory: historyBlock.length > 0,
+      },
+    });
   } else {
-    // 即使没有可复用历史，也不再召回/过滤历史；只注入当前用户消息
+    // agent 模式：即使没有可复用历史，也不再召回/过滤历史；只注入当前用户消息
     messages.push({
       role: "user",
       content: tagUserInput(

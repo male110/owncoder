@@ -1004,16 +1004,19 @@ export function hydratePipelinesFromLegacy(config: {
     agent: { pipeline: ModePipeline; dangerousBashConfirm: boolean };
   };
 }): void {
+  // Plan 模式固定使用内置专用提示词 BUILTIN_PLAN_PROMPT。旧版本持久化的
+  // prompts.plan 可能是 ReAct/Agent 提示词，绝不能用它覆盖 plan 节点，
+  // 否则 plan 请求会错误地带上 "# ReAct Loop …" 指令。
   const planLlm = findPipelineNode(config.modes.plan.pipeline, "explore_tools");
-  if (planLlm && config.prompts.plan.trim()) {
-    planLlm.prompt = config.prompts.plan;
+  if (planLlm) {
+    planLlm.prompt = BUILTIN_PLAN_PROMPT.trim();
   }
   if (planLlm && config.prompts.planZh?.trim()) {
     planLlm.promptZh = config.prompts.planZh;
   }
   const draft = findPipelineNode(config.modes.plan.pipeline, "draft_plan");
-  if (draft && config.prompts.plan.trim()) {
-    draft.prompt = config.prompts.plan;
+  if (draft) {
+    draft.prompt = BUILTIN_PLAN_PROMPT.trim();
   }
   if (draft && config.prompts.planZh?.trim()) {
     draft.promptZh = config.prompts.planZh;

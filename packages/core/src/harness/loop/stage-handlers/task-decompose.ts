@@ -251,13 +251,27 @@ export function rankAndFilterByRelevance<T extends { score?: number }>(
  *
  * Compress persisted older rounds when the request exceeds the input budget or more than 13 rounds remain.
  */
+export interface BuildDecomposeContextOptions {
+  /**
+   * 只构建对话历史段（最近轮次 + 滚动摘要），跳过 Mode / 用户偏好 / 项目规则 /
+   * 计划状态 / 文档工作流等静态段。
+   *
+   * plan 模式不经过任务分解节点，无法像 agent 模式那样由分解 LLM 消化历史，
+   * 因此在主 LLM 调用前直接复用同一套历史处理逻辑；静态上下文已由
+   * context_gather 阶段注入，这里只取对话历史，避免重复。
+   */
+  historyOnly?: boolean;
+}
+
 export async function buildDecomposeContext(
   opts: AgentLoopOpts,
   budgets: ReturnType<typeof contextBudgets>,
   requestPrefix = "",
+  options: BuildDecomposeContextOptions = {},
 ): Promise<string> {
+  const { historyOnly = false } = options;
   const limits = computeDecomposeLimits(budgets);
-  const sections: string[] = [`Mode: ${opts.mode}`];
+  const sections: string[] = historyOnly ? [] : [`Mode: ${opts.mode}`];
 
   const { tagConversationHistory } = await import("../../message-tags.js");
   const { loadDecomposeHistory, persistDecomposeHistory, formatRoundsForDecomposeHistory, summarizeOlderRounds } = await import("../../../turn-rounds.ts");
@@ -334,26 +348,29 @@ export async function buildDecomposeContext(
     ...(summary ? [tagConversationHistory(`### Earlier History Summary (compressed)\n\n${summary}`)] : []),
   ];
 
-  if (opts.memoriesBlock?.trim()) {
-    sections.push(
-      `### Saved user preferences\n${clipBlock(opts.memoriesBlock.trim(), limits.preferenceChars)}`,
-    );
-  }
-  if (opts.projectRules?.trim()) {
-    sections.push(
-      `### Project rules\n${clipBlock(opts.projectRules.trim(), limits.preferenceChars)}`,
-    );
+  if (!historyOnly) {
+    if (opts.memoriesBlock?.trim()) {
+      sections.push(
+        `### Saved user preferences\n${clipBlock(opts.memoriesBlock.trim(), limits.preferenceChars)}`,
+      );
+    }
+    if (opts.projectRules?.trim()) {
+      sections.push(
+        `### Project rules\n${clipBlock(opts.projectRules.trim(), limits.preferenceChars)}`,
+      );
+    }
+
+    const planState = agentIntentContext(opts.activePlan, opts.activeTasks, opts.currentTaskId);
+    if (planState) {
+      sections.push(`### Plan state\n${planState}`);
+    }
+    if (opts.documentWorkflow) {
+      sections.push(`### Document workflow\n${documentIntentContext(opts.documentWorkflow)}`);
+    }
   }
 
-  const planState = agentIntentContext(opts.activePlan, opts.activeTasks, opts.currentTaskId);
-  if (planState) {
-    sections.push(`### Plan state\n${planState}`);
-  }
-  if (opts.documentWorkflow) {
-    sections.push(`### Document workflow\n${documentIntentContext(opts.documentWorkflow)}`);
-  }
-
-  const assemble = (lines: string[], summary: string) => [sections[0], ...historySections(lines, summary), ...sections.slice(1)].join("\n\n");
+  const assemble = (lines: string[], summary: string) =>
+    [sections[0], ...historySections(lines, summary), ...sections.slice(1)].filter(Boolean).join("\n\n");
   // Budget decisions use the uncompressed candidate; the request itself never includes more than five details.
   const fullContext = assemble(fullPendingLines.length ? fullPendingLines : roundLines, olderSummary);
   if (compression && (compression.pendingCount > maxUncompressedRounds || estimateChars(requestPrefix + fullContext) > inputChars) && opts.sessionId) {
