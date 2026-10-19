@@ -153,6 +153,42 @@ describe("会话行内重命名", () => {
   });
 });
 
+describe("会话右键菜单复制", () => {
+  it.each([
+    ["C:\\work", "C:\\work\\.owncoder\\sessions\\two.json"],
+    ["/work", "/work/.owncoder/sessions/two.json"],
+  ])("复制被右键点击的会话 ID 和文件路径：%s", async (root, path) => {
+    const session = { id: "two", title: "two", projectRoot: root, updatedAt: "2026-01-01" };
+    const menu = { session, root, x: 20, y: 20 };
+    const setMenu = vi.fn();
+    vi.mocked(useState)
+      .mockImplementationOnce(() => [null, vi.fn()] as never)
+      .mockImplementationOnce(() => [menu, setMenu] as never);
+    const writeText = vi.fn(async () => {});
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+    vi.stubGlobal("window", { innerWidth: 800, innerHeight: 600 });
+    const tree = AgentSidebar({
+      projects: [{ root, name: "work" }], sessions: [session] as never, sessionsByProject: {},
+      workspace: { root } as never, activeSessionId: null, expanded: { [root]: true },
+      onNewSession: vi.fn(), onAddProject: vi.fn(), onOpenSettings: vi.fn(),
+      onSelectProject: vi.fn(async () => {}), onRemoveProject: vi.fn(async () => {}),
+      onMoveProject: vi.fn(async () => {}), onSwitchSession: vi.fn(async () => {}), onDeleteSession: vi.fn(),
+    });
+    const [contextMenu] = find(tree, "file-tree-context-menu");
+    const buttons = contextMenu.props.children as ReactElement[];
+    expect(buttons.map((button) => button.props.children)).toEqual([
+      "重命名", "置顶", "复制sessionId", "复制session文件路径", "删除",
+    ]);
+    find(tree, "session-wrap")[0].props.onContextMenu({ preventDefault: vi.fn(), stopPropagation: vi.fn(), clientX: 5, clientY: 6 });
+    expect(setMenu).toHaveBeenCalledWith({ session, root, x: 5, y: 6 });
+    buttons[2].props.onClick();
+    buttons[3].props.onClick();
+    await Promise.resolve();
+    expect(writeText.mock.calls).toEqual([["two"], [path]]);
+    expect(setMenu).toHaveBeenCalledWith(null);
+  });
+});
+
 describe("项目标题栏拖动", () => {
   it("不显示拖动手柄，名称仍可拖动、选择，箭头仍可展开折叠", async () => {
     const onSelectProject = vi.fn(async () => {});

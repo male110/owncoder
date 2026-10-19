@@ -281,9 +281,12 @@ export async function buildDecomposeContext(
 
   if (opts.sessionId) {
     const { rounds, checkpoint } = await loadDecomposeHistory(opts.workspaceRoot, opts.sessionId);
-    if (rounds.length > 0 || checkpoint) {
+    // A round with no report for this request is not conversation history.
+    const priorRounds = rounds.filter((round) => round.turnId !== opts.turnId &&
+      !(round.userInput === opts.userMessage.trim() && !round.assistantReport));
+    if (priorRounds.length > 0 || checkpoint) {
       source = "persisted";
-      const pending = rounds.filter((round) => round.index > (checkpoint?.throughIndex ?? 0));
+      const pending = priorRounds.filter((round) => round.index > (checkpoint?.throughIndex ?? 0));
       const older = pending.slice(0, -recentWindowSize);
       const recent = pending.slice(-recentWindowSize);
       olderSummary = summaryBody(checkpoint?.summary ?? "");
@@ -294,8 +297,21 @@ export async function buildDecomposeContext(
   }
 
   if (roundLines.length === 0 && source === "heuristic") {
+    // Older sessions can have a complete conversation store but only the current
+    // round in rounds.json. Read completed turns, never an in-flight request.
+    let storedHistory: ChatTurn[] = [];
+    if (opts.sessionId) {
+      try {
+        const { loadRecentTurns, projectConversationTurns } = await import("../../../conversation-store.ts");
+        const page = await loadRecentTurns(opts.workspaceRoot, opts.sessionId, recentWindowSize + 1);
+        const completed = page.turns.filter((turn) => turn.status === "completed" && turn.turnId !== opts.turnId);
+        storedHistory = projectConversationTurns(completed.slice(-recentWindowSize));
+      } catch (error) {
+        writeEventLog({ category: "stage_error", message: "读取会话历史失败，使用运行时历史", details: { error: String(error) } });
+      }
+    }
     // Fallback: heuristic extraction (no decompose JSON, no evidence).
-    const structuredHistory = extractStructuredHistory(opts.history, recentWindowSize, true);
+    const structuredHistory = extractStructuredHistory(storedHistory.length ? storedHistory : opts.history, recentWindowSize, !storedHistory.length);
     roundLines = structuredHistory.slice().reverse().map((round, idx) => {
       const parts: string[] = [`## Round ${idx + 1}`, `[user] ${stripConversationHistoryTags(round.userInput)}`];
       if (round.taskDecompose) parts.push(`[decompose] ${round.taskDecompose}`);
@@ -311,16 +327,6 @@ export async function buildDecomposeContext(
   if (currentAttachmentUrls.length > 0) {
     roundLines.unshift(`## Current uploaded images\n${currentAttachmentUrls.map((url) => `- ${url}`).join("\n")}`);
   }
-
-  writeEventLog({
-    category: "other",
-    message: "任务分解历史提取",
-    details: {
-      source,
-      totalHistoryTurns: opts.history.length,
-      roundCount: roundLines.length,
-    },
-  });
 
   // Quoted conversation text is data, not another history-section heading.
   const historySections = (lines = roundLines, summary = olderSummary) => [

@@ -106,6 +106,14 @@ export function AgentSidebar({
   const [rename, setRename] = useState<{ id: string; root: string; title: string; originalTitle: string } | null>(null);
   const [savingName, setSavingName] = useState(false);
   const [actionError, setActionError] = useState("");
+  const copySessionValue = async (value: string) => {
+    setMenu(null);
+    try {
+      await navigator.clipboard.writeText(value);
+    } catch {
+      setActionError("复制失败，请重试");
+    }
+  };
   const renameFormRef = useRef<HTMLFormElement>(null);
   const finishedRenameRef = useRef<typeof rename>(null);
   const commitRename = useCallback(async () => {
@@ -177,7 +185,7 @@ export function AgentSidebar({
       {actionError ? <p role="alert">{actionError}</p> : null}
       {menu && !collapsed ? (
         <div className="file-tree-context-menu" role="menu" aria-label="会话操作"
-          style={{ left: Math.max(8, Math.min(menu.x, window.innerWidth - 208)), top: Math.max(8, Math.min(menu.y, window.innerHeight - 120)) }}
+          style={{ left: Math.max(8, Math.min(menu.x, window.innerWidth - 208)), top: Math.max(8, Math.min(menu.y, window.innerHeight - 180)) }}
           onMouseDown={(event) => event.stopPropagation()} onContextMenu={(event) => event.preventDefault()}>
           <button type="button" role="menuitem" disabled={!onRenameSession || savingName} onClick={() => {
             setRename({ id: menu.session.id, root: menu.root, title: menu.session.title, originalTitle: menu.session.title });
@@ -187,6 +195,12 @@ export function AgentSidebar({
             void onPinSession?.(menu.session.id, menu.root).catch(() => setActionError("置顶操作失败，请重试"));
             setMenu(null);
           }}>{menu.session.pinned ? "取消置顶" : "置顶"}</button>
+          <button type="button" role="menuitem" onClick={() => void copySessionValue(menu.session.id)}>复制sessionId</button>
+          <button type="button" role="menuitem" onClick={() => {
+            const separator = menu.root.includes("\\") ? "\\" : "/";
+            const path = `${menu.root.replace(/[\\/]+$/, "")}${separator}.owncoder${separator}sessions${separator}${menu.session.id}.json`;
+            void copySessionValue(path);
+          }}>复制session文件路径</button>
           <button type="button" role="menuitem" disabled={isSessionRunning?.(menu.session.id) ?? false} onClick={() => {
             setConfirmDeleteId(menu.session.id);
             setMenu(null);

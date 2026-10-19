@@ -128,6 +128,10 @@ export function buildLogBlocks(
 
   rounds.forEach((round, ri) => {
     const active = ri === rounds.length - 1 && lastRoundActive;
+    const owner = round.find((t) => t.role === "user");
+    // Runtime and legacy histories may only stamp the user row.
+    const withOwner = (t: ChatTurnDto): ChatTurnDto =>
+      t.turnId || !owner?.turnId ? t : { ...t, turnId: owner.turnId };
 
     let finalIdx = -1;
     for (let i = 0; i < round.length; i++) {
@@ -145,11 +149,11 @@ export function buildLogBlocks(
     if (active || finalIdx < 0) {
       for (const t of round) {
         if (t.role === "user") {
-          out.push({ kind: "user", turn: t });
+          out.push({ kind: "user", turn: withOwner(t) });
         } else if (t.role === "assistant") {
           if (t.content.startsWith("Error:")) continue;
           if (!t.content.trim()) continue;
-          out.push({ kind: "assistant", turn: t });
+          out.push({ kind: "assistant", turn: withOwner(t) });
         } else if (t.role === "tool") {
           const last = out[out.length - 1];
           if (last?.kind === "tools") last.items.push(t);
@@ -194,8 +198,8 @@ export function buildLogBlocks(
 
     if (userTurn) out.push({ kind: "user", turn: userTurn });
     if (process.length > 0) out.push({ kind: "process", items: process });
-    if (finalTurn) out.push({ kind: "assistant", turn: finalTurn });
-    for (const p of planNotices) out.push({ kind: "assistant", turn: p });
+    if (finalTurn) out.push({ kind: "assistant", turn: withOwner(finalTurn) });
+    for (const p of planNotices) out.push({ kind: "assistant", turn: withOwner(p) });
   });
 
   return out;

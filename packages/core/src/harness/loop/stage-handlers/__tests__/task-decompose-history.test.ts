@@ -1457,6 +1457,7 @@ describe("分解历史：使用滚动摘要和最近轮次，不检索向量历�
     const ctx = await buildDecomposeContext(
       makeOpts({
         userMessage: "把向量召回加进任务分解历史拼装",
+        history: [{ role: "user", content: "当前输入不应触发旧轮召回" }],
         historyVector: {
           embedding: {
             async embed() {
@@ -1485,6 +1486,7 @@ describe("分解历史：使用滚动摘要和最近轮次，不检索向量历�
     expect(ctx).toContain("<conversation_history>");
     expect(ctx).toContain("Recent conversation rounds");
     expect(ctx).toContain("最近一轮理解-完整保留");
+    expect(ctx).not.toContain("当前输入不应触发旧轮召回");
     expect(ctx).not.toContain("Vector-recalled history");
     expect(ctx).not.toContain("…(截断)");
     expect(searchCalled).toBe(false);
