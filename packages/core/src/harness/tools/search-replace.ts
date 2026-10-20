@@ -33,6 +33,9 @@ interface SearchReplaceBlock {
   replace: string;
 }
 
+/** 严格解析结果：要么得到完整闭合的块，要么得到明确的格式错误。 */
+type ParsedBlocks = { blocks: SearchReplaceBlock[] } | { error: string };
+
 interface TextMatch {
   start: number;
   end: number;
@@ -144,45 +147,84 @@ function lineEndingForReplacement(content: string, match: TextMatch): string {
  * Parse SEARCH/REPLACE blocks from patch content using a line-level scan.
  * A divider (`=======`) is only recognised on its own line, so markers that
  * appear inside SEARCH/REPLACE content are treated as literal content.
+ *
+ * STRICT: every block must be fully closed with its own `>>>>>>> REPLACE`
+ * marker. A truncated/malformed patch (e.g. cut off mid-REPLACE, a missing
+ * divider, or a stray divider) returns an error instead of a half-parsed
+ * block — otherwise a fragment could be "applied" and reported as success.
  */
-function parseSearchReplaceBlocks(patch: string): SearchReplaceBlock[] {
+function parseSearchReplaceBlocks(patch: string): ParsedBlocks {
   const lines = splitLinesKeepEnds(patch);
   const blocks: SearchReplaceBlock[] = [];
   let i = 0;
+  let blockNo = 0;
 
   while (i < lines.length) {
-    if (HEAD_RE.test(stripEol(lines[i]).trim())) {
+    if (!HEAD_RE.test(stripEol(lines[i]).trim())) {
       i++;
-      const searchParts: string[] = [];
-      while (i < lines.length && !DIVIDER_RE.test(stripEol(lines[i]).trim())) {
-        searchParts.push(lines[i]);
-        i++;
+      continue;
+    }
+
+    blockNo++;
+    const headLine = i + 1;
+    i++; // consume `<<<<<<< SEARCH`
+
+    // --- SEARCH section: everything up to the divider line ---
+    const searchParts: string[] = [];
+    while (i < lines.length && !DIVIDER_RE.test(stripEol(lines[i]).trim())) {
+      // A REPLACE marker before the divider means the divider was omitted.
+      if (UPDATED_RE.test(stripEol(lines[i]).trim())) {
+        return {
+          error:
+            `Block #${blockNo}: malformed patch — missing the "=======" divider line ` +
+            `between SEARCH and REPLACE (line ${i + 1}).`,
+        };
       }
-      if (i >= lines.length || !DIVIDER_RE.test(stripEol(lines[i]).trim())) break;
-
-      i++; // skip DIVIDER
-      const replaceParts: string[] = [];
-      while (
-        i < lines.length &&
-        !UPDATED_RE.test(stripEol(lines[i]).trim()) &&
-        !DIVIDER_RE.test(stripEol(lines[i]).trim())
-      ) {
-        replaceParts.push(lines[i]);
-        i++;
-      }
-
-      blocks.push({
-        search: ensureTrailingNewline(searchParts.join("")),
-        replace: ensureTrailingNewline(replaceParts.join("")),
-      });
-
-      if (i < lines.length && UPDATED_RE.test(stripEol(lines[i]).trim())) i++;
-    } else {
+      searchParts.push(lines[i]);
       i++;
     }
+    if (i >= lines.length) {
+      return {
+        error:
+          `Block #${blockNo}: malformed patch — reached end of patch while reading the SEARCH ` +
+          `section (opened at line ${headLine}); expected a "=======" divider line.`,
+      };
+    }
+
+    i++; // consume `=======` divider
+
+    // --- REPLACE section: everything up to the closing marker ---
+    const replaceParts: string[] = [];
+    while (i < lines.length && !UPDATED_RE.test(stripEol(lines[i]).trim())) {
+      // A second divider inside the REPLACE section is almost always a
+      // malformed/truncated patch rather than literal content.
+      if (DIVIDER_RE.test(stripEol(lines[i]).trim())) {
+        return {
+          error:
+            `Block #${blockNo}: malformed patch — unexpected extra "=======" divider at line ` +
+            `${i + 1}; each block needs exactly one divider and a closing ">>>>>>> REPLACE".`,
+        };
+      }
+      replaceParts.push(lines[i]);
+      i++;
+    }
+    if (i >= lines.length) {
+      return {
+        error:
+          `Block #${blockNo}: malformed patch — reached end of patch while reading the REPLACE ` +
+          `section (opened at line ${headLine}); the closing ">>>>>>> REPLACE" marker is missing. ` +
+          `The patch may have been truncated.`,
+      };
+    }
+
+    i++; // consume `>>>>>>> REPLACE`
+    blocks.push({
+      search: ensureTrailingNewline(searchParts.join("")),
+      replace: ensureTrailingNewline(replaceParts.join("")),
+    });
   }
 
-  return blocks;
+  return { blocks };
 }
 
 // --- matching ---
@@ -753,7 +795,12 @@ export function applySearchReplace(
   originalContent: string,
   patchContent: string,
 ): SearchReplaceResult {
-  const blocks = parseSearchReplaceBlocks(patchContent);
+  const parsed = parseSearchReplaceBlocks(patchContent);
+  if ("error" in parsed) {
+    // Malformed/truncated patch structure — never treat as a successful edit.
+    return { success: false, error: parsed.error, replacements: 0 };
+  }
+  const blocks = parsed.blocks;
 
   if (blocks.length === 0) {
     return {

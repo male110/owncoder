@@ -3,11 +3,70 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="description" content="OwnCoder — 安全优先的 AI 编程工具。密码密钥自动脱敏，代码与索引全部留在本地，不上传云端。" />
+  <!-- 基础 SEO：title / description 是搜索结果中最主要的关键词承载位置 -->
+  <title>OwnCoder — 安全优先的 AI 编程工具｜Claude Code / OpenCode / zCode 替代方案</title>
+  <meta name="description" content="OwnCoder 是安全优先、本地运行的 AI 编程工具，可作为 Claude Code、OpenCode、zCode 的隐私优先替代：密码密钥发往模型前自动脱敏，代码与索引全部留在本地，零遥测。" />
+  <!-- meta keywords 对 Google 已无效、对百度仅有极弱参考作用，主要关键词仍应放在标题与可见正文中 -->
+  <meta name="keywords" content="OwnCoder,Claude Code 替代,OpenCode 替代,zCode,AI 编程工具,AI 编程助手,本地 AI 编程,代码脱敏,零遥测" />
+  <meta name="robots" content="index, follow" />
   <meta name="theme-color" content="#0b1220" />
-  <title>OwnCoder — 安全优先的 AI 编程工具</title>
+  <link rel="canonical" href="https://www.owncoder.cn/" />
+  <link rel="alternate" hreflang="zh-CN" href="https://www.owncoder.cn/" />
+  <link rel="alternate" hreflang="en" href="https://www.owncoder.net/" />
+  <link rel="alternate" hreflang="x-default" href="https://www.owncoder.net/" />
   <link rel="icon" href="favicon.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="styles.css" />
+
+  <!-- Open Graph / Twitter：分享到社交平台与聊天工具时展示的标题描述 -->
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="OwnCoder" />
+  <meta property="og:locale" content="zh_CN" />
+  <meta property="og:url" content="https://www.owncoder.cn/" />
+  <meta property="og:title" content="OwnCoder — 安全优先的 AI 编程工具｜Claude Code / OpenCode / zCode 替代方案" />
+  <meta property="og:description" content="注重代码隐私的 Claude Code / OpenCode / zCode 替代选择：发送给大模型前自动脱敏密码与密钥，代码分析与索引全部在本地完成，零遥测。" />
+  <meta name="twitter:card" content="summary" />
+  <meta name="twitter:title" content="OwnCoder — 安全优先的 AI 编程工具" />
+  <meta name="twitter:description" content="Claude Code / OpenCode / zCode 的隐私优先替代：密钥自动脱敏，代码与索引全部留在本地。" />
+
+  <!-- 结构化数据：帮助搜索引擎理解产品定位，并争取 FAQ 富摘要 -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "SoftwareApplication",
+        "name": "OwnCoder",
+        "applicationCategory": "DeveloperApplication",
+        "operatingSystem": "Windows",
+        "url": "https://www.owncoder.cn/",
+        "description": "安全优先、本地运行的 AI 编程工具，面向注重代码隐私的 Claude Code、OpenCode、zCode 用户的替代方案。发送给大模型前自动脱敏密码与密钥，代码与索引全部留在本地，零遥测。",
+        "keywords": "AI 编程工具, AI 编程助手, Claude Code 替代, OpenCode 替代, zCode, 本地优先, 代码脱敏, 零遥测",
+        "license": "https://polyformproject.org/licenses/noncommercial/1.0.0/",
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "CNY" }
+      },
+      {
+        "@type": "FAQPage",
+        "mainEntity": [
+          {
+            "@type": "Question",
+            "name": "OwnCoder 是 Claude Code、OpenCode、zCode 的替代品吗？",
+            "acceptedAnswer": { "@type": "Answer", "text": "OwnCoder 与它们同属 Agent 式 AI 编程助手，可作为注重代码隐私时的替代方案，需要接入你自己的模型 API。它是独立产品，与上述工具及其开发公司没有隶属或官方合作关系。" }
+          },
+          {
+            "@type": "Question",
+            "name": "从 Claude Code、OpenCode 或 zCode 迁移复杂吗？",
+            "acceptedAnswer": { "@type": "Answer", "text": "不复杂。在 Windows 上安装后，在设置中填入你自己的模型 API，即可继续使用任务分解、工具调用、迭代修改的 Agent 工作流，代码索引在本地增量构建。" }
+          },
+          {
+            "@type": "Question",
+            "name": "使用 OwnCoder 时我的代码会被上传吗？",
+            "acceptedAnswer": { "@type": "Answer", "text": "不会。源码分析、符号索引、全文检索与 RAG 嵌入全部在本机完成；密码、密钥等敏感内容在发往模型前自动脱敏，产品默认零遥测。" }
+          }
+        ]
+      }
+    ]
+  }
+  </script>
 </head>
 <body>
   <div class="bg-glow" aria-hidden="true"></div>
@@ -19,9 +78,10 @@
       </a>
       <nav class="nav-links" aria-label="主导航">
         <a href="#security">安全</a>
-        <a href="#features">能力</a>
+        <a href="#features">省钱</a>
         <a href="#local">本地优先</a>
         <a href="#download" class="nav-cta">下载</a>
+        <a class="nav-lang" href="https://www.owncoder.net" hreflang="en" target="_blank" rel="noopener noreferrer">English</a>
       </nav>
     </div>
   </header>
@@ -29,7 +89,8 @@
   <main id="top">
     <section class="hero container">
       <p class="eyebrow">安全优先 · 本地运行 · 零遥测</p>
-      <h2>注重安全，代码不会自动上传。</h1>
+      <h1>安全优先，<span class="hero-accent">代码留在本地。</span></h1>
+      <p class="hero-subtitle">注重安全，代码不会自动上传。</p>
       <p class="hero-lead">
         OwnCoder 是面向开发者的 AI 编程桌面工具。发送给大模型前自动脱敏密码与密钥，
         代码分析与索引全部在本地完成——不上传源码，没有云端索引。
@@ -48,6 +109,37 @@
         <li>索引仅存本地</li>
         <li>零遥测</li>
       </ul>
+    </section>
+
+    <!-- 同类工具替代区块：关键词以对用户有用的对比内容自然出现，而非隐藏堆砌 -->
+    <section id="alternatives" class="section section-alt">
+      <div class="container">
+        <div class="section-head">
+          <p class="eyebrow">面向 Claude Code · OpenCode · zCode 用户</p>
+          <h2>在用或正在对比 Claude Code、OpenCode、zCode？</h2>
+          <p class="section-desc">
+            OwnCoder 与它们同属 Agent 式 AI 编程助手，可以作为你注重代码隐私时的替代选择：
+            接入你自己的模型 API，保留熟悉的“任务分解 + 工具调用”工作流，
+            同时把密钥脱敏、全本地索引和零遥测作为默认值。
+            OwnCoder 是独立产品，与 Claude Code、OpenCode、zCode 及其开发公司没有隶属或官方合作关系。
+          </p>
+        </div>
+
+        <div class="grid-3">
+          <article class="card">
+            <h3>想从 Claude Code 迁移？</h3>
+            <p>习惯让 Agent 读仓库、调工具、迭代改代码？OwnCoder 提供同样的 Agent 工作流与桌面界面，并在请求发出前把密码、API Key、私钥自动掩码为 <code>***</code>。</p>
+          </article>
+          <article class="card">
+            <h3>想从 OpenCode 迁移？</h3>
+            <p>喜欢开放、可自带模型的方式？OwnCoder 同样由你配置自己的模型 API，符号索引、全文检索与 RAG 嵌入全部在本机基于 SQLite + FTS5 完成，无需云端索引。</p>
+          </article>
+          <article class="card">
+            <h3>想从 zCode 迁移？</h3>
+            <p>想要更省心的安全默认值？从 zCode 这类 AI 编程工具切换后，60+ 敏感文件规则与 25+ 密钥格式正则开箱即用，源码不会离开你的电脑。</p>
+          </article>
+        </div>
+      </div>
     </section>
 
     <section id="security" class="section container">
@@ -161,7 +253,6 @@
           <h3>让 LLM 多做事，少说话</h3>
           <p><strong>原理：</strong>输出 Token 通常是输入的 2-3 倍价格。让 LLM 多做工作（通过工具调用）、少说话（减少解释性文字），可大幅降低输出成本。</p>
           <p><strong>纪律：</strong>关键规则是零叙事工具调用——默认直接调用工具完成任务，除工具调用外不输出任何文字。禁止过渡语、计划叙述、进度评论、寒暄、解释；禁止"让我先…""现在开始…""接下来…""我来搜索…""首先需要…"；禁止工具调用之间的任何说明文字。</p>
-          <p><strong>效果：</strong>多步骤任务的输出 Token 可降低 60-80%。</p>
         </article>
 
       </div>
@@ -194,7 +285,10 @@
         <span class="brand-name">OwnCoder</span>
       </div>
       <p>安全优先的 AI 编程工具 — 你的代码，始终属于你。</p>
-      <p class="footer-meta">© <span id="year"></span> OwnCoder</p>
+      <p class="footer-meta footer-meta-row">
+        <span class="footer-copyright">© <span id="year"></span> OwnCoder</span>
+        <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">豫ICP备2026051214号-1</a>
+      </p>
     </div>
   </footer>
 

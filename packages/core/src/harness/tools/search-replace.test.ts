@@ -139,3 +139,41 @@ test("patch with no blocks is rejected", () => {
   assert.equal(res.success, false);
   assert.match(res.error ?? "", /No SEARCH\/REPLACE blocks/);
 });
+test("truncated patch missing the closing REPLACE marker is rejected", () => {
+  // Regression: a patch cut off after the replacement body (no >>>>>>> REPLACE)
+  // used to be accepted and reported as a successful edit. It must fail loudly.
+  const file = "alpha\nbeta\ngamma\n";
+  const patch = "<<<<<<< SEARCH\nbeta\n=======\nBETA\n";
+  const res = applySearchReplace(file, patch);
+  assert.equal(res.success, false);
+  assert.equal(res.content, undefined);
+  assert.match(res.error ?? "", /closing ">>>>>>> REPLACE" marker is missing/);
+});
+
+test("patch missing the ======= divider is rejected", () => {
+  const file = "alpha\nbeta\ngamma\n";
+  const patch = "<<<<<<< SEARCH\nbeta\n>>>>>>> REPLACE\n";
+  const res = applySearchReplace(file, patch);
+  assert.equal(res.success, false);
+  assert.equal(res.content, undefined);
+  assert.match(res.error ?? "", /missing the "=======" divider/);
+});
+
+test("patch truncated while still in the SEARCH section is rejected", () => {
+  const file = "alpha\nbeta\n";
+  const patch = "<<<<<<< SEARCH\nalpha\nbeta\n";
+  const res = applySearchReplace(file, patch);
+  assert.equal(res.success, false);
+  assert.equal(res.content, undefined);
+  assert.match(res.error ?? "", /expected a "=======" divider/);
+});
+
+test("a stray second divider in the REPLACE section is rejected", () => {
+  const file = "alpha\nbeta\n";
+  const patch =
+    "<<<<<<< SEARCH\nalpha\n=======\nALPHA\n=======\n>>>>>>> REPLACE\n";
+  const res = applySearchReplace(file, patch);
+  assert.equal(res.success, false);
+  assert.equal(res.content, undefined);
+  assert.match(res.error ?? "", /unexpected extra "=======" divider/);
+});

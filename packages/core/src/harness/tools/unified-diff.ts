@@ -78,6 +78,21 @@ export function applyUnifiedDiff(
       };
     }
 
+    // The `diff` library returns the ORIGINAL content unchanged (not `false`)
+    // for an empty patch, plain prose, or a header with no real hunks. That is
+    // a no-op, not a successful edit — reporting it as applied would lie about
+    // a change that never happened, so reject it explicitly.
+    if (result === originalContent) {
+      return {
+        success: false,
+        error:
+          "Patch made no changes: the parsed diff contained no additions or deletions " +
+          "(or was not a valid unified diff), so the file content is identical to the original. " +
+          "Check that the patch includes real '-'/'+' lines and that the markers are intact. " +
+          "For SEARCH/REPLACE edits use the <<<<<<< SEARCH / ======= / >>>>>>> REPLACE format.",
+      };
+    }
+
     // Success! Generate a preview diff
     const preview = createPatch(
       "file",

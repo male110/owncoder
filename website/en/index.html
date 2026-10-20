@@ -3,11 +3,70 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="description" content="OwnCoder — Security-First AI Coding Tool. Auto-redacts passwords & keys, code & index stay local, never uploaded to cloud." />
+  <!-- Core SEO: title and description carry the most weight in search results -->
+  <title>OwnCoder — Security-First AI Coding Tool | Claude Code / OpenCode / zCode Alternative</title>
+  <meta name="description" content="OwnCoder is a security-first, local AI coding tool and a privacy-focused Claude Code, OpenCode & zCode alternative. Auto-redacts passwords and keys before they reach LLMs; code and index stay local with zero telemetry." />
+  <!-- meta keywords is ignored by Google and only weakly considered elsewhere; put keywords in the title and visible copy instead -->
+  <meta name="keywords" content="OwnCoder,Claude Code alternative,OpenCode alternative,zCode alternative,AI coding tool,AI coding assistant,local AI coding,secret redaction,zero telemetry" />
+  <meta name="robots" content="index, follow" />
   <meta name="theme-color" content="#0b1220" />
-  <title>OwnCoder — Security-First AI Coding Tool</title>
+  <link rel="canonical" href="https://www.owncoder.net/" />
+  <link rel="alternate" hreflang="en" href="https://www.owncoder.net/" />
+  <link rel="alternate" hreflang="zh-CN" href="https://www.owncoder.cn/" />
+  <link rel="alternate" hreflang="x-default" href="https://www.owncoder.net/" />
   <link rel="icon" href="favicon.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="styles.css" />
+
+  <!-- Open Graph / Twitter: title and description shown in social and chat shares -->
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="OwnCoder" />
+  <meta property="og:locale" content="en_US" />
+  <meta property="og:url" content="https://www.owncoder.net/" />
+  <meta property="og:title" content="OwnCoder — Security-First AI Coding Tool | Claude Code / OpenCode / zCode Alternative" />
+  <meta property="og:description" content="A privacy-focused Claude Code, OpenCode & zCode alternative: passwords and keys are auto-redacted before reaching LLMs, code analysis and indexing stay fully local, zero telemetry." />
+  <meta name="twitter:card" content="summary" />
+  <meta name="twitter:title" content="OwnCoder — Security-First AI Coding Tool" />
+  <meta name="twitter:description" content="A privacy-focused Claude Code / OpenCode / zCode alternative: secret redaction, fully local code and index." />
+
+  <!-- Structured data: helps search engines understand the product and can earn FAQ rich results -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "SoftwareApplication",
+        "name": "OwnCoder",
+        "applicationCategory": "DeveloperApplication",
+        "operatingSystem": "Windows",
+        "url": "https://www.owncoder.net/",
+        "description": "A security-first, local AI coding tool and a privacy-focused alternative for Claude Code, OpenCode and zCode users. Auto-redacts passwords and keys before they reach LLMs; code and index stay local with zero telemetry.",
+        "keywords": "AI coding tool, AI coding assistant, Claude Code alternative, OpenCode alternative, zCode alternative, local-first, secret redaction, zero telemetry",
+        "license": "https://polyformproject.org/licenses/noncommercial/1.0.0/",
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+      },
+      {
+        "@type": "FAQPage",
+        "mainEntity": [
+          {
+            "@type": "Question",
+            "name": "Is OwnCoder an alternative to Claude Code, OpenCode and zCode?",
+            "acceptedAnswer": { "@type": "Answer", "text": "OwnCoder is an agentic AI coding assistant in the same category, and a privacy-focused alternative when code confidentiality matters. You bring your own model API. It is an independent product with no affiliation or official partnership with those tools or their companies." }
+          },
+          {
+            "@type": "Question",
+            "name": "Is it hard to switch from Claude Code, OpenCode or zCode?",
+            "acceptedAnswer": { "@type": "Answer", "text": "No. Install on Windows, add your own model API key in settings, and keep the familiar agent workflow of task decomposition, tool calls and iterative edits. The local code index is built incrementally on your machine." }
+          },
+          {
+            "@type": "Question",
+            "name": "Will my code be uploaded when I use OwnCoder?",
+            "acceptedAnswer": { "@type": "Answer", "text": "No. Source analysis, symbol indexing, full-text search and RAG embeddings all run on your machine. Passwords, keys and other secrets are auto-redacted before any request reaches a model, and the product ships with zero telemetry by default." }
+          }
+        ]
+      }
+    ]
+  }
+  </script>
 </head>
 <body>
   <div class="bg-glow" aria-hidden="true"></div>
@@ -19,9 +78,10 @@
       </a>
       <nav class="nav-links" aria-label="Main navigation">
         <a href="#security">Security</a>
-        <a href="#features">Features</a>
-        <a href="#local">Local-First</a>
+        <a href="#features">Save Money</a>
+        <a href="#local">Local First</a>
         <a href="#download" class="nav-cta">Download</a>
+        <a class="nav-lang" href="https://www.owncoder.cn" hreflang="zh-CN" target="_blank" rel="noopener noreferrer">中文</a>
       </nav>
     </div>
   </header>
@@ -48,6 +108,38 @@
         <li>Local-only indexing</li>
         <li>Zero telemetry</li>
       </ul>
+    </section>
+
+    <!-- Alternatives section: keywords appear in genuinely useful comparison copy, never hidden or stuffed -->
+    <section id="alternatives" class="section section-alt">
+      <div class="container">
+        <div class="section-head">
+          <p class="eyebrow">For Claude Code · OpenCode · zCode Users</p>
+          <h2>Comparing Claude Code, OpenCode or zCode?</h2>
+          <p class="section-desc">
+            OwnCoder is an agentic AI coding assistant in the same category — a privacy-focused alternative
+            when your code has to stay confidential. Bring your own model API, keep the familiar
+            "plan + tool calls" workflow, and get secret redaction, fully local indexing and zero telemetry
+            by default. OwnCoder is an independent product with no affiliation or official partnership
+            with Claude Code, OpenCode, zCode or their companies.
+          </p>
+        </div>
+
+        <div class="grid-3">
+          <article class="card">
+            <h3>Switching from Claude Code?</h3>
+            <p>Used to agents that read your repo, call tools and iterate? OwnCoder offers the same agent workflow and desktop UI, while passwords, API keys and private keys are masked to <code>***</code> before any request is sent.</p>
+          </article>
+          <article class="card">
+            <h3>Switching from OpenCode?</h3>
+            <p>Like open, bring-your-own-model setups? Configure your own model API, and get symbol indexing, full-text search and RAG embeddings entirely on your machine via SQLite + FTS5 — no cloud index required.</p>
+          </article>
+          <article class="card">
+            <h3>Switching from zCode?</h3>
+            <p>Want safer defaults out of the box? Moving from zCode and similar AI coding tools gives you 60+ sensitive-file rules and 25+ secret format patterns immediately, and your source never leaves your computer.</p>
+          </article>
+        </div>
+      </div>
     </section>
 
     <section id="security" class="section container">
@@ -161,7 +253,6 @@
           <h3>Do More, Say Less</h3>
           <p><strong>Principle:</strong> Output tokens are typically 2-3× more expensive than input tokens. Getting the LLM to do more work (via tool calls) and say less (fewer explanatory words) dramatically lowers output costs.</p>
           <p><strong>Discipline:</strong> Key rule is zero-narrative tool calls—default to calling tools directly to complete tasks, outputting no text except tool calls. Forbidden: transitional phrases, plan narration, progress commentary, greetings, explanations; forbidden phrases include "Let me first...", "Now I'll start...", "Next...", "I'll search...", "First I need..."; forbidden: any explanatory text between tool calls.</p>
-          <p><strong>Impact:</strong> Output tokens for multi-step tasks can drop 60-80%.</p>
         </article>
 
       </div>
@@ -194,7 +285,9 @@
         <span class="brand-name">OwnCoder</span>
       </div>
       <p>Security-First AI Coding Tool — Your code, always yours.</p>
-      <p class="footer-meta">© <span id="year"></span> OwnCoder</p>
+      <p class="footer-meta">
+        <span class="footer-copyright">© <span id="year"></span> OwnCoder</span>
+      </p>
     </div>
   </footer>
 

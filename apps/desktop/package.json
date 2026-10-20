@@ -1,6 +1,6 @@
 {
   "name": "@owncoder/desktop",
-  "version": "0.1.21",
+  "version": "0.1.22",
   "private": true,
   "description": "OwnCoder desktop shell",
   "main": "./out/main/index.js",
@@ -153,7 +153,7 @@
     },
     "nsisWeb": {
       "artifactName": "${productName} Web Setup ${version}.${ext}",
-      "appPackageUrl": "https://zy-1310897501.cos.ap-nanjing.myqcloud.com/owncoder/0.1.21/%40owncoderdesktop-0.1.21-x64.nsis.7z"
+      "appPackageUrl": "https://zy-1310897501.cos.ap-nanjing.myqcloud.com/owncoder/0.1.22/%40owncoderdesktop-0.1.22-x64.nsis.7z"
     },
     "mac": {
       "target": [

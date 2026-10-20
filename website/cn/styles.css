@@ -89,11 +89,13 @@ code {
 }
 
 .nav {
+  /* 品牌与主导航作为一个整体从左侧依次排列 */
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   min-height: 68px;
-  gap: 1rem;
+  /* 品牌与主导航链接组之间留出更宽间距，强化视觉分隔，整体仍靠左排列 */
+  gap: 4rem;
 }
 
 .brand {
@@ -136,10 +138,17 @@ code {
   background: rgba(255, 255, 255, 0.04);
 }
 
-.nav-cta {
-  color: var(--text) !important;
-  background: var(--accent-soft);
-  border: 1px solid rgba(91, 140, 255, 0.28);
+/* 下载按钮：纯文字样式，与文字链接区分但不抢眼；hover 时填充主色，反馈明确 */
+.nav-links a.nav-cta {
+  color: var(--accent);
+  font-weight: 600;
+  background: transparent;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.nav-links a.nav-cta:hover {
+  color: #fff;
+  background: var(--accent);
 }
 
 .hero {
@@ -189,6 +198,15 @@ h1 {
   line-height: 1.15;
   white-space: nowrap;
   text-shadow: 0 12px 36px rgba(91, 140, 255, 0.16);
+}
+
+.hero-subtitle {
+  max-width: 100%;
+  margin: 0 0 1.5rem;
+  font-size: clamp(1.4rem, 3vw, 2rem);
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--text);
 }
 
 .hero-accent {
@@ -592,6 +610,28 @@ h3 {
   margin: 0;
 }
 
+/* 版权信息与备案号保持同一行，窄屏时缩小间距避免折行 */
+.footer-meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 1rem;
+}
+
+.footer-meta-row a {
+  color: inherit;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.footer-meta-row a:hover {
+  text-decoration: underline;
+}
+
+.footer-copyright {
+  white-space: nowrap;
+}
+
 .site-footer p {
   margin: 0;
 }
@@ -609,7 +649,8 @@ h3 {
 }
 
 @media (max-width: 720px) {
-  .nav-links a:not(.nav-cta) {
+  /* 移动端仅保留“下载”按钮与语言切换链接，并跟随品牌保持左侧排列 */
+  .nav-links a:not(.nav-cta):not(.nav-lang) {
     display: none;
   }
 
