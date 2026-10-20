@@ -2,9 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   BUILTIN_AGENT_PROMPT,
   BUILTIN_PLAN_PROMPT,
-  ensureWebSearchGuidance,
 } from "./builtin-prompts.js";
-import { BUILTIN_WORKFLOW, mergeWorkflow } from "./index.js";
 import { BUILTIN_TASK_DECOMPOSE_PROMPT } from "./task-decompose-prompt.js";
 
 describe("agent code comment guidance", () => {
@@ -49,25 +47,6 @@ describe("web search prompt guidance", () => {
     }
   });
 
-  it("appends guidance when a saved prompt never mentions web_search", () => {
-    const saved = "# Agent Mode — OwnCode\nMake precise edits. Avoid redundant reads.";
-    const out = ensureWebSearchGuidance(saved);
-    expect(out).toContain("web_search");
-    expect(out.startsWith(saved)).toBe(true);
-  });
-
-  it("does not duplicate guidance when web_search is already present", () => {
-    expect(ensureWebSearchGuidance(BUILTIN_AGENT_PROMPT)).toBe(BUILTIN_AGENT_PROMPT);
-  });
-
-  it("injects web_search into saved overlays that omit it", () => {
-    const merged = mergeWorkflow(BUILTIN_WORKFLOW, {
-      version: 2,
-      prompts: { agent: "# Agent Mode — OwnCode\nEdit code.", plan: "# Plan Mode — OwnCode\nWrite a plan." },
-    });
-    expect(merged.prompts.agent).toMatch(/web_search/);
-    expect(merged.prompts.plan).toMatch(/web_search/);
-  });
 });
 
 describe("task decompose prompt JSON contract", () => {

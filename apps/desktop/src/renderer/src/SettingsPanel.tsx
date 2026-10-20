@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { customConfirm } from "./utils/customConfirm";
 import {
-  materializeEnglishPrompts,
   BUILTIN_SENSITIVE_FILES,
   SECURITY_STACK_COVERAGE,
   type SystemWorkflowConfig,
@@ -152,14 +151,8 @@ export function SettingsPanel({ open, onClose, onSaved, initialTab }: Props) {
     const savingDraft = latestDraftRef.current ?? draft;
     const savingJson = JSON.stringify(savingDraft);
     try {
-      // Chinese UI edits → English runtime prompts before persist
-      const ready = await materializeEnglishPrompts(
-        savingDraft,
-        (text, target) => window.owncoder.translatePrompt(text, target),
-        snap.effective,
-      );
       if (revision !== settingsRevisionRef.current) return;
-      const s = await window.owncoder.saveSettings(ready);
+      const s = await window.owncoder.saveSettings(savingDraft);
       if (revision !== settingsRevisionRef.current) return;
       if (llmApiKey.trim() !== savedApiKeyRef.current) {
         await window.owncoder.setLlmApiKey(llmApiKey.trim() || null);

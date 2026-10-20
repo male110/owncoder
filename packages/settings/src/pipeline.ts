@@ -370,8 +370,6 @@ export const PipelineNodeSchema = z.object({
   enabled: z.boolean().default(true),
   /** English prompt used at runtime (canonical). */
   prompt: z.string().optional(),
-  /** Chinese display/edit copy; translated to `prompt` on save when dirty. */
-  promptZh: z.string().optional(),
   /** Optional model name override for this stage (empty = mode/default model). */
   model: z.string().optional(),
   params: PipelineNodeParamsSchema.optional(),
@@ -471,7 +469,6 @@ export function builtinPlanPipeline(): ModePipeline {
         id: "llm",     type: "explore_tools",  label: "调用模型", enabled: true,
         position: { x: 300, y: 300 },
         prompt: BUILTIN_PLAN_PROMPT.trim(),
-        promptZh: "",
         params: { maxIterations: 200, allowPlanFiles: true },
       },
       { id: "end",     type: "end",            label: "结束",     enabled: true, position: { x: 300, y: 430 } },
@@ -501,13 +498,11 @@ export function builtinAgentPipeline(): ModePipeline {
         id: "decompose",  type: "task_decompose",   label: "理解与任务分解", enabled: true,
         position: { x: 300, y: 300 },
         prompt: BUILTIN_TASK_DECOMPOSE_PROMPT.trim(),
-        promptZh: "",
       },
       {
         id: "llm",        type: "execute_tools",    label: "调用模型", enabled: true,
         position: { x: 300, y: 690 },
         prompt: BUILTIN_AGENT_PROMPT.trim(),
-        promptZh: "",
         params: { maxIterations: 200 },
       },
       { id: "postverify", type: "post_verify",      label: "执行验证", enabled: true, position: { x: 300, y: 820 } },
@@ -614,7 +609,6 @@ export function createPipelineNode(
         label: "调用模型",
         enabled: true,
         prompt: BUILTIN_PLAN_PROMPT.trim(),
-        promptZh: "",
         params: { maxIterations: 200, allowPlanFiles: true, reactSteps: defaultReactSteps() },
       };
     case "execute_tools":
@@ -624,7 +618,6 @@ export function createPipelineNode(
         label: "调用模型",
         enabled: true,
         prompt: BUILTIN_AGENT_PROMPT.trim(),
-        promptZh: "",
         params: { maxIterations: 200, reactSteps: defaultReactSteps() },
       };
     // Legacy, non-addable: kept only so a hand-edited workflow.json still parses.
@@ -651,7 +644,6 @@ export function createPipelineNode(
           "Audit the completed work against the user request using only the conversation, tool results, and recorded checks. " +
           "Do not call tools or redo work. Return a concise verdict: Verified, Partially verified, or Not verified; then list requirement evidence " +
           "and any gap or next action. Never claim a check passed unless its result is present in context.",
-        promptZh: "",
       };
     case "task_decompose":
       return {
@@ -660,7 +652,6 @@ export function createPipelineNode(
         label: "理解与任务分解",
         enabled: true,
         prompt: BUILTIN_TASK_DECOMPOSE_PROMPT.trim(),
-        promptZh: "",
       };
     default:
       return { id, type, label, enabled: true };
@@ -967,75 +958,4 @@ export function mergePipeline(
   }
 
   return ModePipelineSchema.parse({ nodes, edges, removed: [...removed] });
-}
-
-/**
- * Sync legacy prompts.* from pipeline draft_plan / execute_tools / explore_tools nodes
- * so older readers stay consistent.
- */
-export function syncLegacyPromptsFromPipelines(config: {
-  prompts: { plan: string; agent: string; planZh?: string; agentZh?: string };
-  modes: {
-    plan: { pipeline: ModePipeline };
-    agent: { pipeline: ModePipeline };
-  };
-}): void {
-  const draft = findPipelineNode(config.modes.plan.pipeline, "draft_plan");
-  const planLlm = findPipelineNode(config.modes.plan.pipeline, "explore_tools");
-  const exec = findPipelineNode(config.modes.agent.pipeline, "execute_tools");
-  const planPrompt = planLlm?.prompt?.trim() || draft?.prompt?.trim();
-  if (planPrompt) config.prompts.plan = planPrompt;
-  if (exec?.prompt?.trim()) config.prompts.agent = exec.prompt;
-  const planZh = planLlm?.promptZh?.trim() || draft?.promptZh?.trim();
-  if (planZh) config.prompts.planZh = planZh;
-  if (exec?.promptZh?.trim()) config.prompts.agentZh = exec.promptZh;
-}
-
-/** After loading flat prompts, push into pipeline nodes if nodes still hold builtins. */
-export function hydratePipelinesFromLegacy(config: {
-  prompts: {
-    plan: string;
-    agent: string;
-    planZh?: string;
-    agentZh?: string;
-  };
-  modes: {
-    plan: { pipeline: ModePipeline; bash: "deny" | "readonly"; allowPlanFiles: boolean };
-    agent: { pipeline: ModePipeline; dangerousBashConfirm: boolean };
-  };
-}): void {
-  // Plan 模式固定使用内置专用提示词 BUILTIN_PLAN_PROMPT。旧版本持久化的
-  // prompts.plan 可能是 ReAct/Agent 提示词，绝不能用它覆盖 plan 节点，
-  // 否则 plan 请求会错误地带上 "# ReAct Loop …" 指令。
-  const planLlm = findPipelineNode(config.modes.plan.pipeline, "explore_tools");
-  if (planLlm) {
-    planLlm.prompt = BUILTIN_PLAN_PROMPT.trim();
-  }
-  if (planLlm && config.prompts.planZh?.trim()) {
-    planLlm.promptZh = config.prompts.planZh;
-  }
-  const draft = findPipelineNode(config.modes.plan.pipeline, "draft_plan");
-  if (draft) {
-    draft.prompt = BUILTIN_PLAN_PROMPT.trim();
-  }
-  if (draft && config.prompts.planZh?.trim()) {
-    draft.promptZh = config.prompts.planZh;
-  }
-  const save = findPipelineNode(config.modes.plan.pipeline, "save_plan");
-  if (save) {
-    save.enabled = config.modes.plan.allowPlanFiles !== false;
-  }
-  if (planLlm) {
-    planLlm.params = {
-      ...planLlm.params,
-      allowPlanFiles: config.modes.plan.allowPlanFiles !== false,
-    };
-  }
-  const exec = findPipelineNode(config.modes.agent.pipeline, "execute_tools");
-  if (exec && config.prompts.agent.trim()) {
-    exec.prompt = config.prompts.agent;
-  }
-  if (exec && config.prompts.agentZh?.trim()) {
-    exec.promptZh = config.prompts.agentZh;
-  }
 }

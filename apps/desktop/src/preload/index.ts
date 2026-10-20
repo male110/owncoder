@@ -477,8 +477,6 @@ export interface DesktopApi {
   >;
   restoreFactorySettings: () => Promise<SettingsSnapshotDto>;
   restorePipelineSettings: (mode: "plan" | "agent") => Promise<SettingsSnapshotDto>;
-  /** Translate a system prompt to English for runtime use. */
-  translatePrompt: (text: string, target?: "en" | "zh") => Promise<string>;
   getSecrets: () => Promise<SecretsDto>;
   setLlmApiKey: (apiKey: string | null) => Promise<SecretsDto>;
   pickAndPreviewRedaction: () => Promise<RedactionPreviewDto>;
@@ -656,7 +654,6 @@ const api: DesktopApi = {
   importModelSettings: () => ipcRenderer.invoke("settings:importModels"),
   restoreFactorySettings: () => ipcRenderer.invoke("settings:restoreFactory"),
   restorePipelineSettings: (mode) => ipcRenderer.invoke("settings:restorePipeline", mode),
-  translatePrompt: (text, target) => ipcRenderer.invoke("llm:translatePrompt", text, target),
   getSecrets: () => ipcRenderer.invoke("secrets:get"),
   setLlmApiKey: (apiKey) => ipcRenderer.invoke("secrets:setLlmApiKey", apiKey),
   pickAndPreviewRedaction: () => ipcRenderer.invoke("security:pickAndPreview"),

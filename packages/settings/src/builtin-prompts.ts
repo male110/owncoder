@@ -163,17 +163,4 @@ export function looksLikeChinese(text: string): boolean {
   return /[\u4e00-\u9fff]/.test(text);
 }
 
-export const WEB_SEARCH_GUIDANCE =
-  "When you do not know a fact, or one local retry cannot fix it (unfamiliar error, missing API/docs, library behavior), call `web_search` before guessing. Then `web_fetch` the best official/source URL. Do not keep editing the same failing approach instead of searching.";
 
-const WEB_SEARCH_GUIDANCE_ZH =
-  "When you do not know a fact, or one local retry still fails to fix it (unfamiliar error, missing API/docs, library behavior), call `web_search` first, then `web_fetch` the official/source URL. Do not keep guessing and editing the same failing approach.";
-
-/** Append web-search guidance when a saved/custom prompt never mentions the tool. */
-export function ensureWebSearchGuidance(prompt: string, lang: "en" | "zh" = "en"): string {
-  const text = String(prompt ?? "");
-  if (!text.trim()) return text;
-  if (/web_search/i.test(text)) return text;
-  const body = lang === "zh" ? WEB_SEARCH_GUIDANCE_ZH : WEB_SEARCH_GUIDANCE;
-  return `${text.trimEnd()}\n\n## Web Search\n${body}\n`;
-}

@@ -4,9 +4,10 @@ import {
   writeEventLog,
 } from "@owncoder/llm";
 import {
+  BUILTIN_AGENT_PROMPT,
+  BUILTIN_PLAN_PROMPT,
   findPipelineNode,
   modePipeline,
-  resolvePrompts,
   type PipelineNode,
 } from "@owncoder/settings";
 import { mcpToolsToOpenAi } from "../mcp/client.ts";
@@ -144,7 +145,6 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
 
   const pipeline = modePipeline(opts.workflow, opts.mode);
   const budgets = contextBudgets(opts.workflow);
-  const resolved = resolvePrompts(opts.workflow);
 
   // ── Resolve pipeline nodes ──
 
@@ -202,15 +202,13 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
     toolsFinal = toolsFinal.filter((t) => !WRITE_TOOLS.has(t.function.name));
   }
 
-  // ── System prompt: from pipeline node or legacy config (full backward compat) ──
-  // Runtime always uses English prompts. Pipeline node prompts take priority;
-  // otherwise fall back to the legacy `config.prompts.{plan,agent}` string.
-  const planPrompt = resolved.plan;
-  const agentPrompt = resolved.agent;
+  // ── System prompt: baked into the builtin pipeline node (English, canonical) ──
+  // Prompts are no longer user-editable, so the node prompt is the only source;
+  // the builtin constants remain as a defensive fallback if a node lacks one.
   const basePrompt =
     hasExplore && !hasExecute
-      ? exploreNode?.prompt?.trim() || draftNode?.prompt?.trim() || planPrompt
-      : executeNode?.prompt?.trim() || agentPrompt;
+      ? exploreNode?.prompt?.trim() || draftNode?.prompt?.trim() || BUILTIN_PLAN_PROMPT.trim()
+      : executeNode?.prompt?.trim() || BUILTIN_AGENT_PROMPT.trim();
 
 
   // 系统提示词（用户/项目定制 prompt 或内置 builtin prompt）不允许截断：

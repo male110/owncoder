@@ -15,8 +15,6 @@ import {
 } from "@owncoder/settings";
 import { isRedactionEnabled, isSensitiveFile, redactSecrets } from "@owncoder/core";
 import {
-  assertLlmAuth,
-  chatCompletion,
   getCodec,
   isLikelyLocalLlm,
   resolveApiFormat,
@@ -282,39 +280,4 @@ export function registerSettingsHandlers(ctx: IpcContext): void {
       }
     },
   );
-
-  // ── Prompt translation ────────────────────────────────────────────────────
-
-  ipcMain.handle("llm:translatePrompt", async (_e, text: string, target?: "en" | "zh") => {
-    const src = String(text || "").trim();
-    if (!src) return "";
-    const workflow = settingsStore.getEffective();
-    const model = getActiveModelRef(workflow);
-    const apiKey = secretsStore.load().llmApiKey;
-    assertLlmAuth(model, apiKey);
-    const toZh = target === "zh";
-    const system = toZh
-      ? "You translate AI coding-agent system prompts into clear, natural Simplified Chinese. " +
-        "Preserve markdown headings, bullet structure, tool names " +
-        "(save_plan, apply_patch, read_file, etc.), paths, and constraints " +
-        "verbatim in their original form. " +
-        "Output ONLY the Chinese prompt text \u2014 no preface or commentary."
-      : "You translate AI coding-agent system prompts into clear English. " +
-        "Preserve markdown headings, bullet structure, tool names " +
-        "(save_plan, apply_patch, read_file, etc.), paths, and constraints. " +
-        "Output ONLY the English prompt text \u2014 no preface or commentary.";
-    const response = await chatCompletion(
-      model,
-      [
-        { role: "system", content: system },
-        { role: "user", content: src },
-      ],
-      { 
-        apiKey, 
-        temperature: 0.1,
-        thinking: { effort: workflow.thinking?.defaultEffort },
-      },
-    );
-    return (response.choices[0]?.message.content ?? "").trim();
-  });
 }

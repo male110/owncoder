@@ -5,8 +5,6 @@ import { resolveApiFormat } from "@owncoder/llm/browser";
 import {
   BUILTIN_AGENT_PROMPT,
   BUILTIN_PLAN_PROMPT,
-  ensureWebSearchGuidance,
-  looksLikeChinese,
 } from "./builtin-prompts.js";
 
 import {
@@ -14,8 +12,6 @@ import {
   builtinAgentPipeline,
   builtinPlanPipeline,
   findPipelineNode,
-  hydratePipelinesFromLegacy,
-  syncLegacyPromptsFromPipelines,
   type ModePipeline,
   type PipelineNode,
 } from "./pipeline.js";
@@ -59,7 +55,6 @@ export {
 export {
   BUILTIN_AGENT_PROMPT,
   BUILTIN_PLAN_PROMPT,
-  looksLikeChinese,
 } from "./builtin-prompts.js";
 
 export {
@@ -119,16 +114,6 @@ export const SystemWorkflowConfigSchema = z.object({
       model: z.string().default("default"),
     }).optional(),
   }).optional(),
-  prompts: z.object({
-    /** English — used at runtime. */
-    plan: z.string().default(""),
-    agent: z.string().default(""),
-    /** Chinese — UI display/edit layer. */
-    planZh: z.string().default(""),
-    agentZh: z.string().default(""),
-    /** Which language the settings UI shows for prompts. */
-    displayLang: z.enum(["zh", "en"]).default("en"),
-  }),
   modes: z.object({
     plan: z.object({
       bash: z.enum(["deny", "readonly"]).default("deny"),
@@ -269,24 +254,10 @@ export const WorkflowOverlaySchema = SystemWorkflowConfigSchema
   .extend({ version: z.union([z.literal(1), z.literal(2)]).optional() });
 export type WorkflowOverlay = z.infer<typeof WorkflowOverlaySchema>;
 
-const BUILTIN_PROMPTS = {
-  plan: BUILTIN_PLAN_PROMPT.trim(),
-  agent: BUILTIN_AGENT_PROMPT.trim(),
-  planZh: "",
-  agentZh: "",
-} as const;
-
 export const BUILTIN_WORKFLOW: SystemWorkflowConfig = SystemWorkflowConfigSchema.parse({
   version: 2,
   providers: [],
   selectedModels: [],
-  prompts: {
-    plan: BUILTIN_PROMPTS.plan,
-    agent: BUILTIN_PROMPTS.agent,
-    planZh: BUILTIN_PROMPTS.planZh,
-    agentZh: BUILTIN_PROMPTS.agentZh,
-    displayLang: "en",
-  },
   modes: {
     plan: {
       bash: "deny",
@@ -353,13 +324,6 @@ export function mergeWorkflow(
     version: 2 as const,
     providers: modelOverlay?.providers ?? builtin.providers,
     selectedModels: modelOverlay?.selectedModels ?? builtin.selectedModels,
-    prompts: {
-      plan: workflowOverlay?.prompts?.plan ?? builtin.prompts.plan,
-      agent: workflowOverlay?.prompts?.agent ?? builtin.prompts.agent,
-      planZh: workflowOverlay?.prompts?.planZh ?? builtin.prompts.planZh,
-      agentZh: workflowOverlay?.prompts?.agentZh ?? builtin.prompts.agentZh,
-      displayLang: workflowOverlay?.prompts?.displayLang ?? builtin.prompts.displayLang ?? "en",
-    },
     modes: {
       plan: {
         ...builtin.modes.plan,
@@ -412,21 +376,6 @@ export function mergeWorkflow(
   merged.modes.agent.dangerousBashConfirm =
     workflowOverlay?.modes?.agent?.dangerousBashConfirm ?? builtin.modes.agent.dangerousBashConfirm;
 
-  // Chinese display layer is no longer shipped; keep empty when missing.
-  if (!merged.prompts.planZh?.trim()) {
-    merged.prompts.planZh = "";
-  }
-  if (!merged.prompts.agentZh?.trim()) {
-    merged.prompts.agentZh = "";
-  }
-  merged.prompts.plan = ensureWebSearchGuidance(merged.prompts.plan);
-  merged.prompts.agent = ensureWebSearchGuidance(merged.prompts.agent);
-  merged.prompts.planZh = ensureWebSearchGuidance(merged.prompts.planZh, "zh");
-  merged.prompts.agentZh = ensureWebSearchGuidance(merged.prompts.agentZh, "zh");
-  // Product path is the builtin graph only; saved pipeline overlays are ignored.
-  hydratePipelinesFromLegacy(merged);
-  syncLegacyPromptsFromPipelines(merged);
-
   // save_plan / allowPlanFiles sync
   const save = findPipelineNode(merged.modes.plan.pipeline, "save_plan");
   if (save && merged.modes.plan.allowPlanFiles === false) {
@@ -467,14 +416,15 @@ export function resolvePrompts(config: SystemWorkflowConfig): {
   plan: string;
   agent: string;
 } {
+  // Prompts are baked into the builtin pipeline nodes; there is no longer a
+  // separate user-overridable `config.prompts` layer. The constants remain as
+  // a defensive fallback if a node is ever missing.
   const planLlm = findPipelineNode(config.modes.plan.pipeline, "explore_tools");
   const draft = findPipelineNode(config.modes.plan.pipeline, "draft_plan");
   const exec = findPipelineNode(config.modes.agent.pipeline, "execute_tools");
   return {
-    plan:
-      (planLlm?.prompt || draft?.prompt || config.prompts.plan).trim() ||
-      BUILTIN_PROMPTS.plan,
-    agent: (exec?.prompt || config.prompts.agent).trim() || BUILTIN_PROMPTS.agent,
+    plan: (planLlm?.prompt || draft?.prompt || "").trim() || BUILTIN_PLAN_PROMPT.trim(),
+    agent: (exec?.prompt || "").trim() || BUILTIN_AGENT_PROMPT.trim(),
   };
 }
 
@@ -490,12 +440,6 @@ export function workflowFingerprint(config: SystemWorkflowConfig): string {
   const payload = JSON.stringify({
     providers: (config.providers ?? []).map((p: Provider) => ({ id: p.id, name: p.name, baseUrl: p.baseUrl })),
     selectedModels: config.selectedModels ?? [],
-    prompts: {
-      planLen: config.prompts.plan.length,
-      agentLen: config.prompts.agent.length,
-      planHead: config.prompts.plan.slice(0, 64),
-      agentHead: config.prompts.agent.slice(0, 64),
-    },
     modes: {
       plan: {
         bash: config.modes.plan.bash,
@@ -538,93 +482,14 @@ export function updatePipelineNode(
     params: { ...prev.params, ...patch.params },
   };
   const t = pipe.nodes[idx]!.type;
-  if ((t === "draft_plan" || t === "explore_tools") && patch.prompt !== undefined) {
-    next.prompts.plan = patch.prompt;
-  }
-  if ((t === "draft_plan" || t === "explore_tools") && patch.promptZh !== undefined) {
-    next.prompts.planZh = patch.promptZh;
-  }
-  if (t === "execute_tools" && patch.prompt !== undefined) {
-    next.prompts.agent = patch.prompt;
-  }
-  if (t === "execute_tools" && patch.promptZh !== undefined) {
-    next.prompts.agentZh = patch.promptZh;
-  }
   if (t === "save_plan" && patch.enabled !== undefined) {
     next.modes.plan.allowPlanFiles = patch.enabled;
   }
   if (t === "explore_tools" && patch.params?.allowPlanFiles !== undefined) {
     next.modes.plan.allowPlanFiles = patch.params.allowPlanFiles;
   }
-  syncLegacyPromptsFromPipelines(next);
   return SystemWorkflowConfigSchema.parse(next);
 }
-
-/**
- * Materialize bilingual prompts before persist:
- * - Chinese side changed (English didn't) → translate zh→en (runtime prompt).
- * - English side changed (Chinese didn't) → translate en→zh (display prompt).
- * Only the edited side is translated. If both sides changed (e.g. factory
- * restore) or neither changed, nothing is translated. `translate(text, target)`
- * picks the direction.
- */
-export async function materializeEnglishPrompts(
-  config: SystemWorkflowConfig,
-  translate: (text: string, target: "en" | "zh") => Promise<string>,
-  baseline?: SystemWorkflowConfig | null,
-): Promise<SystemWorkflowConfig> {
-  const next = structuredClone(config);
-
-  const toEn = async (text: string): Promise<string> => {
-    const t = text.trim();
-    if (!t) return "";
-    if (!looksLikeChinese(t)) return t;
-    return (await translate(t, "en")).trim();
-  };
-  const toZh = async (text: string): Promise<string> => {
-    const t = text.trim();
-    if (!t) return "";
-    return (await translate(t, "zh")).trim();
-  };
-
-  // Legacy plan/agent prompt pairs
-  for (const mode of ["plan", "agent"] as const) {
-    const zhKey = mode === "plan" ? "planZh" : "agentZh";
-    const enKey = mode === "plan" ? "plan" : "agent";
-    const zhChanged = !baseline || next.prompts[zhKey] !== baseline.prompts[zhKey];
-    const enChanged = !baseline || next.prompts[enKey] !== baseline.prompts[enKey];
-    if (zhChanged && !enChanged) {
-      if (next.prompts[zhKey].trim()) next.prompts[enKey] = await toEn(next.prompts[zhKey]);
-    } else if (enChanged && !zhChanged) {
-      if (next.prompts[enKey].trim()) next.prompts[zhKey] = await toZh(next.prompts[enKey]);
-    }
-  }
-
-  for (const mode of ["plan", "agent"] as const) {
-    const pipe = mode === "plan" ? next.modes.plan.pipeline : next.modes.agent.pipeline;
-    const basePipe = baseline
-      ? mode === "plan"
-        ? baseline.modes.plan.pipeline
-        : baseline.modes.agent.pipeline
-      : null;
-    for (const node of pipe.nodes) {
-      const baseNode = basePipe?.nodes.find((n) => n.id === node.id);
-      const zhChanged = !baseline || !baseNode || node.promptZh !== baseNode.promptZh;
-      const enChanged = !baseline || !baseNode || node.prompt !== baseNode.prompt;
-      if (zhChanged && !enChanged) {
-        if (node.promptZh && node.promptZh.trim()) node.prompt = await toEn(node.promptZh);
-      } else if (enChanged && !zhChanged) {
-        if (node.prompt && node.prompt.trim()) node.promptZh = await toZh(node.prompt);
-      }
-    }
-  }
-
-  hydratePipelinesFromLegacy(next);
-  syncLegacyPromptsFromPipelines(next);
-  return SystemWorkflowConfigSchema.parse(next);
-}
-
-
 
 /** Migrate legacy v1 models.default/plan/agent → v2 providers + selectedModels */
 export function migrateLegacyModels(config: Record<string, unknown>): Record<string, unknown> {

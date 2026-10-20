@@ -369,24 +369,12 @@ console.log("— workflow diff / summary —");
   ).length;
   assert.ok(execCount >= 2);
 
-  // Builtin prompts are English-only; Chinese display fields stay empty.
-  assert.equal(BUILTIN_WORKFLOW.prompts.planZh, "");
-  assert.equal(BUILTIN_WORKFLOW.prompts.agentZh, "");
-  assert.ok(BUILTIN_WORKFLOW.prompts.plan.includes("Plan Mode"));
-  assert.ok(BUILTIN_WORKFLOW.prompts.agent.includes("Agent Mode"));
-  const { materializeEnglishPrompts, looksLikeChinese, resolvePrompts } = settings;
-  assert.equal(looksLikeChinese("你好 save_plan"), true);
-  assert.equal(looksLikeChinese("Hello save_plan"), false);
-  const zhEdited = structuredClone(BUILTIN_WORKFLOW);
-  zhEdited.prompts.planZh = "你是 Plan 助手。调用 save_plan。";
-  const materialized = await materializeEnglishPrompts(
-    zhEdited,
-    async (zh) => `EN:${zh}`,
-    BUILTIN_WORKFLOW,
-  );
-  assert.ok(materialized.prompts.plan.startsWith("EN:"));
-  const resolved = resolvePrompts(materialized);
-  assert.equal(resolved.plan, materialized.prompts.plan);
+  // Builtin prompts are baked into the builtin pipeline nodes (English,
+  // canonical); resolvePrompts reads them straight from the nodes.
+  const { resolvePrompts } = settings;
+  const resolved = resolvePrompts(BUILTIN_WORKFLOW);
+  assert.ok(resolved.plan.includes("Plan Mode"));
+  assert.ok(resolved.agent.includes("Agent Mode"));
 }
 
 console.log("smoke-p5: ok");

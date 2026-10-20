@@ -93,10 +93,6 @@ export function migratePipeline(
         tgtNode.prompt = dp.prompt;
         paramMap.prompt = "prompt";
       }
-      if (!tgtNode.promptZh?.trim() && dp.promptZh?.trim()) {
-        tgtNode.promptZh = dp.promptZh;
-        paramMap.promptZh = "promptZh";
-      }
       report.moved.push({
         fromType: "draft_plan",
         fromId: dp.id,
