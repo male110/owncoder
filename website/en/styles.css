@@ -606,6 +606,27 @@ h3 {
   margin: 0;
 }
 
+/* Footer peer links: low-key, muted navigation only */
+.footer-peers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1rem;
+  margin-top: 0.2rem;
+  font-size: 0.82rem;
+}
+
+.footer-peers a {
+  color: var(--faint);
+  text-decoration: none;
+  white-space: nowrap;
+  opacity: 0.85;
+}
+
+.footer-peers a:hover {
+  color: var(--muted);
+  text-decoration: underline;
+}
+
 .footer-meta-row {
   display: flex;
   flex-wrap: wrap;

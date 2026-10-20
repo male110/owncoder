@@ -91,7 +91,7 @@
       <p class="eyebrow">Security-First · Local Execution · Zero Telemetry</p>
       <h1>Security first, <span class="hero-accent">code stays local.</span></h1>
       <p class="hero-lead">
-        OwnCoder is an AI-powered desktop coding tool for developers. Auto-redacts passwords and keys before sending to LLMs, 
+        OwnCoder is a security-first AI coding tool. Files are automatically sanitized to remove passwords and keys before being sent to the LLM, 
         with code analysis and indexing done entirely locally—no source upload, no cloud indexing.
       </p>
       <div class="hero-actions">
@@ -108,38 +108,6 @@
         <li>Local-only indexing</li>
         <li>Zero telemetry</li>
       </ul>
-    </section>
-
-    <!-- Alternatives section: keywords appear in genuinely useful comparison copy, never hidden or stuffed -->
-    <section id="alternatives" class="section section-alt">
-      <div class="container">
-        <div class="section-head">
-          <p class="eyebrow">For Claude Code · OpenCode · zCode Users</p>
-          <h2>Comparing Claude Code, OpenCode or zCode?</h2>
-          <p class="section-desc">
-            OwnCoder is an agentic AI coding assistant in the same category — a privacy-focused alternative
-            when your code has to stay confidential. Bring your own model API, keep the familiar
-            "plan + tool calls" workflow, and get secret redaction, fully local indexing and zero telemetry
-            by default. OwnCoder is an independent product with no affiliation or official partnership
-            with Claude Code, OpenCode, zCode or their companies.
-          </p>
-        </div>
-
-        <div class="grid-3">
-          <article class="card">
-            <h3>Switching from Claude Code?</h3>
-            <p>Used to agents that read your repo, call tools and iterate? OwnCoder offers the same agent workflow and desktop UI, while passwords, API keys and private keys are masked to <code>***</code> before any request is sent.</p>
-          </article>
-          <article class="card">
-            <h3>Switching from OpenCode?</h3>
-            <p>Like open, bring-your-own-model setups? Configure your own model API, and get symbol indexing, full-text search and RAG embeddings entirely on your machine via SQLite + FTS5 — no cloud index required.</p>
-          </article>
-          <article class="card">
-            <h3>Switching from zCode?</h3>
-            <p>Want safer defaults out of the box? Moving from zCode and similar AI coding tools gives you 60+ sensitive-file rules and 25+ secret format patterns immediately, and your source never leaves your computer.</p>
-          </article>
-        </div>
-      </div>
     </section>
 
     <section id="security" class="section container">
@@ -240,14 +208,14 @@
         <article class="card">
           <h3>Dual-Model Token Savings</h3>
           <p><strong>Principle:</strong> Task decomposition consumes fewer tokens but requires strong planning; execution stages involve heavy tool calls and iteration but lower reasoning requirements.</p>
-          <p><strong>Setup:</strong> Use high-capability models (GPT-4 / Claude 3.5 Sonnet) for Plan phase, switch to cost-effective models (GPT-4o-mini / Claude 3.5 Haiku / DeepSeek / Tongyi) for Agent execution.</p>
+          <p><strong>Setup:</strong> Use a high-capability model for the Plan phase, then switch to a lighter, more cost-effective model for Agent execution; the two can be freely mixed and matched by budget and quality, with no lock-in to any specific vendor or model.</p>
           <p><strong>Impact:</strong> Execution stages typically account for 70-80% of total token consumption. Offloading them to cheaper models significantly reduces costs while keeping high-capability models focused on critical decisions.</p>
         </article>
         <article class="card">
           <h3>Prompt Structure Optimization: Maximize Cache Hit Rate</h3>
           <p><strong>Principle:</strong> Many model providers support prompt caching (Prompt Cache), billing repeated input tokens at lower rates. OwnCoder's prompt assembly strategy is specifically designed for cache optimization.</p>
           <p><strong>Implementation:</strong> Static content upfront (system prompt + tool definitions, platform info, project rules), dynamic content at the end (user input, task decomposition); fixed portions maintain strict order and format consistency, ensuring cross-turn cache prefix matches.</p>
-          <p><strong>Impact:</strong> System prompts and tool definitions automatically benefit from caching; repeated project context hits 60-80% cache rates. Measured cache hit rates reach 95%, making high-frequency usage more economical.</p>
+          <p><strong>Impact:</strong> System prompts and tool definitions automatically benefit from caching; repeated project context hits 60-80% cache rates. Measured cache hit rates reach 95% (calculated as cached tokens ÷ (input tokens + output tokens), with output tokens included in the denominator), making high-frequency usage more economical.</p>
         </article>
         <article class="card">
           <h3>Do More, Say Less</h3>
@@ -288,6 +256,14 @@
       <p class="footer-meta">
         <span class="footer-copyright">© <span id="year"></span> OwnCoder</span>
       </p>
+      <!-- Peer tools: low-key footer navigation only, not shown in body copy -->
+      <nav class="footer-peers" aria-label="Related AI coding tools">
+        <a href="https://zcode.z.ai/" target="_blank" rel="noopener noreferrer">zCode</a>
+        <a href="https://claude.com/claude-code" target="_blank" rel="noopener noreferrer">Claude Code</a>
+        <a href="https://opencode.ai/" target="_blank" rel="noopener noreferrer">OpenCode</a>
+        <a href="https://kiro.dev/" target="_blank" rel="noopener noreferrer">Kiro</a>
+        <a href="https://cursor.com/" target="_blank" rel="noopener noreferrer">Cursor</a>
+      </nav>
     </div>
   </footer>
 

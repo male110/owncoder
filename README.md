@@ -1,6 +1,6 @@
 # OwnCoder
 
-English: [README_EN.md](./README_EN.md)
+English: [README_EN.md](./README_EN.md) ｜ 官网：[https://www.owncoder.cn](https://www.owncoder.cn)
 
 **用 AI 写代码，担心泄密？Token 烧钱？**
 
@@ -154,7 +154,7 @@ packages/core/src/harness/loop/context.ts (buildInitialContext)
   5. taskDecompose (任务分解结果 - 每轮变化)
 ```
 
-**效果**：系统提示词和工具定义自动享受缓存；重复的项目上下文命中率可达 60-80%。下图记录了一次约 95% 的缓存命中情况，仅作为使用示例；实际命中率会随模型服务、上下文和任务变化。
+**效果**：系统提示词和工具定义自动享受缓存；重复的项目上下文命中率可达 60-80%。下图记录了一次约 95% 的缓存命中情况（按 缓存 Token ÷（输入 Token + 输出 Token）计算，分母包含输出 Token），仅作为使用示例；实际命中率会随模型服务、上下文和任务变化。
 
 ![上下文缓存命中示例](%E5%B1%8F%E5%B9%95%E6%88%AA%E5%9B%BE%202026-09-17%20235326.png)
 

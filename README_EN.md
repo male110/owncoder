@@ -1,6 +1,6 @@
 # OwnCoder
 
-中文: [README.md](./README.md)
+中文: [README.md](./README.md) | Website: [https://www.owncoder.net](https://www.owncoder.net)
 
 **Using AI to write code but worried about leaks or runaway token costs?**
 
@@ -154,7 +154,7 @@ packages/core/src/harness/loop/context.ts (buildInitialContext)
   5. taskDecompose (task decomposition result - changes per turn)
 ```
 
-**Results**: System prompt and tool definitions automatically benefit from caching; repeated project context can achieve 60-80% hit rates. The screenshot below shows one example with approximately 95% cache hits. Actual hit rates vary by model service, context, and task.
+**Results**: System prompt and tool definitions automatically benefit from caching; repeated project context can achieve 60-80% hit rates. The screenshot below shows one example with approximately 95% cache hits (calculated as cached tokens ÷ (input tokens + output tokens), with output tokens included in the denominator). Actual hit rates vary by model service, context, and task.
 
 ![Context cache hit example](%E5%B1%8F%E5%B9%95%E6%88%AA%E5%9B%BE%202026-09-17%20235326.png)
 

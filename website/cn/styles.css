@@ -636,6 +636,27 @@ h3 {
   margin: 0;
 }
 
+/* 页脚同类工具友链：低调、弱化颜色，仅作导航 */
+.footer-peers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1rem;
+  margin-top: 0.2rem;
+  font-size: 0.82rem;
+}
+
+.footer-peers a {
+  color: var(--faint);
+  text-decoration: none;
+  white-space: nowrap;
+  opacity: 0.85;
+}
+
+.footer-peers a:hover {
+  color: var(--muted);
+  text-decoration: underline;
+}
+
 @media (max-width: 920px) {
   .grid-3,
   .grid-2,

@@ -92,7 +92,7 @@
       <h1>安全优先，<span class="hero-accent">代码留在本地。</span></h1>
       <p class="hero-subtitle">注重安全，代码不会自动上传。</p>
       <p class="hero-lead">
-        OwnCoder 是面向开发者的 AI 编程桌面工具。发送给大模型前自动脱敏密码与密钥，
+        OwnCoder 是一个安全优先的 AI 编程工具。文件在发送给大模型前自动脱敏密码与密钥，
         代码分析与索引全部在本地完成——不上传源码，没有云端索引。
       </p>
       <div class="hero-actions">
@@ -109,37 +109,6 @@
         <li>索引仅存本地</li>
         <li>零遥测</li>
       </ul>
-    </section>
-
-    <!-- 同类工具替代区块：关键词以对用户有用的对比内容自然出现，而非隐藏堆砌 -->
-    <section id="alternatives" class="section section-alt">
-      <div class="container">
-        <div class="section-head">
-          <p class="eyebrow">面向 Claude Code · OpenCode · zCode 用户</p>
-          <h2>在用或正在对比 Claude Code、OpenCode、zCode？</h2>
-          <p class="section-desc">
-            OwnCoder 与它们同属 Agent 式 AI 编程助手，可以作为你注重代码隐私时的替代选择：
-            接入你自己的模型 API，保留熟悉的“任务分解 + 工具调用”工作流，
-            同时把密钥脱敏、全本地索引和零遥测作为默认值。
-            OwnCoder 是独立产品，与 Claude Code、OpenCode、zCode 及其开发公司没有隶属或官方合作关系。
-          </p>
-        </div>
-
-        <div class="grid-3">
-          <article class="card">
-            <h3>想从 Claude Code 迁移？</h3>
-            <p>习惯让 Agent 读仓库、调工具、迭代改代码？OwnCoder 提供同样的 Agent 工作流与桌面界面，并在请求发出前把密码、API Key、私钥自动掩码为 <code>***</code>。</p>
-          </article>
-          <article class="card">
-            <h3>想从 OpenCode 迁移？</h3>
-            <p>喜欢开放、可自带模型的方式？OwnCoder 同样由你配置自己的模型 API，符号索引、全文检索与 RAG 嵌入全部在本机基于 SQLite + FTS5 完成，无需云端索引。</p>
-          </article>
-          <article class="card">
-            <h3>想从 zCode 迁移？</h3>
-            <p>想要更省心的安全默认值？从 zCode 这类 AI 编程工具切换后，60+ 敏感文件规则与 25+ 密钥格式正则开箱即用，源码不会离开你的电脑。</p>
-          </article>
-        </div>
-      </div>
     </section>
 
     <section id="security" class="section container">
@@ -240,14 +209,14 @@
         <article class="card">
           <h3>双模型省 Token</h3>
           <p><strong>原理：</strong>任务分解阶段消耗 Token 较少但需要强规划能力；执行阶段包含大量工具调用和迭代但对推理要求相对较低。</p>
-          <p><strong>配置：</strong>Plan 阶段用高能力模型（GPT-4 / Claude 3.5 Sonnet），Agent 执行阶段切换至成本更低的模型（GPT-4o-mini / Claude 3.5 Haiku / DeepSeek / 通义）。</p>
+          <p><strong>配置：</strong>Plan 阶段使用高能力的强模型，Agent 执行阶段切换至成本更低的轻量模型；两类模型可按预算与效果自由搭配，不绑定具体厂商或型号。</p>
           <p><strong>收益：</strong>执行阶段通常占总 Token 消耗的 70-80%。将其交给成本更低的模型可显著降低总费用，同时让高能力模型专注于关键决策。</p>
         </article>
         <article class="card">
           <h3>提示词结构优化：最大化缓存命中率</h3>
           <p><strong>原理：</strong>许多模型服务商支持提示缓存（Prompt Cache），对重复出现的输入 Token 按更低价格计费。OwnCoder 的提示词拼接策略专门针对缓存优化设计。</p>
           <p><strong>实现：</strong>不变内容前置（系统提示词 + 工具定义、平台信息、项目规则），变动内容后置（用户输入、任务分解结果）；固定部分拼接顺序与格式严格一致，确保跨轮次缓存前缀完全匹配。</p>
-          <p><strong>效果：</strong>系统提示词和工具定义自动享受缓存；重复的项目上下文命中率可达 60-80%。实测缓存命中率可达 95%，让高频使用场景更经济。</p>
+          <p><strong>效果：</strong>系统提示词和工具定义自动享受缓存；重复的项目上下文命中率可达 60-80%。实测缓存命中率可达 95%（按 缓存 Token ÷（输入 Token + 输出 Token）计算，分母包含输出 Token），让高频使用场景更经济。</p>
         </article>
         <article class="card">
           <h3>让 LLM 多做事，少说话</h3>
@@ -289,6 +258,14 @@
         <span class="footer-copyright">© <span id="year"></span> OwnCoder</span>
         <a href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">豫ICP备2026051214号-1</a>
       </p>
+      <!-- 同类工具友链：低调放置于页脚，仅作导航，不在正文出现 -->
+      <nav class="footer-peers" aria-label="同类 AI 编程工具">
+        <a href="https://zcode.z.ai/" target="_blank" rel="noopener noreferrer">zCode</a>
+        <a href="https://claude.com/claude-code" target="_blank" rel="noopener noreferrer">Claude Code</a>
+        <a href="https://opencode.ai/" target="_blank" rel="noopener noreferrer">OpenCode</a>
+        <a href="https://kiro.dev/" target="_blank" rel="noopener noreferrer">Kiro</a>
+        <a href="https://cursor.com/" target="_blank" rel="noopener noreferrer">Cursor</a>
+      </nav>
     </div>
   </footer>
 
