@@ -813,15 +813,27 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
     let currentTurnAccumulated = "";
     try {
       const { result, retries: llmRetries } = await withRetry(
-        () => chatCompletionStream(model, messagesForCall, {
-          tools: toolsFinal,
-          signal: opts.signal,
-          apiKey: opts.llmApiKey,
-          purpose: `react_loop#${stageId}#${i}`,
-          taskId: opts.sessionId,
-          onDelta: (text: string) => { currentTurnAccumulated += text; opts.onEvent?.({ type: "assistant_delta", text }); },
-          onThinkingDelta: (text: string) => opts.onEvent?.({ type: "thinking_delta", text }),
-        }),
+        async () => {
+          const r = await chatCompletionStream(model, messagesForCall, {
+            tools: toolsFinal,
+            signal: opts.signal,
+            apiKey: opts.llmApiKey,
+            purpose: `react_loop#${stageId}#${i}`,
+            taskId: opts.sessionId,
+            onDelta: (text: string) => { currentTurnAccumulated += text; opts.onEvent?.({ type: "assistant_delta", text }); },
+            onThinkingDelta: (text: string) => opts.onEvent?.({ type: "thinking_delta", text }),
+          });
+          // 空白响应兜底：模型既没有返回文本内容、也没有返回任何工具调用时，
+          // 视为本次调用失败并主动抛错。该异常会被 withRetry 捕获，复用既有的
+          // 失败重试逻辑（最多重试 llmMaxRetries 次），而不是把空回复当成正常结束。
+          const firstMessage = r.choices[0]?.message;
+          const hasTextContent = !!(firstMessage?.content && firstMessage.content.trim());
+          const hasToolCalls = !!(firstMessage?.tool_calls && firstMessage.tool_calls.length > 0);
+          if (!hasTextContent && !hasToolCalls) {
+            throw new Error("LLM 返回空响应（无文本内容且无工具调用）");
+          }
+          return r;
+        },
         { maxRetries: llmMaxRetries, baseDelay: 2000, signal: opts.signal },
         (attempt, err, delay) => {
           tracer.addEvent(llmSpanId, "retry", {

@@ -5,6 +5,8 @@ import {
   buildChatItems,
   buildLogBlocks,
   deriveLiveStatus,
+  isActivationEdge,
+  isInitialScrollReady,
   toolLabel,
 } from "./chat-log-model";
 
@@ -23,6 +25,33 @@ function userTurn(content: string): ChatTurnDto {
     content,
   };
 }
+
+describe("切换会话后虚拟列表贴底", () => {
+  it("异步加载 B 的消息后，必须等最后一条虚拟行渲染且容器贴底才结束定位", () => {
+    const lastB = 100_019;
+    // 首屏只有前几条；即使外层容器暂时认为自己已贴底也不能停止。
+    expect(isInitialScrollReady(100_003, lastB, true, true, true, 3)).toBe(false);
+    expect(isInitialScrollReady(lastB, lastB, false, true, true, 4)).toBe(false);
+    expect(isInitialScrollReady(lastB, lastB, true, false, true, 5)).toBe(false);
+    expect(isInitialScrollReady(lastB, lastB, true, true, true, 6)).toBe(true);
+  });
+
+  it("空会话无需等待虚拟行；短会话等待布局稳定", () => {
+    expect(isInitialScrollReady(null, null, true, true, false, 11)).toBe(false);
+    expect(isInitialScrollReady(null, null, true, true, false, 12)).toBe(true);
+  });
+
+  it("面板常驻挂载：只有 active 的 false→true 边沿才重新触发钉底", () => {
+    // 从会话 A 切到正在 streaming 的会话 B：B 的 active 由 false 变 true
+    expect(isActivationEdge(false, true)).toBe(true);
+    // 首次挂载即为激活态（无前序状态），不应重复触发
+    expect(isActivationEdge(true, true)).toBe(false);
+    // 切走：true→false 不触发
+    expect(isActivationEdge(true, false)).toBe(false);
+    // 持续隐藏不触发
+    expect(isActivationEdge(false, false)).toBe(false);
+  });
+});
 
 describe("deriveLiveStatus", () => {
   it("prefers explicit liveStatus", () => {

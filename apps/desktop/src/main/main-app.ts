@@ -1,6 +1,6 @@
 import { app, BrowserWindow, ipcMain, Menu, Notification } from "electron";
 import { existsSync } from "node:fs";
-import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { basename, isAbsolute, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createCompatibilityAdapter } from "@owncoder/core";
 import { SettingsStore } from "./settings-store";

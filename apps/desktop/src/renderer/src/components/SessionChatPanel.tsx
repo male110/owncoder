@@ -78,9 +78,6 @@ export function SessionChatPanel({
 
 
   const virtuosoRef = useRef<VirtuosoHandle | null>(null);
-  const scrollerRef = useRef<HTMLElement | null>(null);
-  const wasActiveRef = useRef(false);
-  const hadContentWhileActiveRef = useRef(false);
   const pageInitSessionRef = useRef<string | null>(null);
 
   const visible = useMemo(
@@ -95,60 +92,6 @@ export function SessionChatPanel({
 
   const isEmpty = visible.length === 0 && liveEvents.length === 0 && !sending;
 
-  // 打开/切换到本会话时滚到底；若历史异步稍后才到，等有内容再滚一次。
-  // 流式增量由 ChatLog 内部的 scrollToTrueBottom effect 负责（用户在底部时
-  // 跟随 Footer 活流；用户上滚后自动停止），这里只处理激活/初始定位。
-  useEffect(() => {
-    if (!isActive) {
-      wasActiveRef.current = false;
-      hadContentWhileActiveRef.current = false;
-      return;
-    }
-
-    const justActivated = !wasActiveRef.current;
-    wasActiveRef.current = true;
-
-    if (isEmpty) return;
-
-    const contentJustArrived = !hadContentWhileActiveRef.current;
-    hadContentWhileActiveRef.current = true;
-
-    if (!justActivated && !contentJustArrived) return;
-
-    const scrollToBottom = () => {
-      // Footer-aware: scroll to the true bottom (includes live stream footer),
-      // not just the last virtual item (which parks above a tall footer).
-      const el = scrollerRef.current;
-      if (el) {
-        el.scrollTop = el.scrollHeight;
-      } else {
-        virtuosoRef.current?.scrollToIndex({ index: "LAST", align: "end", behavior: "auto" });
-      }
-    };
-
-    let cancelled = false;
-    const timers: number[] = [];
-    const schedule = (ms: number) => {
-      timers.push(
-        window.setTimeout(() => {
-          if (!cancelled) requestAnimationFrame(scrollToBottom);
-        }, ms),
-      );
-    };
-
-    // 切会话后 Virtuoso 换 customScrollParent / 量高需要多帧，多补几次避免停在顶部
-    schedule(0);
-    schedule(50);
-    schedule(150);
-    schedule(300);
-    schedule(600);
-    schedule(1000);
-
-    return () => {
-      cancelled = true;
-      for (const t of timers) window.clearTimeout(t);
-    };
-  }, [isActive, isEmpty]);
 
   const onLoadOlder = useCallback(async () => {
     if (historyLoading || !historyHasMore) return;
@@ -266,7 +209,6 @@ export function SessionChatPanel({
             liveStatus={liveStatus}
             sending={sending}
             virtuosoRef={virtuosoRef}
-            scrollerRef={scrollerRef}
             onRegenerate={() => void onRegenerate()}
             onDeleteTurn={onDeleteTurn}
             onOpenFile={onOpenFile}
@@ -275,6 +217,7 @@ export function SessionChatPanel({
             onStartReached={() => {
               if (historyHasMore && !historyLoading) void onLoadOlder();
             }}
+            active={isActive}
           />
         </>
       )}

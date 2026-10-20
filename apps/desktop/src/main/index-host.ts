@@ -83,7 +83,7 @@ export class IndexHost {
       if (msg.type === "fileTypes") {
         void import("@owncoder/core").then((core) => core.installLspsForFileTypes)
           .then((fn) => fn(root, msg.fileTypes))
-          .then(({ installLspsForFileTypes }) => installLspsForFileTypes(root, msg.fileTypes))
+          .then(() => {})
           .catch((error) => console.warn(`[LSP] 扫描类型安装失败: ${error instanceof Error ? error.message : String(error)}`));
         return;
       }

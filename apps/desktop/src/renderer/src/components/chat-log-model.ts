@@ -67,6 +67,27 @@ export function toolLabel(name?: string): string {
   return id ? t(id) : name;
 }
 
+/**
+ * 会话面板常驻挂载、靠 display:none 切换可见性，sessionId 在单个实例上恒定，
+ * 因此「重新钉底」的正确信号是 active 的 false→true 边沿，而非 sessionId 变化。
+ */
+export function isActivationEdge(prevActive: boolean, active: boolean): boolean {
+  return active && !prevActive;
+}
+
+/** 只有目标会话的最后一条虚拟消息已渲染，且外层容器贴底，才结束初始定位。 */
+export function isInitialScrollReady(
+  lastRenderedIndex: number | null,
+  lastItemIndex: number | null,
+  atBottom: boolean,
+  heightStable: boolean,
+  overflow: boolean,
+  attempts: number,
+): boolean {
+  return (lastItemIndex === null || lastRenderedIndex === lastItemIndex) &&
+    atBottom && heightStable && (overflow || attempts >= 12);
+}
+
 /** Status line for a tool phase (shared by ChatLog derivation). */
 export function toolStatusLabel(
   phase: "running" | "done" | "error",

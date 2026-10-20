@@ -9,6 +9,8 @@ import {
   buildChatItems,
   buildLogBlocks,
   deriveLiveStatus,
+  isActivationEdge,
+  isInitialScrollReady,
   lastAssistantBlockIndex,
   toolStatusLabel as toolStatusLabelFromModel,
   type ChatItem,
@@ -724,6 +726,12 @@ interface Props {
   onStartReached?: () => void;
   /** Ref to the underlying scroll container (footer-aware bottom scrolling). */
   scrollerRef?: React.RefObject<HTMLElement | null>;
+  /**
+   * 面板是否可见。所有会话面板常驻挂载、用 display:none 切换，
+   * sessionId 在单个实例上恒定，因此用 active 的 false→true 边沿
+   * 作为「切换到本会话」信号，重新触发初始滚动到底部。
+   */
+  active?: boolean;
 }
 
 export function ChatLog({
@@ -739,6 +747,7 @@ export function ChatLog({
   header,
   onStartReached,
   scrollerRef,
+  active = true,
 }: Props) {
   const { t } = useI18n();
   const blocks = useMemo(
@@ -756,6 +765,9 @@ export function ChatLog({
   const [scrollParent, setScrollParent] = useState<HTMLDivElement | null>(null);
   const scrollerElRef = useRef<HTMLElement | null>(null);
   const atBottomRef = useRef(true);
+  const lastRenderedIndexRef = useRef<number | null>(null);
+  // 虚拟列表异步量高或渲染新范围后，唤醒首屏贴底流程。
+  const retryInitialPinRef = useRef<(() => void) | null>(null);
   const AT_BOTTOM_THRESHOLD = 80;
 
   const bindScroller = useCallback(
@@ -849,6 +861,11 @@ export function ChatLog({
     const firstKey = items[0]?.key;
     const delta = items.length - prev.length;
     prevItemsRef.current = { length: items.length, firstKey };
+    if (prev.length === 0 && items.length > 0) {
+      // A live footer may have settled before the asynchronous history arrived.
+      initialBottomAppliedRef.current = false;
+      lastRenderedIndexRef.current = null;
+    }
     if (prev.length === 0 || delta <= 0) return;
     if (firstKey && firstKey !== prev.firstKey) {
       setFirstItemIndex((value) => value - delta);
@@ -862,7 +879,23 @@ export function ChatLog({
   // scroll to the top — keep pinning until the scroller actually settles so
   // switching sessions lands on the latest messages.
   const initialBottomAppliedRef = useRef(false);
+  
+  // 面板常驻挂载：active 的 false→true 边沿才是真正的「切换到本会话」。
+  // 此时重置初始钉底标志，确保切到正在 streaming 的会话也会重新贴底。
+  const prevActiveRef = useRef(active);
   useEffect(() => {
+    const wasActive = prevActiveRef.current;
+    prevActiveRef.current = active;
+    if (isActivationEdge(wasActive, active)) {
+      initialBottomAppliedRef.current = false;
+      lastRenderedIndexRef.current = null;
+    }
+  }, [active]);
+
+  useEffect(() => {
+    // 隐藏期间（display:none，clientHeight=0）不能跑钉底循环，
+    // 否则会在不可见状态下误判 settle；等面板可见后再执行。
+    if (!active) return;
     if (initialBottomAppliedRef.current) return;
     if (!hasContent) return;
     if (!scrollParent) return;
@@ -899,6 +932,20 @@ export function ChatLog({
     let settledFrames = 0;
     let lastHeight = 0;
     let frame = 0;
+    let framePending = false;
+    const schedulePin = () => {
+      if (cancelled || userTookOver || initialBottomAppliedRef.current || framePending) return;
+      framePending = true;
+      frame = requestAnimationFrame(() => {
+        framePending = false;
+        pin();
+      });
+    };
+    retryInitialPinRef.current = () => {
+      // 帧预算耗尽后，新量高或新虚拟行范围仍需重新尝试，不能只补一帧。
+      if (attempts >= MAX_FRAMES) attempts = 0;
+      schedulePin();
+    };
     // Virtuoso + customScrollParent 首屏量高常超过 800ms；超时后若仍未贴底，
     // 不能把 flag 置 true，否则 ResizeObserver 无法继续纠正，切换会话会停在顶部。
     const MAX_FRAMES = 90;
@@ -914,8 +961,13 @@ export function ChatLog({
       const { overflow, atBottom } = readBottomState(el);
       // 量高完成前 scrollHeight≈clientHeight，不能当成已经在底部。
       // 短会话始终无 overflow：等若干帧高度稳定后再允许 settle。
-      const readyToSettle =
-        atBottom && heightStable && (overflow || attempts >= 12);
+      // The outer scroller can appear settled while Virtuoso has only measured
+      // the first batch. Wait for its last item before releasing the pin.
+      const readyToSettle = isInitialScrollReady(
+        lastRenderedIndexRef.current,
+        items.length > 0 ? firstItemIndex + items.length - 1 : null,
+        atBottom, heightStable, overflow, attempts,
+      );
       settledFrames = readyToSettle ? settledFrames + 1 : 0;
       if (settledFrames >= 3) {
         initialBottomAppliedRef.current = true;
@@ -926,12 +978,16 @@ export function ChatLog({
 
     const pin = () => {
       if (cancelled || userTookOver) return;
+      // A DOM scroll alone cannot reach virtual rows not laid out yet.
+      if (items.length > 0 && lastRenderedIndexRef.current !== firstItemIndex + items.length - 1) {
+        virtuosoRef?.current?.scrollToIndex({ index: "LAST", align: "end", behavior: "auto" });
+      }
       scrollToTrueBottom();
       atBottomRef.current = true;
       attempts += 1;
       const el = scrollerElRef.current;
       if (!el) {
-        frame = requestAnimationFrame(pin);
+        schedulePin();
         return;
       }
       const heightStable = el.scrollHeight === lastHeight;
@@ -940,22 +996,19 @@ export function ChatLog({
       if (attempts >= MAX_FRAMES) {
         // 停止 rAF 空转；只有确实贴底才锁定，否则留给 ResizeObserver 继续钉。
         const { atBottom } = readBottomState(el);
-        if (atBottom && heightStable) initialBottomAppliedRef.current = true;
+        if (atBottom && heightStable &&
+          (items.length === 0 || lastRenderedIndexRef.current === firstItemIndex + items.length - 1)) {
+          initialBottomAppliedRef.current = true;
+        }
         return;
       }
-      frame = requestAnimationFrame(pin);
+      schedulePin();
     };
-    frame = requestAnimationFrame(pin);
+    schedulePin();
 
     const ro = new ResizeObserver(() => {
-      if (cancelled || userTookOver || initialBottomAppliedRef.current) return;
-      scrollToTrueBottom();
-      atBottomRef.current = true;
-      const el = scrollerElRef.current;
-      if (!el) return;
-      // 布局抖动结束后补一次 settle，避免 MAX_FRAMES 放弃后永远停在顶部
-      lastHeight = el.scrollHeight;
-      markSettledIfReady(el, true);
+      // DOM 变化不一定伴随虚拟行范围变化；重新定位最后一行，再校正外层滚动容器。
+      retryInitialPinRef.current?.();
     });
     ro.observe(scrollParent);
     const inner = scrollParent.firstElementChild;
@@ -964,13 +1017,14 @@ export function ChatLog({
     return () => {
       cancelled = true;
       cancelAnimationFrame(frame);
+      retryInitialPinRef.current = null;
       ro.disconnect();
       scrollParent.removeEventListener("wheel", onWheel);
       scrollParent.removeEventListener("touchstart", onTouchStart);
       scrollParent.removeEventListener("touchmove", onTouchMove);
       scrollParent.removeEventListener("keydown", onKeyDown);
     };
-  }, [hasContent, scrollParent, scrollToTrueBottom]);
+  }, [active, hasContent, scrollParent, scrollToTrueBottom, items.length, firstItemIndex, virtuosoRef]);
 
   // 仅挂载时生效：有历史时从底部起，避免先顶后跳
   const initialTopMostItemIndex = useMemo(
@@ -1074,6 +1128,11 @@ export function ChatLog({
           firstItemIndex={firstItemIndex}
           initialTopMostItemIndex={initialTopMostItemIndex}
           computeItemKey={(_index, item) => item.key}
+          rangeChanged={({ endIndex }) => {
+            lastRenderedIndexRef.current = endIndex;
+            retryInitialPinRef.current?.();
+          }}
+          totalListHeightChanged={() => retryInitialPinRef.current?.()}
           components={virtuosoComponents}
           startReached={() => {
             // 初始钉底完成前不要触发加载更早消息，否则会把刚切过来的会话钉在顶部
