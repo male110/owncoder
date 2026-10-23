@@ -36,6 +36,8 @@ const EMPTY_RUNTIME: ChatSessionRuntime = {
   askRequests: [],
   status: "idle",
   currentStage: null,
+  stopping: false,
+  pendingDelete: false,
 };
 
 function useSessionRuntime(sessionId: string) {
@@ -74,6 +76,7 @@ export function SessionChatPanel({
     liveEvents,
     liveStatus,
     errorAlert,
+    stopping,
   } = rt;
 
 
@@ -169,6 +172,12 @@ export function SessionChatPanel({
     });
   }, [sessionId]);
 
+  // 「正在停止…」窗口删除刚发出的消息：乐观行还没有 turnId，先本地丢弃，
+  // 落盘轮由 applyChatResult 在 sendChat 返回后补做物理删除。
+  const onDiscardInflight = useCallback(() => {
+    useChatStore.getState().discardInflightTurn(sessionId);
+  }, [sessionId]);
+
   return (
     <div className="session-chat-panel" style={isActive ? undefined : { display: "none" }}>
       {isEmpty ? (
@@ -208,9 +217,11 @@ export function SessionChatPanel({
             liveEvents={liveEvents}
             liveStatus={liveStatus}
             sending={sending}
+            stopping={stopping}
             virtuosoRef={virtuosoRef}
             onRegenerate={() => void onRegenerate()}
             onDeleteTurn={onDeleteTurn}
+            onDiscardInflight={onDiscardInflight}
             onOpenFile={onOpenFile}
             workspaceRoot={workspaceRoot}
             header={historyHeader}

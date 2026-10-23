@@ -10,7 +10,7 @@
  * No useState, no IPC calls, no business logic lives here.
  * State lives in store/; logic lives in hooks/.
  */
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 // ── Stores ────────────────────────────────────────────────────────────────────
 import { useSessionStore } from "./store/session-store";
@@ -316,11 +316,20 @@ export function App() {
     }
   }, [sessions, activeSessionId]);
   
-  // Keep the store as the source of truth for background sessions, but only
-  // mount the focused panel. Hidden panels still retain their full React tree,
-  // virtualization state and subscriptions, which becomes expensive after many
-  // session switches.
-  const panelSessions = activeSessionId ? [activeSessionId] : [];
+  // 常驻挂载所有「已访问且仍存在」的会话面板，非焦点面板用 display:none 隐藏
+  // （见 SessionChatPanel 的 isActive 样式）。不能只挂载焦点面板：否则切换会话
+  // 会卸载/重挂整个 ChatLog（含 Virtuoso 与 live footer DOM），正在后台 streaming
+  // 的会话切回来时其已输出内容会因重挂竞态而消失。store（bySession）虽保留数据，
+  // 但重建的虚拟列表在量高完成前渲染为空，表现为「原来输出的内容不见了」。
+  // visitedRef 已在会话删除/工作区切换时清理，pruneIdleSessions 也会回收空闲
+  // runtime，因此常驻面板数量是有界的。
+  const panelSessions = useMemo(() => {
+    const existing = new Set(sessions.map((s) => s.id));
+    const ids = Array.from(visitedRef.current).filter((id) => existing.has(id));
+    // 焦点会话即使尚未进入 visited（边界情况）也要保证挂载。
+    if (activeSessionId && !ids.includes(activeSessionId)) ids.push(activeSessionId);
+    return ids;
+  }, [sessions, activeSessionId]);
 
   // When a new session is pending, show a blank canvas instead of the old
   // session's chat history / changes / plans.  The actual backend session is
@@ -351,6 +360,9 @@ export function App() {
     if (sid) {
       chatActions.sealAllStreaming(sid);
       chatActions.setLiveStatus(t("正在停止…"), sid);
+      // 进入「正在停止…」窗口：此窗口内乐观用户行尚无 turnId，单独放开
+      // 删除入口，让用户能删掉刚发出的这条消息。
+      chatActions.setStopping(true, sid);
       // 请求停止队列循环：runQueue 在当前消息结束后会检查停止标志并
       // break 出循环，但保留剩余的待执行消息，用户可继续手动发送。
       requestStop(sid);

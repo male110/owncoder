@@ -60,6 +60,12 @@ export function applyChatEvent(
   // 事件体上的 sessionId 优先，信封仅作兜底。
   const sid = ev.sessionId || sessionId || undefined;
 
+  // 用户已在「正在停止…」窗口删除本轮：中止轮收尾时仍会补发 turn_complete
+  // （以及迟到的 tool_end / error）。这些事件会把已清除的助手内容重新塞回
+  // liveEvents 造成回闪，故在 pendingDelete 窗口内一律忽略，落盘轮由
+  // applyChatResult 物理删除。
+  if (sid && chat.bySession[sid]?.pendingDelete === true) return;
+
   // ── thinking_delta ────────────────────────────────────────────────────
   if (ev.type === "thinking_delta") {
     // 任务分解是内部 JSON 协议，不应把任何 reasoning 泄露到用户聊天。
@@ -214,6 +220,15 @@ export function applyChatEvent(
   // cross that result in flight, so sealing the old stream is not enough:
   // it would render the same assistant reply twice.
   if (ev.type === "turn_complete") {
+    // 被用户中止的轮次：其 cancelled 结果（含「[用户已中止]」与工具过程）
+    // 已由 sendChat 返回的持久化 history 交付，不再把 structured 内容灌进
+    // liveEvents，否则会与历史重复；在「停止后删除」场景还会造成已删内容
+    // 延迟回闪（turn_complete 经主进程缓冲可能晚于结果数秒到达）。
+    if (ev.metadata?.aborted === true) {
+      chat.markSessionCompleted(sid);
+      chat.setSending(false, sid);
+      return;
+    }
     chat.pushStructuredMessage(ev.parts, ev.metadata, sid);
     chat.setLiveEvents(
       (events) => events.filter((event) => event.kind === "structured"),

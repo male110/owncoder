@@ -133,6 +133,18 @@ export interface ChatSessionRuntime {
   status: SessionStatus;
   /** Current stage (task_decompose or react loop) for coloring thinking blocks. */
   currentStage: "decompose" | "react" | null;
+  /**
+   * True 表示用户已点击「停止」、主进程正在 abort 当前轮。此窗口内乐观
+   * 用户行还没有 turnId，需要单独给出删除入口（正常发送中不显示删除）。
+   */
+  stopping: boolean;
+  /**
+   * True 表示当前 in-flight 轮已被用户在「正在停止…」窗口请求删除。
+   * 主进程此刻正在把该轮以 cancelled 落盘，渲染端乐观行还没有 turnId；
+   * 待 sendChat 返回、applyChatResult 拿到持久化 history 后，据此标志
+   * 定位 turnId 并真正整轮删除（deleteTurnPair）。
+   */
+  pendingDelete: boolean;
 }
 
 function emptyRuntime(): ChatSessionRuntime {
@@ -152,6 +164,8 @@ function emptyRuntime(): ChatSessionRuntime {
     askRequests: [],
     status: "idle",
     currentStage: null,
+    stopping: false,
+    pendingDelete: false,
   };
 }
 
@@ -317,6 +331,15 @@ export interface ChatActions {
   prependHistory: (turns: ChatTurnDto[], beforeSeq: number | null, hasMore: boolean, sessionId?: string) => void;
   setHistoryPageState: (patch: Partial<Pick<ChatSessionRuntime, "historyBeforeSeq" | "historyHasMore" | "historyLoading">>, sessionId?: string) => void;
   setSending: (v: boolean, sessionId?: string) => void;
+  /** 标记「正在停止…」窗口：此窗口内允许删除尚无 turnId 的乐观用户行。 */
+  setStopping: (v: boolean, sessionId?: string) => void;
+  /**
+   * 用户在「正在停止…」窗口删除本轮：立即本地移除乐观用户行与已流出的
+   * liveEvents，并挂起 pendingDelete，待 sendChat 返回后物理删除落盘轮。
+   */
+  discardInflightTurn: (sessionId?: string) => void;
+  /** abort 收尾、落盘轮处理完毕后复位 pendingDelete / stopping。 */
+  clearPendingDelete: (sessionId?: string) => void;
   setQueuedMessages: (msgs: QueuedMessageDto[], sessionId?: string) => void;
 
   setLiveEvents: (events: LiveEvent[] | ((prev: LiveEvent[]) => LiveEvent[]), sessionId?: string) => void;
@@ -572,6 +595,38 @@ export const useChatStore = create<ChatState & ChatActions>()((set, get) => ({
       }
       return applyRuntime(s, sid, patch);
     }),
+  setStopping: (stopping, sid) => set((s) => applyRuntime(s, sid, { stopping })),
+
+  discardInflightTurn: (sid) =>
+    set((s) => {
+      const rt = readRuntime(s, sid);
+      // 定位本轮乐观用户行：最后一条尚无 turnId 的 user（停止窗口里它还没
+      // 被持久化行替换）。从该行起的尾部都属于本轮，一并本地移除。
+      let start = -1;
+      for (let i = rt.history.length - 1; i >= 0; i--) {
+        const h = rt.history[i]!;
+        if (h.role === "user" && !h.turnId) {
+          start = i;
+          break;
+        }
+      }
+      const history = start >= 0 ? rt.history.slice(0, start) : rt.history;
+      // 立即从界面清除：乐观输入、已流出的 liveEvents、状态与转圈全部清掉，
+      // 同时挂起 pendingDelete —— 待 sendChat 返回拿到持久化 turnId 后再
+      // 由 applyChatResult 物理删除已落盘的 cancelled 轮，保证刷新无残留。
+      return applyRuntime(s, sid, {
+        history,
+        liveEvents: [],
+        liveStatus: "",
+        sending: false,
+        stopping: true,
+        pendingDelete: true,
+      });
+    }),
+
+  clearPendingDelete: (sid) =>
+    set((s) => applyRuntime(s, sid, { pendingDelete: false, stopping: false })),
+
   setQueuedMessages: (queuedMessages, sid) => set((s) => applyRuntime(s, sid, { queuedMessages })),
 
   setLiveEvents: (events, sid) =>

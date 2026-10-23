@@ -908,14 +908,16 @@ export function useSessionSync() {
         sessionStateMachine.cleanup(id);
         
         if (res.activeId) {
-          // 如果删除的是当前选中的会话，使用后端返回的 activeId
-          // 如果删除的是其他会话，保持当前选中状态不变
+          // 如果删除的是当前选中的会话，切换到后端返回的相邻会话；
+          // 删除其他会话时保持当前选中状态不变。
           const targetSessionId = isDeletingCurrentSession ? res.activeId : currentFocusId;
-          
+
           if (targetSessionId !== currentFocusId) {
-            syncFocusSession(targetSessionId);
-            chat.setHistory(res.history, targetSessionId);
-            session.setSessionTitle(null); // 清空标题，让下一次切换或刷新时重新加载
+            // 必须走与手动切换完全相同的加载流程（switchChatSession +
+            // getChatHistoryPage 分页历史）。不能直接用 res.history：
+            // 它来自主进程 getHistory()，只是受 RECENT_LIMIT 截断的 runtime
+            // 尾部历史，直接 setHistory 会导致界面只剩最后一轮回复。
+            await onSwitchSession(targetSessionId);
           }
           // 如果保持当前会话不变，不需要切换或重新加载历史
         } else {

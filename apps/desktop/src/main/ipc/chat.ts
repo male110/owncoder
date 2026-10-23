@@ -93,13 +93,22 @@ export function registerChatHandlers(ctx: IpcContext): void {
         sessionTitle: state.sessionTitle,
       };
     } catch (err) {
+      // 用户主动点「停止」触发的 AbortError 不是故障：该轮已由
+      // executeAgentTurn 以 cancelled 落盘。不要误报成「请求超时」错误条，
+      // 也不要再发 error 事件（中止回复已通过 history 交付）。
+      const isAborted = err instanceof Error && err.name === "AbortError";
       const appErr = classifyError(err);
-      console.error(ts(`ERROR ${appErr.code}: ${appErr.message}`));
-      if (sid) emitChat(sid, { type: "error", message: serializeError(appErr), sessionId: sid });
+      if (isAborted) {
+        console.log(ts("aborted by user"));
+      } else {
+        console.error(ts(`ERROR ${appErr.code}: ${appErr.message}`));
+        if (sid) emitChat(sid, { type: "error", message: serializeError(appErr), sessionId: sid });
+      }
       const state = session.getState(sid);
       return {
         ok: false as const,
         error: serializeError(appErr),
+        aborted: isAborted,
         history: session.getHistory(sid),
         sessionId: sid ?? null,
         sessionTitle: state.sessionTitle,

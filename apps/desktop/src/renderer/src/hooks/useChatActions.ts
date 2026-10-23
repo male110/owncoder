@@ -73,6 +73,8 @@ type SendResult =
   | {
       ok: false;
       error: string;
+      /** 用户主动点「停止」中止本轮（非故障，不弹错误条）。 */
+      aborted?: boolean;
       history: ChatTurnDto[];
       sessionId: string | null;
       sessionTitle: string | null;
@@ -180,7 +182,38 @@ export function useChatActions(deps: {
       (t) => !(t.role === "assistant" && t.content.startsWith("Error:")),
     );
     const currentHistory = useChatStore.getState().bySession[sid]?.history ?? [];
-    const merged = mergeIncomingHistory(currentHistory, incoming);
+    // 在合并前读取删除意图：用户在「正在停止…」窗口已删除本轮，乐观行已被
+    // 本地移除，待这次返回的持久化 history 把 cancelled 轮带回来后补做物理删除。
+    const wasPendingDelete = useChatStore.getState().bySession[sid]?.pendingDelete === true;
+    let merged = mergeIncomingHistory(currentHistory, incoming);
+
+    // 被中止的本轮位于返回历史尾部：定位最后一条 user 行（及其 turnId）。
+    let tailUserIdx = -1;
+    for (let i = merged.length - 1; i >= 0; i--) {
+      if (merged[i]!.role === "user") {
+        tailUserIdx = i;
+        break;
+      }
+    }
+    const tailTurnId = tailUserIdx >= 0 ? merged[tailUserIdx]!.turnId : undefined;
+
+    if (wasPendingDelete) {
+      // 用户已在停止窗口删除本轮：在写入界面前就把尾部该轮从 merged 剔除，
+      // 避免 cancelled 轮（含「[用户已中止]」）先回闪一下再被删掉。
+      if (tailUserIdx >= 0) merged = merged.slice(0, tailUserIdx);
+      chat.setSending(false, sid);
+      chat.clearPendingDelete(sid);
+      // 落盘轮仍需物理删除（输入 + 部分回复 + 工具过程），保证刷新无残留。
+      if (tailTurnId) {
+        void window.owncoder.deleteChatTurn(tailTurnId, sid).catch((error) => {
+          console.warn("[applyChatResult] 补删被中止轮失败", error);
+        });
+      }
+    } else {
+      // 正常返回（含仅停止、未删除）：结束「正在停止…」窗口。
+      chat.setStopping(false, sid);
+    }
+
     console.log(`[applyChatResult] current.length=${currentHistory.length} incoming.length=${incoming.length} merged.length=${merged.length}`);
     chat.setHistory(merged, sid);
 
@@ -214,7 +247,10 @@ export function useChatActions(deps: {
       console.warn("[applyChatResult] 刷新历史分页状态失败", error);
     });
     if (!res.ok) {
-      if (isVerificationGateError(res.error)) {
+      if (res.aborted) {
+        // 用户主动停止：不是故障，仅清空状态文案，不弹顶部错误条。
+        chat.setLiveStatus("", sid);
+      } else if (isVerificationGateError(res.error)) {
         chat.setLiveStatus("", sid);
       } else {
         showError(res.error, sid);
@@ -411,6 +447,10 @@ export function useChatActions(deps: {
         } catch (e) {
           showError(e, sid);
           chat.setSending(false, sid);
+          // IPC 层异常 reject（正常错误会被主进程捕获并返回 ok:false）：
+          // 复位停止窗口标志，避免 stopping 残留导致删除入口状态不一致。
+          chat.setStopping(false, sid);
+          chat.clearPendingDelete(sid);
         }
         if (oneOnly) break;
         // Do NOT resetTurnState() here - sealAllStreaming() (triggered by the

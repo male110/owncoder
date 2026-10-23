@@ -387,10 +387,25 @@ function DecomposeCard({ decomposition }: { decomposition: DecompositionSnapshot
 
 // ── Bubbles ───────────────────────────────────────────────────────────────────
 
-function UserBubbleImpl({ turn, onDelete }: { turn: ChatTurnDto; onDelete?: (turnId: string) => void }) {
+function UserBubbleImpl({
+  turn,
+  stopping = false,
+  onDelete,
+  onDiscardInflight,
+}: {
+  turn: ChatTurnDto;
+  /** 「正在停止…」窗口：乐观行无 turnId，需要单独放开删除入口。 */
+  stopping?: boolean;
+  onDelete?: (turnId: string) => void;
+  onDiscardInflight?: () => void;
+}) {
   const [copied, setCopied] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const { t } = useI18n();
+
+  // 已落盘（有 turnId）走整轮删除；停止窗口里的乐观行（无 turnId）走本地丢弃。
+  const canDeletePersisted = Boolean(turn.turnId) && Boolean(onDelete);
+  const canDiscardOptimistic = !turn.turnId && stopping && Boolean(onDiscardInflight);
 
   const isCompressed = turn.isCompressed === true;
   const compressionRatio = turn.originalLength && turn.content.length
@@ -434,14 +449,16 @@ function UserBubbleImpl({ turn, onDelete }: { turn: ChatTurnDto; onDelete?: (tur
           <button type="button" className="msg-action-btn" onClick={() => void onCopy()} title={t("复制")}>
             {copied ? t("已复制") : t("复制")}
           </button>
-          {turn.turnId && onDelete ? (
+          {canDeletePersisted || canDiscardOptimistic ? (
             confirming ? (
               <>
                 <button
                   type="button"
                   className="msg-action-btn danger"
                   onClick={() => {
-                    onDelete(turn.turnId!);
+                    // 已落盘轮走整轮删除；停止窗口的乐观行走本地丢弃。
+                    if (canDeletePersisted) onDelete!(turn.turnId!);
+                    else onDiscardInflight!();
                     setConfirming(false);
                   }}
                   title={t("确认删除")}
@@ -716,9 +733,13 @@ interface Props {
   liveEvents: LiveEvent[];
   liveStatus: string;
   sending: boolean;
+  /** True 表示处于「正在停止…」窗口，允许删除尚无 turnId 的乐观用户行。 */
+  stopping?: boolean;
   virtuosoRef?: React.RefObject<VirtuosoHandle | null>;
   onRegenerate?: () => void;
   onDeleteTurn?: (turnId: string) => void;
+  /** 「正在停止…」窗口删除刚发出的乐观消息（本地丢弃 + 落盘后补删）。 */
+  onDiscardInflight?: () => void;
   onOpenFile?: (path: string) => void;
   workspaceRoot?: string;
   /** Rendered above the first message inside the scroll viewport. */
@@ -739,9 +760,11 @@ export function ChatLog({
   liveEvents,
   liveStatus,
   sending,
+  stopping = false,
   virtuosoRef,
   onRegenerate,
   onDeleteTurn,
+  onDiscardInflight,
   onOpenFile,
   workspaceRoot,
   header,
@@ -825,7 +848,15 @@ export function ChatLog({
     nonDecomposeLiveEvents.length > 0;
 
   const renderBlock = useCallback((b: LogBlock, i: number) => {
-    if (b.kind === "user") return <UserBubble turn={b.turn} onDelete={onDeleteTurn} />;
+    if (b.kind === "user")
+      return (
+        <UserBubble
+          turn={b.turn}
+          stopping={stopping}
+          onDelete={onDeleteTurn}
+          onDiscardInflight={onDiscardInflight}
+        />
+      );
     if (b.kind === "assistant") {
       return (
         <AssistantBubble
@@ -843,7 +874,7 @@ export function ChatLog({
     if (b.kind === "process") return <ProcessSteps items={b.items} />;
     // 进行中轮次的工具链由 LiveToolCard / liveStatus 展示，不在列表里重复。
     return null;
-  }, [lastAssistantIdx, sending, liveEvents.length, onRegenerate, onDeleteTurn, onOpenFile]);
+  }, [lastAssistantIdx, sending, stopping, liveEvents.length, onRegenerate, onDeleteTurn, onDiscardInflight, onOpenFile]);
 
   // History rows only — live status/stream render after Virtuoso inside the
   // shared scroller so streaming updates don't depend on Footer remounts.

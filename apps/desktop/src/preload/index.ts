@@ -512,6 +512,8 @@ export interface DesktopApi {
     | {
         ok: false;
         error: string;
+        /** True 表示本轮因用户主动点「停止」而中止（非故障，不弹错误条）。 */
+        aborted?: boolean;
         history: ChatTurnDto[];
         sessionId: string | null;
         sessionTitle: string | null;

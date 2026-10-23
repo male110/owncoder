@@ -101,8 +101,6 @@ export async function injectHistoryAndUserMessage(ctx: SchedulerContext): Promis
   const packedHistory = relevantHistory?.trim() ?? "";
   if (packedHistory) {
     const contextLines: string[] = [
-      `## 当前任务`,
-      ``,
       outboundUserMessage,
       ``,
       `## 可复用历史信息（来自分解阶段，勿重复读取；可含文件及其它相关内容）`,
@@ -153,8 +151,8 @@ export async function injectHistoryAndUserMessage(ctx: SchedulerContext): Promis
       role: "user",
       content: tagUserInput(
         recentFileHints
-          ? `## 当前任务\n\n${outboundUserMessage}\n\n${recentFileHints}`
-          : `## 当前任务\n\n${outboundUserMessage}`,
+          ? `${outboundUserMessage}\n\n${recentFileHints}`
+          : `${outboundUserMessage}`,
       ),
       attachments: currentAttachments,
     });
@@ -173,8 +171,8 @@ export async function injectHistoryAndUserMessage(ctx: SchedulerContext): Promis
       role: "user",
       content: tagUserInput(
         recentFileHints
-          ? `## 当前任务\n\n${outboundUserMessage}\n\n${recentFileHints}`
-          : `## 当前任务\n\n${outboundUserMessage}`,
+          ? `${outboundUserMessage}\n\n${recentFileHints}`
+          : `${outboundUserMessage}`,
       ),
       attachments: currentAttachments,
     });
