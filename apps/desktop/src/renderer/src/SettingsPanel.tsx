@@ -486,7 +486,7 @@ export function SettingsPanel({ open, onClose, onSaved, initialTab }: Props) {
                   }
                 />
               </label>
-              <label>
+              <label className="check">
                 <input
                   type="checkbox"
                   checked={draft.harness.separateStageModels ?? false}
