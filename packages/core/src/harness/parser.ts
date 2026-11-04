@@ -161,7 +161,7 @@ export function softParseArgs(raw: string | undefined): Record<string, unknown> 
       v && typeof v === "object" && !Array.isArray(v)
         ? (v as Record<string, unknown>)
         : { value: v };
-    return truncated ? { ...obj, _truncated: true } : obj;
+    return truncated ? { ...obj, _truncated: true } : { ...obj, _invalid_json: true };
   } catch {
     // fall through
   }
@@ -172,14 +172,16 @@ export function softParseArgs(raw: string | undefined): Record<string, unknown> 
   // We tag the result with `_truncated: true` so callers (toolWrite/toolPatch)
   // can surface a truncation-specific error instead of a generic "empty content" one.
   const pathRescue = rescuePathField(text);
-  if (pathRescue) return { ...pathRescue, _truncated: true };
+  if (pathRescue) {
+    return truncated ? { ...pathRescue, _truncated: true } : { ...pathRescue, _invalid_json: true };
+  }
 
   // 3. Last-resort: rescue at least single-line fields like `path` / `name`
   //    so callers always get something actionable.
   const recovered = extractSingleLineStringFields(text);
-  if (recovered) return truncated ? { ...recovered, _truncated: true } : recovered;
+  if (recovered) return truncated ? { ...recovered, _truncated: true } : { ...recovered, _invalid_json: true };
 
-  return { raw: text };
+  return { raw: text, _invalid_json: true };
 }
 
 /**

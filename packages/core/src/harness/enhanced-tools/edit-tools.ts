@@ -84,7 +84,7 @@ const bashParams = () => ({
     command: {
       type: "string",
       description:
-        "Shell command to execute in the current terminal. On Windows, the default terminal is the system-provided PowerShell (`powershell.exe`), not MSYS2 Bash; use PowerShell syntax. Must be non-empty.",
+        "Shell command to execute in the current terminal. On Windows, the default terminal is the system-provided PowerShell (`powershell.exe`); use PowerShell syntax. Must be non-empty.",
     },
   },
   required: ["command"] as string[],
@@ -161,7 +161,7 @@ export const AGENT_BASH_TOOL_DEF: ToolDef = {
   type: "function",
   function: {
     name: "bash",
-    description: "Run a shell command in the workspace using the current terminal; on Windows this is the system-provided PowerShell (`powershell.exe`), not MSYS2 Bash.",
+    description: "Run a shell command in the workspace using the current terminal; on Windows this is the system-provided PowerShell (`powershell.exe`).",
     parameters: bashParams(),
   },
 };

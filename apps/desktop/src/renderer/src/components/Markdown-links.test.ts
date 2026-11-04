@@ -40,6 +40,45 @@ describe("超链接点击", () => {
     },
   );
 
+  it("拆分 Windows 本地文件链接末尾的行号和列号", () => {
+    const href = "E:/owncoder/packages/core/src/harness/loop/react-prompt.test.ts:32:10";
+    const onOpenFile = vi.fn();
+    const element = Markdown({ content: `[链接](${href})`, onOpenFile, workspaceRoot: "E:/owncoder" });
+    const render = element.type as (props: typeof element.props) => Element;
+    const link = findLink(render(element.props))!;
+    const preventDefault = vi.fn();
+    link.props.onClick!({ preventDefault });
+    expect(preventDefault).toHaveBeenCalledOnce();
+    expect(onOpenFile).toHaveBeenCalledWith("packages/core/src/harness/loop/react-prompt.test.ts", 32, 10);
+  });
+
+  it.each([
+    ["E:/owncoder/packages/core/src/harness/loop/react-prompt.test.ts:32", "E:/owncoder/packages/core/src/harness/loop/react-prompt.test.ts", 32, undefined],
+    ["file.ts:32", "file.ts", 32, undefined],
+    ["src/有 空格%23文件.ts:32:10", "src/有 空格#文件.ts", 32, 10],
+    ["src/log%3A2024:32:10", "src/log:2024", 32, 10],
+    ["src/log%3A2024", "src/log:2024", undefined, undefined],
+  ])("处理文件位置和转义字符：%s", (href, path, line, column) => {
+    const { link, onOpenFile } = linkFor(href);
+    link.props.onClick!({ preventDefault: vi.fn() });
+    if (line === undefined) expect(onOpenFile).toHaveBeenCalledWith(path);
+    else expect(onOpenFile).toHaveBeenCalledWith(path, line, column);
+  });
+
+  it("拆分 Unix 本地文件链接末尾的行号和列号", () => {
+    const { link, onOpenFile } = linkFor("/workspace/src/file.ts:32:10");
+    link.props.onClick!({ preventDefault: vi.fn() });
+    expect(onOpenFile).toHaveBeenCalledWith("/workspace/src/file.ts", 32, 10);
+  });
+
+  it.each(["src/file.ts:0", "src/file.ts:32:0", "src/file.ts:0:10", "src/file.ts:-2:10", "src/file.ts:32:-1", "src/file.ts::10", "src/file.ts:32:", "src/file.ts:abc:10", "src/file.ts:32:abc", "src/file.ts:32:10:5", "src/file.ts:1000001", "src/log:2024.txt"]) (
+    "保留非法位置参数原样：%s", (href) => {
+      const { link, onOpenFile } = linkFor(href);
+      link.props.onClick!({ preventDefault: vi.fn() });
+      expect(onOpenFile).toHaveBeenCalledWith(href);
+    },
+  );
+
   it("拆分 Windows 本地文件链接末尾的行号", () => {
     const href = "E:/owncoder/packages/settings/src/builtin-prompts.ts:81";
     const onOpenFile = vi.fn();
@@ -49,7 +88,7 @@ describe("超链接点击", () => {
     const preventDefault = vi.fn();
     link.props.onClick!({ preventDefault });
     expect(preventDefault).toHaveBeenCalledOnce();
-    expect(onOpenFile).toHaveBeenCalledWith("packages/settings/src/builtin-prompts.ts", 81);
+    expect(onOpenFile).toHaveBeenCalledWith("packages/settings/src/builtin-prompts.ts", 81, undefined);
   });
 
   it("不将文件名本身包含冒号数字的情况误判为行号", () => {
@@ -68,7 +107,7 @@ describe("超链接点击", () => {
     const preventDefault = vi.fn();
     link.props.onClick!({ preventDefault });
     expect(preventDefault).toHaveBeenCalledOnce();
-    expect(onOpenFile).toHaveBeenCalledWith("src/large-file.ts", 999999);
+    expect(onOpenFile).toHaveBeenCalledWith("src/large-file.ts", 999999, undefined);
   });
 
   it("拒绝非法行号 :0", () => {

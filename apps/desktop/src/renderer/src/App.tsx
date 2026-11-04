@@ -158,7 +158,7 @@ export function App() {
   const [editorTabActionsHost, setEditorTabActionsHost] = useState<HTMLDivElement | null>(null);
   /** 各打开文件的 dirty 状态，供 tab 关闭确认与脏点标记。 */
   const [editorDirtyByPath, setEditorDirtyByPath] = useState<Record<string, boolean>>({});
-  const [editorLocation, setEditorLocation] = useState<{ path: string; line: number; requestId: number } | null>(null);
+  const [editorLocation, setEditorLocation] = useState<{ path: string; line: number; column?: number; requestId: number } | null>(null);
 
   // ── Hooks ────────────────────────────────────────────────────────────────────
   const {
@@ -249,10 +249,10 @@ export function App() {
   }, [editorDirtyByPath, handleCloseEditorTab]);
 
   /** 普通打开文件：激活/追加 tab，并取消该路径上的 diff 模式。 */
-  const openEditorFile = useCallback((path: string, line?: number) => {
+  const openEditorFile = useCallback((path: string, line?: number, column?: number) => {
     setEditorPath(path);
     if (line !== undefined) {
-      setEditorLocation((current) => ({ path, line, requestId: (current?.requestId ?? 0) + 1 }));
+      setEditorLocation((current) => ({ path, line, column, requestId: (current?.requestId ?? 0) + 1 }));
     }
   }, [setEditorPath]);
 

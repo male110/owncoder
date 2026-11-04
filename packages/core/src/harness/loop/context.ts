@@ -160,6 +160,9 @@ export async function buildInitialContext(args: BuildContextArgs): Promise<Build
   };
 
   pushSystem(buildPlatformInfo(), "platform");
+  const runScriptInfo = "## run_script\n`run_script` is a tool for executing JavaScript, and it is independent of the current project.";
+  budgetUsed += estimateTokens(runScriptInfo);
+  contextCharsUsed += runScriptInfo.length;
 
   // Tech stack, project size, and project rules are now candidates (truncatable).
   // They will be added to the candidate pool later.
@@ -413,7 +416,7 @@ export async function buildInitialContext(args: BuildContextArgs): Promise<Build
   // Fixed segments separate platform info from optional content (tech stack,
   // project size, rules moved to candidates).
   const fixedSegments: FixedSegments = {
-    systemPrompt: basePromptTokens,       // Built-in system prompt template + tool definitions
+    systemPrompt: basePromptTokens + estimateTokens(runScriptInfo), // Built-in prompt and fixed tool guidance
     platformInfo: platformInfoTokens,      // Platform information (OS, shell, etc)
     toolDefs: 0,                          // @reserved — currently included in systemPrompt
     userInput: estimateTokens(opts.userMessage),
@@ -529,10 +532,9 @@ export async function buildInitialContext(args: BuildContextArgs): Promise<Build
   }
   
   // Wrap all collected project context parts with semantic tag
-  if (projectContextParts.length > 0) {
-    const wrappedProjectContext = tagProjectContext(projectContextParts.join("\n\n"));
-    messages.push({ role: "system", content: wrappedProjectContext });
-  }
+  projectContextParts.push(runScriptInfo);
+  const wrappedProjectContext = tagProjectContext(projectContextParts.join("\n\n"));
+  messages.push({ role: "system", content: wrappedProjectContext });
 
   if (contextNode && ctxEnabled) emitStage(opts.onEvent, "done", contextNode);
   log("stage_done emitted", {
@@ -570,12 +572,7 @@ function buildPlatformInfo(): string {
   if (IS_WINDOWS) {
     osName = "Windows";
     pathSep = "\\";
-    shellHint =
-      "You are running on **Windows** with the system-provided Windows PowerShell (`powershell.exe`) as the default terminal, not MSYS2 Bash. " +
-      "Terminal commands execute in PowerShell with Windows path semantics; use PowerShell syntax rather than POSIX bash syntax. " +
-      "Do not assume `/dev/null`, POSIX redirections, or other Linux shell behavior. " +
-      "For file search use the `glob`/`grep` tools, not shell commands — they are workspace-relative and honor .gitignore on every platform. " +
-      "npm/npx/pnpm/git/node work as usual on all platforms.";
+    shellHint = "The current runtime environment is Windows. **Terminal commands are executed with PowerShell semantics; please use PowerShell syntax.**";
   } else if (PLATFORM === "darwin") {
     osName = "macOS";
     pathSep = "/";
@@ -592,7 +589,6 @@ function buildPlatformInfo(): string {
     `- Release: ${OS_RELEASE}`,
     `- Path separator: \`${pathSep}\``,
     `- ${shellHint}`,
-    "- `run_script` is a system tool provided by OwnCoder (the agent harness): it executes JavaScript . It is unrelated to the project under work — the project's own language, dependencies, and scripts have nothing to do with it.",
     "",
   ].join("\n");
 }

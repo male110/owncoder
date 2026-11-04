@@ -116,12 +116,29 @@ export const READ_TOOL_DEFS: ToolDef[] = [
     function: {
       name: "search_symbols",
       description:
-        "Hybrid search over the code index: exact symbol names via full-text search plus semantic vector recall. Returns symbol definitions with locations, signatures, and documentation.",
+        "Search the code symbol index by exact or fuzzy symbol name. Returns symbol definitions with locations, signatures, and documentation. Use search_semantic for natural-language/vector search.",
       parameters: {
         type: "object",
         properties: {
-          query: { type: "string", description: "Symbol name, keyword, or natural-language query of what you are looking for" },
+          query: { type: "string", description: "Exact or fuzzy symbol name (identifier); use search_semantic to describe code behavior or concepts" },
           limit: { type: "integer", minimum: 1, maximum: 50, description: "Maximum results (default 20)" },
+        },
+        required: ["query"],
+      },
+    },
+  },
+  {
+    type: "function",
+    readOnly: true,
+    function: {
+      name: "search_semantic",
+      description:
+        "Semantic/vector search over embedded code chunks for natural-language queries. Returns ranked vector hits with paths, line ranges, symbols, scores, and excerpts; does not perform exact symbol search or grep fallback.",
+      parameters: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Natural-language description of the code behavior or concept" },
+          limit: { type: "integer", minimum: 1, maximum: 50, description: "Maximum vector results (default 20)" },
         },
         required: ["query"],
       },

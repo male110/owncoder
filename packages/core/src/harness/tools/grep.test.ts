@@ -167,6 +167,7 @@ test("grep respects extraIgnore from workflow index settings", async () => {
 test("grep is not parallel-safe so workspace scans do not pile up", () => {
   assert.equal(PARALLEL_SAFE_TOOLS.has("grep"), false);
   assert.equal(PARALLEL_SAFE_TOOLS.has("search_symbols"), true);
+  assert.equal(PARALLEL_SAFE_TOOLS.has("search_semantic"), true);
 });
 
 test("grep output_mode=files_with_matches returns paths only", async () => {
@@ -230,6 +231,19 @@ test("grep glob filter narrows candidates", async () => {
       assert.equal(jsUnderSrc.ok, true);
       assert.match(jsUnderSrc.output, /src\/b\.js:1:/);
       assert.doesNotMatch(jsUnderSrc.output, /a\.ts|c\.ts/);
+    },
+  );
+});
+
+test("grep glob filters match case-insensitively by default", async () => {
+  await withWorkspace(
+    async (root) => {
+      await writeFile(join(root, "Widget.TS"), "needle\n");
+    },
+    async (root) => {
+      const result = await toolGrep(ctxFor(root), "needle", ".", 40, { glob: "*.ts" });
+      assert.equal(result.ok, true);
+      assert.match(result.output, /Widget\.TS:1:/);
     },
   );
 });

@@ -449,6 +449,7 @@ export function statusEntry(
     list_dir: "列出目录",
     search_code: "搜索代码",
     search_symbols: "搜索符号",
+    search_semantic: "语义搜索",
     grep: "搜索代码",
     list_session_changes: "列出会话变更",
     undo_session_change: "撤销会话变更",

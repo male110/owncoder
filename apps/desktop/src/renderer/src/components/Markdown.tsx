@@ -10,36 +10,23 @@ type Block =
   | { kind: "table"; headers: string[]; rows: string[][] }
   | { kind: "code"; lang: string; code: string };
 
-function splitFileLine(href: string): { href: string; line?: number } {
+function splitFileLine(href: string): { href: string; line?: number; column?: number } {
   const trimmed = href.trim();
-  
-  // 匹配末尾的 :数字 格式
-  const match = trimmed.match(/^(.+):([1-9]\d*)$/);
-  if (!match) {
-    return { href: trimmed };
-  }
-  
-  const [, pathPart, lineStr] = match;
-  const line = Number(lineStr);
-  
-  // 验证行号在合理范围内（1 到 1000000）
-  if (line < 1 || line > 1000000) {
-    return { href: trimmed };
-  }
-  
-  // 仅当路径部分以路径分隔符结尾，或是盘符格式时才认为这是行号
-  // 避免文件名本身包含 :数字 时被误判（如 log:2024.txt）
-  if (/[/\\]$/.test(pathPart!) || /^[a-z]:[\\/]?/i.test(pathPart!)) {
-    return { href: pathPart!, line };
-  }
-  
-  // 如果路径中包含路径分隔符，也认为末尾的 :数字 是行号
-  if (/[/\\]/.test(pathPart!)) {
-    return { href: pathPart!, line };
-  }
-  
-  // 否则保留原样（如 log:2024.txt）
-  return { href: trimmed };
+  const basenameStart = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\")) + 1;
+  const basename = trimmed.slice(basenameStart);
+  const separator = basename.indexOf(":");
+  if (separator <= 0) return { href: trimmed };
+
+  // 文件名中的原始冒号与位置语法有歧义；仅完整匹配后缀才拆分，字面冒号可写为 %3A。
+  const suffix = basename.slice(separator + 1).match(/^([1-9]\d*)(?::([1-9]\d*))?$/);
+  if (!suffix) return { href: trimmed };
+  const line = Number(suffix[1]);
+  const column = suffix[2] === undefined ? undefined : Number(suffix[2]);
+  if (!Number.isSafeInteger(line) || line > 1000000) return { href: trimmed };
+  if (column !== undefined && (!Number.isSafeInteger(column) || column > 1000000)) return { href: trimmed };
+
+  const pathPart = trimmed.slice(0, basenameStart + separator);
+  return column === undefined ? { href: pathPart, line } : { href: pathPart, line, column };
 }
 
 function isLocalFileLink(href: string): boolean {
@@ -68,12 +55,12 @@ function workspaceLinkPath(href: string, workspaceRoot?: string): string {
   return value;
 }
 
-function openLink(href: string, onOpenFile?: (path: string, line?: number) => void, workspaceRoot?: string): void {
+function openLink(href: string, onOpenFile?: (path: string, line?: number, column?: number) => void, workspaceRoot?: string): void {
   if (isLocalFileLink(href) && onOpenFile) {
     const target = splitFileLine(href);
     const path = workspaceLinkPath(target.href, workspaceRoot);
     if (target.line === undefined) onOpenFile(path);
-    else onOpenFile(path, target.line);
+    else onOpenFile(path, target.line, target.column);
     return;
   }
   window.open(href, "_blank", "noopener,noreferrer");
@@ -83,7 +70,7 @@ function renderLink(
   href: string,
   label: string,
   key: number,
-  onOpenFile?: (path: string, line?: number) => void,
+  onOpenFile?: (path: string, line?: number, column?: number) => void,
   workspaceRoot?: string,
 ): ReactNode {
   return (
@@ -103,7 +90,7 @@ function renderLink(
   );
 }
 
-function inlineFormat(text: string, onOpenFile?: (path: string, line?: number) => void, workspaceRoot?: string): ReactNode[] {
+function inlineFormat(text: string, onOpenFile?: (path: string, line?: number, column?: number) => void, workspaceRoot?: string): ReactNode[] {
   const parts: ReactNode[] = [];
   const re = /(`[^`]+`|\*\*[^*]+\*\*|\*[^*\n]+\*|\[[^\]]+\]\([^)]+\)|<a\s+[^>]*\bhref\s*=\s*(?:"[^"]*"|'[^']*')[^>]*>[\s\S]*?<\/a>)/gi;
   let last = 0;
@@ -273,7 +260,7 @@ function parseBlocks(src: string): Block[] {
 interface Props {
   content: string;
   className?: string;
-  onOpenFile?: (path: string, line?: number) => void;
+  onOpenFile?: (path: string, line?: number, column?: number) => void;
   workspaceRoot?: string;
   /** 代码块是否显示复制按钮；思考内容应关闭。默认开启。 */
   showCopy?: boolean;

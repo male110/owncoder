@@ -45,7 +45,7 @@ export function summarizeToolActionForUser(
 function formatPackedHistory(task: TaskItem): string {
   const text = task.relevantHistory?.trim() ?? "";
   return text
-    ? `### Reusable history (from task decomposition)\n${text}`
+    ? `### Reusable history (from task decomposition)\nReview and reuse this history before acting. If it already provides clear, relevant, sufficient file paths, symbols, code locations, call chains, or conclusions for the task, do not search for or re-explore them; continue from that information. Only perform the smallest necessary check when information is missing, conflicting, or potentially outdated, focusing on the uncertain part. Treat history as a lead, not verified fact, and cite actual evidence in the result.\n${text}`
     : "";
 }
 

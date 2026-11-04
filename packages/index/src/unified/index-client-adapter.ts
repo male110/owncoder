@@ -25,6 +25,7 @@ import { UnifiedIndex } from "./index.ts";
 import { buildIndexAsync, updateIndexAsync } from "./builder.ts";
 import { buildSemanticIndex, SEMANTIC_EMBED_DIM, toFloat32 } from "./semantic-index.ts";
 import { MAX_FILE_SIZE } from "./scanner.ts";
+import { SemanticSearchError } from "../semantic-search-error.ts";
 
 /**
  * 将 UnifiedIndex 包装为 IndexClient 接口
@@ -63,8 +64,10 @@ export class UnifiedIndexAdapter implements IndexClient {
 
     try {
       // Main process uses query mode (readonly). Worker uses build mode (writable).
+      const previousDb = this.index.getDatabase();
       this.index.open(root, { readonly: this.readonlyMode });
       const db = this.index.getDatabase();
+      if (db !== previousDb) this.vecLoaded = false;
       if (!db) {
         if (this.readonlyMode) {
           this.kind = "idle";
@@ -81,7 +84,6 @@ export class UnifiedIndexAdapter implements IndexClient {
           this.vecLoaded = true;
         } catch (error) {
           console.warn("[UnifiedIndexAdapter] sqlite-vec load failed, semantic search disabled:", error);
-          this.semantic = undefined;
         }
       }
 
@@ -108,7 +110,7 @@ export class UnifiedIndexAdapter implements IndexClient {
 
       // 后置语义通道（符号 chunk 嵌入 → sqlite-vec）。嵌入器以端口注入，
       // index 包零 ONNX 依赖。best-effort：失败不阻塞构建（日志一行），
-      // ragSearch 降级为空，消费方 hybrid 回退 FTS。
+      // ragSearch 单独报告不可用或检索错误，内部 hybrid 消费方可捕获后回退 FTS。
       if (!this.readonlyMode && this.semantic && this.vecLoaded) {
         await this.runSemanticPass(db, root);
       }
@@ -379,12 +381,22 @@ export class UnifiedIndexAdapter implements IndexClient {
   // ========== 语义检索（ragSearch；rag* 其余成员为预留存根） ==========
 
   async ragSearch(query: string, topK: number): Promise<RagHit[]> {
-    if (!this.semantic || !this.vecLoaded) return [];
+    if (!this.semantic) {
+      throw new SemanticSearchError("embedding_not_configured", "Embedding service is not configured");
+    }
     const db = this.index.getDatabase();
-    if (!db) return [];
+    if (!this.vecLoaded || !db) {
+      throw new SemanticSearchError("vector_index_unavailable", "Vector index is not loaded");
+    }
     try {
+      const table = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'code_chunks_vec'").get();
+      if (!table) {
+        throw new SemanticSearchError("vector_index_unavailable", "Vector index has not been built (code_chunks_vec is missing)");
+      }
       const vector = toFloat32(await this.semantic.embedQuery(query));
-      if (vector.length !== SEMANTIC_EMBED_DIM) return [];
+      if (vector.length !== SEMANTIC_EMBED_DIM) {
+        throw new SemanticSearchError("search_failed", `Invalid embedding dimension: expected ${SEMANTIC_EMBED_DIM}, got ${vector.length}`);
+      }
       const k = Math.max(1, Math.min(topK, 100));
       const rows = db
         .prepare(
@@ -424,10 +436,9 @@ export class UnifiedIndexAdapter implements IndexClient {
         } satisfies RagHit;
       });
     } catch (error) {
-      // vec0 表缺失（语义通道未跑过的旧库）/ KNN 失败一律降级为空，
-      // 消费方 hybrid 回退 FTS。
-      console.error(`[UnifiedIndexAdapter] ragSearch failed:`, error);
-      return [];
+      if (error instanceof SemanticSearchError) throw error;
+      const message = error instanceof Error ? error.message : String(error);
+      throw new SemanticSearchError("search_failed", `Embedding or vector index search failed: ${message}`, { cause: error });
     }
   }
   async ragBuild(): Promise<void> {}
@@ -597,7 +608,7 @@ export class UnifiedIndexAdapter implements IndexClient {
 
   /**
    * 后置语义通道：reconcile 嵌入变更文件的符号 chunk。
-   * 独立 try/catch——语义失败永不阻塞符号索引构建（降级由 ragSearch 空结果 + hybrid 兜底）。
+   * 独立 try/catch——语义失败永不阻塞符号索引构建，查询时单独报告语义通道错误。
    */
   private async runSemanticPass(db: Database.Database, root: string): Promise<void> {
     if (!this.semantic) return;

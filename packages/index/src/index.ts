@@ -1,4 +1,6 @@
 import type { IndexStatus, MapOpts, Tag } from "@owncoder/shared";
+import { SemanticSearchError } from "./semantic-search-error.ts";
+export { SemanticSearchError, type SemanticSearchErrorCode } from "./semantic-search-error.ts";
 
 export interface CallSite {
   path: string;
@@ -66,8 +68,8 @@ export interface IndexOpenOptions {
  * 查询侧（main）：embedQuery 用于 ragSearch 的查询嵌入；
  * loadVec 在 adapter open 时注册 sqlite-vec 模块（构建写 vec0、查询 KNN
  * 都需要模块在本连接注册）。桌面端注入（bge-small + sqlite-vec 均在
- * desktop 依赖里）；CLI/headless 无端口 → ragSearch 维持空数组，
- * 消费方 hybrid 自动降级 FTS。
+ * desktop 依赖里）；CLI/headless 无端口时 ragSearch 抛出明确的不可用错误，
+ * 内部 hybrid 消费方可捕获错误后降级 FTS。
  */
 export interface SemanticSearchPort {
   /** 批量嵌入（构建侧 chunk；查询侧亦可单条调用）。 */
@@ -93,6 +95,7 @@ export interface IndexClient {
   status(): IndexStatus;
   setExtraIgnore?(patterns: string[]): void;
   ftsSearch?(query: string, options?: SearchOptions): Promise<SymbolSearchResult[]>;
+  /** 成功时返回命中（可为空）；不可用或失败时抛出 SemanticSearchError。 */
   ragSearch?(query: string, topK: number): Promise<RagHit[]>;
   ragBuild?(root: string, filePaths: string[]): Promise<void>;
   ragUpdate?(root: string, added: string[], modified: string[], removed: string[]): Promise<void>;
@@ -149,7 +152,7 @@ class StubIndexClient implements IndexClient {
   }
 
   async ragSearch(): Promise<RagHit[]> {
-    return [];
+    throw new SemanticSearchError("vector_index_unavailable", "Semantic search is unavailable in the stub index");
   }
 
   async ragBuild(): Promise<void> {}
@@ -172,7 +175,7 @@ class StubIndexClient implements IndexClient {
 import { UnifiedIndexAdapter } from "./unified/index-client-adapter.ts";
 
 export interface CreateIndexClientOptions {
-  /** 语义检索端口（嵌入 + sqlite-vec 加载）；缺省时 ragSearch 维持空，整体降级 FTS。 */
+  /** 语义检索端口（嵌入 + sqlite-vec 加载）；缺省时 ragSearch 抛出 embedding_not_configured。 */
   semantic?: SemanticSearchPort;
 }
 

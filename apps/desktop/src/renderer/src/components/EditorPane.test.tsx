@@ -198,6 +198,28 @@ describe("变更查看器", () => {
     expect(ed.revealLineInCenter).toHaveBeenCalledWith(81);
   });
 
+  it("首次挂载和后续定位均使用指定列并聚焦", () => {
+    const ed = {
+      getModel: () => null,
+      updateOptions: vi.fn(),
+      layout: vi.fn(),
+      focus: vi.fn(),
+      addCommand: vi.fn(),
+      setPosition: vi.fn(),
+      revealLineInCenter: vi.fn(),
+    };
+    findEditor(render({ path: "src/a.ts", revealLine: { line: 32, column: 10, requestId: 1 } }))!.props.onMount(ed);
+    expect(ed.setPosition).toHaveBeenLastCalledWith({ lineNumber: 32, column: 10 });
+    expect(ed.revealLineInCenter).toHaveBeenLastCalledWith(32);
+    expect(ed.focus).toHaveBeenCalled();
+    ed.focus.mockClear();
+    render({ path: "src/a.ts", revealLine: { line: 42, column: 7, requestId: 2 } });
+    hooks.effects[3]!();
+    expect(ed.setPosition).toHaveBeenLastCalledWith({ lineNumber: 42, column: 7 });
+    expect(ed.revealLineInCenter).toHaveBeenLastCalledWith(42);
+    expect(ed.focus).toHaveBeenCalledOnce();
+  });
+
   it("页签显示后恢复布局和焦点，隐藏页签保持只读", () => {
     const ed = { getModel: () => null, updateOptions: vi.fn(), layout: vi.fn(), focus: vi.fn(), addCommand: vi.fn() };
     findEditor(render({ path: "src/a.ts", active: false }))!.props.onMount(ed);

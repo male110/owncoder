@@ -109,6 +109,32 @@ describe("apply_patch 读取过期自愈", () => {
     await rm(root, { recursive: true, force: true });
   });
 
+  it("截断参数在执行前拒绝且不写入文件", async () => {
+    const root = await mkdtemp(join(tmpdir(), "owncoder-truncated-"));
+    const abs = join(root, "svc.java");
+    const original = "interface Svc {\n    void keep();\n}\n";
+    await writeFile(abs, original);
+    const events: unknown[] = [];
+    const ctx = makeCtx(root, events);
+
+    const result = await executeTool(ctx, {
+      id: "truncated-1",
+      name: "apply_patch",
+      arguments: {
+        file_path: "svc.java",
+        old_string: "void keep();",
+        new_string: "void keep();\n    void partial(",
+        _truncated: true,
+      },
+      rawArguments: '{"file_path":"svc.java","old_string":"void keep();","new_string":"void partial(\\"',
+    });
+
+    expect(result.ok).toBe(false);
+    expect(await readFile(abs, "utf8")).toBe(original);
+    expect(ctx.touchedPaths).toEqual([]);
+
+    await rm(root, { recursive: true, force: true });
+  });
   it("多目标歧义时不触发重读（重读无法补充上下文）", async () => {
     const root = await mkdtemp(join(tmpdir(), "owncoder-ambig-"));
     const abs = join(root, "svc.java");

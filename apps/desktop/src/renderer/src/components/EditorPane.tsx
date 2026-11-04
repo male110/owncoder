@@ -119,7 +119,7 @@ type EditorPaneProps = {
   /** 当前页签是否可见。 */
   active?: boolean;
   /** 定位到指定行；requestId 用于同一文件的重复定位。 */
-  revealLine?: { line: number; requestId: number };
+  revealLine?: { line: number; column?: number; requestId: number };
 } & (
   | {
       /** 普通编辑模式 */
@@ -241,7 +241,7 @@ export function EditorPane({
     if (isMarkdown) setMdViewMode("source");
     const editor = editorRef.current;
     if (!editor) return;
-    editor.setPosition({ lineNumber: revealLine.line, column: 1 });
+    editor.setPosition({ lineNumber: revealLine.line, column: revealLine.column ?? 1 });
     editor.revealLineInCenter(revealLine.line);
     editor.focus();
   }, [active, isMarkdown, revealLine]);
@@ -473,7 +473,7 @@ export function EditorPane({
               if (sourceVisibleRef.current) {
                 ed.layout();
                 if (revealLine) {
-                  ed.setPosition({ lineNumber: revealLine.line, column: 1 });
+                  ed.setPosition({ lineNumber: revealLine.line, column: revealLine.column ?? 1 });
                   ed.revealLineInCenter(revealLine.line);
                 }
                 ed.focus();

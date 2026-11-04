@@ -15,7 +15,7 @@ export const RUN_SCRIPT_TOOL_DEF: ToolDef = {
       "5. No comments in the script.",
       "6. Check every tools.call result through r.ok and recover by changing the path/tool instead of throwing immediately.",
       "7. Module imports: only Node builtins can be required (fs, path, node:process, ...; node: prefix optional) - for computation helpers like path.join. Dynamic import() behaves like require(); static import statements are not supported (classic script). Globals process/Buffer/__dirname/__filename/fetch do not exist - get equivalents via require(\"node:process\") etc. File reads go through tools.call (read_file), never fs.",
-      "8. On Windows, the default terminal is the system-provided PowerShell (`powershell.exe`), not MSYS2 Bash. Use PowerShell syntax and Windows path semantics; do not assume POSIX commands, /dev/null, or Linux redirection behavior.",
+      "8. On Windows, the default terminal is the system-provided PowerShell (`powershell.exe`). Use PowerShell syntax and Windows path semantics; do not assume POSIX commands, /dev/null, or Linux redirection behavior.",
       "</hard_rules>",
       "",
       "<when_to_use>",
@@ -58,7 +58,7 @@ export const RUN_SCRIPT_TOOL_DEF: ToolDef = {
           description: [
             "只写可执行 JavaScript，不要写任何注释（// 或 /* */）",
             "——脚本在宿主 JS 引擎中执行、只有 console 输出进对话，注释没有任何接收者，白费",
-            "生成 token。文件名定位优先用 tools.call(\"glob\", { pattern, file_path })，内容搜索用 tools.call(\"grep\", { pattern, file_path, output_mode: \"files_with_matches\" })；两者自动过滤 .gitignore。不要在脚本里拼 find/ls/grep，也不要使用 /workspace 或 /e/... 绝对路径。已知路径读文件必须用 tools.call(\"read_file\", { file_path })，",
+            "生成 token。文件名定位优先用 tools.call(\"glob\", { pattern, file_path })，内容搜索用 tools.call(\"grep\", { pattern, file_path, output_mode: \"files_with_matches\" })；两者使用工作区相对路径并自动过滤 .gitignore。不要在脚本里拼 find/ls/grep，也不要使用 /workspace 或 /e/... 绝对路径。Windows 终端使用 PowerShell（powershell.exe）语法和 Windows 路径，不要假设 POSIX 命令或 /dev/null 可用。已知路径读文件必须用 tools.call(\"read_file\", { file_path })，",
             "只能 require ",
             "Node 内建模块做计算辅助（如 require(\"node:path\")）；动态 import() ",
             "与 require 等效，静态 import 语句不支持。process/Buffer/__dirname/",

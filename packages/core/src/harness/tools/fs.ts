@@ -20,6 +20,7 @@ export { toolGrep } from "./grep.ts";
 export { toolGlob } from "./glob.ts";
 export { toolRepoMap } from "./repo-map.ts";
 export { toolSearchSymbols } from "./search-symbols.ts";
+export { toolSearchSemantic } from "./search-semantic.ts";
 export { toolPatch } from "./apply-patch.ts";
 export { toolWrite } from "./write-file.ts";
 export { toolAppend } from "./append-file.ts";

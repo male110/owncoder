@@ -170,7 +170,7 @@ export async function toolWebSearch(
     // Graceful degradation: provide useful fallback
     return ok(
       `Web search for "${query}" could not reach Bing.\n` +
-      `Suggested: Check if the term appears in the codebase first using search_symbols.\n` +
+      `Suggested: Check if the term appears in the codebase first using search_symbols, or use search_semantic for natural-language code behavior.\n` +
       `Error: ${e instanceof Error ? e.message : String(e)}`,
     );
   }

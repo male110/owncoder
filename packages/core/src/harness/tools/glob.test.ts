@@ -6,7 +6,7 @@ import { test } from "vitest";
 import { BUILTIN_WORKFLOW } from "@owncoder/settings";
 import type { IndexClient } from "@owncoder/index";
 import { PARALLEL_SAFE_TOOLS } from "../enhanced-tools.ts";
-import { toolGlob } from "./glob.ts";
+import { createGlobMatcher, toolGlob } from "./glob.ts";
 import type { ToolContext } from "./types.ts";
 
 function stubIndex(): IndexClient {
@@ -77,6 +77,22 @@ test("glob basename patterns match at any depth and respect extraIgnore", async 
     const ts = await toolGlob(ctxFor(root, ["tmp/"]), "*.ts", ".", 100);
     assert.doesNotMatch(ts.output, /drop\.ts/);
     assert.match(ts.output, /keep\.ts/);
+  });
+});
+
+test("glob matcher can explicitly require case-sensitive matches", () => {
+  assert.equal(createGlobMatcher("*.ts", false)("Widget.TS", "Widget.TS"), false);
+  assert.equal(createGlobMatcher("*.ts", true)("Widget.TS", "Widget.TS"), true);
+});
+
+test("glob matches paths case-insensitively by default", async () => {
+  await withWorkspace(async root => {
+    await mkdir(join(root, "src"), { recursive: true });
+    await writeFile(join(root, "src", "Widget.TS"), "");
+  }, async root => {
+    const result = await toolGlob(ctxFor(root), "**/*.ts", ".", 100);
+    assert.equal(result.ok, true);
+    assert.match(result.output, /src\/Widget\.TS/);
   });
 });
 

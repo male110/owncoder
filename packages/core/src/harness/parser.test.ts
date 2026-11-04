@@ -24,6 +24,13 @@ test("softParseArgs: valid JSON is not flagged as truncated", () => {
   assert.equal(args.content, "complete");
 });
 
+test("softParseArgs: invalid JSON is marked unsafe instead of becoming writable arguments", () => {
+  const args = softParseArgs('{"file_path":"x",}');
+  assert.equal(args._invalid_json, true);
+  assert.equal(args._truncated, undefined);
+});
+
+
 test("parseToolCallsFromAssistant: single tool call is parsed correctly", () => {
   const calls = parseToolCallsFromAssistant({
     content: null,
@@ -56,6 +63,7 @@ test("normalizeToolName maps search aliases onto search_symbols", () => {
   assert.equal(normalizeToolName("Search Code"), "search_symbols");
   assert.equal(normalizeToolName("grep"), "grep");
   assert.equal(normalizeToolName("search_symbols"), "search_symbols");
+  assert.equal(normalizeToolName("search_semantic"), "search_semantic");
 });
 
 // ── scanUnterminatedString：run_script code 载荷的完整性预检 ──

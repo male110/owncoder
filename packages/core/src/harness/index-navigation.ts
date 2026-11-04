@@ -13,6 +13,9 @@
  *   1. 语义路：index.ragSearch(query)——自然语言查询嵌入，命中 FTS 够不着的
  *      "无确切标识符"场景（代码语义索引，桌面端注入端口）；
  *   2. 关键词路：标识符提取 → index.ftsSearch per identifier——精确符号命中。
+ *
+ * 这里是内部上下文导航的 hybrid 召回，不改变公开 search_symbols 的职责；
+ * 面向模型的语义向量检索由 search_semantic 工具单独提供。
  * 语义文件排前，关键词补充语义漏掉的文件与行号/签名。
  *
  * 全部 best-effort：两个 IndexClient 成员（ragSearch / ftsSearch）都是可选

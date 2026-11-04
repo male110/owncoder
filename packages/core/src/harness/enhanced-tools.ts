@@ -86,6 +86,7 @@ export const PARALLEL_SAFE_TOOLS: ReadonlySet<string> = new Set([
   "glob",
   "repo_map",
   "search_symbols",
+  "search_semantic",
   "project_deps",
   "web_search",
   "web_fetch",
@@ -165,7 +166,7 @@ export function allEnhancedTools(opts?: {
   };
 
   // 1) Controlled search first: no shell syntax or platform path guessing.
-  push(read("glob"), read("grep"), read("search_symbols"));
+  push(read("glob"), read("grep"), read("search_symbols"), read("search_semantic"));
 
   // 2) Script orchestration and known-path reads.
   push(RUN_SCRIPT_TOOL_DEF, read("read_file"));

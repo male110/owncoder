@@ -21,6 +21,7 @@ import {
   toolAnalyzeIssue,
   toolGraphSearch,
   toolSearchSymbols,
+  toolSearchSemantic,
   toolGlob,
   toolWrite,
   toolAppend,
@@ -224,7 +225,7 @@ async function runTool(ctx: ToolContext, call: ParsedToolCall): Promise<ToolResu
   // A truncated/malformed payload means we do not reliably know this call's
   // arguments. For content-carrying tools acting on a fragment silently destroys
   // the rest of the file, so refuse before dispatch.
-  if (args._truncated) {
+  if (args._truncated || args._invalid_json) {
     return fail(truncatedPayloadMessage(name));
   }
 
@@ -282,11 +283,9 @@ async function runTool(ctx: ToolContext, call: ParsedToolCall): Promise<ToolResu
         return await toolGraphSearch(ctx, str(args.query), num(args.depth, 2));
       case "search_code":
       case "search_symbols":
-        return await toolSearchSymbols(
-          ctx,
-          str(args.query || args.pattern),
-          num(args.limit, 20),
-        );
+        return await toolSearchSymbols(ctx, str(args.query || args.pattern), num(args.limit, 20));
+      case "search_semantic":
+        return await toolSearchSemantic(ctx, str(args.query), num(args.limit, 20));
       case "repo_map":
         return await toolRepoMap(ctx, str(args.hint ?? ""));
       // Truncated payloads for these are rejected before dispatch — see the

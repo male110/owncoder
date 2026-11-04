@@ -54,7 +54,32 @@ describe("READONLY_TOOLS 由工具定义派生", () => {
     for (const name of marked) {
       expect(READONLY_TOOLS.has(name)).toBe(true);
     }
-    expect(READONLY_TOOLS.size).toBe(19);
+    expect(READONLY_TOOLS.size).toBe(20);
+  });
+});
+
+describe("搜索工具职责契约", () => {
+  it("两种模式分别注册符号与语义搜索，并明确参数用途", () => {
+    for (const mode of ["agent", "spec"] as const) {
+      const tools = allEnhancedTools({ mode });
+      const symbols = tools.filter(t => t.function.name === "search_symbols");
+      const semantic = tools.filter(t => t.function.name === "search_semantic");
+      expect(symbols).toHaveLength(1);
+      expect(semantic).toHaveLength(1);
+      for (const tool of [...symbols, ...semantic]) {
+        expect(tool.readOnly).toBe(true);
+        expect(READONLY_TOOLS.has(tool.function.name)).toBe(true);
+      }
+      const queryDescription = (tool: typeof symbols[number]) =>
+        (tool.function.parameters as { properties: { query: { description: string } } }).properties.query.description;
+      expect(symbols[0]!.function.description).toContain("exact or fuzzy symbol name");
+      expect(symbols[0]!.function.description).toContain("Use search_semantic");
+      expect(queryDescription(symbols[0]!)).toContain("symbol name");
+      expect(queryDescription(symbols[0]!)).toContain("use search_semantic");
+      expect(queryDescription(symbols[0]!)).not.toMatch(/natural.language query|keyword/i);
+      expect(queryDescription(semantic[0]!)).toMatch(/natural.language/i);
+      expect(semantic[0]!.function.description).toContain("does not perform exact symbol search or grep fallback");
+    }
   });
 });
 
@@ -66,20 +91,20 @@ describe("工具列表顺序：受控搜索优先于 run_script", () => {
   const names = (mode: "agent" | "spec", opts?: Record<string, unknown>) =>
     allEnhancedTools({ mode, ...opts }).map((t) => t.function.name);
 
-  it("两种模式下 grep、glob、search_symbols 排在 run_script 之前", () => {
+  it("两种模式下 grep、glob、search_symbols、search_semantic 排在 run_script 之前", () => {
     for (const mode of ["agent", "spec"] as const) {
-      expect(names(mode).slice(0, 3)).toEqual(["glob", "grep", "search_symbols"]);
+      expect(names(mode).slice(0, 4)).toEqual(["glob", "grep", "search_symbols", "search_semantic"]);
     }
-    expect(names("agent")[3]).toBe("run_script");
+    expect(names("agent")[4]).toBe("run_script");
   });
 
   it("agent 模式在搜索和脚本后提供 read_file / bash / apply_patch", () => {
-    expect(names("agent").slice(4, 7)).toEqual(["read_file", "bash", "apply_patch"]);
+    expect(names("agent").slice(5, 8)).toEqual(["read_file", "bash", "apply_patch"]);
   });
 
   it("spec 模式写工具降级为 plan_* 变体，仍在编辑位置", () => {
     const specNames = names("spec", { allowSpecFiles: true, planBashReadonly: true });
-    expect(specNames.slice(4, 7)).toEqual(["read_file", "bash", "apply_patch"]);
+    expect(specNames.slice(5, 8)).toEqual(["read_file", "bash", "apply_patch"]);
     // plan_* 变体与 agent 原生版同名，覆盖同一槽位
     expect(specNames.filter((n) => n === "write_file").length).toBe(1);
     expect(specNames.filter((n) => n === "append_file").length).toBe(1);
@@ -87,8 +112,8 @@ describe("工具列表顺序：受控搜索优先于 run_script", () => {
 
   it("关闭开关时对应工具从列表消失，其余顺序不变", () => {
     const closed = names("agent", { allowBash: false, enableLsp: false, enableWebSearch: false });
-    expect(closed.slice(0, 4)).toEqual(["glob", "grep", "search_symbols", "run_script"]);
-    expect(closed.slice(4, 6)).toEqual(["read_file", "apply_patch"]);
+    expect(closed.slice(0, 5)).toEqual(["glob", "grep", "search_symbols", "search_semantic", "run_script"]);
+    expect(closed.slice(5, 7)).toEqual(["read_file", "apply_patch"]);
     expect(closed).not.toContain("bash");
     expect(closed).not.toContain("lsp_diagnostics");
     expect(closed).not.toContain("web_search");

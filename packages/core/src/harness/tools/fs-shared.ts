@@ -106,10 +106,16 @@ export function inferFeatureFromContent(content: string): string {
  * search root and (when the pattern contains no "/") the bare file name.
  * Throws when the pattern cannot be compiled to a valid RegExp.
  */
-export function createGlobMatcher(pattern: string): (relativePath: string, fileName: string) => boolean {
+export function createGlobMatcher(
+  pattern: string,
+  ignoreCase = true,
+): (relativePath: string, fileName: string) => boolean {
   const normalized = normalizeGlobPattern(pattern);
-  const regex = globPatternToRegExp(normalized);
-  const basenameRegex = normalized.includes("/") ? undefined : globPatternToRegExp(normalized);
+  const flags = ignoreCase ? "i" : "";
+  const regex = new RegExp(globPatternToRegExp(normalized).source, flags);
+  const basenameRegex = normalized.includes("/")
+    ? undefined
+    : new RegExp(globPatternToRegExp(normalized).source, flags);
 
   return (relativePath, fileName) =>
     regex.test(relativePath) || (basenameRegex ? basenameRegex.test(fileName) : false);

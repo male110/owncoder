@@ -29,6 +29,22 @@ describe("任务上下文：短硬执行纪律", () => {
     expect(text).toMatch(/stop exploring/i);
   });
 
+  it("先复用分解阶段历史，历史为空时不注入该引导", () => {
+    const withHistory = formatCurrentTaskContext(makeTask({
+      relevantHistory: "packages/core/src/example.ts 中的 updateTask 函数负责更新任务。",
+    }));
+    expect(withHistory).toContain("### Reusable history (from task decomposition)");
+    expect(withHistory).toContain("Review and reuse this history before acting.");
+    expect(withHistory).toContain("do not search for or re-explore them");
+    expect(withHistory).toContain("Treat history as a lead, not verified fact");
+    expect(withHistory).toContain("cite actual evidence in the result");
+    expect(withHistory).toContain("packages/core/src/example.ts 中的 updateTask");
+
+    const withoutHistory = formatCurrentTaskContext(makeTask());
+    expect(withoutHistory).not.toContain("### Reusable history");
+    expect(withoutHistory).not.toContain("Review and reuse this history");
+  });
+
   it("仍携带任务字段（做什么），顺序为标题在前", () => {
     const task = makeTask({
       description: "修改示例文件",

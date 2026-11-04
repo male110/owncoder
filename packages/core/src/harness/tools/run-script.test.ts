@@ -264,6 +264,42 @@ test("run_script works via executeTool dispatch", async () => {
   );
 });
 
+test("搜索分派保持符号和向量职责，并通过脚本传播语义不可用状态", async () => {
+  await withWorkspace(async () => {}, async root => {
+    const ctx = ctxFor(root);
+    ctx.index.ftsSearch = async query => {
+      assert.equal(query, "login");
+      return [{ path: "src/auth.ts", name: "login", kind: "function", line: 4, score: 1 }];
+    };
+    ctx.index.ragSearch = async query => {
+      assert.equal(query, "用户登录校验");
+      return [{
+        chunkId: "1", filePath: "src/auth.ts", symbol: "login", content: "login\nfunction login()",
+        startLine: 4, endLine: 8, language: "typescript", score: 0.9, semanticScore: 0.9,
+      }];
+    };
+    for (const [name, query, heading] of [
+      ["search_symbols", "login", "Symbol Search"],
+      ["search_semantic", "用户登录校验", "Semantic Search"],
+    ] as const) {
+      const result = await executeTool(ctx, {
+        id: name, name, arguments: { query }, rawArguments: "{}",
+      });
+      assert.equal(result.ok, true, result.output);
+      assert.ok(result.output.includes(heading), result.output);
+    }
+    delete ctx.index.ragSearch;
+    const result = await toolRunScript(ctx, `
+      const r = await tools.call("search_semantic", { query: "用户登录校验" });
+      console.log("ok=" + r.ok, r.output);
+    `);
+    assert.equal(result.ok, true, result.output);
+    assert.match(result.output, /ok=false/);
+    assert.match(result.output, /unavailable/);
+    assert.doesNotMatch(result.output, /No semantic results/);
+  });
+});
+
 test("executeTool rejects empty run_script code", async () => {
   await withWorkspace(async () => {}, async (root) => {
     const result = await executeTool(ctxFor(root), {
@@ -297,8 +333,14 @@ test("run_script code 参数描述携带防截断、搜索工具和路径纪律"
     ".gitignore",
     "/workspace",
     "/e/...",
+    "PowerShell",
+    "powershell.exe",
+    "/dev/null",
   ]) {
     assert.ok(codeDesc.includes(text), text);
+  }
+  for (const text of ["tools.call(\"glob\"", "tools.call(\"grep\"", ".gitignore", "workspace-relative", "PowerShell", "powershell.exe", "/dev/null"]) {
+    assert.ok(def.function.description.includes(text), text);
   }
 });
 
@@ -796,8 +838,7 @@ test.skipIf(process.platform !== "win32")(
       async () => {},
       async (root) => {
         // 用户原始场景：Unix 重定向/管道写法在 cmd.exe 下失败，stderr 是 GBK 字节。
-        // 默认壳已是随包 bash（POSIX 管道可用），显式 shell:true 锁定 cmd.exe
-        // 路径，验证 GBK 兜底解码仍然生效。
+        // 显式 shell:true 使用 cmd.exe，独立验证输出解码；终端提示词仍要求 PowerShell。
         const code = `
           const { execSync } = require("child_process");
           try {
@@ -811,10 +852,9 @@ test.skipIf(process.platform !== "win32")(
         // 旧行为：ϵͳҲα·汾 类乱码 + U+FFFD（字节已丢失，不可逆）
         assert.ok(!result.output.includes("�"), result.output);
         assert.ok(!result.output.includes("ϵ"), result.output);
-        const locale = Intl.DateTimeFormat().resolvedOptions().locale ?? "";
-        if (locale.toLowerCase().startsWith("zh")) {
-          assert.match(result.output, /系统找不到指定的路径/);
-        }
+        // Node 的区域设置不决定 cmd.exe 的消息语言（中文区域也可能使用英文系统消息）。
+        assert.match(result.output, /MSG=Command failed:/);
+        assert.match(result.output, /系统找不到指定的路径|The system cannot find the path specified/i);
       },
     );
   },

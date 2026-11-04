@@ -3,6 +3,10 @@
  */
 
 import { describe, it, expect, beforeAll } from "vitest";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { extractSymbols } from "../parser.js";
 import {
   initTreeSitter,
   extractSymbolsTreeSitter,
@@ -15,6 +19,28 @@ describe("parser-treesitter", () => {
   beforeAll(async () => {
     // 初始化 tree-sitter (测试环境需要)
     await initTreeSitter();
+  });
+
+  it("should preserve long signatures in both parsers and JSON files", async () => {
+    for (const value of ["short", "x".repeat(210), "😀".repeat(12000)]) {
+      const signature = `function example(value: "${value}")`;
+      const code = `${signature}\n{}`;
+      const treeSymbols = await extractSymbolsTreeSitter(code, "typescript");
+      const regexSymbols = extractSymbols(code, "typescript");
+      expect(treeSymbols[0]?.signature).toBe(signature);
+      expect(regexSymbols[0]?.signature).toBe(signature);
+
+      const dir = mkdtempSync(join(tmpdir(), "signature-test-"));
+      try {
+        const file = join(dir, "symbols.json");
+        writeFileSync(file, JSON.stringify({ treeSymbols, regexSymbols }), "utf8");
+        const result = JSON.parse(readFileSync(file, "utf8"));
+        expect(result.treeSymbols[0].signature).toBe(signature);
+        expect(result.regexSymbols[0].signature).toBe(signature);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    }
   });
 
   describe("isLanguageSupported", () => {
