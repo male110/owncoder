@@ -62,10 +62,6 @@ export function setLocalePref(pref: LocalePref): void {
   syncMain(pref);
 }
 
-export function readLocalePref(): LocalePref {
-  return readStoredPref();
-}
-
 export interface I18n {
   locale: Locale;
   t: (id: MsgId, params?: MsgParams) => string;

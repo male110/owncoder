@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { readNodeDeps, readRustDeps, readPythonDeps, readMavenDeps, readDotNetDeps } from "../context.js";
+import { readNodeDeps, readRustDeps, readPythonDeps, readMavenDeps, readDotNetDeps } from "../project-deps.js";
 import { mkdtemp, writeFile } from "fs/promises";
 import { tmpdir } from "os";
 import { join } from "path";

@@ -3,7 +3,7 @@
  */
 import { dialog, ipcMain, shell } from "electron";
 import { promises as fs } from "node:fs";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { searchWorkspaceFiles } from "../workspace-search";
 import type { IpcContext } from "./types";
 
@@ -24,35 +24,6 @@ export type WorkspaceDirEntryDto = {
   path: string;
   kind: "file" | "dir";
 };
-
-/** Resolve a Markdown link to a file in the current workspace. */
-export function resolveWorkspaceFileLink(workspaceRoot: string, href: string): string | null {
-  const raw = String(href || "").trim();
-  const isWindowsAbsolute = /^[a-z]:[\\/]/i.test(raw);
-  if (
-    !raw ||
-    raw.startsWith("#") ||
-    (!isWindowsAbsolute && /^[a-z][a-z\d+.-]*:/i.test(raw) && !/^file:/i.test(raw))
-  ) {
-    return null;
-  }
-
-  let input = raw;
-  try {
-    input = decodeURIComponent(/^file:\/\//i.test(input) ? new URL(input).pathname : input);
-  } catch {
-    return null;
-  }
-
-  // Chromium represents a Windows absolute path as /C:/path in an href.
-  if (/^\/[a-z]:[\\/]/i.test(input)) input = input.slice(1);
-  input = input.replace(/\\/g, "/");
-  const root = resolve(workspaceRoot);
-  const abs = isAbsolute(input) ? resolve(input) : resolve(root, input);
-  const rel = relative(root, abs);
-  if (rel === ".." || rel.startsWith(`..${sep}`) || isAbsolute(rel)) return null;
-  return abs;
-}
 
 export function registerWorkspaceHandlers(ctx: IpcContext): void {
   const { session, recentStore, openWorkspaceRoot, switchWorkspaceRoot, resolveWorkspacePath } = ctx;

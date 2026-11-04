@@ -34,6 +34,7 @@ export function registerSessionHandlers(ctx: IpcContext): void {
       matchesBuiltin: snap.matchesBuiltin,
       activePlanPath: s.activePlanPath,
       lastPlanPath: s.lastPlanPath,
+      currentFeature: s.currentFeature,
       todoAnchor: s.todoAnchor,
       lastCheckpointId: s.lastCheckpointId,
       sessionRestored: s.sessionRestored,
@@ -138,6 +139,28 @@ export function registerSessionHandlers(ctx: IpcContext): void {
   ipcMain.handle("plans:list", (_e, sessionId?: string) => session.listPlans(sessionId));
 
   ipcMain.handle("plans:read", (_e, path: string) => session.readPlan(path));
+
+  // ── Specs (Kiro 风格 spec → design → tasks 审批流) ─────────────────────────
+
+  ipcMain.handle("specs:list", (_e, sessionId?: string) => session.listSpecs(sessionId));
+
+  ipcMain.handle("specs:read", (_e, feature: string, phase: string) =>
+    session.readSpec(feature, phase as never),
+  );
+
+  ipcMain.handle("specs:status", (_e, feature: string) => session.getSpecStatus(feature));
+
+  ipcMain.handle("specs:save", (_e, feature: string, phase: string, content: string, sessionId?: string) =>
+    session.saveSpecDoc(feature, phase as never, content, sessionId),
+  );
+
+  ipcMain.handle("specs:approve", (_e, feature: string, sessionId?: string) =>
+    session.approveSpec(feature, sessionId),
+  );
+
+  ipcMain.handle("specs:reject", (_e, feature: string, feedback: string, sessionId?: string) =>
+    session.rejectSpec(feature, feedback, sessionId),
+  );
 
   // ── Checkpoints & changes ─────────────────────────────────────────────────
 

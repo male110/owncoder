@@ -44,8 +44,15 @@ build/
 .bugfix/
 .tmp-z-ide/
 _tmp_o_ide/
+tmp*
+.tmp*/
 
 # Deprecated Rust implementation (replaced by TypeScript)
 crates/
 .idea/
 pnpm-lock.yaml
+.zcode/
+# 内置 MSYS2 运行时：固定归档入 git（确定性离线构建），解包产物不入 git
+!apps/desktop/dependencies/msys2/*.tar.xz
+!apps/desktop/dependencies/msys2/SHA256SUMS
+apps/desktop/bundled-tools/

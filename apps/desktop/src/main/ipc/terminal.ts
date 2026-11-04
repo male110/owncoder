@@ -2,7 +2,8 @@
  * IPC handlers: terminal log, interactive PTY.
  */
 import { ipcMain } from "electron";
-import { createPty, killPty, resizePty, writePty } from "../pty";
+import { acceptTerminalCompletion, completeTerminal, createPty, getTerminalContext, killPty, resizePty, writePty } from "../pty";
+import type { TerminalCompletionAcceptRequest, TerminalCompletionRequest } from "../../shared/terminal-completion";
 import type { IpcContext } from "./types";
 
 export function registerTerminalHandlers(ctx: IpcContext): void {
@@ -20,6 +21,10 @@ export function registerTerminalHandlers(ctx: IpcContext): void {
     const cwd = session.getState().workspace?.root;
     return createPty(sink, { cwd, cols: opts?.cols, rows: opts?.rows });
   });
+
+  ipcMain.handle("terminal:context/get", (_e, id: string) => getTerminalContext(id));
+  ipcMain.handle("terminal:complete", (_e, request: TerminalCompletionRequest) => completeTerminal(request));
+  ipcMain.handle("terminal:accept-completion", (_e, request: TerminalCompletionAcceptRequest) => acceptTerminalCompletion(request));
 
   ipcMain.on("pty:input", (_e, id: string, data: string) => {
     writePty(id, data);

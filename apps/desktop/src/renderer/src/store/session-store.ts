@@ -13,6 +13,7 @@ import type {
   GitStatusDto,
   PlanInfoDto,
   ProjectDto,
+  SpecFeatureDto,
   TaskStatusDto,
 } from "../../../preload/index";
 
@@ -36,7 +37,7 @@ export interface SessionState {
   providers: Provider[];
   llmConfigured: boolean;
   thinkingEffort: ThinkingEffort;
-  
+
   // 执行阶段单独配置
   separateStageModels: boolean;
   reactModelId: string | null;
@@ -61,6 +62,15 @@ export interface SessionState {
   /** Per-session pending-plan list shown in PlansBar. */
   plansBySession: Record<string, PlanInfoDto[]>;
 
+  // Spec workflow (Kiro 风格 spec → design → tasks)
+  /** Focused-session mirror of the spec feature under discussion. */
+  currentFeature: string | null;
+  /** Per-session current feature; prevents A's spec from showing in B's bar. */
+  currentFeatureBySession: Record<string, string | null>;
+  /** Spec features list — focused-session mirror. */
+  specs: SpecFeatureDto[];
+  specsBySession: Record<string, SpecFeatureDto[]>;
+
   // Git
   gitStatus: GitStatusDto | null;
 }
@@ -81,7 +91,7 @@ export interface SessionActions {
   setProviders: (providers: Provider[]) => void;
   setLlmConfigured: (v: boolean) => void;
   setThinkingEffort: (effort: ThinkingEffort) => void;
-  
+
   // 执行阶段单独配置
   setSeparateStageModels: (enabled: boolean) => void;
   setReactModelId: (id: string | null) => void;
@@ -98,6 +108,11 @@ export interface SessionActions {
   getChangesForSession: (sessionId?: string | null) => ChangeFileDto[];
   setPlans: (plans: PlanInfoDto[], sessionId?: string | null) => void;
   getPlansForSession: (sessionId?: string | null) => PlanInfoDto[];
+  // Spec workflow
+  setCurrentFeature: (feature: string | null, sessionId?: string | null) => void;
+  getCurrentFeatureForSession: (sessionId?: string | null) => string | null;
+  setSpecs: (specs: SpecFeatureDto[], sessionId?: string | null) => void;
+  getSpecsForSession: (sessionId?: string | null) => SpecFeatureDto[];
   setGitStatus: (status: GitStatusDto | null) => void;
 
   // High-level helpers used by hooks
@@ -119,7 +134,7 @@ const initialState: SessionState = {
   providers: [],
   llmConfigured: true,
   thinkingEffort: "high",
-  
+
   separateStageModels: false,
   reactModelId: null,
   reactProviderId: null,
@@ -131,6 +146,10 @@ const initialState: SessionState = {
   changesBySession: {},
   plans: [],
   plansBySession: {},
+  currentFeature: null,
+  currentFeatureBySession: {},
+  specs: [],
+  specsBySession: {},
   gitStatus: null,
 };
 
@@ -205,7 +224,7 @@ export const useSessionStore = create<SessionState & SessionActions>()((set, get
   setProviders: (providers) => set({ providers }),
   setLlmConfigured: (llmConfigured) => set({ llmConfigured }),
   setThinkingEffort: (thinkingEffort) => set({ thinkingEffort }),
-  
+
   setSeparateStageModels: (separateStageModels) => set({ separateStageModels }),
   setReactModelId: (reactModelId) => set({ reactModelId }),
   setReactProviderId: (reactProviderId) => set({ reactProviderId }),
@@ -349,6 +368,52 @@ export const useSessionStore = create<SessionState & SessionActions>()((set, get
       return [];
     }
     return s.plans;
+  },
+  setCurrentFeature: (feature, sessionId) => {
+    const sid = sessionId ?? get().activeSessionId;
+    set((s) => {
+      const currentFeatureBySession = sid
+        ? { ...s.currentFeatureBySession, [sid]: feature }
+        : s.currentFeatureBySession;
+      return {
+        currentFeatureBySession,
+        currentFeature: !sid || sid === s.activeSessionId ? feature : s.currentFeature,
+      };
+    });
+  },
+  getCurrentFeatureForSession: (sessionId) => {
+    const s = get();
+    if (sessionId) {
+      if (Object.prototype.hasOwnProperty.call(s.currentFeatureBySession, sessionId)) {
+        return s.currentFeatureBySession[sessionId] ?? null;
+      }
+      if (sessionId === s.activeSessionId) return s.currentFeature;
+      return null;
+    }
+    return s.currentFeature;
+  },
+  setSpecs: (specs, sessionId) => {
+    const sid = sessionId ?? get().activeSessionId;
+    set((s) => {
+      const specsBySession = sid
+        ? { ...s.specsBySession, [sid]: specs }
+        : s.specsBySession;
+      return {
+        specsBySession,
+        specs: !sid || sid === s.activeSessionId ? specs : s.specs,
+      };
+    });
+  },
+  getSpecsForSession: (sessionId) => {
+    const s = get();
+    if (sessionId) {
+      if (Object.prototype.hasOwnProperty.call(s.specsBySession, sessionId)) {
+        return s.specsBySession[sessionId] ?? [];
+      }
+      if (sessionId === s.activeSessionId) return s.specs;
+      return [];
+    }
+    return s.specs;
   },
   setGitStatus: (gitStatus) => set({ gitStatus }),
 

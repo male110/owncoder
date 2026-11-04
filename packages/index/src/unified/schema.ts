@@ -11,7 +11,7 @@
 
 import type Database from "better-sqlite3";
 
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 /**
  * Schema迁移定义
@@ -235,6 +235,58 @@ const MIGRATIONS: SchemaMigration[] = [
         WHERE rowid NOT IN (SELECT id FROM files);
         INSERT INTO symbols_fts(symbols_fts) VALUES ('rebuild');
       `);
+    },
+  },
+  {
+    version: 4,
+    description: "Add semantic code index: symbol-level chunks + per-file embedding watermark (vec0 table created lazily by the semantic pass — CLI processes have no sqlite-vec loaded)",
+    up: (db: Database.Database) => {
+      // 符号级语义 chunk：qualified_name + signature + doc + 正文摘录的嵌入文本
+      // 在构建后置语义通道（semantic-index.ts）写入，嵌入器以端口注入，
+      // index 包自身不依赖 onnxruntime / sqlite-vec。
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS code_chunks (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          path TEXT NOT NULL,
+          symbol_name TEXT,
+          qualified_name TEXT,
+          kind TEXT,
+          start_line INTEGER NOT NULL,
+          end_line INTEGER NOT NULL,
+          content TEXT NOT NULL,
+          content_hash TEXT NOT NULL,
+          file_hash TEXT,
+          updated_at INTEGER NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_code_chunks_path ON code_chunks(path);
+        CREATE INDEX IF NOT EXISTS idx_code_chunks_hash ON code_chunks(content_hash);
+
+        -- 每文件嵌入水位：files.hash 与之相等即跳过重嵌入（增量 reconcile）。
+        CREATE TABLE IF NOT EXISTS code_chunks_state (
+          path TEXT PRIMARY KEY,
+          file_hash TEXT NOT NULL,
+          embedded_at INTEGER NOT NULL
+        );
+      `);
+      // 注意：code_chunks_vec（vec0）不在迁移里创建——CREATE VIRTUAL TABLE
+      // 需要 sqlite-vec 模块已在本连接注册，而 CLI/查询进程不加载该扩展。
+      // vec0 表由语义通道（buildSemanticIndex）在持有 vec 加载器的写连接上
+      // lazy 创建（CREATE VIRTUAL TABLE IF NOT EXISTS，幂等）。
+    },
+    down: (db: Database.Database) => {
+      // vec0 表的 DROP 在模块未注册的连接上会报错，逐条吞掉（down 仅开发用）。
+      for (const sql of [
+        "DROP TABLE IF EXISTS code_chunks_vec;",
+        "DROP TABLE IF EXISTS code_chunks;",
+        "DROP TABLE IF EXISTS code_chunks_state;",
+      ]) {
+        try {
+          db.exec(sql);
+        } catch {
+          /* 模块未加载时 vec0 drop 失败可忽略 */
+        }
+      }
     },
   },
 ];

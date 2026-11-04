@@ -29,6 +29,27 @@ const {
   useUiStore,
 } = await import("./ui-store");
 
+describe("editor column width", () => {
+  afterEach(() => {
+    useUiStore.getState().setEditorWidth(70);
+  });
+
+  it("defaults to a wider file column", () => {
+    expect(useUiStore.getState().editorWidth).toBe(70);
+  });
+
+  it.each([
+    [25, 60],
+    [60, 60],
+    [70, 70],
+    [75, 75],
+    [90, 75],
+  ])("keeps the file column wider when resizing to %s percent", (width, expected) => {
+    useUiStore.getState().setEditorWidth(width);
+    expect(useUiStore.getState().editorWidth).toBe(expected);
+  });
+});
+
 describe("composer draft persistence", () => {
   beforeEach(() => {
     memory.clear();
@@ -111,6 +132,26 @@ describe("composer draft persistence", () => {
     expect(useUiStore.getState().editorPath).toBe("b.ts");
     ui.setEditorPath(null);
     expect(useUiStore.getState()).toMatchObject({ editorTabs: [], editorPath: null, diffDataByPath: {} });
+  });
+
+  it("关闭最后一个文件清空编辑器状态，保留对话草稿", () => {
+    const ui = useUiStore.getState();
+    ui.setEditorPath(null);
+    ui.setDraft("继续对话", "layout-session");
+    ui.setEditorPath("src/a.ts");
+    ui.setEditorPath("src/b.ts");
+
+    ui.closeEditorTab("src/b.ts");
+    expect(useUiStore.getState()).toMatchObject({
+      editorTabs: ["src/a.ts"], editorPath: "src/a.ts",
+    });
+
+    ui.closeEditorTab("src/a.ts");
+    expect(useUiStore.getState()).toMatchObject({
+      editorTabs: [], editorPath: null, diffDataByPath: {},
+    });
+    expect(useUiStore.getState().drafts["layout-session"]).toBe("继续对话");
+    ui.setDraft("", "layout-session");
   });
 
   it("keeps pending composer text when there is no active session", () => {

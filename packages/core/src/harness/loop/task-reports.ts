@@ -22,27 +22,24 @@ export function isolateMessagesForNextTask(
   messages.splice(keep);
 }
 
-/** Compose every task report into the conversation's final report. */
-export function formatFinalTaskReports(
-  reports: readonly TaskReport[],
-  progress: { done: number; total: number },
-): string {
-  if (reports.length === 0) {
-    return `All tasks processed (${progress.done}/${progress.total} completed).`;
+/** Compose one final report per task, ignoring duplicate events and repeated paragraphs. */
+export function formatFinalTaskReports(reports: readonly TaskReport[]): string {
+  const latestByTask = new Map<string, TaskReport>();
+  for (const report of reports) latestByTask.set(report.taskId, report);
+
+  const seenReports = new Set<string>();
+  const finalReports: string[] = [];
+  for (const report of latestByTask.values()) {
+    const paragraphs = report.report
+      .split(/\n\s*\n/)
+      .map((paragraph) => paragraph.trim())
+      .filter(Boolean);
+    const uniqueParagraphs = [...new Set(paragraphs)];
+    const text = uniqueParagraphs.join("\n\n") || "(无报告内容)";
+    const key = text.replace(/\s+/g, " ").trim();
+    if (seenReports.has(key)) continue;
+    seenReports.add(key);
+    finalReports.push(text);
   }
-
-  const sections = reports.map((r, index) => {
-    const heading = `### 任务 ${index + 1} (${r.taskId}) — ${r.status}`;
-    const desc = r.description.trim() ? `\n${r.description.trim()}` : "";
-    const body = r.report.trim() || "(无报告内容)";
-    return `${heading}${desc}\n\n${body}`;
-  });
-
-  return [
-    `## 本次对话最终报告`,
-    ``,
-    `进度：${progress.done}/${progress.total} 任务完成。`,
-    ``,
-    ...sections,
-  ].join("\n");
+  return finalReports.join("\n\n");
 }

@@ -1,7 +1,7 @@
 import { z } from "zod";
 import {
   BUILTIN_AGENT_PROMPT,
-  BUILTIN_PLAN_PROMPT,
+  BUILTIN_SPEC_PROMPT,
 } from "./builtin-prompts.js";
 import {
   BUILTIN_TASK_DECOMPOSE_PROMPT,
@@ -42,7 +42,7 @@ export interface NodeTypeDescriptor {
   palette?: string;
   hint?: string;
   fixed?: boolean;
-  addableIn?: ReadonlyArray<"plan" | "agent">;
+  addableIn?: ReadonlyArray<"spec" | "agent">;
   /** Filled in T11. */
   positionConstraints?: NodeTypePositionConstraints;
 }
@@ -53,13 +53,13 @@ export const NODE_TYPE_REGISTRY: ReadonlyArray<NodeTypeDescriptor> = [
   { type: "history_compact", label: "压缩历史", hint: "旧节点：已移除运行处理器，仅保留旧配置兼容，执行时跳过。历史上下文由任务分解和模型调用前的统一注入提供。", positionConstraints: { deletable: true, repeatable: false, slot: "pre-model" } },
   { type: "document_intent_router", label: "文档意图识别", hint: "旧节点：一次 LLM 调用把用户回复归类为“确认/问下一步/其他”。已删除——一个标签装不下用户的真实意思，而且它的判定结果任务分解看不到，两者会互相矛盾。PRD/TDD 的确认判断已并入 Plan 模式「调用模型」的提示词。", positionConstraints: { deletable: true, repeatable: false, slot: "pre-model" } },
   { type: "agent_intent_router", label: "Agent 意图识别", hint: "旧节点：一次 LLM 调用把用户消息归类为“执行当前任务/问进度/其他”。已删除，原因同上；理解用户意图已并入「任务分解」——先读懂再分解，同一次调用。", positionConstraints: { deletable: true, repeatable: false, slot: "pre-model" } },
-  { type: "task_decompose", label: "理解与任务分解", palette: "读懂请求，再分解为有序步骤", hint: "一次 LLM 调用：先结合对话历史、用户偏好和项目规则说清用户到底要什么，同时记下用户设下的限制，再据此分解为有序步骤（Agent 模式）。琐碎任务返回空步骤列表。可禁用以跳过该阶段。", addableIn: ["agent"], positionConstraints: { deletable: true, repeatable: false, slot: "pre-model" } },
-  { type: "explore_tools", label: "调用模型", palette: "大模型 + 只读工具循环", hint: "调用大模型（流式）。模型可发起只读工具；多轮直到不再调工具。可添加多个，按顺序执行。", addableIn: ["plan"], positionConstraints: { deletable: true, repeatable: true, slot: "mid" } },
+  { type: "task_decompose", label: "理解与任务分解", palette: "识别意图，再分解为独立任务", hint: "一次 LLM 调用：先结合对话历史、用户偏好和项目规则识别用户意图（这是一切的基础），再把意图分解为独立任务——每个任务只含任务内容、建议性的完成指导与相关历史，不产出详细步骤（Agent 模式）。琐碎请求返回空任务列表。可禁用以跳过该阶段。", addableIn: ["agent"], positionConstraints: { deletable: true, repeatable: false, slot: "pre-model" } },
+  { type: "explore_tools", label: "调用模型", palette: "大模型 + 只读工具循环", hint: "调用大模型（流式）。模型可发起只读工具；多轮直到不再调工具。可添加多个，按顺序执行。", addableIn: ["spec"], positionConstraints: { deletable: true, repeatable: true, slot: "mid" } },
   { type: "draft_plan", label: "计划提示词", hint: "旧节点：计划系统提示词。出厂已并入「调用模型」。" , positionConstraints: { deletable: true, repeatable: false } },
   { type: "save_plan", label: "保存计划", hint: "旧节点：是否允许 save_plan。出厂已并入「调用模型」参数。", positionConstraints: { deletable: true, repeatable: false } },
   { type: "load_anchors", label: "活动计划/TODO", hint: "旧节点：注入 ACTIVE PLAN / TODO。出厂已并入「收集上下文」。" , positionConstraints: { deletable: true, repeatable: false } },
   { type: "execute_tools", label: "调用模型", palette: "大模型 + 读/写工具循环", hint: "调用大模型（流式）。模型可发起读/写/终端等工具；多轮循环。可添加多个，按顺序执行。", addableIn: ["agent"], positionConstraints: { deletable: true, repeatable: true, slot: "mid" } },
-  { type: "verify", label: "检验", palette: "结束后再检验一次", hint: "再调一次模型做简短检验（可选）。", addableIn: ["plan", "agent"], positionConstraints: { deletable: true, repeatable: true, slot: "post-model" } },
+  { type: "verify", label: "检验", palette: "结束后再检验一次", hint: "再调一次模型做简短检验（可选）。", addableIn: ["spec", "agent"], positionConstraints: { deletable: true, repeatable: true, slot: "post-model" } },
   { type: "post_verify", label: "执行验证", palette: "对修改文件做执行级验证", hint: "对工具修改的文件做执行级验证（语法检查等），不需要 LLM 调用。", addableIn: ["agent"], positionConstraints: { deletable: true, repeatable: false, slot: "post-model" } },
   { type: "present_changes", label: "变更审阅", palette: "Keep / Undo 审阅写入", hint: "对本回合工具写入的文件做 Keep / Undo 审阅（不是再调一次模型）。", addableIn: ["agent"], positionConstraints: { deletable: true, repeatable: false, slot: "post-model" } },
   { type: "end", label: "结束", fixed: true, positionConstraints: { deletable: false, repeatable: false } },
@@ -217,7 +217,7 @@ export const REACT_STEP_METAS: ReactStepMeta[] = [
     labelZh: "文档交付物检测",
     description: "Stop after writing PRD/TDD etc., wait for user confirmation.",
     descriptionZh: "写入 PRD/TDD 等后停止，等待确认。",
-    conditional: "Plan mode",
+    conditional: "Spec mode",
     conditionalZh: "Plan 模式",
   },
   {
@@ -255,7 +255,7 @@ export function defaultReactSteps(): ReactStepConfig[] {
     { id: "budget_check", enabled: true, params: { startIter: 6, interval: 3, maxChars: 24000 } },
     { id: "llm_call", enabled: true, params: { maxRetries: 2 } },
     { id: "parse_response", enabled: true, params: {} },
-    { id: "stuck_detect", enabled: true, params: { maxRepeat: 2, maxReadCount: 3, maxReadonlyIters: 100 } },
+    { id: "stuck_detect", enabled: true, params: { maxRepeat: 2, maxReadCount: 3, maxReadonlyIters: 6 } },
     { id: "tool_cap", enabled: true, params: { maxTotal: 200 } },
     { id: "git_snapshot", enabled: true, params: {} },
     { id: "tool_exec", enabled: true, params: { parallel: true } },
@@ -289,7 +289,7 @@ export const PipelineNodeParamsSchema = z
     maxPagesPerFile: z.number().int().min(1).optional(),
     /** Max redundant reads of ranges that are already fully covered for one file. */
     maxRedundantRangesPerFile: z.number().int().min(1).optional(),
-    /** Loop strategy name; default "react". */
+    /** Loop strategy name; default "react". Multi-task work remains sequential in the same ReAct context. */
     loopStrategy: z.string().optional(),
     /** State machine configuration for improved loop control */
     stateMachine: z.object({
@@ -310,10 +310,10 @@ export const PipelineNodeParamsSchema = z
     injectMentions: z.boolean().optional(),
     /** @deprecated Dependencies are no longer injected; use the `project_deps` tool on demand. */
     injectDeps: z.boolean().optional(),
-    /** Agent: inject ACTIVE PLAN / TODO before the model call (was "load_anchors"). */
+    /** Agent: inject ACTIVE PLAN / TODO before the model call. */
     injectAnchors: z.boolean().optional(),
-    /** Plan: allow save_plan tool during the model+tools loop. */
-    allowPlanFiles: z.boolean().optional(),
+    /** Spec: allow spec write tools during the model+tools loop. */
+    allowSpecFiles: z.boolean().optional(),
     autoKeepChanges: z.boolean().optional(),
     /** Inject user preference memories (global, cross-project) into context. */
     injectMemories: z.boolean().optional(),
@@ -332,15 +332,14 @@ export const PipelineNodeParamsSchema = z
       }),
     ]).optional(),
     /**
-     * Per-turn controls for progressive source expansion, indexed-context
-     * freshness receipts, and model-visible tool-output projection. Source
-     * compression defaults to observe at the runtime boundary.
-     * 
+     * Per-turn controls for indexed-context freshness receipts and
+     * model-visible tool-output projection. Source compression defaults to
+     * observe at the runtime boundary.
+     *
      * historyFilter: Task-aware filtering of recent conversation history before
      * ReAct loops, reducing token usage while preserving relevant context.
      */
     contextControl: z.object({
-      progressiveExpansion: z.boolean().optional(),
       freshnessTracking: z.boolean().optional(),
       emitTelemetry: z.boolean().optional(),
       sourceCompression: z.object({
@@ -433,9 +432,7 @@ function isRemovedNode(
 }
 
 export type PipelineNode = z.infer<typeof PipelineNodeSchema>;
-export type PipelineEdge = z.infer<typeof PipelineEdgeSchema>;
 export type ModePipeline = z.infer<typeof ModePipelineSchema>;
-export type PipelineNodeParams = z.infer<typeof PipelineNodeParamsSchema>;
 
 /** UI labels — derived from NODE_TYPE_REGISTRY (mirror real runtime). */
 export const NODE_TYPE_LABELS: Record<PipelineNodeType, string> = Object.fromEntries(
@@ -453,10 +450,10 @@ export const NODE_TYPE_HINTS: Partial<Record<PipelineNodeType, string>> = Object
 ) as Partial<Record<PipelineNodeType, string>>;
 
 /**
- * Plan = pre-model context → call model (with plan tools) → end.
+ * Spec = pre-model context → call model (with plan tools) → end.
  * Matches pre-orchestration single LLM+tools loop.
  */
-export function builtinPlanPipeline(): ModePipeline {
+export function builtinSpecPipeline(): ModePipeline {
   return ModePipelineSchema.parse({
     nodes: [
       { id: "start",   type: "start",         label: "开始",     enabled: true, position: { x: 300, y: 40 } },
@@ -468,8 +465,8 @@ export function builtinPlanPipeline(): ModePipeline {
       {
         id: "llm",     type: "explore_tools",  label: "调用模型", enabled: true,
         position: { x: 300, y: 300 },
-        prompt: BUILTIN_PLAN_PROMPT.trim(),
-        params: { maxIterations: 200, allowPlanFiles: true },
+        prompt: BUILTIN_SPEC_PROMPT.trim(),
+        params: { maxIterations: 200, allowSpecFiles: true },
       },
       { id: "end",     type: "end",            label: "结束",     enabled: true, position: { x: 300, y: 430 } },
     ],
@@ -516,8 +513,7 @@ export function builtinAgentPipeline(): ModePipeline {
     edges: [
       { id: "e1",  from: "start",      to: "context"    },
       { id: "e2",  from: "context",    to: "decompose"  },
-      { id: "e2b", from: "decompose",  to: "compact"    },
-      { id: "e3",  from: "compact",    to: "llm"        },
+      { id: "e3",  from: "decompose",  to: "llm"        },
       { id: "e3b", from: "llm",        to: "postverify" },
       { id: "e4",  from: "postverify", to: "present"    },
       { id: "e5",  from: "present",    to: "end"        },
@@ -536,8 +532,8 @@ export const FIXED_PIPELINE_TYPES = new Set<PipelineNodeType>(
  * Type set mirrors NODE_TYPE_REGISTRY.addableIn; array order is UI display order
  * (order-sensitive, hence kept explicit rather than derived).
  */
-export const ADDABLE_PIPELINE_TYPES: Record<"plan" | "agent", PipelineNodeType[]> = {
-  plan: [],
+export const ADDABLE_PIPELINE_TYPES: Record<"spec" | "agent", PipelineNodeType[]> = {
+  spec: [],
   agent: [],
 };
 
@@ -596,7 +592,7 @@ function newNodeId(type: PipelineNodeType, existing: Set<string>): string {
 
 export function createPipelineNode(
   type: PipelineNodeType,
-  _mode: "plan" | "agent",
+  _mode: "spec" | "agent",
   existingIds: Set<string>,
 ): PipelineNode {
   const id = newNodeId(type, existingIds);
@@ -608,8 +604,8 @@ export function createPipelineNode(
         type,
         label: "调用模型",
         enabled: true,
-        prompt: BUILTIN_PLAN_PROMPT.trim(),
-        params: { maxIterations: 200, allowPlanFiles: true, reactSteps: defaultReactSteps() },
+        prompt: BUILTIN_SPEC_PROMPT.trim(),
+        params: { maxIterations: 200, allowSpecFiles: true, reactSteps: defaultReactSteps() },
       };
     case "execute_tools":
       return {
@@ -665,7 +661,7 @@ export function createPipelineNode(
 export function addPipelineNode(
   pipeline: ModePipeline,
   type: PipelineNodeType,
-  mode: "plan" | "agent",
+  mode: "spec" | "agent",
   afterId?: string,
 ): ModePipeline {
   if (FIXED_PIPELINE_TYPES.has(type)) {
@@ -807,57 +803,12 @@ function canSwapSlots(a: PipelineNode, b: PipelineNode): boolean {
   if (aSlot < 0 || bSlot < 0) return true;
   return aSlot === bSlot;
 }
-
-/** Linearize pipeline following edges; skip disabled nodes (short-circuit). */
-export function orderedEnabledNodes(pipeline: ModePipeline): PipelineNode[] {
-  const byId = new Map(pipeline.nodes.map((n) => [n.id, n]));
-  const outs = new Map<string, string[]>();
-  for (const e of pipeline.edges) {
-    const list = outs.get(e.from) ?? [];
-    list.push(e.to);
-    outs.set(e.from, list);
-  }
-  const start = pipeline.nodes.find((n) => n.type === "start");
-  if (!start) return pipeline.nodes.filter((n) => n.enabled && n.type !== "end");
-
-  const ordered: PipelineNode[] = [];
-  const seen = new Set<string>();
-  let cur: string | undefined = start.id;
-  while (cur && !seen.has(cur)) {
-    seen.add(cur);
-    const node = byId.get(cur);
-    if (!node) break;
-    if (node.enabled !== false && node.type !== "start" && node.type !== "end") {
-      ordered.push(node);
-    }
-    const successors: string[] = outs.get(cur) ?? [];
-    let next: string | undefined = successors[0];
-    while (next) {
-      const n = byId.get(next);
-      if (!n) {
-        next = undefined;
-        break;
-      }
-      if (n.enabled !== false || n.type === "end") break;
-      next = (outs.get(next) ?? [])[0];
-    }
-    cur = next;
-  }
-  return ordered;
-}
-
 export function findPipelineNode(
   pipeline: ModePipeline,
   type: PipelineNodeType,
 ): PipelineNode | undefined {
   return pipeline.nodes.find((n) => n.type === type);
 }
-
-export function isNodeEnabled(pipeline: ModePipeline, type: PipelineNodeType): boolean {
-  const n = findPipelineNode(pipeline, type);
-  return n?.enabled !== false;
-}
-
 /**
  * Merge overlay pipeline onto base by node id.
  * When overlay provides edges, orphaned nodes (present in merged nodes but not

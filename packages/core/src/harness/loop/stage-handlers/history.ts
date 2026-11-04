@@ -28,7 +28,7 @@ const CHAR_TOKEN_SAFETY = 0.75;
  *
  * Now accepts the properly computed `historyBudgetTokens` from
  * `computeContextBudget().segments.history`, which already subtracts all
- * fixed segments (systemPrompt, platformInfo, promptOptimizer, userInput,
+ * fixed segments (systemPrompt, platformInfo, userInput,
  * taskDecomposition, activePlan) from the input budget.
  */
 export function computeHistoryLimits(historyBudgetTokens: number): {

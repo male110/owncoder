@@ -15,12 +15,12 @@ import { join, resolve } from "node:path";
 
 const SESSIONS_DIR = ".owncoder/sessions";
 const FILE_VERSION = 1 as const;
-const MAX_ROUNDS = 50;
 const MAX_USER_INPUT_CHARS = 8_000;
 const MAX_UNDERSTANDING_CHARS = 4_000;
 const MAX_STEP_DESCRIPTION_CHARS = 500;
+/** 单个任务报告落盘字符上限（召回历史时整体仍有轮次级截断）。 */
+const MAX_REPORT_CHARS = 6_000;
 const MAX_TASKS = 20;
-const MAX_STEPS = 20;
 const MAX_EVIDENCE_PER_ROUND = 200;
 const MAX_FILE_CHANGES_PER_ROUND = 30;
 const MAX_TOOL_CALLS_PER_ROUND = 100;
@@ -39,36 +39,6 @@ export interface FileEvidence {
   capturedAt: string;
 }
 
-export interface Finding {
-  id: string;
-  summary: string;
-  evidenceIds: string[];
-  createdAt: string;
-}
-
-export interface Checkpoint {
-  id: string;
-  stepId?: string;
-  status: "started" | "completed" | "interrupted";
-  createdAt: string;
-}
-
-export type TaskRelation = "continue" | "new";
-
-export interface TaskState {
-  taskId: string;
-  relation: TaskRelation;
-  goal: string;
-  scope: string[];
-  completedSteps: string[];
-  pendingSteps: string[];
-  fileEvidence: FileEvidence[];
-  findings: Finding[];
-  checkpoints: Checkpoint[];
-  /** 统一执行状态；旧持久化数据可能缺失，读取时按可选处理。 */
-  runState?: import("./task-run.ts").TaskRunState;
-}
-
 export interface PersistedEvidence {
   needId: string;
   summary: string;
@@ -83,28 +53,24 @@ export interface PersistedEvidence {
   fileEvidence?: FileEvidence;
 }
 
-export interface PersistedDecomposeStep {
-  id: string;
-  description: string;
-  dependsOn: string[];
-  verificationCriteria?: {
-    command: string;
-    expectedOutput: string;
-    exitCode?: number;
-  };
-  rollbackStrategy?: string;
-  estimatedComplexity?: "low" | "medium" | "high";
-  /** 当前步骤可复用的完整相关历史。 */
-  relevantHistory?: string;
-}
-
 export interface PersistedDecomposeTask {
   id: string;
+  /** 短标题（任务式分解产出；旧数据可能缺失）。 */
+  title?: string;
   description: string;
-  userConstraints?: string[];
-  relevantHistory?: string;
-  progressStatus?: string;
-  steps: PersistedDecomposeStep[];
+  /**
+   * 任务执行指令（原 guidance；旧轮次持久化的 guidance / steps 描述
+   * 读时折叠进此字段）。
+   */
+  prompt?: string;
+  /** 本任务依赖的其他任务 id（真实依赖，不是线性顺序）。 */
+  dependsOn?: string[];
+  /** 任务类型：implementation 产出变更，verification 验证正确性。 */
+  kind?: "implementation" | "verification";
+  /** 任务执行结果报告（turn 结束归档时带入，供下轮分解历史召回）。 */
+  result?: string;
+  /** @deprecated 旧字段，读时映射到 prompt。 */
+  guidance?: string;
 }
 
 export interface PersistedDecompose {
@@ -112,6 +78,8 @@ export interface PersistedDecompose {
   intent: string;
   userConstraints: string[];
   tasks: PersistedDecomposeTask[];
+  /** 任务相关历史：与 tasks 同级（旧轮次任务级历史读时折叠到此处）。 */
+  relevantHistory?: string;
 }
 
 export interface PersistedFileChange {
@@ -216,102 +184,102 @@ function sanitizeDecompose(raw: unknown): PersistedDecompose | undefined {
         .filter(Boolean)
         .slice(0, 20)
     : [];
-  // 新格式 tasks[] 优先；旧格式顶层 steps 包成单个 task_1。
+
+  // 旧形状 steps[].description 折叠进 prompt（读兼容；不保留依赖/环检信息）。
+  const promptFromSteps = (rawSteps: unknown): string => {
+    if (!Array.isArray(rawSteps)) return "";
+    return rawSteps.slice(0, 20)
+      .map((step, index) => {
+        const description = step && typeof step === "object"
+          ? (step as Record<string, unknown>).description
+          : "";
+        return typeof description === "string" && description.trim()
+          ? `${index + 1}. ${clip(description.trim(), MAX_STEP_DESCRIPTION_CHARS)}`
+          : "";
+      })
+      .filter(Boolean)
+      .join("\n");
+  };
+
+  // 当前格式 tasks[] 优先（字段为 prompt/kind/dependsOn）；旧格式 nodes[]
+  // （同字段）次之；更旧的 tasks[]（字段为 guidance）与顶层 steps 由字段
+  // 折叠兼容，steps 包成单个 task_1，步骤描述折叠进 prompt。
   const rawTasks: unknown[] = Array.isArray(obj.tasks)
     ? obj.tasks.slice(0, MAX_TASKS)
-    : Array.isArray(obj.steps)
-      ? [{ id: "task_1", description: "", steps: obj.steps }]
-      : [];
+    : Array.isArray(obj.nodes)
+      ? obj.nodes.slice(0, MAX_TASKS)
+      : Array.isArray(obj.steps)
+        ? [{ id: "task_1", description: "", prompt: promptFromSteps(obj.steps) }]
+        : [];
   const usedTaskIds = new Set<string>();
-  const usedStepIds = new Set<string>();
-  const uniqueId = (base: string, used: Set<string>, fallback: string): string => {
+  const uniqueId = (base: string, fallback: string): string => {
     const seed = base.trim() || fallback;
-    if (!used.has(seed)) {
-      used.add(seed);
+    if (!usedTaskIds.has(seed)) {
+      usedTaskIds.add(seed);
       return seed;
     }
     let suffix = 2;
-    while (used.has(`${seed}_${suffix}`)) suffix++;
+    while (usedTaskIds.has(`${seed}_${suffix}`)) suffix++;
     const id = `${seed}_${suffix}`;
-    used.add(id);
+    usedTaskIds.add(id);
     return id;
   };
   const tasks: PersistedDecomposeTask[] = rawTasks.flatMap((rawTask, ti) => {
     if (!rawTask || typeof rawTask !== "object") return [];
     const t = rawTask as Record<string, unknown>;
-    const rawSteps = Array.isArray(t.steps) ? t.steps.slice(0, MAX_STEPS) : [];
-    const localStepIds = new Set<string>();
-    const pendingSteps: Array<{ step: PersistedDecomposeStep; rawDependsOn: string[] }> = [];
-    rawSteps.forEach((step, i) => {
-      if (!step || typeof step !== "object") return;
-      const s = step as Record<string, unknown>;
-      const description = typeof s.description === "string" ? clip(s.description.trim(), MAX_STEP_DESCRIPTION_CHARS) : "";
-      if (!description) return;
-      const id = uniqueId(typeof s.id === "string" ? s.id : "", usedStepIds, `step_${i + 1}`);
-      localStepIds.add(id);
-      const relevantHistory =
-        typeof s.relevantHistory === "string" && s.relevantHistory.trim()
-          ? clip(s.relevantHistory.trim(), MAX_UNDERSTANDING_CHARS)
+    // prompt 优先；旧字段 guidance 读兼容；更旧的 task.steps 折叠进 prompt。
+    let prompt = typeof t.prompt === "string" && t.prompt.trim()
+      ? clip(t.prompt.trim(), MAX_UNDERSTANDING_CHARS)
+      : "";
+    if (!prompt && typeof t.guidance === "string" && t.guidance.trim()) {
+      prompt = clip(t.guidance.trim(), MAX_UNDERSTANDING_CHARS);
+    }
+    if (!prompt) {
+      prompt = promptFromSteps(Array.isArray(t.steps) ? t.steps : []);
+    }
+    const title = typeof t.title === "string" && t.title.trim()
+      ? clip(t.title.trim(), MAX_STEP_DESCRIPTION_CHARS)
+      : undefined;
+    const dependsOn = Array.isArray(t.dependsOn)
+      ? t.dependsOn.filter((dep): dep is string => typeof dep === "string" && dep.trim() !== "")
+          .map((dep) => dep.trim())
           : undefined;
-      pendingSteps.push({
-        step: {
-          id,
-          description,
-          dependsOn: [],
-        verificationCriteria: (() => {
-          if (!s.verificationCriteria || typeof s.verificationCriteria !== "object") return undefined;
-          const vc = s.verificationCriteria as Record<string, unknown>;
-          if (typeof vc.command !== "string" || typeof vc.expectedOutput !== "string") return undefined;
-          const command = vc.command.trim();
-          const expectedOutput = vc.expectedOutput.trim();
-          if (!command || !expectedOutput) return undefined;
-          return {
-            command,
-            expectedOutput,
-            exitCode: typeof vc.exitCode === "number" ? vc.exitCode : undefined,
-          };
-        })(),
-        rollbackStrategy: typeof s.rollbackStrategy === "string"
-          ? s.rollbackStrategy.trim() || undefined
-          : undefined,
-        estimatedComplexity: s.estimatedComplexity === "low" || s.estimatedComplexity === "medium" || s.estimatedComplexity === "high"
-          ? s.estimatedComplexity
-          : undefined,
-          relevantHistory,
-        },
-        rawDependsOn: Array.isArray(s.dependsOn)
-          ? s.dependsOn.filter((d): d is string => typeof d === "string")
-          : [],
-      });
-    });
-    const steps: PersistedDecomposeStep[] = pendingSteps.map(({ step, rawDependsOn }) => ({
-      ...step,
-      dependsOn: rawDependsOn.filter((dependency) => localStepIds.has(dependency)),
-    }));
-    const taskConstraints = Array.isArray(t.userConstraints)
-      ? t.userConstraints.filter((value): value is string => typeof value === "string")
-        .map((value) => value.trim()).filter(Boolean).slice(0, 20)
-      : [];
-    const relevantHistory = typeof t.relevantHistory === "string" && t.relevantHistory.trim()
-      ? clip(t.relevantHistory.trim(), MAX_UNDERSTANDING_CHARS)
-      : undefined;
-    const progressStatus = typeof t.progressStatus === "string" && t.progressStatus.trim()
-      ? clip(t.progressStatus.trim(), 200)
-      : undefined;
+    const kind = t.kind === "implementation" || t.kind === "verification" ? t.kind : undefined;
+    const description = typeof t.description === "string" && t.description.trim()
+      ? clip(t.description.trim(), MAX_STEP_DESCRIPTION_CHARS)
+      : "";
     return [{
-      id: uniqueId(typeof t.id === "string" ? t.id : "", usedTaskIds, `task_${ti + 1}`),
-      description: typeof t.description === "string" ? clip(t.description.trim(), MAX_STEP_DESCRIPTION_CHARS) : "",
-      userConstraints: taskConstraints.length > 0 ? taskConstraints : userConstraints,
-      relevantHistory,
-      progressStatus,
-      steps,
+      id: uniqueId(typeof t.id === "string" ? t.id : "", `task_${ti + 1}`),
+      ...(title ? { title } : {}),
+      description,
+      prompt: prompt || undefined,
+      ...(dependsOn ? { dependsOn } : {}),
+      ...(kind ? { kind } : {}),
+      ...(typeof t.result === "string" && t.result.trim()
+        ? { result: clip(t.result.trim(), MAX_REPORT_CHARS) }
+        : {}),
     }];
   });
   if (!intent && tasks.length === 0) return undefined;
+  // 新格式历史与 tasks 同级；旧格式（任务级 relevantHistory）折叠到顶层。
+  const foldedHistory = rawTasks
+    .flatMap((rawTask) => {
+      if (!rawTask || typeof rawTask !== "object") return [];
+      const t = rawTask as Record<string, unknown>;
+      return typeof t.relevantHistory === "string" && t.relevantHistory.trim()
+        ? [clip(t.relevantHistory.trim(), MAX_UNDERSTANDING_CHARS)]
+        : [];
+    })
+    .join("\n\n");
+  const relevantHistory =
+    typeof obj.relevantHistory === "string" && obj.relevantHistory.trim()
+      ? clip(obj.relevantHistory.trim(), MAX_UNDERSTANDING_CHARS)
+      : foldedHistory;
   return {
     intent,
     userConstraints,
     tasks,
+    relevantHistory: relevantHistory || undefined,
   };
 }
 
@@ -444,16 +412,8 @@ async function readFile(workspaceRoot: string, sessionId: string): Promise<TurnR
 async function writeFile(workspaceRoot: string, file: TurnRoundsFile): Promise<void> {
   const dir = sessionsDirAbs(workspaceRoot);
   await fs.mkdir(dir, { recursive: true });
-  const trimmed: TurnRoundsFile = {
-    version: FILE_VERSION,
-    sessionId: file.sessionId,
-    // Uncompressed rounds must remain available until the next budget-triggered update.
-    rounds: file.rounds.length > MAX_ROUNDS && file.decomposeHistory
-      ? file.rounds.filter((round, i) => i >= file.rounds.length - MAX_ROUNDS || round.index > file.decomposeHistory!.throughIndex)
-      : file.rounds,
-    decomposeHistory: file.decomposeHistory,
-  };
-  await fs.writeFile(roundsFilePath(workspaceRoot, file.sessionId), JSON.stringify(trimmed, null, 2) + "\n", "utf8");
+  // 原始轮次始终持久保留；压缩只改变上下文注入形态，不裁剪磁盘原文。
+  await fs.writeFile(roundsFilePath(workspaceRoot, file.sessionId), JSON.stringify(file, null, 2) + "\n", "utf8");
 }
 
 function nextIndex(rounds: TurnRoundRecord[]): number {
@@ -510,10 +470,27 @@ export function formatRoundBlock(
       `- ${call.toolName} ${JSON.stringify(call.arguments)}`,
     ).join("\n")}`);
   }
-  if (round.assistantReport) {
-    parts.push(`[assistant] ${round.assistantReport}`);
+  const assistantForRecall = formatAssistantForRecall(round);
+  if (assistantForRecall) {
+    parts.push(`[assistant] ${assistantForRecall}`);
   }
   return parts.join("\n");
+}
+
+/**
+ * 召回进分解历史的「上轮助手产出」。
+ *
+ * 优先用各子任务的执行报告拼接（细节更多，对当前任务更有参考价值），
+ * 只有在没有任何子任务报告时才回退到最终合成报告。
+ */
+export function formatAssistantForRecall(round: TurnRoundRecord): string {
+  const taskReports = round.taskDecompose?.tasks
+    ?.filter((task) => typeof task.result === "string" && task.result.trim())
+    .map((task) =>
+      `### ${task.id}${task.title ? ` ${task.title}` : ""}\n${task.result!.trim()}`
+    )
+    .join("\n\n");
+  return taskReports || round.assistantReport || "";
 }
 
 
@@ -677,23 +654,8 @@ export function formatRecentFileHints(roundsOldestFirst: TurnRoundRecord[]): str
  * Source-read tool output is stored in full; this is what the next
  * task_decompose round should see, not a truncated excerpt.
  */
-/** 续接判断只依据已持久化任务状态和语义信号，不依赖固定的 continue 文本。 */
-export function classifyTaskRelation(
-  message: string,
-  previous: TaskState | PersistedDecompose | null | undefined,
-): TaskRelation {
-  if (!previous) return "new";
-  const text = message.trim().toLowerCase();
-  const continuation = /继续|接着|上次|刚才|未完成|中断|恢复|前面|progress|resume|pick up|same task/.test(text);
-  return continuation ? "continue" : "new";
-}
-
 export function makeFileEvidence(path: string, content: string, version: string, complete = true): FileEvidence {
   return { path, content, contentHash: createHash("sha256").update(content).digest("hex"), version, complete, capturedAt: new Date().toISOString() };
-}
-
-export function isReusableFileEvidence(evidence: FileEvidence, currentVersion: string, requireComplete = true): boolean {
-  return Boolean(evidence.complete || !requireComplete) && evidence.version === currentVersion && evidence.contentHash === createHash("sha256").update(evidence.content).digest("hex");
 }
 
 export function collectToolCallsFromTurns(
@@ -1078,13 +1040,16 @@ export async function deleteDecomposeRound(
         }
       }
     }
-    // The checkpoint is an aggregate, and may include a round already pruned
-    // from the file. Rebuild from surviving rounds rather than reuse stale text.
-    const hadCheckpoint = Boolean(file.decomposeHistory);
-    file.decomposeHistory = undefined;
-    if (target) file.rounds = file.rounds.filter((round) => round !== target);
-    if (target || hadCheckpoint) await writeFile(workspaceRoot, file);
-    return Boolean(target || hadCheckpoint);
+    // 未找到轮次时不修改历史；删除摘要覆盖范围外的轮次也不影响已有摘要。
+    if (!target) return false;
+    file.rounds = file.rounds.filter((round) => round !== target);
+    if (file.decomposeHistory && target.index <= file.decomposeHistory.throughIndex) {
+      // 聚合摘要无法单独扣除已删内容；剩余原文完整保留，下次注入从原文重建，
+      // 并按原有预算策略重新生成摘要，避免已删内容继续出现在上下文中。
+      file.decomposeHistory = undefined;
+    }
+    await writeFile(workspaceRoot, file);
+    return true;
   });
 }
 

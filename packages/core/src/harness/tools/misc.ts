@@ -11,7 +11,9 @@ export async function toolSemanticDiff(ctx: ToolContext, filePath: string, again
 
   try {
     // Get git diff
-    const diffCmd = `git diff ${against} -- "${filePath}"`;
+    // bash 下双引号内的反斜杠会被吞（Windows 绝对路径），统一正斜杠。
+    const posixFilePath = filePath.split("\\").join("/");
+    const diffCmd = `git diff ${against} -- "${posixFilePath}"`;
     const diffResult = await runCommand(diffCmd, ctx.workspaceRoot, 30_000, ctx.signal);
 
     if (!diffResult.stdout.trim()) {
@@ -177,8 +179,7 @@ export async function toolWebSearch(
 // ── Web Fetch Tool (fetch a URL and return readable text content) ──
 
 const FETCH_UA = BING_UA;
-const DEFAULT_FETCH_MAX_CHARS = 50_000;
-const HARD_FETCH_MAX_CHARS = 100_000;
+
 /** Below this, static HTML text is treated as a likely CSR/empty shell. */
 const CSR_SHELL_TEXT_THRESHOLD = 200;
 
@@ -302,7 +303,7 @@ function pickBestText(parts: Array<string | undefined | null>): string {
 export async function toolWebFetch(
   ctx: ToolContext,
   urlStr: string,
-  maxChars: number,
+  _maxChars: number,
 ): Promise<ToolResult> {
   if (!urlStr?.trim()) return fail("url required");
 
@@ -316,10 +317,7 @@ export async function toolWebFetch(
     return fail(`Only http/https URLs are allowed (got ${parsed.protocol})`);
   }
 
-  const limit = Math.min(
-    Math.max(maxChars > 0 ? maxChars : DEFAULT_FETCH_MAX_CHARS, 1_000),
-    HARD_FETCH_MAX_CHARS,
-  );
+  // Text extraction is complete; do not apply a second character budget.
 
   try {
     const controller = new AbortController();
@@ -414,7 +412,7 @@ export async function toolWebFetch(
       (contentType ? ` | ${contentType.split(";")[0]!.trim()}` : "") +
       (viaRender ? " | rendered" : "") +
       `\n\n`;
-    return ok(cap(header + text, Math.min(limit, ctx.maxOutputChars)));
+    return ok(header + text);
   } catch (e) {
     return fail(
       `Failed to fetch ${parsed.toString()}: ${e instanceof Error ? e.message : String(e)}`,

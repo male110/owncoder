@@ -1,7 +1,7 @@
 import { runReActLoop } from "./react.ts";
 import type { ReActLoopArgs } from "./types.ts";
 
-interface LoopStrategyResult {
+export interface LoopStrategyResult {
   lastAssistant: string;
   aborted: boolean;
   /** A document deliverable was written and requires user confirmation. */
@@ -20,7 +20,7 @@ interface LoopStrategyResult {
   successRejected?: boolean;
 }
 
-interface LoopStrategy {
+export interface LoopStrategy {
   name: string;
   run(args: ReActLoopArgs): Promise<LoopStrategyResult>;
 }

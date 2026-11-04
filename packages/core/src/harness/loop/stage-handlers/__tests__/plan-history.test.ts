@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { BUILTIN_WORKFLOW, builtinPlanPipeline, builtinAgentPipeline } from "@owncoder/settings";
+import { BUILTIN_WORKFLOW, builtinSpecPipeline, builtinAgentPipeline } from "@owncoder/settings";
 import { contextBudgets } from "../../../budget.ts";
 import { injectHistoryAndUserMessage } from "../index.ts";
 import type { SchedulerContext } from "../types.ts";
@@ -10,7 +10,7 @@ vi.mock("@owncoder/llm", async (importOriginal) => ({
   writeEventLog: vi.fn(),
 }));
 
-function makeContext(mode: "plan" | "agent", history: ChatTurn[]): SchedulerContext {
+function makeContext(mode: "spec" | "agent", history: ChatTurn[]): SchedulerContext {
   return {
     opts: {
       mode,
@@ -45,7 +45,7 @@ describe("plan 模式历史对话传递", () => {
       { role: "user", content: "第二轮问题" },
       { role: "assistant", content: "第二轮结论" },
     ];
-    const ctx = makeContext("plan", history);
+    const ctx = makeContext("spec", history);
     await injectHistoryAndUserMessage(ctx);
 
     // 历史块 + 当前用户消息，共两条 user 消息
@@ -71,7 +71,7 @@ describe("plan 模式历史对话传递", () => {
       { role: "tool", content: "大段工具返回内容 SECRET", toolName: "read_file" },
       { role: "assistant", content: "找到问题" },
     ];
-    const ctx = makeContext("plan", history);
+    const ctx = makeContext("spec", history);
     await injectHistoryAndUserMessage(ctx);
 
     const historyMsg = ctx.messages.find((m) => (m.content ?? "").includes("conversation_history"))!;
@@ -80,7 +80,7 @@ describe("plan 模式历史对话传递", () => {
   });
 
   it("无历史时不推送历史块，仅注入当前用户消息", async () => {
-    const ctx = makeContext("plan", []);
+    const ctx = makeContext("spec", []);
     await injectHistoryAndUserMessage(ctx);
 
     const userMessages = ctx.messages.filter((m) => m.role === "user");
@@ -105,7 +105,7 @@ describe("plan 模式历史对话传递", () => {
   });
 
   it("plan pipeline 不包含 task_decompose 节点", () => {
-    const plan = builtinPlanPipeline();
+    const plan = builtinSpecPipeline();
     expect(plan.nodes.some((n) => n.type === "task_decompose")).toBe(false);
   });
 

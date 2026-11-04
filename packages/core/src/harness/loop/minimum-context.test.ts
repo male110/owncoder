@@ -66,7 +66,6 @@ test("always retains mandatory context while selecting an explicit indexed path 
   });
 
   assert.deepEqual(plan.selected.map((item) => item.id), ["rules", "auth-knowledge"]);
-  assert.deepEqual(plan.requiresFreshRead, ["src/auth.ts"]);
   assert.equal(plan.omitted.find((item) => item.id === "dependency-list")?.reason, "budget");
 });
 
@@ -116,5 +115,5 @@ test("classifies multilingual task hints without making text classification auth
   assert.equal(inferTaskIntent("请修复登录错误", "agent"), "change");
   assert.equal(inferTaskIntent("为什么这个模块报错？", "agent"), "debug");
   assert.equal(inferTaskIntent("认证模块是怎么工作的？", "agent"), "inspect");
-  assert.equal(inferTaskIntent("write a plan", "plan"), "plan");
+  assert.equal(inferTaskIntent("write a spec", "spec"), "spec");
 });

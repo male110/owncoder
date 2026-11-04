@@ -3,9 +3,7 @@ import upath from "upath";
 import { relative, resolve } from "node:path";
 
 const MENTION_RE = /(?:^|[\s([{])@([^\s@]+)/g;
-const MAX_FILES = 8;
-const MAX_CHARS_PER_FILE = 4000;
-const MAX_TOTAL_CHARS = 12_000;
+
 
 export function extractMentionPaths(text: string): string[] {
   const found: string[] = [];
@@ -35,19 +33,13 @@ export async function loadMentionedFiles(
   paths: string[],
 ): Promise<MentionFile[]> {
   const out: MentionFile[] = [];
-  let total = 0;
-  for (const p of paths.slice(0, MAX_FILES)) {
-    if (total >= MAX_TOTAL_CHARS) break;
+  for (const p of paths) {
     const abs = resolve(workspaceRoot, p);
     const rel = relative(workspaceRoot, abs).split(/[/\\]/).join("/");
     if (rel.startsWith("..")) continue;
     try {
       const raw = await fs.readFile(abs, "utf8");
-      const budget = Math.min(MAX_CHARS_PER_FILE, MAX_TOTAL_CHARS - total);
-      const truncated = raw.length > budget;
-      const content = truncated ? `${raw.slice(0, budget)}\n…(截断)` : raw;
-      total += content.length;
-      out.push({ path: rel, content, truncated });
+      out.push({ path: rel, content: raw, truncated: false });
     } catch {
       /* missing path — skip */
     }

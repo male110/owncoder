@@ -10,6 +10,8 @@
  * a single identical model and their results discarded).
  */
 
+import { isLlmTimeoutError } from "@owncoder/llm";
+
 // ── Types ──────────────────────────────────────────────────
 
 export interface TaskClassification {
@@ -147,8 +149,12 @@ export async function withRetry<T>(
       lastError = e instanceof Error ? e : new Error(String(e));
       retries = attempt;
 
-      // Never retry a caller cancellation or an AbortError.
-      if (p.signal?.aborted || lastError.name === "AbortError") throw lastError;
+      // 用户取消立即抛出
+      if (p.signal?.aborted) throw lastError;
+      // 我方不活跃超时（LlmTimeoutError，含被 AbortError 包装的情况）视为
+      // 临时故障，按指数退避重试；其余 AbortError（如调用方真正的取消）
+      // 不重试。
+      if (lastError.name === "AbortError" && !isLlmTimeoutError(lastError)) throw lastError;
       if (attempt === p.maxRetries) break;
 
       // Check if retryable based on HTTP status.

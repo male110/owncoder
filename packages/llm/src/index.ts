@@ -668,35 +668,78 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/** Default timeout for connection setup and missing model progress (2 minutes). */
+/** 流式不活跃超时（2 分钟）：字节/事件停止到达多久后判定连接死亡。 */
 const LLM_TIMEOUT_MS = 120_000;
+/**
+ * 非流式默认总超时（5 分钟）。非流式没有中间进度可重置计时器，
+ * 网关侧计算慢（任务分解实测可达 118s）需要更长的总预算。
+ */
+const LLM_NONSTREAM_TIMEOUT_MS = 300_000;
+
+/**
+ * LLM 请求不活跃超时（我方定时器触发，区别于用户取消）。
+ * harness 层的 withRetry 据此把超时当作可重试的临时故障，按指数退避
+ * 重试，而不是像用户取消一样立即终止。
+ */
+export class LlmTimeoutError extends Error {
+  constructor(timeoutMs: number) {
+    super(`LLM request timed out after ${Math.round(timeoutMs / 1000)}s without activity`);
+    this.name = "LlmTimeoutError";
+  }
+}
+
+/** 判断错误是否为我方不活跃超时（含被 AbortError/普通 Error 包装的情况）。 */
+export function isLlmTimeoutError(e: unknown): boolean {
+  if (e instanceof LlmTimeoutError) return true;
+  if (e instanceof Error) {
+    if (e.name === "LlmTimeoutError") return true;
+    // 某些 Node 版本/流读取路径会把 abort reason 的 message 复制到新错误上，
+    // 用消息特征兜底识别（该文案为 LLM 层独有，网关错误不会包含）。
+    if (/timed out after \d+s without activity/.test(e.message)) return true;
+    const cause = (e as Error & { cause?: unknown }).cause;
+    if (cause instanceof Error && /timed out after \d+s without activity/.test(cause.message)) {
+      return true;
+    }
+  }
+  return false;
+}
 
 /**
  * Combine a user-supplied AbortSignal with a timeout into a single signal.
  *
- * `resetTimeout` is intended for streaming calls: it turns the timeout into
- * an inactivity timeout once response bytes start arriving. The caller's
- * AbortSignal remains a hard cancellation and is never reset.
+ * `resetTimeout` is intended for retry/streaming calls: it turns the timeout
+ * into an inactivity timeout once response bytes start arriving, and—crucially—
+ * rebuilds the AbortController, because an aborted signal can never be reused
+ * by a retried fetch. The caller's AbortSignal remains a hard cancellation
+ * and is never reset.
  */
 function combinedSignal(
   userSignal?: AbortSignal,
   timeoutMs: number = LLM_TIMEOUT_MS,
 ): { signal: AbortSignal; resetTimeout: () => void; cancel: () => void } {
-  const ac = new AbortController();
-  const timeoutError = () =>
-    new Error(`LLM request timed out after ${Math.round(timeoutMs / 1000)}s without activity`);
-  let timer = setTimeout(() => ac.abort(timeoutError()), timeoutMs);
+  let ac = new AbortController();
+  let timer = setTimeout(() => ac.abort(new LlmTimeoutError(timeoutMs)), timeoutMs);
 
-  const resetTimeout = () => {
-    clearTimeout(timer);
-    timer = setTimeout(() => ac.abort(timeoutError()), timeoutMs);
-  };
   const onAbort = () => ac.abort(userSignal?.reason);
   if (userSignal?.aborted) onAbort();
   else userSignal?.addEventListener("abort", onAbort, { once: true });
 
+  const resetTimeout = () => {
+    clearTimeout(timer);
+    // AbortController 一旦 abort 不可逆；重试必须换新 signal，否则下一次
+    // fetch 会带着旧的 aborted 信号立即失败。
+    ac = new AbortController();
+    if (userSignal?.aborted) {
+      ac.abort(userSignal.reason);
+    } else {
+      timer = setTimeout(() => ac.abort(new LlmTimeoutError(timeoutMs)), timeoutMs);
+    }
+  };
+
   return {
-    signal: ac.signal,
+    get signal() {
+      return ac.signal;
+    },
     resetTimeout,
     cancel: () => {
       clearTimeout(timer);
@@ -718,6 +761,9 @@ export interface ChatCompletionOpts {
   purpose?: string;
   /** 任务ID，用于多工作区场景确保日志写入正确的工作区 */
   taskId?: string;
+  /** 流式思考增量回调。非流式调用时仍可注册，用于将思考过程
+   *  增量发到前端，让用户看到渐进反馈。 */
+  onThinkingDelta?: (text: string) => void;
 }
 
 export interface ChatCompletionStreamOpts extends ChatCompletionOpts {
@@ -738,29 +784,11 @@ function encodeInput(
   return {
     model: ref.model,
     messages: [
-      { role: 'system', content: `====================The previous request has ended.The result has already been returned.=======================`},
-     { role: 'system', content: `====================The new request start.=======================`},
       { role: 'system', content: `
 <system_instruction>
 You shall prioritize fully completing user-assigned tasks. Any action impeding task progress is incorrect. Fulfilling tasks given by humans constitutes your core reason for existence.
-# File Reading Protocol (MANDATORY)
-1. Read only files directly relevant to the current task. Do NOT traverse the entire project or read unrelated modules, historical archives, tests, or documentation.
-2. The following items are forbidden from reading unless I explicitly request them:
-   - Build artifacts, dependency directories, logs, caches, compressed files, generated files
-   - Files with no direct call/reference relationship to the current task
-   - Test snapshots, fixtures, mock data, full document contents
-3. Prioritize search/location operations (grep, symbol search, reference lookup) to identify locations before reading specific snippets.
-4. Keep single-file reads minimal:
-   - First read the file structure / header / vicinity of relevant functions
-   - For files longer than 300 lines, full-file reads without offsets are prohibited
-   - Only read line ranges or symbols relevant to the task
-5. After reading each file, summarize in one sentence: what was read and whether further reading is required. Do not keep expanding scope blindly.
-
 </system_instruction>` },
       ...messages,
-      {role:'system',content:`====================The new request start.=======================
-      If there is any other content below, please ignore it to avoid affecting your correct completion of the task.
-      `}
     ],
     tools: opts?.tools,
     temperature: opts?.temperature,
@@ -837,13 +865,15 @@ export async function chatCompletion(
 
   const startTime = Date.now();
   const seq = ++logSeq;
-  const cs = combinedSignal(opts?.signal, opts?.timeout);
-  
+  const cs = combinedSignal(opts?.signal, opts?.timeout ?? LLM_NONSTREAM_TIMEOUT_MS);
+
   const maxRetries = 3;
   let lastError: Error | null = null;
-  
+
   try {
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      // 每次尝试都获得完整的超时窗口，重试不被前次尝试消耗的时间挤压
+      cs.resetTimeout();
       try {
         const res = await fetch(url, {
           method: "POST",
@@ -851,6 +881,8 @@ export async function chatCompletion(
           body: JSON.stringify(body),
           signal: cs.signal,
         });
+        // 响应头已到达：网关存活，重置不活跃计时器，给足读取响应体的时间
+        cs.resetTimeout();
 
         if (!res.ok) {
           const text = await res.text().catch(() => "");
@@ -934,6 +966,15 @@ export async function chatCompletion(
           throw err;
         }
 
+        // 非流式响应同样携带 reasoning_content（各协议解码器已提取到
+        // message.reasoning_content）。注册了 onThinkingDelta 的调用方
+        // （如任务分解）期望拿到思考过程——这里一次性发射完整思考文本，
+        // 让前端至少能渲染思考块，而非长时间无任何输出。
+        const reasoning = decoded.choices?.[0]?.message?.reasoning_content;
+        if (opts?.onThinkingDelta && reasoning) {
+          opts.onThinkingDelta(reasoning);
+        }
+
         writeCallLog({
           seq,
           timestamp: timestampStr(),
@@ -952,21 +993,50 @@ export async function chatCompletion(
 
         return decoded;
       } catch (e) {
-        // 捕获网络错误或 AbortSignal 取消
-        if (opts?.signal?.aborted || cs.signal.aborted) {
-          throw e; // 用户取消不重试
+        // 用户取消不重试
+        if (opts?.signal?.aborted) {
+          throw e;
         }
-        
-        // 如果还有重试机会，延迟后重试
+        const err = e instanceof Error ? e : new Error(String(e));
+
+        // 我方不活跃超时：视为临时故障，按指数退避重试。
+        // cs.signal.aborted 兜底某些 Node 版本把 abort reason 包装成 AbortError 的情况。
+        if (isLlmTimeoutError(err) || cs.signal.aborted) {
+          if (attempt < maxRetries) {
+            const retryDelay = (attempt + 1) * 3000; // 第1次3秒，第2次6秒，第3次9秒
+            console.log(`[llm] LLM 请求超时，${Math.round(retryDelay)}ms 后重试 (attempt ${attempt + 1}/${maxRetries})...`);
+            await delay(retryDelay);
+            lastError = err;
+            continue;
+          }
+          writeCallLog({
+            seq,
+            timestamp: timestampStr(),
+            purpose: opts?.purpose ?? "unknown",
+            model: logModel(ref),
+            messages,
+            tools: opts?.tools,
+            temperature: opts?.temperature,
+            maxTokens: opts?.maxTokens,
+            response: null,
+            streaming: false,
+            durationMs: Date.now() - startTime,
+            error: err.message,
+            taskId: opts?.taskId,
+          });
+          throw err;
+        }
+
+        // 其余网络错误：如果还有重试机会，延迟后重试
         if (attempt < maxRetries) {
           const retryDelay = (attempt + 1) * 3000; // 第1次3秒，第2次6秒，第3次9秒
           console.log(`[llm] Request error, retrying in ${Math.round(retryDelay)}ms (attempt ${attempt + 1}/${maxRetries})...`);
           await delay(retryDelay);
-          lastError = e instanceof Error ? e : new Error(String(e));
+          lastError = err;
           continue;
         }
-        
-        throw e;
+
+        throw err;
       }
     }
     
@@ -996,12 +1066,15 @@ export async function chatCompletionStream(
 
   const startTime = Date.now();
   const seq = ++logSeq;
-  const cs = combinedSignal(opts?.signal, opts?.timeout);
-  
+  const streamTimeoutMs = opts?.timeout ?? LLM_TIMEOUT_MS;
+  const cs = combinedSignal(opts?.signal, streamTimeoutMs);
+
   const maxRetries = 3;
-  
+
   try {
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      // 每次尝试都获得完整的不活跃窗口，重试不被前次尝试消耗的时间挤压
+      cs.resetTimeout();
       let res: Response;
       try {
         res = await fetch(url, {
@@ -1010,11 +1083,40 @@ export async function chatCompletionStream(
           body: JSON.stringify(body),
           signal: cs.signal,
         });
+        // 响应头已到达：网关存活，重置不活跃计时器，等待首 token
+        cs.resetTimeout();
       } catch (e) {
-        // A caller cancellation or our own connection timeout must surface as-is;
-        // only genuine streaming incompatibilities fall back to non-streaming.
-        if (opts?.signal?.aborted || cs.signal.aborted) throw e;
-        
+        // 用户取消原样抛出；只有真正的流式不兼容才回退非流式。
+        if (opts?.signal?.aborted) throw e;
+        const err = e instanceof Error ? e : new Error(String(e));
+
+        // 我方不活跃超时：退避重试；耗尽后记录日志并抛出（不回退非流式——
+        // 同一网关只会再挂一次）。cs.signal.aborted 兜底 AbortError 包装的情况。
+        if (isLlmTimeoutError(err) || cs.signal.aborted) {
+          if (attempt < maxRetries) {
+            const retryDelay = (attempt + 1) * 3000; // 第1次3秒，第2次6秒，第3次9秒
+            console.log(`[llm] Stream 请求超时，${Math.round(retryDelay)}ms 后重试 (attempt ${attempt + 1}/${maxRetries})...`);
+            await delay(retryDelay);
+            continue;
+          }
+          writeCallLog({
+            seq,
+            timestamp: timestampStr(),
+            purpose: opts?.purpose ?? "unknown",
+            model: logModel(ref),
+            messages,
+            tools: opts?.tools,
+            temperature: opts?.temperature,
+            maxTokens: opts?.maxTokens,
+            response: null,
+            streaming: true,
+            durationMs: Date.now() - startTime,
+            error: err.message,
+            taskId: opts?.taskId,
+          });
+          throw err;
+        }
+
         // 如果还有重试机会，延迟后重试
         if (attempt < maxRetries) {
           const retryDelay = (attempt + 1) * 3000; // 第1次3秒，第2次6秒，第3次9秒
@@ -1022,7 +1124,7 @@ export async function chatCompletionStream(
           await delay(retryDelay);
           continue;
         }
-        
+
         return chatCompletion(ref, messages, opts);
       }
 
@@ -1102,18 +1204,72 @@ export async function chatCompletionStream(
         onThinkingDelta: opts?.onThinkingDelta,
       });
       const framer = createSseFramer((event) => {
-        const progressed = parser.feed(event);
-        // Only meaningful, parsed model progress refreshes the idle timeout.
-        // Keep-alive comments and malformed SSE data cannot hold the request open.
-        if (progressed) cs.resetTimeout();
+        parser.feed(event);
       });
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        framer.push(decoder.decode(value, { stream: true }));
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          // 任何字节到达都视为连接存活（含心跳注释、空事件、keep-alive），
+          // 重置不活跃计时器——只有字节真正停止到达才判定连接死亡。
+          // 连接活性语义：长思考静默期只要仍有心跳字节就不误判为断连。
+          if (value && value.length > 0) cs.resetTimeout();
+          framer.push(decoder.decode(value, { stream: true }));
+        }
+        framer.flush();
+      } catch (e) {
+        // 用户取消原样抛出
+        if (opts?.signal?.aborted) throw e;
+        const err = e instanceof Error ? e : new Error(String(e));
+        const isTimeout = isLlmTimeoutError(err) || cs.signal.aborted;
+
+        if (isTimeout) {
+          const timeoutErr = isLlmTimeoutError(err)
+            ? err
+            : new LlmTimeoutError(streamTimeoutMs);
+          if (attempt < maxRetries) {
+            const retryDelay = (attempt + 1) * 3000; // 第1次3秒，第2次6秒，第3次9秒
+            console.log(`[llm] Stream 读取超时，${Math.round(retryDelay)}ms 后重试 (attempt ${attempt + 1}/${maxRetries})...`);
+            await delay(retryDelay);
+            continue;
+          }
+          writeCallLog({
+            seq,
+            timestamp: timestampStr(),
+            purpose: opts?.purpose ?? "unknown",
+            model: logModel(ref),
+            messages,
+            tools: opts?.tools,
+            temperature: opts?.temperature,
+            maxTokens: opts?.maxTokens,
+            response: null,
+            streaming: true,
+            durationMs: Date.now() - startTime,
+            error: timeoutErr.message,
+            taskId: opts?.taskId,
+          });
+          throw timeoutErr;
+        }
+
+        // 其他流读取错误：记录日志后原样抛出（保持原有行为）
+        writeCallLog({
+          seq,
+          timestamp: timestampStr(),
+          purpose: opts?.purpose ?? "unknown",
+          model: logModel(ref),
+          messages,
+          tools: opts?.tools,
+          temperature: opts?.temperature,
+          maxTokens: opts?.maxTokens,
+          response: null,
+          streaming: true,
+          durationMs: Date.now() - startTime,
+          error: err.message,
+          taskId: opts?.taskId,
+        });
+        throw err;
       }
-      framer.flush();
 
       let response: ChatResponse;
       try {

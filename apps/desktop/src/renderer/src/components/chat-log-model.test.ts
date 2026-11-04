@@ -115,6 +115,29 @@ describe("buildChatItems", () => {
 });
 
 describe("buildLogBlocks process panel", () => {
+  it("turn_complete 后残留分解快照不阻止历史过程折叠或重复渲染报告", () => {
+    const turns: ChatTurnDto[] = [
+      userTurn("修复问题"),
+      { id: "a1", role: "assistant", content: "正在检查代码" },
+      { id: "t1", role: "tool", toolName: "read_file", content: "完成" },
+      { id: "a2", role: "assistant", content: "发现问题，准备修复" },
+      { id: "t2", role: "tool", toolName: "apply_patch", content: "完成" },
+      { id: "a3", role: "assistant", content: "最终报告：修复完成" },
+    ];
+    const blocks = buildLogBlocks(turns, false, 1);
+    expect(blocks.map((block) => block.kind)).toEqual(["user", "process", "assistant"]);
+    const process = blocks[1];
+    expect(process?.kind).toBe("process");
+    if (process?.kind === "process") {
+      expect(process.items.map((item) => item.content)).toEqual([
+        "正在检查代码", "完成", "发现问题，准备修复", "完成",
+      ]);
+    }
+    const reports = blocks.filter((block) => block.kind === "assistant");
+    expect(reports).toHaveLength(1);
+    expect(reports[0]).toMatchObject({ kind: "assistant", turn: { content: "最终报告：修复完成" } });
+  });
+
   it("任务结束移除实时事件后仍使用 history 参数，包括合法空参数", () => {
     const turns: ChatTurnDto[] = [
       userTurn("检查参数"),

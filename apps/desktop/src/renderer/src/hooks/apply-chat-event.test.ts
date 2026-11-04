@@ -142,24 +142,19 @@ describe("applyChatEvent streaming / turn_complete", () => {
   });
 
   it("pushes decompose snapshot in DEV after task_decomposition", () => {
-    // vitest/vite 默认 MODE=test �?import.meta.env.DEV �?true
+    // vitest/vite 默认 MODE=test -> import.meta.env.DEV 为 true
     expect(import.meta.env.DEV).toBe(true);
     apply({
       type: "task_decomposition",
       sessionId: "s1",
       intent: "理解任务",
       userConstraints: ["仅开发模式显示"],
+      relevantHistory: "上次讨论的定位结论",
       tasks: [
         {
           id: "task_1",
           description: "定位任务",
-          steps: [
-            {
-              id: "s1",
-              description: "定位",
-              dependsOn: [],
-            },
-          ],
+          guidance: "定位",
         },
       ],
       fallback: false,
@@ -189,14 +184,14 @@ describe("applyChatEvent streaming / turn_complete", () => {
     apply({
       type: "warning",
       sessionId: "s1",
-      message: "自动修复达到上限�? 次）�?## semantic_diff (semantic_diff) ⚠️ packages/core/src/harness/loop/context.ts: 移除了导�? export function isMeaningfulRepoMap",
+      message: "自动修复达到上限（3 次）；## semantic_diff (semantic_diff) ⚠️ packages/core/src/harness/loop/context.ts: 移除了导出 export function isMeaningfulRepoMap",
     });
     expect(useChatStore.getState().errorAlert).toBeNull();
 
     apply({
       type: "warning",
       sessionId: "s1",
-      message: "自动修复达到上限�? 次）�?## semantic_diff (semantic_diff) ⚠️ packages/core/src/harness/loop/context.ts: 移除了导�? export function isMeaningfulRepoMap",
+      message: "自动修复达到上限（3 次）；## semantic_diff (semantic_diff) ⚠️ packages/core/src/harness/loop/context.ts: 移除了导出 export function isMeaningfulRepoMap",
     });
     expect(useChatStore.getState().errorAlert).toBeNull();
 
@@ -240,7 +235,16 @@ describe("applyChatEvent streaming / turn_complete", () => {
     ]);
   });
 
-  it("turn_complete keeps structured events and clears sending", () => {
+  it("turn_complete keeps the final report and removes prior process events", () => {
+    apply({
+      type: "task_decomposition",
+      sessionId: "s1",
+      intent: "任务意图",
+      userConstraints: [],
+      relevantHistory: "",
+      tasks: [],
+      fallback: false,
+    });
     apply({ type: "thinking_delta", sessionId: "s1", text: "t" });
     apply({ type: "assistant_delta", sessionId: "s1", text: "a" });
     useChatStore.getState().setSending(true, "s1");
@@ -254,17 +258,115 @@ describe("applyChatEvent streaming / turn_complete", () => {
 
     const next = useChatStore.getState();
     expect(next.sending).toBe(false);
-    expect(next.liveEvents.every((e) => e.kind === "structured")).toBe(true);
-    expect(next.liveEvents.some((e) => e.kind === "structured")).toBe(true);
+    expect(next.liveEvents).toHaveLength(1);
+    expect(next.liveEvents[0]).toMatchObject({ kind: "decompose" });
+    expect(next.liveEvents.some((event) => event.kind === "text" || event.kind === "thinking" || event.kind === "structured")).toBe(false);
   });
 });
 
 /**
  * Closest-to-E2E path available without Electron Playwright:
- * simulate agent file edit �?verification failure �?UI taskRun/liveStatus
+ * simulate agent file edit -> verification failure -> UI taskRun/liveStatus
  * (failed / repairing) via the same applyChatEvent entry the hook uses.
  */
-describe("E2E-ish: agent edit �?verification fail �?UI failed/repairing", () => {
+describe("applyChatEvent subagent grouping", () => {
+  beforeEach(() => resetChat());
+
+  it("routes Explore tool events into a grouped card", () => {
+    const subagent = { id: "sub-1", agentType: "Explore", task: "find the loop" };
+    apply({
+      type: "tool_start",
+      sessionId: "s1",
+      id: "t-1",
+      name: "read_file",
+      args: { file_path: "a.ts" },
+      subagent,
+    });
+    apply({
+      type: "tool_end",
+      sessionId: "s1",
+      id: "t-1",
+      name: "read_file",
+      ok: true,
+      output: "content",
+      subagent,
+    });
+
+    const events = useChatStore.getState().liveEvents;
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      kind: "subagent",
+      group: {
+        id: "sub-1",
+        agentType: "Explore",
+        task: "find the loop",
+        status: "running",
+        tools: [
+          { id: "t-1", name: "read_file", status: "done", output: "content" },
+        ],
+      },
+    });
+  });
+
+  it("marks the group error when a tool fails", () => {
+    const subagent = { id: "sub-1", agentType: "Explore", task: "find" };
+    apply({
+      type: "tool_start",
+      sessionId: "s1",
+      id: "t-1",
+      name: "grep",
+      args: { pattern: "x" },
+      subagent,
+    });
+    apply({
+      type: "tool_end",
+      sessionId: "s1",
+      id: "t-1",
+      name: "grep",
+      ok: false,
+      output: "Error: boom",
+      subagent,
+    });
+
+    const group = useChatStore.getState().liveEvents.find((e) => e.kind === "subagent");
+    expect(group).toMatchObject({
+      group: { status: "error", tools: [{ status: "error" }] },
+    });
+  });
+
+  it("closes the group on the matching subagent stage_done", () => {
+    const subagent = { id: "sub-1", agentType: "Explore", task: "find" };
+    apply({
+      type: "tool_start",
+      sessionId: "s1",
+      id: "t-1",
+      name: "grep",
+      args: { pattern: "x" },
+      subagent,
+    });
+    apply({
+      type: "tool_end",
+      sessionId: "s1",
+      id: "t-1",
+      name: "grep",
+      ok: true,
+      output: "hit",
+      subagent,
+    });
+    apply({
+      type: "stage_done",
+      sessionId: "s1",
+      id: "sub-1",
+      nodeType: "subagent",
+      label: "Explore finished",
+    });
+
+    const events = useChatStore.getState().liveEvents;
+    expect(events[0]).toMatchObject({ group: { status: "done" } });
+  });
+});
+
+describe("E2E-ish: agent edit -> verification fail -> UI failed/repairing", () => {
   beforeEach(() => {
     resetChat("s-e2e");
     useChatStore.getState().setSending(true, "s-e2e");
@@ -285,7 +387,7 @@ describe("E2E-ish: agent edit �?verification fail �?UI failed/repairing", ()
         verificationSummary: "尚未验证",
         repairAttempts: 0,
         maxRepairAttempts: 3,
-        label: "执行中�?,
+        label: "执行中…",
       },
       sid,
     );
@@ -326,17 +428,17 @@ describe("E2E-ish: agent edit �?verification fail �?UI failed/repairing", ()
         taskId: sid,
         verificationStatus: "not_run",
         verificationPassed: false,
-        verificationSummary: "运行验证�?,
+        verificationSummary: "运行验证…",
         repairAttempts: 0,
         maxRepairAttempts: 3,
-        label: "验证中�?,
+        label: "验证中…",
       },
       sid,
     );
     expect(useChatStore.getState().taskRun?.phase).toBe("verifying");
-    expect(useChatStore.getState().liveStatus).toBe("验证中�?);
+    expect(useChatStore.getState().liveStatus).toBe("验证中…");
 
-    // Verification failed �?auto-repair
+    // Verification failed -> auto-repair
     apply(
       {
         type: "task_run_state",
@@ -348,7 +450,7 @@ describe("E2E-ish: agent edit �?verification fail �?UI failed/repairing", ()
         verificationSummary: "typecheck failed: Cannot find name 'x'",
         repairAttempts: 1,
         maxRepairAttempts: 3,
-        label: "自动修复中�?,
+        label: "自动修复中…",
       },
       sid,
     );
@@ -360,13 +462,13 @@ describe("E2E-ish: agent edit �?verification fail �?UI failed/repairing", ()
       verificationPassed: false,
       verificationSummary: "typecheck failed: Cannot find name 'x'",
       repairAttempts: 1,
-      label: "自动修复中�?,
+      label: "自动修复中…",
     });
-    expect(ui.liveStatus).toBe("自动修复中�?);
+    expect(ui.liveStatus).toBe("自动修复中…");
     // File-modifying tool still visible in the live stream
     expect(ui.liveEvents.some((e) => e.kind === "tool" && e.tool.name === "apply_patch")).toBe(true);
 
-    // Exhausted repairs �?failed (UI must show 失败)
+    // Exhausted repairs -> failed (UI must show 失败)
     apply(
       {
         type: "task_run_state",
@@ -387,5 +489,47 @@ describe("E2E-ish: agent edit �?verification fail �?UI failed/repairing", ()
     expect(ui.taskRun?.phase).toBe("failed");
     expect(ui.liveStatus).toBe("失败");
     expect(ui.taskRun?.verificationStatus).toBe("failed");
+  });
+});
+
+
+describe("最终报告历史回填去重", () => {
+  beforeEach(() => resetChat("report-session"));
+
+  it("对话结束首次回填时同一最终报告只显示一份", () => {
+    const report = {
+      id: "final-report-1",
+      role: "assistant" as const,
+      content: "最终报告：修复完成",
+    };
+
+    useChatStore.getState().setHistory([
+      { role: "user", id: "user-1", content: "修复问题" },
+      report,
+      report,
+    ], "report-session");
+
+    const history = useChatStore.getState().bySession["report-session"]?.history ?? [];
+    expect(history.filter((turn) => turn.id === "final-report-1")).toHaveLength(1);
+    expect(history).toEqual([
+      { role: "user", id: "user-1", content: "修复问题" },
+      report,
+    ]);
+  });
+
+  it("切换到其它会话再返回后最终报告仍只有一份", () => {
+    const report = {
+      id: "final-report-2",
+      role: "assistant" as const,
+      content: "最终报告：验证通过",
+    };
+
+    useChatStore.getState().setHistory([report, report], "report-session");
+    useChatStore.getState().setActiveSession("other-session");
+    useChatStore.getState().setActiveSession("report-session");
+
+    const history = useChatStore.getState().history;
+    expect(history.filter((turn) => turn.id === "final-report-2")).toHaveLength(1);
+    expect(history[0]).toEqual(report);
   });
 });

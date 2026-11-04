@@ -137,28 +137,6 @@ export function sanitizeFtsQuery(query: string): string {
   // 7. 为每个token添加引号(精确匹配)并添加前缀通配符
   return tokens.map(token => `"${token}"*`).join(" ");
 }
-
-/**
- * 验证符号名称
- * 
- * 确保符号名称合法,防止SQL注入
- */
-export function validateSymbolName(name: string): boolean {
-  if (!name || typeof name !== "string") {
-    return false;
-  }
-  
-  // 符号名称长度限制
-  if (name.length === 0 || name.length > 500) {
-    return false;
-  }
-  
-  // 允许的字符: 字母、数字、下划线、$、点、冒号(用于命名空间)
-  const validPattern = /^[a-zA-Z_$][a-zA-Z0-9_$.:]*$/;
-  
-  return validPattern.test(name);
-}
-
 /**
  * 设置数据库文件权限
  * 
@@ -195,28 +173,6 @@ export function validateDatabasePath(dbPath: string, workspaceRoot: string): str
   
   return resolvedDb;
 }
-
-/**
- * Sanitize SQL标识符
- * 
- * 使用反引号包裹标识符,防止SQL保留字冲突
- */
-export function sanitizeSqlIdentifier(identifier: string): string {
-  if (!identifier || typeof identifier !== "string") {
-    throw new Error("Invalid SQL identifier");
-  }
-  
-  // 移除已有的反引号
-  const cleaned = identifier.replace(/`/g, "");
-  
-  // 验证标识符只包含安全字符
-  if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(cleaned)) {
-    throw new Error(`Invalid SQL identifier: ${identifier}`);
-  }
-  
-  return `\`${cleaned}\``;
-}
-
 /**
  * 构建安全的LIKE模式
  * 
@@ -304,26 +260,4 @@ export function validateSearchOptions(options?: SearchOptionsValidation): Search
   }
   
   return validated;
-}
-
-/**
- * 日志sanitization
- * 
- * 移除日志中的敏感信息
- */
-export function sanitizeLogMessage(message: string): string {
-  if (!message || typeof message !== "string") {
-    return "";
-  }
-  
-  let sanitized = message;
-  
-  // 移除可能的文件路径中的用户名
-  sanitized = sanitized.replace(/\/Users\/[^\/]+\//g, "/Users/****/");
-  sanitized = sanitized.replace(/C:\\Users\\[^\\]+\\/g, "C:\\Users\\****\\");
-  
-  // 移除可能的API密钥模式
-  sanitized = sanitized.replace(/\b[A-Za-z0-9]{32,}\b/g, "****");
-  
-  return sanitized;
 }

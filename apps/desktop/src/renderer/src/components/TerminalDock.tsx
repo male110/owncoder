@@ -6,6 +6,8 @@ import type { TerminalEntryDto } from "../../../preload/index";
 import { useUiStore } from "../store/ui-store";
 import { t } from "../../../shared/i18n/core";
 import { useI18n } from "../i18n";
+import { TerminalCompletionController, type CompletionMenuState } from "./terminal/completion-controller";
+import { TerminalCompletionMenu, completionMenuPosition, type CompletionAnchor } from "./terminal/TerminalCompletionMenu";
 
 const TERMINAL_THEMES = {
   dark: { background: "#0d1014", foreground: "#d8dee9", cursor: "#6b9cc4" },
@@ -44,52 +46,53 @@ function XtermView({ active }: { active: boolean }) {
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const ptyIdRef = useRef<string | null>(null);
-  const inputBufferRef = useRef("");
-  const historyRef = useRef<string[]>([]);
-  const suggestionRef = useRef("");
-  const [suggestion, setSuggestion] = useState("");
+  const completionRef = useRef<TerminalCompletionController | null>(null);
+  const [menu, setMenu] = useState<CompletionMenuState | null>(null);
   const [cursorCell, setCursorCell] = useState({ x: 0, y: 0 });
-  const [ghostPosition, setGhostPosition] = useState<{
-    left: number;
-    top: number;
-    lineHeight: number;
-  } | null>(null);
+  const [menuAnchor, setMenuAnchor] = useState<CompletionAnchor | null>(null);
+  const activeRef = useRef(active);
+  activeRef.current = active;
+  const menuVisible = active && menu !== null && menuAnchor !== null &&
+    completionMenuPosition(menuAnchor).maxHeight >= 36;
+  const menuVisibleRef = useRef(false);
+  menuVisibleRef.current = menuVisible;
   const uiTheme = useUiStore((s) => s.theme);
 
   const syncCursor = () => {
     const term = termRef.current;
     if (!term) return;
-    setCursorCell({ x: term.buffer.active.cursorX, y: term.buffer.active.cursorY });
+    const buffer = term.buffer.active;
+    setCursorCell({ x: buffer.cursorX, y: buffer.cursorY - buffer.viewportY });
   };
 
   useEffect(() => {
-    if (!suggestion) {
-      setGhostPosition(null);
+    if (!menu || !active) {
+      setMenuAnchor(null);
       return;
     }
-    const frame = requestAnimationFrame(() => {
-      const shell = shellRef.current;
-      const host = hostRef.current;
-      const term = termRef.current;
-      const screen = host?.querySelector<HTMLElement>(".xterm-screen");
-      if (!shell || !screen || !term || term.cols <= 0 || term.rows <= 0) {
-        setGhostPosition(null);
-        return;
-      }
-      const shellRect = shell.getBoundingClientRect();
-      const screenRect = screen.getBoundingClientRect();
-      if (screenRect.width <= 0 || screenRect.height <= 0) {
-        setGhostPosition(null);
-        return;
-      }
-      setGhostPosition({
-        left: screenRect.left - shellRect.left + cursorCell.x * (screenRect.width / term.cols),
-        top: screenRect.top - shellRect.top + cursorCell.y * (screenRect.height / term.rows),
-        lineHeight: screenRect.height / term.rows,
-      });
+    const shell = shellRef.current;
+    const host = hostRef.current;
+    const term = termRef.current;
+    const screen = host?.querySelector<HTMLElement>(".xterm-screen");
+    if (!shell || !screen || !term || term.cols <= 0 || term.rows <= 0 ||
+        cursorCell.y < 0 || cursorCell.y >= term.rows) {
+      setMenuAnchor(null);
+      return;
+    }
+    const shellRect = shell.getBoundingClientRect();
+    const screenRect = screen.getBoundingClientRect();
+    if (screenRect.width <= 0 || screenRect.height <= 0) {
+      setMenuAnchor(null);
+      return;
+    }
+    setMenuAnchor({
+      left: screenRect.left - shellRect.left + cursorCell.x * (screenRect.width / term.cols),
+      top: screenRect.top - shellRect.top + cursorCell.y * (screenRect.height / term.rows),
+      lineHeight: screenRect.height / term.rows,
+      width: shellRect.width,
+      height: shellRect.height,
     });
-    return () => cancelAnimationFrame(frame);
-  }, [active, cursorCell, suggestion]);
+  }, [active, cursorCell, menu]);
 
   useEffect(() => {
     const term = termRef.current;
@@ -117,103 +120,53 @@ function XtermView({ active }: { active: boolean }) {
       /* not visible yet */
     }
 
-let disposed = false;
+    let disposed = false;
 
-	    // Right-click: copy selection or paste clipboard (PowerShell-style)
-	    const onContextMenu = (e: MouseEvent) => {
-	      e.preventDefault();
-	      if (!term || disposed) return;
-	      const selection = term.getSelection();
-	      if (selection) {
-	        navigator.clipboard.writeText(selection).catch(() => {});
-	        term.clearSelection();
-	      } else {
-	        navigator.clipboard.readText().then((text) => {
-	          if (text && ptyIdRef.current) {
-	            window.owncoder.writeTerminal(ptyIdRef.current, text);
-	          }
-	        }).catch(() => {});
-	      }
-	    };
-	    host.addEventListener("contextmenu", onContextMenu);
+    const onContextMenu = (event: MouseEvent) => {
+      event.preventDefault();
+      if (disposed) return;
+      const selection = term.getSelection();
+      if (selection) {
+        navigator.clipboard.writeText(selection).catch(() => {});
+        term.clearSelection();
+      } else {
+        navigator.clipboard.readText().then((text) => {
+          if (text && !disposed) term.paste(text);
+        }).catch(() => {});
+      }
+    };
+    host.addEventListener("contextmenu", onContextMenu);
 
-	    const clearSuggestion = () => {
-	      suggestionRef.current = "";
-	      setSuggestion("");
-	    };
-    const refreshSuggestion = () => {
-      const input = inputBufferRef.current;
-      if (!input || /[\r\n]/.test(input)) {
-        clearSuggestion();
-        return;
+    term.attachCustomKeyEventHandler((event) => {
+      if (event.type !== "keydown") return true;
+      if (menuVisibleRef.current && completionRef.current?.handleKey(event)) {
+        event.preventDefault();
+        event.stopPropagation();
+        return false;
       }
-      const match = [...historyRef.current]
-        .reverse()
-        .find((command) => command.startsWith(input) && command.length > input.length);
-      const next = match ? match.slice(input.length) : "";
-      suggestionRef.current = next;
-      setSuggestion(next);
-    };
-    const rememberCurrentCommand = () => {
-      const command = inputBufferRef.current.trim();
-      if (command) {
-        historyRef.current = [
-          ...historyRef.current.filter((entry) => entry !== command),
-          command,
-        ].slice(-100);
-      }
-      inputBufferRef.current = "";
-      clearSuggestion();
-    };
-    const trackInput = (data: string) => {
-      let buffer = inputBufferRef.current;
-      for (const char of data) {
-        if (char === "\r" || char === "\n") {
-          inputBufferRef.current = buffer;
-          rememberCurrentCommand();
-          buffer = "";
-          continue;
-        }
-        if (char === "\x7f" || char === "\b") {
-          buffer = Array.from(buffer).slice(0, -1).join("");
-          continue;
-        }
-        if (char === "\t" || char < " " || char === "\x7f") {
-          inputBufferRef.current = "";
-          clearSuggestion();
-          return;
-        }
-        buffer += char;
-      }
-      inputBufferRef.current = buffer;
-      refreshSuggestion();
-    };
-
+      return true;
+    });
+    const onFocus = () => completionRef.current?.setEnabled(activeRef.current);
+    const onBlur = () => completionRef.current?.setEnabled(false);
+    host.addEventListener("focusin", onFocus);
+    host.addEventListener("focusout", onBlur);
+    const offContext = window.owncoder.onTerminalContext(({ id, context }) => {
+      if (id === ptyIdRef.current) completionRef.current?.update(context);
+    });
     const offData = window.owncoder.onTerminalData(({ id, data }) => {
       if (id === ptyIdRef.current) term.write(data, syncCursor);
     });
     const offExit = window.owncoder.onTerminalExit(({ id }) => {
       if (id === ptyIdRef.current) {
-        clearSuggestion();
-        inputBufferRef.current = "";
+        completionRef.current?.dispose();
+        completionRef.current = null;
         term.write(`\r\n\x1b[90m${t("[进程已退出]")}\x1b[0m\r\n`, syncCursor);
       }
     });
+    const onScroll = term.onScroll(syncCursor);
     const onInput = term.onData((data) => {
-      const currentSuggestion = suggestionRef.current;
-      const acceptsSuggestion =
-        currentSuggestion && (data === "\t" || data === "\x1b[C" || data === "\x1bOC");
-      if (acceptsSuggestion) {
-        if (ptyIdRef.current) {
-          window.owncoder.writeTerminal(ptyIdRef.current, currentSuggestion);
-          inputBufferRef.current += currentSuggestion;
-          refreshSuggestion();
-        }
-        return;
-      }
+      if (data !== "\x1b[I" && data !== "\x1b[O") completionRef.current?.invalidate();
       if (ptyIdRef.current) window.owncoder.writeTerminal(ptyIdRef.current, data);
-      trackInput(data);
-      syncCursor();
     });
 
     void window.owncoder.createTerminal({ cols: term.cols, rows: term.rows }).then((id) => {
@@ -222,6 +175,17 @@ let disposed = false;
         return;
       }
       ptyIdRef.current = id;
+      const controller = new TerminalCompletionController(id, {
+        complete: (request) => window.owncoder.completeTerminal(request),
+        accept: (request) => window.owncoder.acceptTerminalCompletion(request),
+      }, setMenu);
+      completionRef.current = controller;
+      controller.setEnabled(activeRef.current && host.contains(document.activeElement));
+      void window.owncoder.getTerminalContext(id).then((context) => {
+        if (!disposed && context) controller.update(context);
+      }).catch(() => {});
+    }).catch(() => {
+      if (!disposed) term.write(`\r\n\x1b[31m${t("终端启动失败")}\x1b[0m\r\n`);
     });
 
     const ro = new ResizeObserver(() => {
@@ -235,21 +199,33 @@ let disposed = false;
     });
     ro.observe(host);
 
-return () => {
-	      disposed = true;
-	      ro.disconnect();
-	      offData();
-	      offExit();
-	      onInput.dispose();
-	      host.removeEventListener("contextmenu", onContextMenu);
-	      if (ptyIdRef.current) window.owncoder.killTerminal(ptyIdRef.current);
-	      term.dispose();
-	    };
+    return () => {
+      disposed = true;
+      completionRef.current?.dispose();
+      completionRef.current = null;
+      ro.disconnect();
+      offContext();
+      offData();
+      offExit();
+      onInput.dispose();
+      onScroll.dispose();
+      host.removeEventListener("contextmenu", onContextMenu);
+      host.removeEventListener("focusin", onFocus);
+      host.removeEventListener("focusout", onBlur);
+      if (ptyIdRef.current) window.owncoder.killTerminal(ptyIdRef.current);
+      ptyIdRef.current = null;
+      termRef.current = null;
+      fitRef.current = null;
+      term.dispose();
+    };
   }, []);
 
   // Re-fit + focus when this tab becomes active (was possibly display:none before).
   useEffect(() => {
-    if (!active) return;
+    if (!active) {
+      completionRef.current?.setEnabled(false);
+      return;
+    }
     const t = setTimeout(() => {
       try {
         fitRef.current?.fit();
@@ -265,20 +241,17 @@ return () => {
   }, [active]);
 
   return (
-    <div className="xterm-shell" ref={shellRef}>
+    <div className="xterm-shell" ref={shellRef} onKeyDown={(event) => event.stopPropagation()}>
       <div className="xterm-host" ref={hostRef} />
-      {suggestion && ghostPosition ? (
-        <span
-          className="terminal-ghost"
-          aria-hidden="true"
-          style={{
-            left: ghostPosition.left,
-            top: ghostPosition.top,
-            lineHeight: `${ghostPosition.lineHeight}px`,
+      {menuVisible && menu && menuAnchor ? (
+        <TerminalCompletionMenu
+          menu={menu}
+          anchor={menuAnchor}
+          onAccept={(index) => {
+            completionRef.current?.accept(index);
+            termRef.current?.focus();
           }}
-        >
-          {suggestion}
-        </span>
+        />
       ) : null}
     </div>
   );

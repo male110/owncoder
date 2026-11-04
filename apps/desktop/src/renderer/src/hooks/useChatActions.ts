@@ -24,7 +24,7 @@ import {
   clearStopRequest,
   sendQueuedMessage,
 } from "./queue-controller";
-import type { ChatTurnDto, TaskStatusDto } from "../../../preload/index";
+import type { ChatTurnDto, SpecPhaseDto, TaskStatusDto } from "../../../preload/index";
 import { t } from "../../../shared/i18n/core";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -132,6 +132,7 @@ export function useChatActions(deps: {
   refreshGit: () => Promise<void>;
   refreshSessions: () => Promise<void>;
   refreshPlans: (sessionId?: string) => Promise<void>;
+  refreshSpecs: (sessionId?: string) => Promise<void>;
   refreshActivePlan: (sessionId?: string) => Promise<import("../../../preload/index").ActivePlanMetaDto | null>;
   // 方案B: deferred session creation
   pendingNewSessionRef: React.MutableRefObject<boolean>;
@@ -358,10 +359,10 @@ export function useChatActions(deps: {
       ui.clearSentDrafts(sid);
       return true;
     }
-    if (cmd === "/plan") {
-      session.setMode(await window.owncoder.setMode("plan", sid));
+    if (cmd === "/spec" || cmd === "/plan") {
+      session.setMode(await window.owncoder.setMode("spec", sid));
       ui.clearSentDrafts(sid);
-      chat.setLiveStatus(t("已切换到 Plan 模式"), sid);
+      chat.setLiveStatus(t("已切换到 Spec 模式"), sid);
       return true;
     }
     if (cmd === "/agent") {
@@ -741,6 +742,83 @@ export function useChatActions(deps: {
   }, [showError, runQueue]); // eslint-disable-line react-hooks/exhaustive-deps
 
 
+
+  // ── Spec 工作流（spec → design → tasks 审批）────────────────────────────
+
+  const onApproveSpec = useCallback(async (feature: string) => {
+    const sid = getFocusSessionId();
+    if (!sid) return;
+    ui.setBusy(true);
+    try {
+      // 与 onApprovePlan 同款：先保留生成的 spec 文档，清 checkpoint 引用。
+      await window.owncoder.keepAllChanges(sid).catch(() => undefined);
+      const res = await window.owncoder.approveSpec(feature, sid);
+      if (res.mode) session.setMode(res.mode);
+      if (res.activePlanPath !== undefined) session.setActivePlanPath(res.activePlanPath, sid);
+      if (res.currentFeature !== undefined) session.setCurrentFeature(res.currentFeature, sid);
+      const backendHistory = await window.owncoder.getChatHistory(sid);
+      chat.setHistory(backendHistory, sid);
+      await depsRef.current.refreshSpecs(sid);
+      // tasks 阶段审批后进入执行（与计划批准一致的自动执行路径）。
+      const meta = await depsRef.current.refreshActivePlan(sid);
+      if (meta && meta.tasks.length > 0) {
+        const currentSession = useSessionStore.getState();
+        if (!currentSession.workspace || !currentSession.llmConfigured) {
+          chat.setLiveStatus(t("任务已批准。请先配置 LLM，再发送消息开始执行。"), sid);
+        } else {
+          enqueueMessage(sid, t("开始执行"));
+          clearStopRequest(sid);
+          chat.setLiveStatus(t("任务已批准，自动开始执行 {{count}} 个任务…", { count: meta.tasks.length }), sid);
+          void runQueue(sid);
+        }
+      }
+    } catch (e) {
+      showError(e, sid);
+    } finally {
+      ui.setBusy(false);
+    }
+  }, [showError, runQueue]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const onRejectSpec = useCallback(async (feature: string, feedback: string) => {
+    const sid = getFocusSessionId();
+    if (!sid) return;
+    ui.setBusy(true);
+    try {
+      const res = await window.owncoder.rejectSpec(feature, feedback, sid);
+      if (res.currentFeature !== undefined) session.setCurrentFeature(res.currentFeature, sid);
+      const backendHistory = await window.owncoder.getChatHistory(sid);
+      chat.setHistory(backendHistory, sid);
+      // 用户驳回后，模型需要看到反馈并修订：如果会话配置就绪则自动触发下一轮。
+      const currentSession = useSessionStore.getState();
+      if (currentSession.workspace && currentSession.llmConfigured) {
+        const prompt = feedback.trim()
+          ? t("请根据以下反馈修改并重新保存：") + " " + feedback.trim()
+          : t("请重新审视该文档并修改后重新保存。");
+        enqueueMessage(sid, prompt);
+        void runQueue(sid);
+      }
+    } catch (e) {
+      showError(e, sid);
+    } finally {
+      ui.setBusy(false);
+    }
+  }, [showError, runQueue]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const onSaveSpecDoc = useCallback(async (feature: string, phase: SpecPhaseDto, content: string) => {
+    const sid = getFocusSessionId();
+    if (!sid) return;
+    ui.setBusy(true);
+    try {
+      await window.owncoder.saveSpecDoc(feature, phase, content, sid);
+      await depsRef.current.refreshSpecs(sid);
+      chat.setLiveStatus(t("已保存修改，等待审批。"), sid);
+    } catch (e) {
+      showError(e, sid);
+    } finally {
+      ui.setBusy(false);
+    }
+  }, [showError]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const onUpdateTask = useCallback(async (taskId: string, status: TaskStatusDto) => {
     const sid = getFocusSessionId();
     if (!sid) return;
@@ -851,6 +929,9 @@ export function useChatActions(deps: {
     onSend,
     onRegenerate,
     onApprovePlan,
+    onApproveSpec,
+    onRejectSpec,
+    onSaveSpecDoc,
 
     onUpdateTask,
     onRollback,

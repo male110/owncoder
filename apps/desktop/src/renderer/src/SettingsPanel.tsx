@@ -1,19 +1,20 @@
-import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { customConfirm } from "./utils/customConfirm";
 import {
   BUILTIN_SENSITIVE_FILES,
   SECURITY_STACK_COVERAGE,
   type SystemWorkflowConfig,
-  type Provider,
-  type AvailableModel,
-  type ApiFormat,
 } from "@owncoder/settings";
 
-import type { RuleFileDto, SettingsSnapshotDto, UserMemoryDto } from "../../preload/index";
+import type { RuleFileDto, SettingsSnapshotDto } from "../../preload/index";
 import { BlurNumberInput } from "./components/BlurNumberInput";
 import { SecurityRedactionTest } from "./components/SecurityRedactionTest";
 import type { LocalePref, MsgId } from "../../shared/i18n/core";
 import { setLocalePref, useI18n } from "./i18n";
+import { ModelTab } from "./settings/ModelTab";
+import { MemoriesTab } from "./settings/MemoriesTab";
+import { RulesTab } from "./settings/RulesTab";
+import { SkillsTab } from "./settings/SkillsTab";
 
 export type TabId =
   | "harness"
@@ -23,6 +24,7 @@ export type TabId =
   | "secrets"
   | "rules"
   | "memories"
+  | "skills"
   | "restore";
 
 const TABS: { id: TabId; label: MsgId; group?: MsgId }[] = [
@@ -33,6 +35,7 @@ const TABS: { id: TabId; label: MsgId; group?: MsgId }[] = [
   { id: "secrets", label: "安全", group: "运转" },
   { id: "rules", label: "规则", group: "项目" },
   { id: "memories", label: "偏好记忆", group: "项目" },
+  { id: "skills", label: "技能", group: "项目" },
   { id: "restore", label: "还原", group: "维护" },
 ];
 
@@ -496,21 +499,22 @@ export function SettingsPanel({ open, onClose, onSaved, initialTab }: Props) {
                       d.harness.separateStageModels = enabling;
                       
                       if (enabling) {
-                        // 启用执行阶段单独配置：从统一配置迁移
+                        // 启用执行阶段单独配置：从统一配置迁移模型
                         const unifiedModel = draft.selectedModels?.[0]?.id;
-                        const unifiedEffort = draft.thinking?.defaultEffort ?? "high";
-                        
+
                         // 只在 reactModel 为空时才迁移
                         if (!d.harness.reactModel && unifiedModel) {
                           d.harness.reactModel = unifiedModel;
                         }
+                        // 执行阶段思考等级默认“中强度”：未配置时固定为 medium，
+                        // 不从任务分解的 defaultEffort 迁移（后者默认 high）。
                         if (!d.harness.reactThinkingEffort) {
-                          d.harness.reactThinkingEffort = unifiedEffort;
+                          d.harness.reactThinkingEffort = "medium";
                         }
                       } else {
                         // 禁用执行阶段单独配置：回退到统一配置
                         const fallbackModel = d.harness.reactModel;
-                        const fallbackEffort = d.harness.reactThinkingEffort || "high";
+                        const fallbackEffort = d.harness.reactThinkingEffort || "medium";
                         
                         if (fallbackModel && draft.selectedModels?.length) {
                           // 查找对应的模型对象
@@ -547,6 +551,25 @@ export function SettingsPanel({ open, onClose, onSaved, initialTab }: Props) {
                   </div>
                 </div>
               )}
+
+              {/* 危险 bash 自动批准：勾选后所有 bash 命令（含危险命令）不再弹确认 */}
+              <label className="check" style={{ marginTop: "1rem" }}>
+                <input
+                  type="checkbox"
+                  checked={draft.modes.agent.autoApproveBash ?? false}
+                  onChange={(e) =>
+                    patch((d) => {
+                      d.modes.agent.autoApproveBash = e.target.checked;
+                    })
+                  }
+                />
+                {tr("自动批准所有 bash 命令")}
+              </label>
+              <p className="hint">
+                {tr("勾选后所有 bash 命令（含危险命令）不再弹出确认，直接执行。")}
+                {" "}
+                <strong>{tr("危险命令将跳过确认直接执行，请仅在可信环境中开启。")}</strong>
+              </p>
             </div>
           )}
 
@@ -777,71 +800,27 @@ export function SettingsPanel({ open, onClose, onSaved, initialTab }: Props) {
           )}
 
           {tab === "rules" && (
-            <div className="form rules-form">
-              <p className="hint">
-                {tr("项目级规则存于 ")}<code>.owncoder/rules/*.md</code>{tr("，按文件名排序合并后注入系统提示（有预算截断）。不属于用户工作流，一键还原不会删除。")}
-              </p>
-              {!hasWorkspace ? (
-                <p className="hint">{tr("请先打开工作区文件夹。")}</p>
-              ) : (
-                <>
-                  <div className="rules-layout">
-                    <div className="rules-list">
-                      {rules.length === 0 ? (
-                        <p className="hint">{tr("暂无规则文件")}</p>
-                      ) : (
-                        rules.map((r) => (
-                          <button
-                            key={r.name}
-                            type="button"
-                            className={selectedRule === r.name ? "rule-item active" : "rule-item"}
-                            onClick={() => void openRule(r.name)}
-                          >
-                            {r.name}
-                          </button>
-                        ))
-                      )}
-                    </div>
-                    <div className="rules-editor">
-                      {selectedRule ? (
-                        <>
-                          <div className="prompt-toolbar">
-                            <strong>{selectedRule}</strong>
-                            <button type="button" className="ghost" disabled={busy} onClick={() => void onDeleteRule()}>
-                              {tr("删除")}
-                            </button>
-                          </div>
-                          <textarea
-                            rows={14}
-                            value={ruleBody}
-                            onChange={(e) => {
-                              setRuleBody(e.target.value);
-                              setRuleDirty(true);
-                            }}
-                          />
-                        </>
-                      ) : (
-                        <p className="hint">{tr("选择左侧文件，或新建规则。")}</p>
-                      )}
-                    </div>
-                  </div>
-                  <div className="todo-actions">
-                    <input
-                      value={newRuleName}
-                      placeholder={tr("新规则.md")}
-                      onChange={(e) => setNewRuleName(e.target.value)}
-                      style={{ flex: 1, minWidth: 120 }}
-                    />
-                    <button type="button" className="ghost" disabled={busy} onClick={() => void onCreateRule()}>
-                      {tr("新建")}
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
+            <RulesTab
+              hasWorkspace={hasWorkspace}
+              rules={rules}
+              selectedRule={selectedRule}
+              ruleBody={ruleBody}
+              newRuleName={newRuleName}
+              busy={busy}
+              onOpenRule={(name) => void openRule(name)}
+              onDeleteRule={() => void onDeleteRule()}
+              onCreateRule={() => void onCreateRule()}
+              onRuleBodyChange={(value) => {
+                setRuleBody(value);
+                setRuleDirty(true);
+              }}
+              onNewRuleNameChange={setNewRuleName}
+            />
           )}
 
           {tab === "memories" && <MemoriesTab />}
+
+          {tab === "skills" && <SkillsTab />}
 
           {tab === "restore" && (
             <div className="form">
@@ -868,863 +847,6 @@ export function SettingsPanel({ open, onClose, onSaved, initialTab }: Props) {
           </span>
         </footer>
       </div>
-    </div>
-  );
-}
-
-// ── Model Tab Component ─────────────────────────────────────
-
-function ModelTab({
-  draft,
-  patch,
-  onProviderAdded,
-  onImported,
-  setStatus,
-  setBusy,
-}: {
-  draft: SystemWorkflowConfig;
-  patch: (fn: (d: SystemWorkflowConfig) => void) => void;
-  onProviderAdded: () => void;
-  onImported: (snapshot: SettingsSnapshotDto) => void;
-  setStatus: (status: string) => void;
-  setBusy: (busy: boolean) => void;
-}) {
-  // useMemo 稳定引用：draft.providers 为 undefined 时复用同一空数组，
-  // 避免每次渲染新建数组进入 effect deps 导致 effect 空转。
-  const providers = useMemo(() => draft.providers ?? [], [draft.providers]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [adding, setAdding] = useState(false);
-  const [transferAction, setTransferAction] = useState<"import" | "export" | null>(null);
-  const providerCountRef = useRef(providers.length);
-  const { t: tr } = useI18n();
-
-  useEffect(() => {
-    if (providers.length > providerCountRef.current) onProviderAdded();
-    providerCountRef.current = providers.length;
-  }, [providers.length, onProviderAdded]);
-
-  useEffect(() => {
-    if (adding) return;
-    if (!selectedId && providers.length > 0) {
-      setSelectedId(providers[0]!.id);
-      return;
-    }
-    if (selectedId && !providers.some((p) => p.id === selectedId)) {
-      setSelectedId(providers[0]?.id ?? null);
-    }
-  }, [providers, selectedId, adding]);
-
-  return (
-    <div className="model-tab-layout">
-      <div className="model-provider-list">
-        <div className="model-provider-list-head">
-          <div className="model-provider-list-title">
-            <span>{tr("自定义平台")}</span>
-            <span className="model-provider-count" aria-hidden="true">{providers.length}</span>
-          </div>
-          <div className="model-settings-actions">
-            <button type="button" className="model-transfer-button" title={tr("导出模型设置")} disabled={transferAction !== null} aria-busy={transferAction === "export"} onClick={() => void (async () => {
-              setTransferAction("export");
-              setBusy(true);
-              try {
-                const result = await window.owncoder.exportModelSettings();
-                if (result.status === "success") setStatus(tr("已导出 {{count}} 个模型", { count: result.count ?? 0 }));
-              } catch (e) {
-                setStatus(e instanceof Error ? e.message : String(e));
-              } finally { setBusy(false); setTransferAction(null); }
-            })()}>
-              <span className="model-transfer-icon" aria-hidden="true">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M12 15V3m-4 4 4-4 4 4M5 14v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5" />
-                </svg>
-              </span>
-              <span>{tr("导出")}</span>
-            </button>
-            <button type="button" className="model-transfer-button model-transfer-button-primary" title={tr("导入模型设置")} disabled={transferAction !== null} aria-busy={transferAction === "import"} onClick={() => void (async () => {
-              setTransferAction("import");
-              setBusy(true);
-              try {
-                const result = await window.owncoder.importModelSettings();
-                if (result.status === "success") {
-                  onImported(result.snapshot);
-                  setStatus(tr("导入完成：新增 {{added}} 个，跳过 {{skipped}} 个", { added: result.added, skipped: result.skipped }));
-                } else if (result.status === "error") {
-                  setStatus(result.message);
-                }
-              } catch (e) {
-                setStatus(e instanceof Error ? e.message : String(e));
-              } finally { setBusy(false); setTransferAction(null); }
-            })()}>
-              <span className="model-transfer-icon" aria-hidden="true">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M12 3v12m-4-4 4 4 4-4M5 14v5a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-5" />
-                </svg>
-              </span>
-              <span>{tr("导入")}</span>
-            </button>
-          </div>
-        </div>
-        {providers.map((p) => {
-          const enabledCount =
-            draft.selectedModels?.filter((m) => m.providerId === p.id).length ?? 0;
-          return (
-            <button
-              key={p.id}
-              type="button"
-              className={`model-provider-item ${selectedId === p.id && !adding ? "active" : ""}`}
-              onClick={() => {
-                setSelectedId(p.id);
-                setAdding(false);
-              }}
-            >
-              <span className="model-provider-name">{p.name || p.baseUrl}</span>
-              <span
-                className={`model-provider-dot ${enabledCount > 0 ? "on" : ""}`}
-                title={tr("已启用 {{count}} 个模型", { count: enabledCount })}
-              />
-            </button>
-          );
-        })}
-        <button
-          type="button"
-          className={`model-provider-item add ${adding ? "active" : ""}`}
-          onClick={() => setAdding(true)}
-        >
-          {tr("+ 添加平台")}
-        </button>
-      </div>
-
-      <div className="model-provider-detail">
-        {adding ? (
-          <NewProviderForm
-            onDone={(p) => {
-              patch((d) => {
-                d.providers = [...(d.providers ?? []), p];
-              });
-              setAdding(false);
-              setSelectedId(p.id);
-            }}
-            onCancel={() => setAdding(false)}
-          />
-        ) : selectedId && providers.some((p) => p.id === selectedId) ? (
-          <ProviderDetail
-            key={selectedId}
-            provider={providers.find((p) => p.id === selectedId)!}
-            selectedModels={draft.selectedModels ?? []}
-            patch={patch}
-          />
-        ) : (
-          <div className="model-empty">
-            <p className="hint">{tr("暂无平台配置，点击左侧「添加平台」开始。")}</p>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ── Provider Detail (right panel) ───────────────────────────
-
-/** Subsequence fuzzy match: query chars appear in order within haystack. */
-function fuzzyMatchModel(name: string, id: string, query: string): boolean {
-  const targets = [name.toLowerCase(), id.toLowerCase()];
-  return targets.some((text) => {
-    let qi = 0;
-    for (let i = 0; i < text.length && qi < query.length; i++) {
-      if (text[i] === query[qi]) qi++;
-    }
-    return qi === query.length;
-  });
-}
-
-function ProviderDetail({
-  provider,
-  selectedModels,
-  patch,
-}: {
-  provider: Provider;
-  selectedModels: AvailableModel[];
-  patch: (fn: (d: SystemWorkflowConfig) => void) => void;
-}) {
-  const [name, setName] = useState(provider.name);
-  const [baseUrl, setBaseUrl] = useState(provider.baseUrl);
-  const [apiKey, setApiKey] = useState(provider.apiKey);
-  const [apiFormat, setApiFormat] = useState<ApiFormat>(
-    provider.apiFormat === "openai-chat" ||
-      provider.apiFormat === "openai-responses" ||
-      provider.apiFormat === "anthropic-messages"
-      ? provider.apiFormat
-      : "openai-chat",
-  );
-  const [fetching, setFetching] = useState(false);
-  const [fetchError, setFetchError] = useState("");
-  const [showKey, setShowKey] = useState(false);
-  const [manualModelId, setManualModelId] = useState("");
-  const [listMode, setListMode] = useState<"add" | "search">("add");
-  const [modelSearchQuery, setModelSearchQuery] = useState("");
-  const modelListInputRef = useRef<HTMLInputElement>(null);
-  const { t: tr } = useI18n();
-
-  useEffect(() => {
-    setName(provider.name);
-    setBaseUrl(provider.baseUrl);
-    setApiKey(provider.apiKey);
-    setApiFormat(
-      provider.apiFormat === "openai-chat" ||
-        provider.apiFormat === "openai-responses" ||
-        provider.apiFormat === "anthropic-messages"
-        ? provider.apiFormat
-        : "openai-chat",
-    );
-    setListMode("add");
-    setModelSearchQuery("");
-    setManualModelId("");
-  }, [provider.id, provider.name, provider.baseUrl, provider.apiKey, provider.apiFormat]);
-
-  useEffect(() => {
-    modelListInputRef.current?.focus();
-  }, [listMode]);
-
-  const syncProvider = useCallback(
-    (field: "name" | "baseUrl" | "apiKey" | "apiFormat", value: string) => {
-      patch((d) => {
-        const idx = (d.providers ?? []).findIndex((p) => p.id === provider.id);
-        if (idx >= 0) {
-          if (field === "apiFormat") {
-            d.providers![idx]!.apiFormat = value as ApiFormat;
-          } else {
-            d.providers![idx]![field] = value;
-          }
-        }
-      });
-    },
-    [patch, provider.id],
-  );
-
-  const fetchModels = useCallback(async () => {
-    setFetching(true);
-    setFetchError("");
-    try {
-      const result = await window.owncoder.fetchModelList(baseUrl, apiKey || undefined, apiFormat);
-      if (!result.ok) {
-        setFetchError(result.error ?? tr("未知错误"));
-        return;
-      }
-      const models = (result.models ?? []).map((m: { id: string; name: string }) => ({
-        id: m.id,
-        name: m.name || m.id,
-        providerId: provider.id,
-      }));
-      patch((d) => {
-        const idx = (d.providers ?? []).findIndex((p) => p.id === provider.id);
-        if (idx < 0) return;
-
-        d.providers![idx]!.models = models;
-        const currentModels = new Map(models.map((model) => [model.id, model]));
-        d.selectedModels = (d.selectedModels ?? []).flatMap((selected) => {
-          if (selected.providerId !== provider.id) return [selected];
-          const current = currentModels.get(selected.id);
-          return current ? [{ ...selected, name: current.name }] : [];
-        });
-      });
-    } catch (e) {
-      setFetchError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setFetching(false);
-    }
-  }, [baseUrl, apiKey, apiFormat, provider.id, patch]);
-
-  const toggleModel = useCallback(
-    (model: AvailableModel, checked: boolean) => {
-      patch((d) => {
-        if (checked) {
-          d.selectedModels = [...(d.selectedModels ?? []), model];
-        } else {
-          d.selectedModels = (d.selectedModels ?? []).filter(
-            (m) => m.providerId !== model.providerId || m.id !== model.id,
-          );
-        }
-      });
-    },
-    [patch],
-  );
-
-  const removeProvider = useCallback(() => {
-    patch((d) => {
-      d.providers = (d.providers ?? []).filter((p) => p.id !== provider.id);
-      d.selectedModels = (d.selectedModels ?? []).filter((m) => m.providerId !== provider.id);
-    });
-  }, [patch, provider.id]);
-
-  const addManualModel = useCallback(() => {
-    const raw = manualModelId.trim();
-    if (!raw) return;
-    const modelId = `model_${provider.id}_${raw}`;
-    patch((d) => {
-      const idx = (d.providers ?? []).findIndex((p) => p.id === provider.id);
-      if (idx < 0) return;
-      const existing = d.providers![idx]!.models ?? [];
-      if (existing.some((m) => m.id === modelId)) return;
-      d.providers![idx]!.models = [...existing, { id: modelId, name: raw }];
-      d.selectedModels = [
-        ...(d.selectedModels ?? []),
-        { id: modelId, name: raw, providerId: provider.id },
-      ];
-    });
-    setManualModelId("");
-  }, [manualModelId, provider.id, patch]);
-
-  const removeModel = useCallback(
-    (modelId: string) => {
-      patch((d) => {
-        const idx = (d.providers ?? []).findIndex((p) => p.id === provider.id);
-        if (idx >= 0) {
-          d.providers![idx]!.models = (d.providers![idx]!.models ?? []).filter((m) => m.id !== modelId);
-        }
-        d.selectedModels = (d.selectedModels ?? []).filter(
-          (m) => m.providerId !== provider.id || m.id !== modelId,
-        );
-      });
-    },
-    [patch, provider.id],
-  );
-
-  const enabledCount = selectedModels.filter((m) => m.providerId === provider.id).length;
-
-  const filteredModels = useMemo(() => {
-    if (listMode !== "search" || !modelSearchQuery.trim()) return provider.models;
-    const q = modelSearchQuery.trim().toLowerCase();
-    return provider.models.filter((m) => fuzzyMatchModel(m.name, m.id, q));
-  }, [provider.models, listMode, modelSearchQuery]);
-
-  const enterSearchMode = useCallback(() => {
-    setListMode("search");
-    setModelSearchQuery("");
-  }, []);
-
-  const exitSearchMode = useCallback(() => {
-    setListMode("add");
-    setModelSearchQuery("");
-  }, []);
-
-  return (
-    <div className="model-detail">
-      <div className="model-detail-head">
-        <div className="model-detail-title">
-          <input
-            className="model-detail-name-input"
-            value={name}
-            placeholder={tr("平台名称")}
-            onChange={(e) => {
-              setName(e.target.value);
-              syncProvider("name", e.target.value);
-            }}
-          />
-          <span className={`model-status-badge ${enabledCount > 0 ? "on" : ""}`}>
-            {enabledCount > 0 ? tr("已启用 {{count}}", { count: enabledCount }) : tr("未启用")}
-          </span>
-        </div>
-        <button type="button" className="ghost small danger" onClick={removeProvider}>
-          {tr("删除")}
-        </button>
-      </div>
-
-      <label className="model-detail-field">
-        Base URL
-        <input
-          value={baseUrl}
-          placeholder="https://api.example.com/v1"
-          onChange={(e) => {
-            setBaseUrl(e.target.value);
-            syncProvider("baseUrl", e.target.value);
-          }}
-        />
-      </label>
-
-      <label className="model-detail-field">
-        {tr("API 协议")}
-        <select
-          value={apiFormat}
-          onChange={(e) => {
-            const next = e.target.value as ApiFormat;
-            setApiFormat(next);
-            syncProvider("apiFormat", next);
-          }}
-        >
-          <option value="openai-chat">OpenAI Chat Completions</option>
-          <option value="openai-responses">OpenAI Responses</option>
-          <option value="anthropic-messages">Anthropic Messages</option>
-        </select>
-        <span className="hint">{tr("协议与 Base URL 独立：自建或代理端点也可选 Anthropic Messages。")}</span>
-      </label>
-
-      <label className="model-detail-field">
-        API Key
-        <div className="api-key-row">
-          <input
-            type={showKey ? "text" : "password"}
-            value={apiKey}
-            placeholder={tr("sk-...（本地可留空）")}
-            autoComplete="off"
-            onChange={(e) => {
-              setApiKey(e.target.value);
-              syncProvider("apiKey", e.target.value);
-            }}
-          />
-          <button type="button" className="ghost tiny" onClick={() => setShowKey((s) => !s)}>
-            {showKey ? tr("隐藏") : tr("显示")}
-          </button>
-        </div>
-      </label>
-
-      <div className="model-detail-actions">
-        <button
-          type="button"
-          className="primary small"
-          disabled={fetching || !baseUrl.trim()}
-          onClick={() => void fetchModels()}
-        >
-          {fetching ? tr("获取中...") : tr("获取模型列表")}
-        </button>
-      </div>
-
-      {fetchError && <p className="error-text">{fetchError}</p>}
-
-      <div
-        className="model-detail-list"
-        tabIndex={0}
-        onKeyDown={(e) => {
-          if (e.key === "f" && (e.ctrlKey || e.metaKey)) {
-            e.preventDefault();
-            e.stopPropagation();
-            enterSearchMode();
-          } else if (e.key === "Escape" && listMode === "search") {
-            e.preventDefault();
-            e.stopPropagation();
-            exitSearchMode();
-          }
-        }}
-      >
-        <div className="model-detail-list-head">
-          {tr("模型列表")}
-          {listMode === "search" && (
-            <span className="model-list-mode-hint">{tr("按 Esc 退出搜索")}</span>
-          )}
-        </div>
-        <div className="model-manual-add">
-          {listMode === "add" ? (
-            <>
-              <input
-                ref={modelListInputRef}
-                value={manualModelId}
-                placeholder={tr("手动输入模型 ID，如 gpt-4o、deepseek-chat（Ctrl+F 搜索）")}
-                onChange={(e) => setManualModelId(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    addManualModel();
-                  }
-                }}
-              />
-              <button
-                type="button"
-                className="ghost small"
-                disabled={!manualModelId.trim()}
-                onClick={addManualModel}
-              >
-                {tr("添加")}
-              </button>
-            </>
-          ) : (
-            <input
-              ref={modelListInputRef}
-              value={modelSearchQuery}
-              placeholder={tr("模糊搜索模型名称或 ID…")}
-              onChange={(e) => setModelSearchQuery(e.target.value)}
-              aria-label={tr("搜索模型")}
-            />
-          )}
-        </div>
-        {provider.models.length === 0 ? (
-          <p className="hint">{tr("点击「获取模型列表」拉取，或在上方手动输入模型 ID 后添加")}</p>
-        ) : filteredModels.length === 0 ? (
-          <p className="hint">{tr("无匹配模型")}</p>
-        ) : (
-          filteredModels.map((m) => {
-            const isSelected = selectedModels.some(
-              (s) => s.providerId === provider.id && s.id === m.id,
-            );
-            return (
-              <div key={m.id} className="model-detail-row">
-                <label className="model-detail-row-label">
-                  <input
-                    type="checkbox"
-                    checked={isSelected}
-                    onChange={(e) =>
-                      toggleModel(
-                        { id: m.id, name: m.name, providerId: provider.id },
-                        e.target.checked,
-                      )
-                    }
-                  />
-                  <span className="model-detail-row-name">{m.name}</span>
-                </label>
-                <button
-                  type="button"
-                  className="ghost tiny danger"
-                  title={tr("移除该模型")}
-                  onClick={() => removeModel(m.id)}
-                >
-                  {tr("删除")}
-                </button>
-              </div>
-            );
-          })
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ── New Provider Form (right panel) ─────────────────────────
-
-function NewProviderForm({
-  onDone,
-  onCancel,
-}: {
-  onDone: (p: Provider) => void;
-  onCancel: () => void;
-}) {
-  const [name, setName] = useState("");
-  const [baseUrl, setBaseUrl] = useState("");
-  const [apiKey, setApiKey] = useState("");
-  const [apiFormat, setApiFormat] = useState<ApiFormat>("openai-chat");
-  const [fetching, setFetching] = useState(false);
-  const [fetchError, setFetchError] = useState("");
-  const [showKey, setShowKey] = useState(false);
-  const { t: tr } = useI18n();
-
-  const fetchAndAdd = useCallback(async () => {
-    if (!baseUrl.trim()) return;
-    setFetching(true);
-    setFetchError("");
-    try {
-      const providerId = `provider_${Date.now().toString(36)}`;
-      const result = await window.owncoder.fetchModelList(baseUrl, apiKey || undefined, apiFormat);
-      if (!result.ok) {
-        setFetchError(result.error ?? tr("未知错误"));
-        return;
-      }
-      const models = (result.models ?? []).map((m: { id: string; name: string }) => ({
-        id: m.id,
-        name: m.name || m.id,
-        providerId: providerId,
-      }));
-      onDone({
-        id: providerId,
-        name: name.trim() || new URL(baseUrl).hostname,
-        baseUrl,
-        apiKey,
-        apiFormat,
-        models,
-      });
-    } catch (e) {
-      setFetchError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setFetching(false);
-    }
-  }, [baseUrl, apiKey, apiFormat, name, onDone]);
-
-  const addDirect = useCallback(() => {
-    if (!baseUrl.trim()) return;
-    const providerId = `provider_${Date.now().toString(36)}`;
-    let displayName = name.trim();
-    if (!displayName) {
-      try {
-        displayName = new URL(baseUrl).hostname;
-      } catch {
-        displayName = "";
-      }
-    }
-    onDone({
-      id: providerId,
-      name: displayName,
-      baseUrl,
-      apiKey,
-      apiFormat,
-      models: [],
-    });
-  }, [baseUrl, apiKey, apiFormat, name, onDone]);
-
-  return (
-    <div className="model-detail">
-      <div className="model-detail-head">
-        <div className="model-detail-title">{tr("添加平台")}</div>
-      </div>
-
-      <label className="model-detail-field">
-        {tr("平台名称")}
-        <input
-          value={name}
-          placeholder="Ollama / OpenAI / DeepSeek"
-          onChange={(e) => setName(e.target.value)}
-        />
-      </label>
-
-      <label className="model-detail-field">
-        Base URL
-        <input
-          value={baseUrl}
-          placeholder="http://127.0.0.1:11434/v1"
-          onChange={(e) => setBaseUrl(e.target.value)}
-        />
-      </label>
-
-      <label className="model-detail-field">
-        {tr("API 协议")}
-        <select value={apiFormat} onChange={(e) => setApiFormat(e.target.value as ApiFormat)}>
-          <option value="openai-chat">OpenAI Chat Completions</option>
-          <option value="openai-responses">OpenAI Responses</option>
-          <option value="anthropic-messages">Anthropic Messages</option>
-        </select>
-        <span className="hint">{tr("协议与 Base URL 独立：自建或代理端点也可选 Anthropic Messages。")}</span>
-      </label>
-
-      <label className="model-detail-field">
-        API Key
-        <div className="api-key-row">
-          <input
-            type={showKey ? "text" : "password"}
-            value={apiKey}
-            placeholder={tr("sk-...（本地可留空）")}
-            autoComplete="off"
-            onChange={(e) => setApiKey(e.target.value)}
-          />
-          <button type="button" className="ghost tiny" onClick={() => setShowKey((s) => !s)}>
-            {showKey ? tr("隐藏") : tr("显示")}
-          </button>
-        </div>
-      </label>
-
-      {fetchError && <p className="error-text">{fetchError}</p>}
-
-      <p className="hint" style={{ margin: "4px 0 10px" }}>
-        {tr("「获取并添加」将调用 /v1/models 拉取模型列表；若端点不可用或想稍后手动添加模型，请用「直接添加」。")}
-      </p>
-
-      <div className="model-detail-actions">
-        <button
-          type="button"
-          className="primary small"
-          disabled={fetching || !baseUrl.trim()}
-          onClick={() => void fetchAndAdd()}
-        >
-          {fetching ? tr("获取中...") : tr("获取并添加")}
-        </button>
-        <button
-          type="button"
-          className="ghost small"
-          disabled={!baseUrl.trim()}
-          onClick={addDirect}
-        >
-          {tr("直接添加")}
-        </button>
-        <button type="button" className="ghost small" onClick={onCancel}>
-          {tr("取消")}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// ── Memories Tab Component ──────────────────────────────────
-
-function MemoriesTab() {
-  const [globalMemories, setGlobalMemories] = useState<UserMemoryDto[]>([]);
-  const { t: tr } = useI18n();
-  const [projectMemories, setProjectMemories] = useState<UserMemoryDto[]>([]);
-  const [editing, setEditing] = useState<{ memory: UserMemoryDto; scope: string } | null>(null);
-  const [addingScope, setAddingScope] = useState<string | null>(null);
-  const [form, setForm] = useState({ title: "", content: "", category: "general", keywords: "" });
-  const [hasWorkspace, setHasWorkspace] = useState(false);
-
-  const reload = useCallback(async () => {
-    const ws = await window.owncoder.getWorkspace();
-    setHasWorkspace(Boolean(ws));
-    const g = await window.owncoder.listMemories("global");
-    setGlobalMemories(g);
-    const p = ws ? await window.owncoder.listMemories("project") : [];
-    setProjectMemories(p);
-  }, []);
-
-  useEffect(() => {
-    void reload();
-  }, [reload]);
-
-  const startAdd = (scope: string) => {
-    setForm({ title: "", content: "", category: "general", keywords: "" });
-    setEditing(null);
-    setAddingScope(scope);
-  };
-
-  const startEdit = (m: UserMemoryDto, scope: string) => {
-    setForm({
-      title: m.title,
-      content: m.content,
-      category: m.category,
-      keywords: m.keywords.join(", "),
-    });
-    setEditing({ memory: m, scope });
-    setAddingScope(null);
-  };
-
-  const cancelForm = () => {
-    setAddingScope(null);
-    setEditing(null);
-  };
-
-  const activeScope = addingScope ?? editing?.scope ?? "global";
-
-  const saveForm = async () => {
-    if (!form.title.trim() || !form.content.trim()) return;
-    const keywords = form.keywords
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
-    const scope = activeScope;
-    if (editing) {
-      await window.owncoder.updateMemory(editing.memory.id, {
-        title: form.title.trim(),
-        content: form.content.trim(),
-        category: form.category.trim() || "general",
-        keywords,
-      }, scope);
-    } else {
-      await window.owncoder.addMemory({
-        title: form.title.trim(),
-        content: form.content.trim(),
-        category: form.category.trim() || "general",
-        keywords,
-      }, scope);
-    }
-    cancelForm();
-    await reload();
-  };
-
-  const deleteMemory = async (id: string, scope: string) => {
-    if (!(await customConfirm(tr("删除此偏好记忆？")))) return;
-    await window.owncoder.deleteMemory(id, scope);
-    await reload();
-  };
-
-  const showForm = addingScope !== null || editing !== null;
-
-  const renderList = (items: UserMemoryDto[], scope: string) => (
-    <div className="memories-list">
-      {items.length === 0 ? (
-        <p className="hint">{scope === "global" ? tr("暂无全局偏好记忆") : tr("暂无项目偏好记忆")}</p>
-      ) : (
-        items.map((m) => (
-          <div key={m.id} className="memory-item">
-            <div className="memory-item-head">
-              <strong>{m.title}</strong>
-              <span className="memory-item-category">{m.category}</span>
-            </div>
-            <p className="memory-item-content">{m.content}</p>
-            <div className="memory-item-footer">
-              <span className="hint">{new Date(m.updatedAt).toLocaleString()}</span>
-              <div className="memory-item-actions">
-                <button type="button" className="ghost tiny" onClick={() => startEdit(m, scope)}>
-                  {tr("编辑")}
-                </button>
-                <button type="button" className="ghost tiny danger" onClick={() => void deleteMemory(m.id, scope)}>
-                  {tr("删除")}
-                </button>
-              </div>
-            </div>
-          </div>
-        ))
-      )}
-    </div>
-  );
-
-  return (
-    <div className="form">
-      <p className="hint">
-        {tr("模型在对话中识别到持久偏好时会主动调用 save_memory 工具保存到这里。")}
-        {tr("全局偏好跨项目生效，项目偏好仅在当前工作区生效。")}
-      </p>
-
-      {showForm ? (
-        <div className="memories-form">
-          <p className="hint-inline">
-            {addingScope ? (addingScope === "global" ? tr("添加全局偏好") : tr("添加项目偏好")) : (editing?.scope === "global" ? tr("编辑全局偏好") : tr("编辑项目偏好"))}
-          </p>
-          <label>
-            {tr("标题")}
-            <input
-              value={form.title}
-              placeholder={tr("例如：使用中文回复")}
-              onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
-            />
-          </label>
-          <label>
-            {tr("内容")}
-            <textarea
-              rows={4}
-              value={form.content}
-              placeholder={tr("偏好的详细描述")}
-              onChange={(e) => setForm((f) => ({ ...f, content: e.target.value }))}
-            />
-          </label>
-          <label>
-            {tr("分类")}
-            <input
-              value={form.category}
-              placeholder="general"
-              onChange={(e) => setForm((f) => ({ ...f, category: e.target.value }))}
-            />
-          </label>
-          <label>
-            {tr("关键词（逗号分隔）")}
-            <input
-              value={form.keywords}
-              placeholder={tr("中文, 语言, 回复")}
-              onChange={(e) => setForm((f) => ({ ...f, keywords: e.target.value }))}
-            />
-          </label>
-          <div className="todo-actions">
-            <button type="button" className="ghost" onClick={() => void saveForm()}>
-              {editing ? tr("保存") : tr("添加")}
-            </button>
-            <button type="button" className="ghost" onClick={cancelForm}>
-              {tr("取消")}
-            </button>
-          </div>
-        </div>
-      ) : null}
-
-      <h3>{tr("全局偏好")}</h3>
-      {renderList(globalMemories, "global")}
-      {!showForm ? (
-        <button type="button" className="ghost" onClick={() => startAdd("global")}>
-          {tr("+ 添加全局偏好")}
-        </button>
-      ) : null}
-
-      <h3 style={{ marginTop: "1.5em" }}>{tr("当前项目偏好")}</h3>
-      {!hasWorkspace ? (
-        <p className="hint">{tr("请先打开工作区文件夹")}</p>
-      ) : (
-        <>
-          {renderList(projectMemories, "project")}
-          {!showForm ? (
-            <button type="button" className="ghost" onClick={() => startAdd("project")}>
-              {tr("+ 添加项目偏好")}
-            </button>
-          ) : null}
-        </>
-      )}
     </div>
   );
 }

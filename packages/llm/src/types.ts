@@ -2,6 +2,13 @@ export type ChatRole = "system" | "user" | "assistant" | "tool";
 
 export interface ToolDef {
   type: "function";
+  /**
+   * True when this tool never mutates the workspace and runs no side-effectful
+   * command. The ReAct loop derives its read-only (exploration) guard from
+   * this flag — see READONLY_TOOLS in harness/enhanced-tools.ts — so keep it
+   * accurate when adding tools.
+   */
+  readOnly?: boolean;
   function: {
     name: string;
     description: string;
@@ -35,18 +42,6 @@ export interface ChatMessage {
   is_error?: boolean;
   name?: string;
 }
-
-export interface ChatRequest {
-  model: string;
-  messages: ChatMessage[];
-  tools?: ToolDef[];
-  tool_choice?: "auto" | "none" | { type: "function"; function: { name: string } };
-  temperature?: number;
-  stream?: boolean;
-  stream_options?: { include_usage?: boolean };
-  max_tokens?: number;
-}
-
 export interface ChatChoiceMessage {
   role: "assistant";
   content?: string | null;

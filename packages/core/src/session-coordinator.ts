@@ -424,15 +424,3 @@ export class SessionRunCoordinator<T = any, TContext = any> {
     return this.entries.get(sessionId)!;
   }
 }
-
-/**
- * 创建一个简化的协调器（无 continuation check）
- */
-export function createSimpleCoordinator<T, TContext = any>(
-  drainHandler: DrainHandler<T, TContext>,
-): SessionRunCoordinator<T, TContext> {
-  return new SessionRunCoordinator(
-    drainHandler,
-    async () => false, // 不自动继续
-  );
-}

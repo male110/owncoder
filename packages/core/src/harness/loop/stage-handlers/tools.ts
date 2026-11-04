@@ -11,7 +11,7 @@ import { resolveLoopStrategy } from "../loop-strategy.ts";
 import type { AgentLoopOpts } from "../types.ts";
 import type { SchedulerState, StageHandler, StageHandlerContext } from "./types.ts";
 
-/** 把分解结果中的可复用历史合并进 activeTasks，供 ReAct 循环直接使用。 */
+/** 把分解结果中的任务字段合并进 activeTasks，供 ReAct 循环直接使用。 */
 function withDecomposeHistory(opts: AgentLoopOpts, state: SchedulerState): AgentLoopOpts {
   const decomposedTasks = state.rawDecompose?.tasks ?? [];
   if (!decomposedTasks.length || !opts.activeTasks?.length) return opts;
@@ -19,17 +19,20 @@ function withDecomposeHistory(opts: AgentLoopOpts, state: SchedulerState): Agent
   const shared = state.rawDecompose?.relevantHistory;
   const activeTasks = opts.activeTasks.map((task) => {
     const source = taskById.get(task.id);
-    const stepHistory = source?.steps
-      .map((step) => step.relevantHistory?.trim())
-      .filter((history): history is string => Boolean(history));
-    const combinedStepHistory = stepHistory?.length ? stepHistory.join("\n\n") : undefined;
     return {
       ...task,
-      userConstraints: task.userConstraints?.length ? task.userConstraints : source?.userConstraints,
-      progressStatus: task.progressStatus ?? source?.progressStatus,
+      guidance: task.guidance?.trim()
+        ? task.guidance
+        : source?.prompt?.trim() || undefined,
+      // 依赖图带入：selectNextPendingTask 按依赖调度。
+      dependsOn: source?.dependsOn?.length ? source.dependsOn : task.dependsOn,
+      userConstraints: task.userConstraints?.length
+        ? task.userConstraints
+        : state.rawDecompose?.userConstraints,
+      // 当前格式历史与任务同级：所有任务共享同一份分解历史。
       relevantHistory: task.relevantHistory?.trim()
         ? task.relevantHistory
-        : source?.relevantHistory ?? combinedStepHistory ?? shared,
+        : shared || undefined,
     };
   });
   return { ...opts, activeTasks };
@@ -56,7 +59,27 @@ async function runToolLoop(ctx: StageHandlerContext): Promise<void> {
   });
 
   const loopParams = node.params ?? {};
-  const enrichedOpts = withDecomposeHistory(opts, state);
+  let enrichedOpts = withDecomposeHistory(opts, state);
+
+  // Task decomposition feeds the normal sequential ReAct task driver.
+  if (!enrichedOpts.activeTasks?.length && state.rawDecompose?.tasks?.length) {
+    enrichedOpts = {
+      ...enrichedOpts,
+      activeTasks: state.rawDecompose.tasks.map((task) => ({
+        id: task.id,
+        description: task.description,
+        guidance: task.prompt,
+        dependsOn: task.dependsOn ?? [],
+        status: "pending" as const,
+        retryCount: 0,
+        maxRetries: 2,
+        ...(task.title ? { progressStatus: task.title } : {}),
+        ...(task.kind ? { kind: task.kind } : {}),
+        ...(state.rawDecompose?.userConstraints?.length ? { userConstraints: state.rawDecompose.userConstraints } : {}),
+        ...(state.rawDecompose?.relevantHistory ? { relevantHistory: state.rawDecompose.relevantHistory } : {}),
+      })),
+    };
+  }
 
   const reactResult = await resolveLoopStrategy(loopParams.loopStrategy).run({
     opts: enrichedOpts,
@@ -83,6 +106,7 @@ async function runToolLoop(ctx: StageHandlerContext): Promise<void> {
     maxRedundantRangesPerFile: loopParams.maxRedundantRangesPerFile,
     // ── Pass reactSteps from node.params so UI config takes effect at runtime ──
     reactSteps: loopParams.reactSteps,
+    thinking: opts.workflow.thinking?.defaultEffort ? { effort: opts.workflow.thinking.defaultEffort } : undefined,
   });
 
   tracer.endSpan(loopSpanId, reactResult.aborted ? "error" : "ok");

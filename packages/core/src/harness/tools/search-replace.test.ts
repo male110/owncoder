@@ -177,3 +177,90 @@ test("a stray second divider in the REPLACE section is rejected", () => {
   assert.equal(res.content, undefined);
   assert.match(res.error ?? "", /unexpected extra "=======" divider/);
 });
+
+// ---------------------------------------------------------------------------
+// Robustness fixes for real-world model output (see tool failure analysis):
+// these shapes used to fail outright even though the intent is unambiguous.
+// ---------------------------------------------------------------------------
+
+test("last SEARCH line without a newline is not glued to the divider", () => {
+  // The model copied the file's final line (no trailing newline) into the
+  // block, so `=======` ended up appended to it. Parsing must split them.
+  const file = "const a = 1;\nconst b = 2;";
+  const patch = "<<<<<<< SEARCH\nconst b = 2;=======\nconst b = 20;\n>>>>>>> REPLACE\n";
+  const res = applySearchReplace(file, patch);
+  assert.equal(res.success, true);
+  assert.equal(res.content, "const a = 1;\nconst b = 20;\n");
+});
+
+test("last REPLACE line without a newline is not glued to the closing marker", () => {
+  const file = "const a = 1;\n";
+  const patch = "<<<<<<< SEARCH\nconst a = 1;\n=======\nconst a = 10;>>>>>>> REPLACE\n";
+  const res = applySearchReplace(file, patch);
+  assert.equal(res.success, true);
+  assert.equal(res.content, "const a = 10;\n");
+});
+
+test("missing trailing newline on the file's last line still matches", () => {
+  // File ends without "\n"; SEARCH was copied verbatim from read_file output
+  // where the final line has no ending either (after ensureTrailingNewline
+  // would otherwise introduce a phantom blank line).
+  const file = "const a = 1;\nconst b = 2;";
+  const res = applySearchReplace(file, SR("const b = 2;\n", "const b = 20;\n"));
+  assert.equal(res.success, true);
+  assert.equal(res.content, "const a = 1;\nconst b = 20;\n");
+});
+
+test("blank padding lines around SEARCH that the file does not have are stripped", () => {
+  // The model wrapped the block in blank "context" lines; the file has none.
+  const file = "import x\nconst a = 1;\nconst b = 2;\n";
+  const res = applySearchReplace(
+    file,
+    SR("\nconst a = 1;\n", "\nconst a = 10;\n"),
+  );
+  assert.equal(res.success, true);
+  assert.equal(res.content, "import x\nconst a = 10;\nconst b = 2;\n");
+});
+
+test("blank padding at the file's end (no trailing blank line) is tolerated", () => {
+  const file = "import x\nconst a = 1;\nconst b = 2;\n";
+  const res = applySearchReplace(
+    file,
+    SR("const b = 2;\n\n", "const b = 20;\n\n"),
+  );
+  assert.equal(res.success, true);
+  assert.equal(res.content, "import x\nconst a = 1;\nconst b = 20;\n");
+});
+
+test("swapped SEARCH/REPLACE is diagnosed instead of a bare 'not found'", () => {
+  // The model put the NEW text in SEARCH and the OLD text in REPLACE.
+  const file = "old code here\n";
+  const res = applySearchReplace(file, SR("new code here\n", "old code here\n"));
+  assert.equal(res.success, false);
+  assert.match(res.error ?? "", /swapped/i);
+});
+
+test("identical SEARCH and REPLACE is rejected as a no-op block", () => {
+  const file = "alpha\nbeta\n";
+  const res = applySearchReplace(file, SR("beta\n", "beta\n"));
+  assert.equal(res.success, false);
+  assert.match(res.error ?? "", /identical|changes nothing/i);
+});
+
+test("blank-padding tolerance does not mask genuine ambiguity", () => {
+  // Padded SEARCH still has to resolve to exactly one location — stripping the
+  // padding must not let a flexible matcher silently pick the second copy.
+  const file = "a\nb\na\n";
+  const res = applySearchReplace(file, SR("\na\n", "\nA\n"));
+  assert.equal(res.success, false);
+  assert.equal(res.content, undefined);
+  assert.match(res.error ?? "", /not unique/i);
+});
+
+test("padded SEARCH that is unique after stripping still applies to the right copy", () => {
+  // Only one "a\n" line; the leading blank in SEARCH is pure padding.
+  const file = "x\na\ny\n";
+  const res = applySearchReplace(file, SR("\na\n", "\nA\n"));
+  assert.equal(res.success, true);
+  assert.equal(res.content, "x\nA\ny\n");
+});

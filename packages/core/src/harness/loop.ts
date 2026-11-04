@@ -5,7 +5,7 @@ import {
 } from "@owncoder/llm";
 import {
   BUILTIN_AGENT_PROMPT,
-  BUILTIN_PLAN_PROMPT,
+  BUILTIN_SPEC_PROMPT,
   findPipelineNode,
   modePipeline,
   type PipelineNode,
@@ -15,6 +15,9 @@ import { contextBudgets } from "./budget.ts";
 import type { ToolContext } from "./execute.ts";
 import { allEnhancedTools } from "./enhanced-tools.ts";
 import { OS_LOCALE } from "./tools/shared.ts";
+import { BudgetLedger } from "./budget-ledger.ts";
+import { EvidenceStore } from "./evidence-store.ts";
+import { routeRequest } from "./loop/request-router.ts";
 
 // ── Language directive: single source of truth for reply-language instruction ──
 // All LLM calls within one task (main agent loop AND pre-loop stages such as
@@ -32,16 +35,6 @@ function replyLocaleLabel(pref: LocaleSetting | undefined): string {
 
 export function localeSystemPrompt(pref: LocaleSetting | undefined = "system"): string {
   return `## Language\nAlways reply in ${replyLocaleLabel(pref)}. Use this language for all explanations, comments, and output regardless of what language the user writes in.`;
-}
-
-/** 结构化 JSON 协议调用用：只约束 JSON 字符串字段语言，不要求整段用自然语言作答。 */
-export function localeJsonValuesPrompt(pref: LocaleSetting | undefined = "system"): string {
-  const lang = replyLocaleLabel(pref);
-  return [
-    "## Language",
-    `Write JSON string values (intent, descriptions, questions, progressStatus, relevantHistory, etc.) in ${lang}, regardless of the user's language.`,
-    "Do not write a free-form chat reply, explanation, or any text outside the JSON object.",
-  ].join("\n");
 }
 
 /** @deprecated Prefer localeSystemPrompt(workflow.harness.locale). Kept for callers that still assume OS-only. */
@@ -78,8 +71,6 @@ import {
   classifyTask,
 } from "./model-coordinator.ts";
 
-import { AdaptivePromptOptimizer } from "./prompt-optimizer.ts";
-
 import { persistExperiences } from "./experience.ts";
 export { classifyRecoveryError } from "./recovery.ts";
 import { applyTaskEvent } from "../task-run.ts";
@@ -90,7 +81,7 @@ import { stampTurnEvent, type AgentLoopOpts, type AgentLoopResult, type TurnEven
 
 import { resolveMidStages, resolveStageModel } from "./loop/stages.ts";
 import { runPipelineScheduler, type SchedulerContext, type SchedulerState } from "./loop/pipeline-scheduler.ts";
-import { runVerifyReport, mergeVerificationIntoAssistant } from "./loop/react.ts";
+import { runVerifyReport, mergeVerificationIntoAssistant } from "./loop/react-verify.ts";
 
 export type { TurnEvent, TurnEventInput, ChatTurn, DocumentWorkflowState, AgentLoopOpts, AgentLoopResult, ReactDecisionSummary } from "./loop/types.ts";
 export { stampTurnEvent } from "./loop/types.ts";
@@ -117,6 +108,12 @@ export {
 
 export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult> {
   const sessionId = opts.sessionId;
+  // Create one ledger for the whole request. Nested task nodes and Explore
+  // loops receive this same object through their options instead of resetting
+  // local counters at every child boundary.
+  if (!opts.budget) opts = { ...opts, budget: new BudgetLedger() };
+  if (!opts.evidenceStore) opts = { ...opts, evidenceStore: new EvidenceStore() };
+
   if (!sessionId) {
     throw new Error("runAgentLoop requires a non-empty sessionId");
   }
@@ -142,6 +139,8 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
   const memory = opts.memory ?? new MemoryManager();
   const reasoningTrace = createReasoningTrace();
   const taskClassification = classifyTask(opts.userMessage, opts.history.length);
+  const requestRoute = opts.requestRoute ?? routeRequest(opts.userMessage);
+  if (opts.requestRoute !== requestRoute) opts = { ...opts, requestRoute };
 
   const pipeline = modePipeline(opts.workflow, opts.mode);
   const budgets = contextBudgets(opts.workflow);
@@ -163,11 +162,11 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
   const toolNode = hasExecute ? executeNode : exploreNode;
   const draftNode = findPipelineNode(pipeline, "draft_plan");
 
-  const allowPlanFiles =
-    opts.workflow.modes.plan.allowPlanFiles !== false;
+  const allowSpecFiles =
+    opts.workflow.modes.spec.allowSpecFiles !== false;
 
   const planBashReadonly =
-    opts.mode === "plan" && opts.workflow.modes.plan.bash === "readonly";
+    opts.mode === "spec" && opts.workflow.modes.spec.bash === "readonly";
 
   // ── Tools: use enhanced tools (backward-compatible: all existing tools still work) ──
   let toolsFinal: ToolDef[] = [
@@ -175,7 +174,7 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
       mode: opts.mode,
       allowBash: opts.mode === "agent",
       planBashReadonly,
-      allowPlanFiles,
+      allowSpecFiles,
       enableLsp: opts.enableLsp !== false,
       enableWebSearch: opts.enableWebSearch !== false,
       enableVerification: opts.enableVerification !== false && opts.mode === "agent",
@@ -197,7 +196,10 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
       "apply_patch", "write_file", "append_file", "bash",
       "save_plan", "save_spec", "save_design", "save_experience",
       "save_memory", "update_memory", "forget_memory",
-      "undo_session_change",
+      "undo_session_change", "run_script",
+      // 任务清单状态变更（活清单的增删改）同样是会话状态写入，readOnly
+      // 会话（探索沙箱）不可用。
+      "update_tasks",
     ]);
     toolsFinal = toolsFinal.filter((t) => !WRITE_TOOLS.has(t.function.name));
   }
@@ -207,7 +209,7 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
   // the builtin constants remain as a defensive fallback if a node lacks one.
   const basePrompt =
     hasExplore && !hasExecute
-      ? exploreNode?.prompt?.trim() || draftNode?.prompt?.trim() || BUILTIN_PLAN_PROMPT.trim()
+      ? exploreNode?.prompt?.trim() || draftNode?.prompt?.trim() || BUILTIN_SPEC_PROMPT.trim()
       : executeNode?.prompt?.trim() || BUILTIN_AGENT_PROMPT.trim();
 
 
@@ -215,7 +217,7 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
   // 用户在设置里写下的提示词是契约、规则、约束；内置 prompt 也是出厂定义的产品行为。
   // 任何裁剪都会让 LLM 丢掉关键指令（典型如大项目禁止全量 build 的约束被砍）。
   // 历史消息可以截断（由 history_compact 控制）。
-  const systemPrompt = basePrompt;
+  const systemPrompt = opts.systemPromptOverride ?? basePrompt;
 
   // Authentication is checked at each actual model-call boundary. This lets
   // pre-model local routers answer without requiring an LLM credential.
@@ -231,50 +233,30 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
     content: localeSystemPrompt(opts.workflow.harness.locale),
   });
 
-  messages.push({
-    role: "system",
-    content:
-      "## External knowledge\n" +
-      "When you do not know a fact, or one local retry failed to fix the same error, call `web_search` before guessing. " +
-      "Then `web_fetch` the best official/source URL. Do not keep editing the same failing approach instead of searching.",
-  });
-
   const history = [...opts.history];
-
-  // ── Adaptive Prompt Optimizer: track success/failure for self-improvement ──
-  // Owned by the session orchestrator so learned failure patterns persist across
-  // turns; falls back to a per-call instance when the caller does not supply one.
-  const promptOptimizer = opts.promptOptimizer ?? new AdaptivePromptOptimizer();
-  // Ensure downstream stages (buildInitialContext) can access the resolved
-  // instance even when the caller did not pass promptOptimizer explicitly
-  // (e.g. subagents). Otherwise the deferred injection in
-  // buildInitialContext would silently no-op for those call paths.
-  opts.promptOptimizer = promptOptimizer;
-
-  // NOTE: promptOptContext injection is deferred to buildInitialContext so it
-  // lands AFTER all stable system messages (fewShot, platform info, project
-  // rules), keeping the LLM cache prefix byte-stable across turns.
 
   // ── Few-shot examples: removed (Assistant-style minimal system, no curated examples) ──
 
   memory.setGoal(opts.userMessage.slice(0, 200));
 
   const readSet = new Set<string>();
-  const readMtTimes = new Map<string, number>();
   const toolCtx: ToolContext = {
     workspaceRoot: opts.workspaceRoot,
     sessionId: opts.sessionId,
     mode: opts.mode,
     workflow: opts.workflow,
+    availableTools: new Set(toolsFinal.map(t => t.function.name)),
+    budget: opts.budget,
     index: opts.index,
     codemap: opts.codemap,
     readSet,
-    readMtTimes,
     maxOutputChars: opts.workflow.harness.toolOutputMaxChars,
     bashMaxChars: opts.workflow.harness.bashMaxChars,
+    currentFeature: opts.currentFeature,
     fileSnapshots: opts.fileSnapshots,
     touchedPaths: opts.touchedPaths,
     confirmDangerousBash: opts.confirmDangerousBash,
+    autoApproveDangerousBash: opts.autoApproveDangerousBash,
     askUser: opts.askUser,
     askUserTurnCache: new Map(),
     renderPage: opts.renderPage,
@@ -283,6 +265,7 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
 
     mcp: opts.mcp,
     projectRules: opts.projectRules,
+    skills: opts.skills,
     llmApiKey: opts.llmApiKey,
     signal: opts.signal,
     historyVector: opts.historyVector,
@@ -290,36 +273,54 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
     memoryStore: opts.memoryStore,
     projectMemoryStore: opts.projectMemoryStore,
     sessionChanges: opts.sessionChanges,
+    // 子智能体派发：dispatch_agent 工具通过这里运行隔离的 Explore 子循环。
+    // 动态导入 run-subagent，避免 subagent ↔ loop 的静态导入环。
+    dispatchSubagent: async (request) => {
+      const { runExploreSubagent } = await import("./subagent/run-subagent.ts");
+      return runExploreSubagent(request, {
+        workspaceRoot: opts.workspaceRoot,
+        sessionId: opts.sessionId,
+        workflow: opts.workflow,
+        mode: opts.mode,
+        index: opts.index,
+        codemap: opts.codemap,
+        llmApiKey: opts.llmApiKey,
+        signal: opts.signal,
+        renderPage: opts.renderPage,
+        // 危险命令确认回调必须透传：子循环里 looksDangerous 命中时，没有
+        // 这个回调就会走硬拦截分支，宿主弹窗永远不会出现。
+        confirmDangerousBash: opts.confirmDangerousBash,
+        autoApproveDangerousBash: opts.autoApproveDangerousBash,
+        budget: opts.budget,
+        onEvent: opts.onEvent,
+      });
+    },
+    // Shared bounded evidence cache and sequential task-list updates.
+    evidenceStore: opts.evidenceStore,
+    updateTasks: opts.updateTasks,
   };
 
   // ── Resolve middle stages from pipeline (user-configurable) ──
   // T8-T10: resolveMidStages now includes context_gather so the scheduler
   // dispatches it through its StageHandler instead of hardcoding it before the loop.
-  const midStages = resolveMidStages(pipeline);
+  let midStages = resolveMidStages(pipeline);
+  if (opts.leanPipeline) {
+    // Subagents run only the tool stage; no context gather, decomposition,
+    // verification, or change presentation.
+    midStages = midStages.filter(
+      (n: PipelineNode) => n.type === "execute_tools" || n.type === "explore_tools",
+    );
+  }
 
   const presentNodes = midStages.filter((n: PipelineNode) => n.type === "present_changes");
   const presentNode = presentNodes[presentNodes.length - 1];
 
-
-  let runError = "";
-  let runOutput = "";
 
   const finish = (assistantText: string): AgentLoopResult => {
     const autoKeep = presentNode?.params?.autoKeepChanges === true;
     updateTraceStats(reasoningTrace, estimateTokens(messages.map((m: ChatMessage) => m.content ?? "").join("")), 0, 0);
     const traceSummary = tracer.formatSummary();
     opts.onEvent?.({ type: "trace_report", summary: traceSummary });
-
-    // Record run stats for adaptive prompt optimization
-    const estimatedTokens = estimateTokens(messages.map((m: ChatMessage) => m.content ?? "").join(""));
-    promptOptimizer.recordRun(
-      opts.mode,
-      runError.length === 0,
-      runError,
-      runOutput.slice(0, 500),
-      estimatedTokens,
-      reasoningTrace.steps.length,
-    );
 
     // 🆕 历史归档：turn 结束时只归档「本轮新增」的 turns（增量），写入向量库（best-effort）。
     // 归档与任务分解/检索解耦，失败不影响主流程。
@@ -369,6 +370,7 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
       history,
       assistantText,
       lastPlanPath: toolCtx.lastPlanPath,
+      currentFeature: toolCtx.currentFeature,
       presentChanges:
         opts.mode === "agent" ? presentNodes.length > 0 && !autoKeep : undefined,
       documentWorkflow: state.documentWorkflow,
@@ -376,6 +378,9 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
       traceSummary,
       taskRunState: state.taskRunState ?? opts.taskRunState ?? null,
       successRejected: state.successRejected === true || state.postVerifyFailed === true,
+      // 透传硬限制（迭代/工具调用/成本上限）终态，供 Explore 子智能体标注部分结果。
+      blocked: state.blocked === true,
+      blockedReason: state.blockedReason,
     };
   };
 
@@ -417,18 +422,14 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
             ? {
                 intent: state.rawDecompose.intent,
                 userConstraints: state.rawDecompose.userConstraints ?? [],
+                relevantHistory: state.rawDecompose.relevantHistory ?? "",
                 tasks: state.rawDecompose.tasks.map((task) => ({
                   id: task.id,
+                  ...(task.title ? { title: task.title } : {}),
                   description: task.description,
-                  userConstraints: task.userConstraints ?? [],
-                  relevantHistory: task.relevantHistory ?? "",
-                  progressStatus: task.progressStatus ?? "pending",
-                  steps: task.steps.map((step) => ({
-                    id: step.id,
-                    description: step.description,
-                    dependsOn: step.dependsOn,
-                    relevantHistory: step.relevantHistory ?? "",
-                  })),
+                  prompt: task.prompt,
+                  ...(task.kind ? { kind: task.kind } : {}),
+                  ...(task.dependsOn ? { dependsOn: task.dependsOn } : {}),
                 })),
               }
             : undefined,
@@ -543,6 +544,7 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
     state,
     hasToolStage,
     hasExecute,
+    requestRoute,
 
     taskClassification,
     anchorsNode,

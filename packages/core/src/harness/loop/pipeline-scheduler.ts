@@ -47,6 +47,17 @@ export async function runPipelineScheduler(
   for (const node of stages) {
     console.log(ts(`stage start: ${node.type}`));
     const stageT0 = performance.now();
+    // A deterministic precise route is already fully located. Skip global
+    // context gathering and decomposition so the executor can perform the
+    // smallest evidence-first read/edit cycle.
+    if (
+      (ctx.requestRoute?.mode === "precise_single_file" &&
+        (node.type === "context_gather" || node.type === "task_decompose")) ||
+      (ctx.requestRoute?.mode === "simple_direct" && node.type === "task_decompose")
+    ) {
+      console.log(ts(`stage skipped: ${node.type} reason=${ctx.requestRoute?.mode ?? "route"}`));
+      continue;
+    }
     // Before any model-calling stage, ensure history + user message are in messages.
     if (!ctx.state.userMessageInjected && isModelCallingStage(node)) {
       await injectHistoryAndUserMessage(ctx);

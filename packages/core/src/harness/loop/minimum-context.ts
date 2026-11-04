@@ -10,20 +10,22 @@
 import upath from "upath";
 
 export type ContextSelectionMode = "off" | "observe" | "apply";
-export type ContextIntent = "change" | "debug" | "inspect" | "plan" | "unknown";
+export type ContextIntent = "change" | "debug" | "inspect" | "spec" | "unknown";
 export type ContextFreshness = "current" | "indexed" | "unknown";
 export type ContextSource =
   | "memory"
   | "knowledge"
   | "short-term"
   | "mention"
-  | "plan"
+  | "spec"
   | "todo"
   | "workflow"
   | "deps"
   | "tech-stack"
   | "project-size"
-  | "rules";
+  | "rules"
+  | "skills"
+  | "index-navigation";
 
 export interface ContextTaskSignal {
   mode: string;
@@ -68,8 +70,6 @@ export interface MinimumContextPlan {
   estimatedTokens: number;
   selected: ContextCandidate[];
   omitted: OmittedContextCandidate[];
-  /** Indexed excerpts that can navigate an edit but cannot replace a fresh read. */
-  requiresFreshRead: string[];
 }
 
 const DEFAULT_MAX_CANDIDATES = 24;
@@ -81,13 +81,17 @@ const SOURCE_VALUE: Record<ContextSource, number> = {
   knowledge: 50,
   "short-term": 48,
   mention: 120,
-  plan: 118,
+  spec: 118,
   todo: 112,
   workflow: 116,
   deps: 28,
   "tech-stack": 35,
   "project-size": 38,
+  // 索引符号召回的导航起点：价值高于技术栈行（直接指向业务符号），
+  // 低于显式 mention/spec（用户意图的直接表达）。内容是导航指针。
+  "index-navigation": 40,
   rules: 60,
+  skills: 62,
 };
 
 const CHANGE_QUERY = /\b(?:add|change|create|delete|fix|implement|modify|refactor|remove|rename|update|write)\b|实现|修改|修复|添加|删除|重构|更新|开发|编写|改造/i;
@@ -97,7 +101,7 @@ const DEPENDENCY_QUERY = /\b(?:dependency|dependencies|package|version)\b|依赖
 
 /** Infer only a low-confidence routing hint. Explicit paths and active work remain stronger signals. */
 export function inferTaskIntent(query: string, mode: string): ContextIntent {
-  if (mode === "plan") return "plan";
+  if (mode === "spec") return "spec";
   if (CHANGE_QUERY.test(query)) return "change";
   if (DEBUG_QUERY.test(query)) return "debug";
   if (INSPECT_QUERY.test(query)) return "inspect";
@@ -230,7 +234,6 @@ export function summarizeMinimumContextPlan(plan: MinimumContextPlan): Record<st
       mandatory: candidate.mandatory === true,
     })),
     omitted: plan.omitted,
-    requiresFreshRead: plan.requiresFreshRead,
   };
 }
 
@@ -245,18 +248,12 @@ function finalizePlan(
   selected: ContextCandidate[],
   omitted: OmittedContextCandidate[],
 ): MinimumContextPlan {
-  const requiresFreshRead = uniquePaths(
-    selected
-      .filter((candidate) => candidate.freshness === "indexed" && candidate.path)
-      .map((candidate) => candidate.path!),
-  );
   return {
     mode: config.mode,
     tokenBudget: config.tokenBudget,
     estimatedTokens: selected.reduce((total, candidate) => total + candidate.estimatedTokens, 0),
     selected,
     omitted,
-    requiresFreshRead,
   };
 }
 
@@ -330,18 +327,6 @@ function pathMatches(path: string, targets: readonly string[]): boolean {
       normalizedTarget.endsWith(`/${normalizedPath}`)
     );
   });
-}
-
-function uniquePaths(paths: readonly string[]): string[] {
-  const seen = new Set<string>();
-  const unique: string[] = [];
-  for (const path of paths) {
-    const normalized = normalizePath(path);
-    if (!normalized || seen.has(normalized)) continue;
-    seen.add(normalized);
-    unique.push(path);
-  }
-  return unique;
 }
 
 function normalizePath(path: string): string {

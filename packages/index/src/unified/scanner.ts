@@ -593,12 +593,6 @@ export function computeDiffFromMetas(
 
   return { added, modified, removed };
 }
-
-export function hashFile(absolutePath: string): string {
-  const content = readFileSync(absolutePath, "utf-8");
-  return computeHash(content);
-}
-
 /**
  * 计算文件内容的SHA-256哈希
  */
@@ -718,32 +712,4 @@ function loadGitignore(root: string): ReturnType<typeof ignore> | null {
   } catch {
     return null;
   }
-}
-
-/**
- * 快速扫描 - 只计算hash,不读取文件内容
- */
-export function quickScan(
-  root: string,
-  paths: string[]
-): Map<string, { hash: string; mtime: number }> {
-  const result = new Map<string, { hash: string; mtime: number }>();
-
-  for (const path of paths) {
-    try {
-      const absolutePath = join(root, path);
-      const stat = statSync(absolutePath);
-      const content = readFileSync(absolutePath, "utf-8");
-      const hash = computeHash(content);
-
-      result.set(path, {
-        hash,
-        mtime: stat.mtimeMs,
-      });
-    } catch {
-      // 文件不存在或无法读取,跳过
-    }
-  }
-
-  return result;
 }

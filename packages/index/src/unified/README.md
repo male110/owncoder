@@ -441,7 +441,7 @@ case "ruby":
 ## 未来计划
 
 - [ ] 升级到tree-sitter-wasm解析（更精确的语法理解）
-- [ ] 语义搜索支持（基于embedding的相似度搜索）
+- [x] 语义搜索支持（基于embedding的相似度搜索）—— 符号级 chunk + sqlite-vec cosine KNN，嵌入器经 `SemanticSearchPort` 由桌面端注入（bge-small-zh INT8），构建侧走 `semantic-index.ts` 后置通道（水位增量），查询侧 `ragSearch`；CLI/无模型自动降级 FTS
 - [ ] LSP集成（实时索引更新）
 - [ ] Worker线程并行扫描（大型项目加速）
 - [ ] Benchmark套件（性能回归检测）

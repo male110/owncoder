@@ -1,12 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { promises as fs } from "node:fs";
-import { join } from "node:path";
+import { join, basename } from "node:path";
+import { closeConversationStore } from "../../../../conversation-store.ts";
 import { tmpdir } from "node:os";
 import {
   loadRecentRounds,
   loadDecomposeHistory,
-  persistDecomposeHistory,
-  dropLastRound,
+
   deleteDecomposeRound,
   persistDecomposeRound,
   persistRoundReport,
@@ -28,21 +28,18 @@ import type { AgentLoopOpts, ChatTurn } from "../../types.ts";
 import {
   extractStructuredHistory,
   parseDecomposeAnswer,
-  // packFallbackRelevantHistory, // 已移除
   buildFallbackRawDecompose,
   isCurrentCodeBehaviorInquiry,
-  recoverEmptyDecomposeSteps,
+  isPreciseLocatedRequest,
+  recoverEmptyDecomposeTasks,
+  collapsePseudoLinearTasks,
   buildDecomposeContext,
   rankAndFilterByRelevance,
   estimateTextRelevance,
-  detectCircularDependency,
-  resolveCircularDependenciesInTasks,
-  flattenSteps,
   RELEVANT_HISTORY_SCORE_THRESHOLD,
 } from "../task-decompose.ts";
 import { BUILTIN_WORKFLOW } from "@owncoder/settings";
 import { contextBudgets } from "../../../budget.ts";
-import { localeJsonValuesPrompt, localeSystemPrompt } from "../../../loop.ts";
 
 // ── 临时目录 ──
 let tmpDir: string;
@@ -50,6 +47,14 @@ beforeEach(async () => {
   tmpDir = await fs.mkdtemp(join(tmpdir(), "rounds-test-"));
 });
 afterEach(async () => {
+  // 历史回退会打开 SQLite；Windows 删除临时目录前必须释放句柄。
+  const sessionsDir = join(tmpDir, ".owncoder", "sessions");
+  const files = await fs.readdir(sessionsDir).catch(() => [] as string[]);
+  for (const file of files) {
+    if (file.endsWith(".conversation.sqlite")) {
+      closeConversationStore(tmpDir, basename(file, ".conversation.sqlite"));
+    }
+  }
   await fs.rm(tmpDir, { recursive: true, force: true });
 });
 
@@ -160,7 +165,8 @@ describe("extractStructuredHistory (旧格式 fallback)", () => {
     const decomposeObj = {
       intent: "理解用户需求",
       userConstraints: ["不能修改配置"],
-      tasks: [{ id: "task_1", description: "任务1", steps: [{ id: "s1", description: "步骤1", dependsOn: [] }] }],
+      relevantHistory: "上次结论：登录用 AuthService",
+      tasks: [{ id: "task_1", description: "任务1", prompt: "步骤1" }],
     };
     const history: ChatTurn[] = [
       mkTurn("user", "分析需求"),
@@ -173,13 +179,14 @@ describe("extractStructuredHistory (旧格式 fallback)", () => {
     expect(parsed.intent).toBe("理解用户需求");
     expect(parsed.userConstraints).toEqual(["不能修改配置"]);
     expect(parsed.tasks).toHaveLength(1);
-    expect(parsed.tasks[0].steps).toHaveLength(1);
+    expect(parsed.tasks[0].prompt).toBe("步骤1");
+    expect(parsed.relevantHistory).toBe("上次结论：登录用 AuthService");
   });
 
   it("fenced JSON 也可识别为 decompose", () => {
     const decomposeObj = {
       intent: "fenced 解析",
-      tasks: [{ id: "task_1", description: "任务", steps: [{ id: "s1", description: "步骤", dependsOn: [] }] }],
+      tasks: [{ id: "task_1", description: "任务", prompt: "步骤" }],
     };
     const history: ChatTurn[] = [
       mkTurn("user", "请求"),
@@ -655,17 +662,6 @@ describe("decompose→report/evidence 同轮持久化", () => {
   });
 });
 
-describe("分解阶段 locale 拼装不得诱导纯文本", () => {
-  it("JSON 协议语言指令不包含 Always reply，且与聊天 locale 分离", () => {
-    const jsonLocale = localeJsonValuesPrompt("zh");
-    const chatLocale = localeSystemPrompt("zh");
-    expect(jsonLocale).toMatch(/JSON string values/);
-    expect(jsonLocale).toMatch(/Do not write a free-form chat reply/);
-    expect(jsonLocale).not.toMatch(/Always reply/);
-    expect(chatLocale).toMatch(/Always reply in Chinese \(zh-CN\)/);
-  });
-});
-
 describe("parseDecomposeAnswer / fallback：intent 用原话，纯文本收成 task", () => {
   it("可从 Markdown 围栏中提取 JSON", () => {
     const answer = parseDecomposeAnswer([
@@ -674,25 +670,22 @@ describe("parseDecomposeAnswer / fallback：intent 用原话，纯文本收成 t
       JSON.stringify({
         intent: "定位登录实现",
         userConstraints: [],
-        tasks: [{
-          id: "task_1",
+        relevantHistory: "登录由 AuthService 负责",
+        nodes: [{
+          id: "n1",
+          title: "阅读登录实现",
           description: "阅读 AuthService",
-          steps: [{
-            id: "step_1",
-            description: "定位 AuthService.login",
-            dependsOn: [],
-
-          }],
+          prompt: "定位 AuthService.login 后阅读相关代码",
+          dependsOn: [],
         }],
-        progressStatus: "开始定位",
-        relevantHistory: "",
       }),
       "```",
     ].join("\n"));
 
     expect(answer).not.toBeNull();
     expect(answer!.intent).toBe("定位登录实现");
-    expect(answer!.tasks[0].steps[0].description).toContain("AuthService.login");
+    expect(answer!.tasks[0].prompt).toContain("AuthService.login");
+    expect(answer!.relevantHistory).toBe("登录由 AuthService 负责");
   });
 
   it("纯散文无 JSON 时返回 null，不把原文当结构化结果", () => {
@@ -707,188 +700,121 @@ describe("parseDecomposeAnswer / fallback：intent 用原话，纯文本收成 t
     expect(fallback.intent).not.toContain("当然可以");
     expect(fallback.tasks).toHaveLength(1);
     expect(fallback.tasks[0].description).toBe(modelProse);
-    expect(fallback.tasks[0].steps).toHaveLength(1);
-    expect(fallback.tasks[0].steps[0].description).toBe(modelProse);
-    // progressStatus 字段已移除
+    expect(fallback.tasks[0].prompt).toMatch(/Execute the model reply above directly/);
   });
 
-  it("fallback 无模型纯文本时仍用用户原话生成本地 plan", () => {
+  it("fallback 无模型纯文本时仍用用户原话与启发式 prompt 生成单一节点", () => {
     const userMessage = "现在任务分解这一步，历史信息是如何处理的？";
     const fallback = buildFallbackRawDecompose(userMessage);
     expect(fallback.intent).toBe(userMessage);
     expect(fallback.tasks[0].description).toBe(userMessage);
-    // progressStatus 字段已移除
+    expect(fallback.tasks[0].prompt).toMatch(/Local heuristic plan/);
   });
 });
 
 describe("parseDecomposeAnswer 保留 prompt 约定字段", () => {
-  it("解析步骤验证字段", () => {
+  it("解析任务内容、完成指导与相关历史；忽略旧 step 级字段", () => {
     const answer = parseDecomposeAnswer(JSON.stringify({
-      intent: "User wants Redis caching (act: request_change, intent: implement).",
-      userConstraints: ["Must use Redis"],
-      progressStatus: "New task, step 1: locate login",
-      tasks: [{ id: "task_1", description: "Confirm AuthService.login and add Redis caching", steps: [
-        {
-          id: "step_1",
-          description: "Confirm AuthService.login and add Redis caching",
-          dependsOn: [],
-          stopReadingWhen: [
-            {
-              condition: "login implementation located",
-              requiredEvidenceIds: ["need_1"],
-            },
-          ],
-          verificationCriteria: {
-            command: "pnpm test",
-            expectedOutput: "passed",
-            exitCode: 0,
-          },
-          rollbackStrategy: "revert the Redis cache patch",
-          estimatedComplexity: "medium",
-        },
-      ] }],
-    }));
-
-    expect(answer).not.toBeNull();
-    expect(answer!.tasks[0].steps).toHaveLength(1);
-    // stopReadingWhen 字段已从 schema 中移除
-    expect(answer!.tasks[0].steps[0].verificationCriteria).toEqual({
-      command: "pnpm test",
-      expectedOutput: "passed",
-      exitCode: 0,
-    });
-    expect(answer!.tasks[0].steps[0].rollbackStrategy).toBe("revert the Redis cache patch");
-    expect(answer!.tasks[0].steps[0].estimatedComplexity).toBe("medium");
-  });
-
-  it("非法枚举降级为缺省，不阻断整份分解", () => {
-    const answer = parseDecomposeAnswer(JSON.stringify({
-      intent: "Continue.",
-      userConstraints: [],
-      tasks: [{ id: "task_1", description: "Inspect current login path", steps: [
-        {
-          id: "step_1",
-          description: "Inspect current login path",
-          dependsOn: [],
-          verificationCriteria: { command: "", expectedOutput: "ok" },
-          estimatedComplexity: "extreme",
-        },
-      ] }],
-    }));
-
-    expect(answer).not.toBeNull();
-    // stopReadingWhen 字段已从 schema 中移除
-    expect(answer!.tasks[0].steps[0].verificationCriteria).toBeUndefined();
-    expect(answer!.tasks[0].steps[0].estimatedComplexity).toBeUndefined();
-  });
-
-  it("sanitize 持久化后仍保留 source/priority/fallback 与验证字段", async () => {
-    const record = await persistDecomposeRound(tmpDir, "parse-fields-session", "加 Redis 缓存", {
-      intent: "用户希望登录页更快",
+      intent: "用户希望给登录加 Redis 缓存。",
       userConstraints: ["必须使用 Redis"],
       tasks: [{
         id: "task_1",
         description: "接入 Redis 缓存",
-        steps: [
-        {
+        prompt: "先确认 AuthService.login 现状，再加缓存并自测",
+        relevantHistory: "上次讨论：缓存 key 用 sessionId",
+        // 旧 step 形状：描述应折叠进 prompt，其余字段忽略。
+        steps: [{
           id: "step_1",
-          description: "接入 Redis 缓存",
+          description: "确认 AuthService.login 并加缓存",
           dependsOn: [],
-
-          verificationCriteria: {
-            command: "pnpm test",
-            expectedOutput: "passed",
-            exitCode: 0,
-          },
+          verificationCriteria: { command: "pnpm test", expectedOutput: "passed", exitCode: 0 },
           rollbackStrategy: "回滚 Redis 补丁",
           estimatedComplexity: "medium",
-        },
-      ] }],
+        }],
+      }],
+    }));
+
+    expect(answer).not.toBeNull();
+    expect(answer!.userConstraints).toEqual(["必须使用 Redis"]);
+    const task = answer!.tasks[0]!;
+    expect(task.description).toBe("接入 Redis 缓存");
+    expect(task.prompt).toContain("先确认 AuthService.login");
+    expect(task.prompt).toContain("确认 AuthService.login");
+    expect(task).not.toHaveProperty("relevantHistory");
+    // 历史与 tasks 同级：任务级旧字段 relevantHistory 折叠到顶层。
+    expect(answer!.relevantHistory).toBe("上次讨论：缓存 key 用 sessionId");
+    // 旧 step 级验证/回滚/复杂度字段不再作为独立属性保留。
+    expect(task).not.toHaveProperty("steps");
+  });
+
+  it("prompt 缺失但有旧 steps 时，把步骤描述折叠进 prompt；非法字段降级", () => {
+    const answer = parseDecomposeAnswer(JSON.stringify({
+      intent: "继续。",
+      userConstraints: [],
+      tasks: [{
+        id: "task_1",
+        description: "检查当前登录路径",
+        steps: [
+          { id: "step_1", description: "检查当前登录路径", dependsOn: [] },
+          { id: "step_2", description: "补一次类型检查", dependsOn: ["missing"] },
+        ],
+      }],
+    }));
+
+    expect(answer).not.toBeNull();
+    expect(answer!.tasks[0].prompt).toBe(
+      "1. 检查当前登录路径\n2. 补一次类型检查",
+    );
+  });
+
+  it("sanitize 持久化后仍保留任务内容/指导/顶层历史", async () => {
+    const record = await persistDecomposeRound(tmpDir, "parse-fields-session", "加 Redis 缓存", {
+      intent: "用户希望登录页更快",
+      userConstraints: ["必须使用 Redis"],
+      relevantHistory: "相关历史：登录现状",
+      tasks: [{
+        id: "task_1",
+        description: "接入 Redis 缓存",
+        prompt: "确认登录实现后加缓存并运行测试",
+      }],
     });
 
     expect(record).not.toBeNull();
-    // stopReadingWhen 字段已从 schema 中移除
-    expect(record!.taskDecompose?.tasks[0].steps[0].verificationCriteria).toEqual({
-      command: "pnpm test",
-      expectedOutput: "passed",
-      exitCode: 0,
-    });
-    expect(record!.taskDecompose?.tasks[0].steps[0].rollbackStrategy).toBe("回滚 Redis 补丁");
-    expect(record!.taskDecompose?.tasks[0].steps[0].estimatedComplexity).toBe("medium");
+    const task = record!.taskDecompose?.tasks[0]!;
+    expect(task.description).toBe("接入 Redis 缓存");
+    expect(task.prompt).toBe("确认登录实现后加缓存并运行测试");
+    expect(record!.taskDecompose?.relevantHistory).toBe("相关历史：登录现状");
   });
 
-  it("新结构解析：intent + tasks[].description + 任务内 steps", () => {
+  it("新结构解析：nodes[] 携带 title/prompt/dependsOn，旧 tasks[] 仍可读", () => {
     const answer = parseDecomposeAnswer(JSON.stringify({
       intent: "新意图",
       userConstraints: ["约束一"],
-      tasks: [
-        {
-          id: "task_1",
-          description: "任务一描述",
-          steps: [{ id: "s1", description: "步骤一", dependsOn: [] }],
-        },
-        {
-          id: "task_2",
-          description: "任务二描述",
-          steps: [{ id: "s2", description: "步骤二", dependsOn: ["s1"] }],
-        },
+      relevantHistory: "共享历史",
+      nodes: [
+        { id: "n1", title: "节点一", description: "任务一描述", prompt: "指导一", dependsOn: [] },
+        { id: "n2", title: "节点二", description: "任务二描述", prompt: "指导二", dependsOn: ["n1"] },
       ],
-      progressStatus: "进行中",
     }));
 
     expect(answer).not.toBeNull();
     expect(answer!.intent).toBe("新意图");
     expect(answer!.userConstraints).toEqual(["约束一"]);
     expect(answer!.tasks.map((t) => t.description)).toEqual(["任务一描述", "任务二描述"]);
-    expect(answer!.tasks[0].steps[0].id).toBe("s1");
-    expect(answer!.tasks[1].steps[0].id).toBe("s2");
-    expect(answer!.tasks[1].steps[0].dependsOn).toEqual([]);
-  });
+    expect(answer!.tasks.map((t) => t.prompt)).toEqual(["指导一", "指导二"]);
+    expect(answer!.tasks[0].title).toBe("节点一");
+    expect(answer!.tasks[1].dependsOn).toEqual(["n1"]);
+    expect(answer!.relevantHistory).toBe("共享历史");
 
-  it("保留同任务依赖并丢弃未知依赖", () => {
-    const answer = parseDecomposeAnswer(JSON.stringify({
-      tasks: [{
-        id: "task_1",
-        steps: [
-          { id: "s1", description: "一步", dependsOn: ["missing"] },
-          { id: "s2", description: "二步", dependsOn: ["s1", "missing"] },
-        ],
-      }],
+    // 旧 tasks[] + guidance 字段仍能解析（读兼容）。
+    const legacy = parseDecomposeAnswer(JSON.stringify({
+      intent: "旧意图",
+      tasks: [{ id: "task_1", description: "任务", guidance: "旧指导" }],
     }));
-
-    expect(answer!.tasks[0].steps.map((step) => step.dependsOn)).toEqual([[], ["s1"]]);
+    expect(legacy!.tasks[0].prompt).toBe("旧指导");
   });
 
-  it("显式忽略 tasks[].dependsOn，不进入解析结果", () => {
-    const answer = parseDecomposeAnswer(JSON.stringify({
-      intent: "忽略任务级依赖",
-      userConstraints: [],
-      tasks: [
-        {
-          id: "task_1",
-          description: "任务一",
-          dependsOn: ["task_0"],
-          steps: [{ id: "s1", description: "步骤一", dependsOn: [] }],
-        },
-        {
-          id: "task_2",
-          description: "任务二",
-          dependsOn: ["task_1"],
-          steps: [{ id: "s2", description: "步骤二", dependsOn: ["s1"] }],
-        },
-      ],
-    }));
-
-    expect(answer).not.toBeNull();
-    expect(answer!.tasks).toHaveLength(2);
-    for (const task of answer!.tasks) {
-      expect(task).not.toHaveProperty("dependsOn");
-    }
-    // 跨任务步骤依赖按新协议丢弃
-    expect(answer!.tasks[1].steps[0].dependsOn).toEqual([]);
-  });
-
-  it("旧格式兼容：顶层 steps + understanding + 被删字段 → 单 task_1 + intent，被删字段忽略", () => {
+  it("旧格式兼容：顶层 steps + understanding + 被删字段 → 单 task_1（steps 折叠进 prompt）+ intent", () => {
     const answer = parseDecomposeAnswer(JSON.stringify({
       understanding: "旧格式理解段",
       userConstraints: ["旧约束"],
@@ -900,7 +826,6 @@ describe("parseDecomposeAnswer 保留 prompt 约定字段", () => {
       pendingSteps: ["旧待办"],
       findings: [{ id: "f1", summary: "旧发现", evidenceIds: [], createdAt: "2024-01-01" }],
       checkpoints: [{ id: "c1", status: "started", createdAt: "2024-01-01" }],
-      sharedEvidence: [{ path: "a.ts", content: "x", contentHash: "h", version: "v", complete: true, capturedAt: "2024-01-01" }],
     }));
 
     expect(answer).not.toBeNull();
@@ -908,9 +833,8 @@ describe("parseDecomposeAnswer 保留 prompt 约定字段", () => {
     expect(answer!.userConstraints).toEqual(["旧约束"]);
     expect(answer!.tasks).toHaveLength(1);
     expect(answer!.tasks[0].id).toBe("task_1");
-    expect(answer!.tasks[0].steps).toHaveLength(1);
-    expect(answer!.tasks[0].steps[0].description).toBe("旧步骤");
-    // 被删的 8 个旧字段直接忽略，不进入新结构
+    expect(answer!.tasks[0].prompt).toBe("1. 旧步骤");
+    // 被删的旧字段直接忽略，不进入新结构。
     expect(answer).not.toHaveProperty("understanding");
     expect(answer).not.toHaveProperty("goal");
     expect(answer).not.toHaveProperty("scope");
@@ -919,16 +843,14 @@ describe("parseDecomposeAnswer 保留 prompt 约定字段", () => {
     expect(answer).not.toHaveProperty("pendingSteps");
     expect(answer).not.toHaveProperty("findings");
     expect(answer).not.toHaveProperty("checkpoints");
-    expect(answer).not.toHaveProperty("sharedEvidence");
   });
 
-  it("旧格式持久化兼容：顶层 steps + understanding + 被删字段 → 单 task_1 + intent", async () => {
+  it("旧格式持久化兼容：顶层 steps + understanding → 单 task_1，steps 折叠进 prompt", async () => {
     const legacy = {
       understanding: "旧理解",
       userConstraints: ["旧约束"],
       goal: "旧目标",
       relation: "continue",
-      sharedEvidence: [],
       steps: [{ id: "s1", description: "旧步骤", dependsOn: [], stopReadingWhen: [] }],
     } as unknown as PersistedDecompose;
     const record = await persistDecomposeRound(tmpDir, "legacy-shape-session", "旧请求", legacy);
@@ -937,154 +859,77 @@ describe("parseDecomposeAnswer 保留 prompt 约定字段", () => {
     expect(record!.taskDecompose?.intent).toBe("旧理解");
     expect(record!.taskDecompose?.tasks).toHaveLength(1);
     expect(record!.taskDecompose?.tasks[0].id).toBe("task_1");
-    expect(record!.taskDecompose?.tasks[0].steps[0].description).toBe("旧步骤");
+    expect(record!.taskDecompose?.tasks[0].prompt).toBe("1. 旧步骤");
     expect(record!.taskDecompose).not.toHaveProperty("goal");
     expect(record!.taskDecompose).not.toHaveProperty("relation");
-    expect(record!.taskDecompose).not.toHaveProperty("sharedEvidence");
   });
 });
 
-describe("per-task 环检与全局唯一 step id", () => {
-  it("多 task 各自有环时，清依赖后 step id 带 task 前缀且全局唯一", () => {
-    const tasks = [
-      {
-        id: "task_1",
-        description: "任务一",
-        steps: [
-          { id: "a", description: "A", dependsOn: ["b"] },
-          { id: "b", description: "B", dependsOn: ["a"] },
-        ],
-      },
-      {
-        id: "task_2",
-        description: "任务二",
-        steps: [
-          { id: "c", description: "C", dependsOn: ["d"] },
-          { id: "d", description: "D", dependsOn: ["c"] },
-        ],
-      },
-    ];
-
-    const resolved = resolveCircularDependenciesInTasks(tasks);
-    expect(resolved.hadCycle).toBe(true);
-    expect(resolved.cycledTaskIds).toEqual(["task_1", "task_2"]);
-
-    const ids = flattenSteps({ tasks: resolved.tasks }).map((s) => s.id);
-    expect(ids).toEqual(["task_1_step_1", "task_1_step_2", "task_2_step_1", "task_2_step_2"]);
-    expect(new Set(ids).size).toBe(ids.length);
-    for (const step of flattenSteps({ tasks: resolved.tasks })) {
-      expect(step.dependsOn).toEqual([]);
-    }
-  });
-
-  it("跨 task 的 dependsOn 链不会因全局 flatten 误触发假环", () => {
-    // 全局 flatten 后 a→b→c→a 会被判环；按 task 分别检测则两边都无环。
-    const tasks = [
-      {
-        id: "task_1",
-        description: "任务一",
-        steps: [
-          { id: "a", description: "A", dependsOn: ["b"] },
-          { id: "b", description: "B", dependsOn: ["c"] },
-        ],
-      },
-      {
-        id: "task_2",
-        description: "任务二",
-        steps: [
-          { id: "c", description: "C", dependsOn: ["a"] },
-        ],
-      },
-    ];
-
-    expect(detectCircularDependency(flattenSteps({ tasks }))).toBe(true);
-    const resolved = resolveCircularDependenciesInTasks(tasks);
-    expect(resolved.hadCycle).toBe(false);
-    expect(resolved.tasks[0].steps.map((s) => s.id)).toEqual(["a", "b"]);
-    expect(resolved.tasks[1].steps.map((s) => s.id)).toEqual(["c"]);
-    expect(resolved.tasks[0].steps[1].dependsOn).toEqual(["c"]);
-    expect(resolved.tasks[1].steps[0].dependsOn).toEqual(["a"]);
-  });
-
-  it("仅有环的 task 被重编，无环 task 保持原 id 与 dependsOn", () => {
-    const tasks = [
-      {
-        id: "task_1",
-        description: "有环",
-        steps: [
-          { id: "x", description: "X", dependsOn: ["y"] },
-          { id: "y", description: "Y", dependsOn: ["x"] },
-        ],
-      },
-      {
-        id: "task_2",
-        description: "无环",
-        steps: [
-          { id: "step_1", description: "S1", dependsOn: [] },
-          { id: "step_2", description: "S2", dependsOn: ["step_1"] },
-        ],
-      },
-    ];
-
-    const resolved = resolveCircularDependenciesInTasks(tasks);
-    expect(resolved.hadCycle).toBe(true);
-    expect(resolved.cycledTaskIds).toEqual(["task_1"]);
-    expect(resolved.tasks[0].steps.map((s) => s.id)).toEqual(["task_1_step_1", "task_1_step_2"]);
-    expect(resolved.tasks[0].steps.every((s) => s.dependsOn.length === 0)).toBe(true);
-    expect(resolved.tasks[1].steps.map((s) => s.id)).toEqual(["step_1", "step_2"]);
-    expect(resolved.tasks[1].steps[1].dependsOn).toEqual(["step_1"]);
-  });
-});
-
-describe("relevantHistory 持久化与 ID 归一化", () => {
-  it("解析重复 task/step id，并将依赖保留到归一化后的步骤", () => {
+describe("relevantHistory 与 ID 归一化", () => {
+  it("解析重复 task id，prompt 保留到归一化后的节点", () => {
     const answer = parseDecomposeAnswer(JSON.stringify({
       intent: "测试",
+      relevantHistory: "共享历史",
       tasks: [
-        { id: "task", description: "一", steps: [
-          { id: "step", description: "A", dependsOn: [] },
-          { id: "step", description: "B", dependsOn: ["step"] },
-        ] },
-        { id: "task", description: "二", steps: [
-          { id: "step", description: "C", dependsOn: [] },
-        ] },
+        { id: "task", description: "一", prompt: "指导A" },
+        { id: "task", description: "二", prompt: "指导B" },
       ],
     }));
     expect(answer).not.toBeNull();
     expect(answer!.tasks.map((task) => task.id)).toEqual(["task", "task_2"]);
-    expect(flattenSteps(answer!).map((step) => step.id)).toEqual(["step", "step_2", "step_3"]);
-    expect(answer!.tasks[0].steps[1].dependsOn).toEqual(["step"]);
+    expect(answer!.tasks.map((task) => task.prompt)).toEqual(["指导A", "指导B"]);
+    expect(answer!.relevantHistory).toBe("共享历史");
   });
 
-  it("保留步骤级和任务级 relevantHistory", () => {
+  it("保留顶层 relevantHistory；旧格式任务级历史折叠到顶层", () => {
     const answer = parseDecomposeAnswer(JSON.stringify({
       intent: "测试",
-      tasks: [{ id: "task", description: "任务", relevantHistory: "task history", steps: [
-        { id: "step", description: "步骤", relevantHistory: "step history", dependsOn: [] },
-      ] }],
+      tasks: [{ id: "task", description: "任务", relevantHistory: "task history", prompt: "指导" }],
     }));
-    expect(answer!.tasks[0].relevantHistory).toBe("task history");
-    expect(answer!.tasks[0].steps[0].relevantHistory).toBe("step history");
+    expect(answer!.tasks[0]).not.toHaveProperty("relevantHistory");
+    expect(answer!.relevantHistory).toBe("task history");
+    // 顶层显式声明优先于任务级折叠。
+    const explicit = parseDecomposeAnswer(JSON.stringify({
+      intent: "测试",
+      relevantHistory: "顶层历史",
+      tasks: [{ id: "task", description: "任务", relevantHistory: "任务历史", prompt: "指导" }],
+    }));
+    expect(explicit!.relevantHistory).toBe("顶层历史");
   });
 
-  it("持久化往返保留步骤级 relevantHistory", async () => {
-    const record = await persistDecomposeRound(tmpDir, "step-history-session", "请求", {
+  it("简单任务零分解也保留顶层 relevantHistory", () => {
+    const answer = parseDecomposeAnswer(JSON.stringify({
+      intent: "用户只是问一个问题",
+      userConstraints: [],
+      tasks: [],
+      relevantHistory: "相关历史：上次讨论的结论",
+    }));
+    expect(answer!.tasks).toHaveLength(0);
+    expect(answer!.relevantHistory).toBe("相关历史：上次讨论的结论");
+  });
+
+  it("持久化往返保留顶层 relevantHistory 与节点 prompt/dependsOn", async () => {
+    const record = await persistDecomposeRound(tmpDir, "history-session", "请求", {
       intent: "测试",
       userConstraints: [],
+      relevantHistory: "task history",
       tasks: [{
-        id: "task",
+        id: "n1",
+        title: "任务标题",
         description: "任务",
-        userConstraints: [],
-        relevantHistory: "task history",
-        progressStatus: "pending",
-        steps: [{ id: "step", description: "步骤", dependsOn: [], relevantHistory: "step history" }],
+        prompt: "指导",
+        dependsOn: [],
       }],
     });
-    expect(record!.taskDecompose?.tasks[0].steps[0].relevantHistory).toBe("step history");
-    const rounds = await loadRecentRounds(tmpDir, "step-history-session", 1);
-    expect(rounds[0].taskDecompose?.tasks[0].steps[0].relevantHistory).toBe("step history");
+    const task = record!.taskDecompose?.tasks[0]!;
+    expect(task.prompt).toBe("指导");
+    expect(task.title).toBe("任务标题");
+    expect(record!.taskDecompose?.relevantHistory).toBe("task history");
+    const rounds = await loadRecentRounds(tmpDir, "history-session", 1);
+    expect(rounds[0].taskDecompose?.relevantHistory).toBe("task history");
   });
 });
+
 
 describe("相关度排序与阈值", () => {
   it("rankAndFilterByRelevance 降序并丢弃 < threshold", () => {
@@ -1106,7 +951,7 @@ describe("相关度排序与阈值", () => {
   });
 });
 
-describe("当前代码/当前步骤行为询问不得空 steps", () => {
+describe("当前代码/当前步骤行为询问不得空 tasks", () => {
   const originalQuestion = "现在任务分解这一步，历史信息是如何处理的？";
 
   it("识别原问法为当前实现行为询问，而不是纯讨论", () => {
@@ -1117,32 +962,138 @@ describe("当前代码/当前步骤行为询问不得空 steps", () => {
     expect(isCurrentCodeBehaviorInquiry("先别改，我们讨论一下方案")).toBe(false);
   });
 
-  it("模型把原问法判成 inquire/discuss 并清空 steps 时，补回定位阅读步骤", () => {
+  it("模型把原问法判成 discuss 并清空 tasks 时，补回任务但不写执行引导", () => {
     const misclassified = parseDecomposeAnswer(JSON.stringify({
-      intent: "用户在询问当前任务分解阶段如何处理历史信息（对话行为：inquire；意图：discuss）。此轮目标是解释历史信息的继承、筛选和复用规则，不进行代码修改或任务规划。",
+      intent: "用户在询问当前任务分解阶段如何处理历史信息。此轮目标是解释历史信息的继承、筛选和复用规则，不进行代码修改或任务规划。",
       userConstraints: [],
       tasks: [],
-      progressStatus: "无需执行步骤；当前仅解释历史信息处理机制。",
       relevantHistory: "历史信息按优先级使用：当前用户消息最高。",
     }));
 
     expect(misclassified).not.toBeNull();
-    const recovered = recoverEmptyDecomposeSteps(misclassified!, originalQuestion);
-    expect(recovered.tasks[0].steps.length).toBeGreaterThan(0);
-    expect(recovered.tasks[0].steps[0].description).toMatch(/定位|阅读|实现|历史信息/);
-    // stopReadingWhen 和 progressStatus 字段已从 schema 中移除
+    const recovered = recoverEmptyDecomposeTasks(misclassified!, originalQuestion);
+    expect(recovered.tasks).toHaveLength(1);
+    // 任务只声明“做什么”（用户原话），不教“怎么读/怎么找”。
+    expect(recovered.tasks[0].description).toContain(originalQuestion);
+    expect(recovered.tasks[0].prompt).toBe("");
   });
 
-  it("真正的进度询问仍保持空 steps", () => {
+  it("真正的进度询问仍保持空 tasks", () => {
     const answer = parseDecomposeAnswer(JSON.stringify({
-      intent: "用户在问进度（act: query_progress, intent: query_progress）。",
+      intent: "用户在问进度。",
       userConstraints: [],
       tasks: [],
-      progressStatus: "无需执行步骤。",
     }));
     expect(answer).not.toBeNull();
-    const recovered = recoverEmptyDecomposeSteps(answer!, "现在做到哪一步了？");
+    const recovered = recoverEmptyDecomposeTasks(answer!, "现在做到哪一步了？");
     expect(recovered.tasks).toHaveLength(0);
+  });
+});
+
+describe("collapsePseudoLinearTasks：伪线性认知链折叠", () => {
+  it("定位→分析→结论的三任务链折叠为单个任务，保留原字段内容", () => {
+    const answer = parseDecomposeAnswer(JSON.stringify({
+      intent: "审查 syncProcessRecordsToMarket 的 isManual 条件是否正确实现",
+      userConstraints: ["仅审查，不修改代码"],
+      relevantHistory: "",
+      tasks: [
+        { id: "t1", title: "定位方法源码", description: "在 DefaultCorrectServiceImpl 中找到方法实现", prompt: "按四个参数签名精确匹配", dependsOn: [], cognitiveOnly: true },
+        { id: "t2", title: "分析分支逻辑", description: "梳理 existing 查询与写入流程", prompt: "关注 null 与各 isManual 值的组合", dependsOn: ["t1"], cognitiveOnly: true },
+        { id: "t3", title: "输出审查结论", description: "给出逻辑是否正确的结论", prompt: "结论需逐条对应分支", dependsOn: ["t2"], cognitiveOnly: true },
+      ],
+    }))!;
+
+    const collapsed = collapsePseudoLinearTasks(answer);
+    expect(collapsed.tasks).toHaveLength(1);
+    const task = collapsed.tasks[0]!;
+    expect(task.id).toBe("t1");
+    expect(task.dependsOn).toEqual([]);
+    // description 携带 intent 与全部子任务要点
+    expect(task.description).toContain("审查 syncProcessRecordsToMarket");
+    expect(task.description).toContain("定位方法源码");
+    expect(task.description).toContain("输出审查结论");
+    expect(task.description).toContain("merged from 3 linear sub-tasks");
+    // prompt 保留每个子任务的指导
+    expect(task.prompt).toContain("按四个参数签名精确匹配");
+    expect(task.prompt).toContain("结论需逐条对应分支");
+    // 其余字段不动
+    expect(collapsed.userConstraints).toEqual(["仅审查，不修改代码"]);
+  });
+
+  it("单任务直通", () => {
+    const answer = parseDecomposeAnswer(JSON.stringify({
+      intent: "改一处",
+      tasks: [{ id: "t1", description: "改", prompt: "", dependsOn: [] }],
+    }))!;
+    expect(collapsePseudoLinearTasks(answer).tasks).toHaveLength(1);
+  });
+
+  it("独立交付物的线性链不折叠", () => {
+    const answer = parseDecomposeAnswer(JSON.stringify({
+      intent: "按 API 契约实现客户端",
+      tasks: [
+        { id: "t1", title: "生成 API 契约", description: "产出可独立审阅的 API 契约文档", prompt: "", dependsOn: [], cognitiveOnly: false },
+        { id: "t2", title: "实现客户端", description: "按契约实现客户端调用", prompt: "", dependsOn: ["t1"], cognitiveOnly: false },
+      ],
+    }))!;
+    expect(collapsePseudoLinearTasks(answer).tasks).toHaveLength(2);
+  });
+
+  it("cognitiveOnly 缺失时保留链，包括漏标 kind 的验证任务", () => {
+    const answer = parseDecomposeAnswer(JSON.stringify({
+      intent: "实现并验证缓存",
+      tasks: [
+        { id: "t1", title: "实现缓存", description: "接入 Redis 缓存", prompt: "", dependsOn: [], cognitiveOnly: false },
+        { id: "t2", title: "运行测试", description: "运行测试验证缓存实现", prompt: "", dependsOn: ["t1"] },
+      ],
+    }))!;
+    expect(collapsePseudoLinearTasks(answer).tasks).toHaveLength(2);
+    expect(answer.tasks[1]?.kind).toBeUndefined();
+    expect(answer.tasks[1]?.cognitiveOnly).toBeUndefined();
+  });
+
+  it("含 verification 任务的不折叠", () => {
+    const answer = parseDecomposeAnswer(JSON.stringify({
+      intent: "加缓存并验证",
+      tasks: [
+        { id: "t1", description: "接入 Redis 缓存", prompt: "", dependsOn: [] },
+        { id: "t2", description: "跑测试验证", prompt: "", dependsOn: ["t1"], kind: "verification" },
+      ],
+    }))!;
+    expect(collapsePseudoLinearTasks(answer).tasks).toHaveLength(2);
+  });
+
+  it("分支/汇合的真 DAG 不折叠", () => {
+    const answer = parseDecomposeAnswer(JSON.stringify({
+      intent: "多交付物",
+      tasks: [
+        { id: "t1", description: "生成契约", prompt: "", dependsOn: [] },
+        { id: "t2", description: "实现 A", prompt: "", dependsOn: ["t1"] },
+        { id: "t3", description: "实现 B", prompt: "", dependsOn: ["t1"] },
+        { id: "t4", description: "整合", prompt: "", dependsOn: ["t2", "t3"] },
+      ],
+    }))!;
+    expect(collapsePseudoLinearTasks(answer).tasks).toHaveLength(4);
+  });
+
+  it("链中某任务依赖链外任务时不折叠", () => {
+    const answer = parseDecomposeAnswer(JSON.stringify({
+      intent: "混合",
+      tasks: [
+        { id: "t1", description: "一", prompt: "", dependsOn: [] },
+        { id: "t2", description: "二", prompt: "", dependsOn: ["t0"] },
+      ],
+    }))!;
+    expect(collapsePseudoLinearTasks(answer).tasks).toHaveLength(2);
+  });
+
+  it("空任务列表直通", () => {
+    const answer = parseDecomposeAnswer(JSON.stringify({
+      intent: "提问",
+      tasks: [],
+      relevantHistory: "h",
+    }))!;
+    expect(collapsePseudoLinearTasks(answer).tasks).toHaveLength(0);
   });
 });
 
@@ -1204,212 +1155,6 @@ describe("删除对话后分解历史同步", () => {
   });
 });
 
-describe("任务分解滚动压缩", () => {
-  const sessionId = "rolling-history";
-  const budgets = { ...contextBudgets(BUILTIN_WORKFLOW), total: 16000 };
-  const opts = (): AgentLoopOpts => ({
-    mode: "agent", workspaceRoot: tmpDir, sessionId, workflow: BUILTIN_WORKFLOW,
-    index: {} as AgentLoopOpts["index"], history: [], userMessage: "继续",
-  });
-  const add = async (n: number, size = 1000) => {
-    const input = `input-${n}-${"x".repeat(size)}`;
-    await persistRoundReport(tmpDir, sessionId, input, `report-${n}`);
-  };
-
-  it("预算充足时仍只传最新五轮详情，早期轮次摘要不丢失", async () => {
-    for (let i = 1; i <= 7; i++) await add(i, 50);
-    const context = await buildDecomposeContext(opts(), budgets);
-    const [recent, summary] = context.split("### Earlier History Summary (compressed)");
-    expect(recent).not.toContain("input-1-");
-    expect(recent).not.toContain("input-2-");
-    for (let i = 3; i <= 7; i++) expect(recent).toContain(`input-${i}-`);
-    expect(summary).toContain("report-1");
-    expect(summary).toContain("report-2");
-    expect((await loadDecomposeHistory(tmpDir, sessionId)).checkpoint).toBeUndefined();
-  });
-
-  it("未超预算时第 13 轮只传五轮详情，第 14 轮压缩最早一轮并跨轮复用检查点", async () => {
-    for (let i = 1; i <= 13; i++) await add(i, 350);
-    const before = await buildDecomposeContext(opts(), budgets);
-    expect(before).not.toContain("input-1-" + "x".repeat(350));
-    expect(before).toContain("report-1");
-    expect((await loadDecomposeHistory(tmpDir, sessionId)).checkpoint).toBeUndefined();
-
-    await add(14, 350);
-    const first = await buildDecomposeContext(opts(), budgets);
-    const saved = (await loadDecomposeHistory(tmpDir, sessionId)).checkpoint;
-    expect(saved?.throughIndex).toBe(1);
-    expect(first).toContain("report-1");
-    expect(first.match(/### Earlier History Summary \(compressed\)/g)).toHaveLength(1);
-    expect(first).not.toContain("input-1-" + "x".repeat(350));
-    const [firstRecent] = first.split("### Earlier History Summary (compressed)");
-    expect(firstRecent.match(/## Round /g)).toHaveLength(5);
-    for (let i = 10; i <= 14; i++) expect(firstRecent).toContain(`input-${i}-` + "x".repeat(350));
-
-    expect(await buildDecomposeContext(opts(), budgets)).toBe(first);
-    expect((await loadDecomposeHistory(tmpDir, sessionId)).checkpoint).toEqual(saved);
-    await add(15, 350);
-    const second = await buildDecomposeContext(opts(), budgets);
-    const updated = (await loadDecomposeHistory(tmpDir, sessionId)).checkpoint;
-    expect(updated?.throughIndex).toBe(2);
-    expect(updated?.summary).toContain("report-1");
-    expect(updated?.summary).not.toContain("Earlier History Summary (compressed)");
-    expect(second.match(/### Earlier History Summary \(compressed\)/g)).toHaveLength(1);
-    expect(second).toContain("### Recent conversation rounds (background)");
-    expect(second).not.toContain("input-2-" + "x".repeat(350));
-    const [secondRecent] = second.split("### Earlier History Summary (compressed)");
-    expect(secondRecent.match(/## Round /g)).toHaveLength(5);
-    for (let i = 11; i <= 15; i++) expect(secondRecent).toContain(`input-${i}-` + "x".repeat(350));
-  });
-
-  it("首次压缩、跨轮更新、重载检查点并始终保留最近五轮", async () => {
-    for (let i = 1; i <= 7; i++) await add(i, 4000);
-    const prefix = "system".repeat(12000);
-    const first = await buildDecomposeContext(opts(), budgets, prefix);
-    const saved = (await loadDecomposeHistory(tmpDir, sessionId)).checkpoint;
-    expect(saved?.throughIndex).toBeGreaterThan(0);
-    expect(first).toContain("input-3-");
-    expect(first).toContain("report-1");
-    expect(first).not.toContain("input-1-" + "x".repeat(4000));
-    for (let i = 8; i <= 12; i++) await add(i, 4000);
-    const second = await buildDecomposeContext(opts(), budgets, prefix);
-    const updated = (await loadDecomposeHistory(tmpDir, sessionId)).checkpoint;
-    expect(updated!.throughIndex).toBeGreaterThan(saved!.throughIndex);
-    expect(updated!.summary).toContain("report-1");
-    expect(second).toContain("input-8-");
-    expect(second.match(/### Earlier History Summary \(compressed\)/g)).toHaveLength(1);
-    for (let i = 8; i <= 12; i++) expect(second).toContain(`input-${i}-` + "x".repeat(4000));
-    const repeated = await buildDecomposeContext(opts(), budgets, prefix);
-    expect((await loadDecomposeHistory(tmpDir, sessionId)).checkpoint).toEqual(updated);
-    expect(repeated).toBe(second);
-  });
-
-  it("二次压缩只注入最新检查点和其后轮次，最近五轮保留分解及过程详情", async () => {
-    for (let i = 1; i <= 7; i++) {
-      const input = `input-${i}-${"x".repeat(4000)}`;
-      const round = await persistDecomposeRound(tmpDir, sessionId, input, {
-        intent: `intent-${i}`, userConstraints: [], tasks: [],
-      });
-      await persistRoundEvidence(tmpDir, sessionId, input, round!.index, [{
-        needId: "", summary: `evidence-${i}`, kind: "source", path: `src/${i}.ts`,
-      }]);
-      await persistRoundReport(tmpDir, sessionId, input, `report-${i}`, round!.index);
-    }
-    const prefix = "system".repeat(12000);
-    await buildDecomposeContext(opts(), budgets, prefix);
-    const first = (await loadDecomposeHistory(tmpDir, sessionId)).checkpoint!;
-    expect(first.throughIndex).toBe(2);
-    for (let i = 8; i <= 12; i++) {
-      const input = `input-${i}-${"x".repeat(4000)}`;
-      const round = await persistDecomposeRound(tmpDir, sessionId, input, {
-        intent: `intent-${i}`, userConstraints: [], tasks: [],
-      });
-      await persistRoundEvidence(tmpDir, sessionId, input, round!.index, [{
-        needId: "", summary: `evidence-${i}`, kind: "source", path: `src/${i}.ts`,
-      }]);
-      await persistRoundReport(tmpDir, sessionId, input, `report-${i}`, round!.index);
-    }
-    const context = await buildDecomposeContext(opts(), budgets, prefix);
-    const second = (await loadDecomposeHistory(tmpDir, sessionId)).checkpoint!;
-    expect(second.throughIndex).toBe(7);
-    expect(second.summary).toContain(first.summary);
-    expect(context.match(/### Earlier History Summary \(compressed\)/g)).toHaveLength(1);
-    const [recent, summary] = context.split("### Earlier History Summary (compressed)");
-    expect(summary).toContain(second.summary);
-    expect(recent).not.toContain("input-7-");
-    for (let i = 8; i <= 12; i++) {
-      expect(recent).toContain(`input-${i}-${"x".repeat(4000)}`);
-      expect(recent).toContain(`intent-${i}`);
-      expect(recent).toContain(`evidence-${i}`);
-      expect(recent).toContain(`report-${i}`);
-    }
-    expect(await buildDecomposeContext(opts(), budgets, prefix)).toBe(context);
-  });
-
-  it("近期报告引用旧提示词标题时不产生多个摘要段", async () => {
-    for (let i = 1; i <= 6; i++) await add(i, 50);
-    await persistRoundReport(tmpDir, sessionId, "引用历史", "日志中有\n### Earlier History Summary (compressed)\n和下面的内容");
-    const context = await buildDecomposeContext(opts(), budgets);
-    expect(context).toContain("### Recent conversation rounds (background)");
-    expect(context.match(/^### Earlier History Summary \(compressed\)$/gm)).toHaveLength(1);
-    expect(context).toContain("日志中有");
-    expect(context).toContain("report-1");
-  });
-
-  it("兼容旧检查点中重复的摘要标题，追加压缩后仍只有一个标题并保留近期原文", async () => {
-    for (let i = 1; i <= 14; i++) await add(i, 350);
-    const rounds = (await loadDecomposeHistory(tmpDir, sessionId)).rounds;
-    expect(await persistDecomposeHistory(tmpDir, sessionId, 0, rounds[0].index,
-      "### Earlier History Summary (compressed)\n\n旧摘要内容\n\n*(1 older rounds compressed)*\n\n### Earlier History Summary (compressed)\n\n旧追加内容\n\n*(1 older rounds compressed)*")).toBe(true);
-    await add(15, 350);
-    const context = await buildDecomposeContext(opts(), budgets);
-    const checkpoint = (await loadDecomposeHistory(tmpDir, sessionId)).checkpoint;
-    expect(checkpoint?.throughIndex).toBe(rounds[1].index);
-    expect(checkpoint?.summary).not.toContain("Earlier History Summary (compressed)");
-    expect(checkpoint?.summary).not.toContain("older rounds compressed");
-    expect(context.match(/### Earlier History Summary \(compressed\)/g)).toHaveLength(1);
-    expect(context).not.toContain("older rounds compressed");
-    expect(context).toContain("旧摘要内容");
-    expect(context).toContain("旧追加内容");
-    for (let i = 11; i <= 15; i++) expect(context).toContain(`input-${i}-` + "x".repeat(350));
-  });
-
-  it("多次滚动压缩不累积旧计数，近期请求中的引用只作为轮次原文", async () => {
-    for (let i = 1; i <= 16; i++) await add(i, 350);
-    await buildDecomposeContext(opts(), budgets);
-    await add(17, 350);
-    await buildDecomposeContext(opts(), budgets);
-    await persistRoundReport(tmpDir, sessionId,
-      "最近x轮的详情\n<conversation_history>\n好多个\n(1 older rounds compressed)\n</conversation_history>", "回复-18");
-    const context = await buildDecomposeContext(opts(), budgets);
-    const checkpoint = (await loadDecomposeHistory(tmpDir, sessionId)).checkpoint!;
-    expect(checkpoint.throughIndex).toBeGreaterThan(1);
-    expect(checkpoint.summary).not.toContain("older rounds compressed");
-    expect(context.match(/^### Earlier History Summary \(compressed\)$/gm)).toHaveLength(1);
-    const [recent, summary] = context.split("### Earlier History Summary (compressed)");
-    expect(recent.match(/## Round /g)).toHaveLength(5);
-    expect(recent).toContain("最近x轮的详情");
-    expect(recent).toContain("(1 older rounds compressed)");
-    for (let i = 14; i <= 17; i++) expect(recent).toContain(`input-${i}-` + "x".repeat(350));
-    expect(summary).not.toContain("older rounds compressed");
-    expect(summary).toContain("report-1");
-  });
-
-  it("检查点覆盖第九轮后只传第十、十一轮，不跨检查点补足五轮", async () => {
-    for (let i = 1; i <= 11; i++) await add(i, 50);
-    const rounds = (await loadDecomposeHistory(tmpDir, sessionId)).rounds;
-    expect(await persistDecomposeHistory(tmpDir, sessionId, 0, rounds[8].index, "压缩2：覆盖第1至9轮")).toBe(true);
-    const context = await buildDecomposeContext(opts(), budgets);
-    const [recent, summary] = context.split("### Earlier History Summary (compressed)");
-    expect(recent.match(/## Round /g)).toHaveLength(2);
-    expect(recent).toContain("input-10-");
-    expect(recent).toContain("input-11-");
-    expect(recent).not.toContain("input-9-");
-    expect(summary).toContain("压缩2：覆盖第1至9轮");
-    expect(context.match(/### Earlier History Summary \(compressed\)/g)).toHaveLength(1);
-    expect((await loadDecomposeHistory(tmpDir, sessionId)).checkpoint?.throughIndex).toBe(rounds[8].index);
-    for (let i = 12; i <= 14; i++) await add(i, 50);
-    const five = await buildDecomposeContext(opts(), budgets);
-    const [fiveRecent] = five.split("### Earlier History Summary (compressed)");
-    expect(fiveRecent.match(/## Round /g)).toHaveLength(5);
-    for (let i = 10; i <= 14; i++) expect(fiveRecent).toContain(`input-${i}-`);
-    await add(15, 50);
-    const six = await buildDecomposeContext(opts(), budgets);
-    const [sixRecent, sixSummary] = six.split("### Earlier History Summary (compressed)");
-    expect(sixRecent.match(/## Round /g)).toHaveLength(5);
-    expect(sixRecent).not.toContain("input-10-");
-    expect(sixSummary).toContain("report-10");
-    expect(sixSummary).toContain("压缩2：覆盖第1至9轮");
-  });
-
-  it("回退轮次后清除越界检查点", async () => {
-    for (let i = 1; i <= 6; i++) await add(i, 4000);
-    await buildDecomposeContext(opts(), budgets, "system".repeat(12000));
-    expect((await loadDecomposeHistory(tmpDir, sessionId)).checkpoint).toBeDefined();
-    for (let i = 0; i < 6; i++) await dropLastRound(tmpDir, sessionId);
-    expect((await loadDecomposeHistory(tmpDir, sessionId)).checkpoint).toBeUndefined();
-  });
-});
 
 describe("分解历史：使用滚动摘要和最近轮次，不检索向量历史", () => {
   const SESSION_ID = "sess-vector-recall";
@@ -1434,7 +1179,7 @@ describe("分解历史：使用滚动摘要和最近轮次，不检索向量历�
     await persistDecomposeRound(tmpDir, SESSION_ID, userInput, {
       intent: "最近一轮理解",
       userConstraints: [],
-      tasks: [{ id: "task_1", description: "最近一轮任务", steps: [{ id: "s1", description: "做点事", dependsOn: [] }] }],
+      tasks: [{ id: "task_1", description: "最近一轮任务", guidance: "做点事" }],
     });
     await persistRoundReport(tmpDir, SESSION_ID, userInput, "最近一轮报告");
 
@@ -1449,7 +1194,7 @@ describe("分解历史：使用滚动摘要和最近轮次，不检索向量历�
     await persistDecomposeRound(tmpDir, SESSION_ID, userInput, {
       intent: "最近一轮理解-完整保留",
       userConstraints: [],
-      tasks: [{ id: "task_1", description: "接线召回任务", steps: [{ id: "s1", description: "接线召回", dependsOn: [] }] }],
+      tasks: [{ id: "task_1", description: "接线召回任务", guidance: "接线召回" }],
     });
     await persistRoundReport(tmpDir, SESSION_ID, userInput, "最近一轮完整报告");
 
@@ -1490,5 +1235,60 @@ describe("分解历史：使用滚动摘要和最近轮次，不检索向量历�
     expect(ctx).not.toContain("Vector-recalled history");
     expect(ctx).not.toContain("…(截断)");
     expect(searchCalled).toBe(false);
+  });
+});
+
+describe("精确定位请求：不补任务、直接走快速路径", () => {
+  const preciseMessages = [
+    "请修改 packages/core/src/harness/loop/context.ts:46-54，把 freshReadGuidance 函数删掉",
+    "把 tools.ts 第 70-75 行的任务执行判定改掉",
+    "Fix src/auth.ts:120 — the token check returns early",
+    "请修改 context.ts，把 `function freshReadGuidance(paths) {` 这段原文替换为 return paths;",
+  ];
+  const vagueMessages = [
+    "帮我改一下登录逻辑",
+    "请修改这个报错",
+    "fix this",
+    "把权限相关的代码重构一下",
+  ];
+
+  it("路径 + 行号锚点（或嵌入原文）判为精确请求", () => {
+    for (const message of preciseMessages) {
+      expect(isPreciseLocatedRequest(message)).toBe(true);
+    }
+  });
+
+  it("只有路径或只有改码意愿，不判为精确请求", () => {
+    for (const message of vagueMessages) {
+      expect(isPreciseLocatedRequest(message)).toBe(false);
+    }
+    expect(isPreciseLocatedRequest("看看 src/auth.ts")).toBe(false);
+    expect(isPreciseLocatedRequest("")).toBe(false);
+  });
+
+  it("精确请求空 tasks 时不补回定位任务（交给执行端快速路径）", () => {
+    const precise = parseDecomposeAnswer(JSON.stringify({
+      intent: "删除 freshReadGuidance 函数",
+      userConstraints: [],
+      tasks: [],
+      relevantHistory: "",
+    }));
+
+    expect(precise).not.toBeNull();
+    const recovered = recoverEmptyDecomposeTasks(precise!, preciseMessages[0]!);
+    expect(recovered.tasks).toHaveLength(0);
+  });
+
+  it("模糊改码请求空 tasks 时仍补回可执行任务", () => {
+    const vague = parseDecomposeAnswer(JSON.stringify({
+      intent: "用户想修改代码",
+      userConstraints: [],
+      tasks: [],
+      relevantHistory: "",
+    }));
+
+    expect(vague).not.toBeNull();
+    const recovered = recoverEmptyDecomposeTasks(vague!, vagueMessages[0]!);
+    expect(recovered.tasks.length).toBeGreaterThan(0);
   });
 });

@@ -1,86 +1,72 @@
 import type { ChatAttachment } from "@owncoder/llm";
-import type { AgentMode, WorkspaceInfo } from "@owncoder/shared";
-import type { AskUserRequest } from "./harness/tools/types.ts";
+import type { AgentMode } from "@owncoder/shared";
+import type { AskUserRequest, SkillsApi } from "./harness/tools/types.ts";
 import { BUILTIN_WORKFLOW, type SystemWorkflowConfig } from "@owncoder/settings";
 import {
-  createCodemapClient,
   createIndexClient,
   type CodemapClient,
   type CodemapImpact,
   type CodemapSearchHit,
   type IndexClient,
+  type SemanticSearchPort,
 } from "@owncoder/index";
-import { join, resolve } from "node:path";
-import { watch, statSync, type FSWatcher, promises as fs } from "node:fs";
+import { join } from "node:path";
 import { initLlmLogger } from "@owncoder/llm";
 import {
-  runAgentLoop,
   type AgentLoopResult,
   type ChatTurn,
-  type DocumentWorkflowState,
   type TurnEvent,
-  type TurnEventInput,
 } from "./harness/loop.ts";
-import { stampTurnEvent, type AgentLoopOpts, type MessageMetadata } from "./harness/loop/types.ts";
+import type { AgentLoopOpts } from "./harness/loop/types.ts";
 import {
   SessionRunCoordinator,
   type SessionInput,
 } from "./session-coordinator.ts";
+import { type SessionRuntime, createSessionRuntime } from "./session-runtime.ts";
+import { buildSessionPersistPayload, enqueueSessionPersist, validateSessionData } from "./session-persist.ts";
+import { compactHistory } from "./history-compact.ts";
+import { CodemapManager } from "./codemap-manager.ts";
+import { WorkspaceFileWatcher } from "./workspace-watcher.ts";
+import { executeAgentTurn } from "./turn-execution.ts";
+import { applyLoadedSession, type LoadedSession, type SessionLoadHost } from "./session-load.ts";
 import {
+  approvePlan,
+  clearActivePlan,
+  getActivePlan,
+  getPendingChanges,
+  keepAllChanges,
+  keepChange,
   listCheckpoints,
-  loadCheckpoint,
-  newCheckpointId,
-  persistCheckpoint,
-  restoreCheckpointFiles,
-  type FileSnapshot,
-} from "./harness/checkpoint.ts";
-export {
-  fileEvidenceHash,
-  isReusableEvidence,
-  loadSharedEvidence,
-  loadTaskState,
-  persistSharedEvidence,
-  persistTaskCheckpoint,
-  persistTaskState,
-  prepareTaskState,
-} from "./task-state.ts";
-export {
-  applyTaskEvent,
-  canReportSuccess,
-  createTaskRunMetrics,
-  createTaskRunState,
-  finalizeTaskSuccess,
-  formatVerificationFailureNotice,
-  normalizeTaskRunMetrics,
-  normalizeVerificationResult,
-  restoreTaskRunState,
-  sealTaskRunSuccess,
-  taskRunMetricsSnapshot,
-  taskRunPhaseLabel,
-  taskRunTotalDurationMs,
-  verificationStatus,
-  type TaskEvent,
-  type TaskRunMetrics,
-  type TaskRunPhase,
-  type TaskRunState,
-  type VerificationCheck,
-  type VerificationError,
-  type VerificationResult,
-  type VerificationStatus,
-} from "./task-run.ts";
+  listPlans,
+  readPlan,
+  rollbackCheckpoint,
+  undoChange,
+  updateTask,
+  type PlansHost,
+} from "./session-plans.ts";
+import type {
+  SpecFeature as SpecFeatureDto,
+  SpecPhase as SpecPhaseDto,
+  SpecStatus as SpecStatusDto,
+} from "./specs.ts";
 import {
-  buildChangesFromCheckpoint,
-  restoreSingleFile,
+  approveSpecPhase,
+  getSpecStatus as getSpecFeatureStatus,
+  listSpecFeatures,
+  readSpecDocument,
+  rejectSpecPhase,
+  saveSpecDocument,
+  type SpecsHost,
+} from "./session-specs.ts";
+import type { SessionState } from "./session-runtime.ts";
+import {
   type ChangeFile,
 } from "./changes.ts";
 import { getGitStatus, type GitStatus } from "./git.ts";
 import { McpManager } from "./mcp/client.ts";
-import { migrateHistory, needsMigration } from "./session-migration.ts";
 import { deleteDecomposeRound } from "./turn-rounds.ts";
 import {
   beginTurn,
-  appendTurnEvent,
-  completeTurn,
   deleteTurn,
   loadTurn,
   migrateLegacyHistory,
@@ -108,8 +94,7 @@ import {
   type QueuedMessage,
   type SessionMeta,
 } from "./session-store.ts";
-import type { TaskRunState } from "./task-run.ts";
-import { applyTaskEvent, restoreTaskRunState, taskRunMetricsSnapshot, taskRunPhaseLabel, taskRunTotalDurationMs } from "./task-run.ts";
+import { applyTaskEvent } from "./task-run.ts";
 import {
   deleteRule,
   listRules,
@@ -119,125 +104,30 @@ import {
   type RuleFileInfo,
 } from "./rules.ts";
 import {
-  extractTitle,
-  isPlanPath,
-  listPlans,
-  readActiveMeta,
-  readPlanFile,
-  writeActiveMeta,
-  writePlanFile,
-  parseTasksFromMarkdown,
-  normalizeTasks,
-  selectNextPendingTask,
-  ACTIVE_DIR,
-  type ActivePlanMeta,
-  type PlanInfo,
-  type TaskItem,
-  type TaskStatus,
+  buildSkillsCatalogSection,
+  deleteSkillDir,
+  discoverSkills,
+  loadSkillContent,
+  parseSkillMarkdown,
+  readSkillRaw,
+  SKILLS_DIR,
+  validateSkillName,
+  writeSkillFiles,
+  writeSkillRaw,
+  type SkillMetadata,
+  type SkillWriteInput,
+} from "./skills.ts";
+import { BUNDLED_SKILLS } from "./skills-bundled.ts";
+import { readActiveMeta } from "./plans.ts";
+import type {
+  ActivePlanMeta,
+  PlanInfo,
+  TaskItem,
+  TaskStatus,
 } from "./plans.ts";
 import { UserMemoryStore } from "./user-memories.ts";
-import { AdaptivePromptOptimizer } from "./harness/prompt-optimizer.ts";
 
-export type { TurnEvent, TurnEventInput };
-export { stampTurnEvent } from "./harness/loop.ts";
-export type {
-  AgentLoopOpts,
-  HistoryChunk,
-  HistoryChunkInput,
-  HistorySearchHit,
-  EmbeddingService,
-  HistoryVectorStore,
-  HistoryRoundInput,
-} from "./harness/loop.ts";
-export {
-  archiveTurn,
-  computeContentHash,
-  comparableHistoryText,
-  historyTextSimilarity,
-  dedupeSimilarHistoryHits,
-  finalizeRecalledHistoryHits,
-  HISTORY_MIN_RELEVANCE_SCORE,
-  HISTORY_NEAR_DUPLICATE_THRESHOLD,
-} from "./harness/loop.ts";
-export { isRedactionEnabled, isSensitiveFile, redactSecrets } from "./harness/redact.ts";
-
-export interface SessionState {
-  mode: AgentMode;
-  workspace: WorkspaceInfo | null;
-  workflow: SystemWorkflowConfig;
-  activePlanPath: string | null;
-  lastPlanPath: string | null;
-  todoAnchor: string | null;
-  lastCheckpointId: string | null;
-  /** Pending PRD/TDD workflow state, persisted with the active chat session. */
-  documentWorkflow: DocumentWorkflowState | null;
-  /** True when history was restored from disk. */
-  sessionRestored: boolean;
-  activeSessionId: string | null;
-  sessionTitle: string | null;
-  /** Messages queued while a turn was running; persisted to survive restarts. */
-  queuedMessages?: QueuedMessage[];
-  /** 统一任务运行状态（会话级快照）。 */
-  taskRunState?: TaskRunState | null;
-}
-
-/**
- * Per-session runtime state. Multiple sessions can run concurrently in the
- * background; each has its own history, abort controller, terminal log, plan
- * state, checkpoint state, and persist/plan-update queues. Global resources
- * (workspace, index, codemap, mcp, memories, llmApiKey, workflow, projectRules,
- * fileWatcher, promptOptimizer) remain on the orchestrator singleton.
- */
-interface SessionRuntime {
-  id: string;
-  history: ChatTurn[];
-  abort: AbortController | null;
-  terminalLog: TerminalEntry[];
-  mode: AgentMode;
-  activePlanPath: string | null;
-  lastPlanPath: string | null;
-  todoAnchor: string | null;
-  lastCheckpointId: string | null;
-  documentWorkflow: DocumentWorkflowState | null;
-  sessionRestored: boolean;
-  sessionTitle: string | null;
-  sessionCreatedAt: string | null;
-  queuedMessages: QueuedMessage[];
-  /** 统一任务运行状态；从会话快照恢复，供下一轮 agent 循环继续。 */
-  taskRunState: TaskRunState | null;
-  keptPaths: Set<string>;
-  persistQueue: Promise<void>;
-  activePlanUpdateQueue: Promise<void>;
-  /** Project this runtime was created in. Survives workspace switches so persist() writes to the right folder. */
-  workspaceRoot: string | null;
-  /** Query-only index bound to workspaceRoot. Survives a later global project switch. */
-  index: IndexClient | null;
-}
-
-function createSessionRuntime(id: string, mode: AgentMode = "agent"): SessionRuntime {
-  return {
-    id,
-    history: [],
-    abort: null,
-    terminalLog: [],
-    mode,
-    activePlanPath: null,
-    lastPlanPath: null,
-    todoAnchor: null,
-    lastCheckpointId: null,
-    documentWorkflow: null,
-    sessionRestored: false,
-    sessionTitle: null,
-    sessionCreatedAt: null,
-    queuedMessages: [],
-    taskRunState: null,
-    keptPaths: new Set(),
-    persistQueue: Promise.resolve(),
-    activePlanUpdateQueue: Promise.resolve(),
-    workspaceRoot: null,
-    index: null,
-  };
-}
+export * from "./public-api.ts";
 
 const ERR_NO_WORKSPACE = "请先打开项目文件夹";
 
@@ -245,11 +135,12 @@ export class SessionOrchestrator {
   /** Global + focus-session state. workspace/workflow are global; activeSessionId
    * is the front-end focus session. Per-session fields live in `runtimes`. */
   private state: SessionState = {
-    mode: "plan",
+    mode: "spec",
     workspace: null,
     workflow: BUILTIN_WORKFLOW,
     activePlanPath: null,
     lastPlanPath: null,
+    currentFeature: null,
     todoAnchor: null,
     lastCheckpointId: null,
     documentWorkflow: null,
@@ -357,7 +248,7 @@ export class SessionOrchestrator {
   private sessionIndex(sessionId: string, workspaceRoot: string): IndexClient {
     const r = this.runtimes.get(sessionId);
     if (r?.index) return r.index;
-    const bound = createIndexClient();
+    const bound = createIndexClient({ semantic: this.indexSemanticPort });
     bound.setExtraIgnore?.(this.state.workflow.index.extraIgnore ?? []);
     void bound.open(workspaceRoot, undefined, { mode: "query" }).catch((error) => {
       console.warn(`[session] query index open failed for ${workspaceRoot}:`, error);
@@ -380,256 +271,96 @@ export class SessionOrchestrator {
   }
 
   private index: IndexClient = createIndexClient();
-  private codemap: CodemapClient | null = null;
-  private codemapInitPromise: Promise<CodemapClient> | null = null;
-  private codemapInitRetries = 0;
-  private readonly MAX_CODEMAP_RETRIES = 3;
-  private readonly CODEMAP_RETRY_DELAY_MS = 1000;
-
-  /** 
-   * 获取或初始化Codemap客户端
-   * 由于新实现是异步的,需要lazy初始化
-   * 
-   * 错误恢复策略:
-   * 1. 失败后重置promise,允许重试
-   * 2. 最多重试3次,每次延迟1秒
-   * 3. 检测损坏数据库并自动重建
-   * 4. 完全失败后降级为stub客户端
-   */
-  private async getCodemapClient(): Promise<CodemapClient> {
-    if (this.codemap) return this.codemap;
-    if (this.codemapInitPromise) return this.codemapInitPromise;
-    
-    this.codemapInitPromise = this.initCodemapWithRetry()
-      .then(client => {
-        this.codemap = client;
-        this.codemapInitRetries = 0; // 重置重试计数
-        console.log("[OwnCoder] Codemap initialized successfully");
-        return client;
-      })
-      .catch(error => {
-        // 重置promise以允许下次调用重试
-        this.codemapInitPromise = null;
-        
-        console.error("[OwnCoder] Codemap initialization failed:", error);
-        
-        // 如果超过最大重试次数,创建stub客户端作为降级
-        if (this.codemapInitRetries >= this.MAX_CODEMAP_RETRIES) {
-          console.warn("[OwnCoder] Codemap initialization exhausted retries, using stub client");
-          this.codemap = this.createStubCodemapClient();
-          return this.codemap;
-        }
-        
-        throw error;
-      });
-    
-    return this.codemapInitPromise;
-  }
-
-  /**
-   * 带重试的Codemap初始化
-   */
-  private async initCodemapWithRetry(): Promise<CodemapClient> {
-    while (this.codemapInitRetries < this.MAX_CODEMAP_RETRIES) {
-      try {
-        const client = await createCodemapClient();
-        
-        // 验证客户端可用性
-        await this.validateCodemapClient(client);
-        
-        return client;
-      } catch (error) {
-        this.codemapInitRetries++;
-        
-        const errorMsg = error instanceof Error ? error.message : String(error);
-        console.warn(
-          `[OwnCoder] Codemap init attempt ${this.codemapInitRetries}/${this.MAX_CODEMAP_RETRIES} failed: ${errorMsg}`
-        );
-        
-        // 检测是否是数据库损坏错误
-        if (this.isDatabaseCorrupted(error)) {
-          console.warn("[OwnCoder] Detected corrupted database, attempting to rebuild...");
-          await this.cleanupCorruptedDatabase();
-          // 清理后立即重试,不计入重试次数
-          this.codemapInitRetries--;
-          continue;
-        }
-        
-        // 如果还有重试机会,等待后重试
-        if (this.codemapInitRetries < this.MAX_CODEMAP_RETRIES) {
-          await this.sleep(this.CODEMAP_RETRY_DELAY_MS * this.codemapInitRetries); // 指数退避
-          continue;
-        }
-        
-        throw error;
-      }
-    }
-    
-    throw new Error("Codemap initialization failed after max retries");
-  }
-
-  /**
-   * 验证Codemap客户端是否可用
-   */
-  private async validateCodemapClient(client: CodemapClient): Promise<void> {
-    try {
-      // 简单的健康检查: 调用status()
-      await client.status();
-    } catch (error) {
-      throw new Error(`Codemap client validation failed: ${error}`);
-    }
-  }
-
-  /**
-   * 检测是否是数据库损坏错误
-   */
-  private isDatabaseCorrupted(error: unknown): boolean {
-    const errorMsg = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
-    
-    return (
-      errorMsg.includes("database disk image is malformed") ||
-      errorMsg.includes("database is locked") ||
-      errorMsg.includes("not a database") ||
-      errorMsg.includes("file is not a database") ||
-      errorMsg.includes("sqlite") && errorMsg.includes("corrupt")
-    );
-  }
-
-  /**
-   * 清理损坏的数据库文件
-   */
-  private async cleanupCorruptedDatabase(): Promise<void> {
-    if (!this.state.workspace) return;
-    
-    const dbPath = join(this.state.workspace.root, ".owncoder", "unified-index.db");
-    
-    try {
-      await fs.unlink(dbPath);
-      console.log("[OwnCoder] Removed corrupted database:", dbPath);
-    } catch (error) {
-      // 文件可能不存在,忽略错误
-      console.warn("[OwnCoder] Failed to remove database:", error);
-    }
-  }
-
-  /**
-   * 创建stub客户端作为降级方案
-   */
-  private createStubCodemapClient(): CodemapClient {
-    const stubStatus = async (): Promise<import("@owncoder/index").CodemapStatus> => ({
-      ready: false,
-      fileCount: 0,
-      nodeCount: 0,
-      edgeCount: 0,
-      message: "Codemap unavailable (initialization failed)",
-    });
-
-    return {
-      async status() {
-        return stubStatus();
-      },
-      async build(_root: string) {
-        console.warn("[OwnCoder] Stub codemap: build() called but no-op");
-        return stubStatus();
-      },
-      async search(_query: string, _limit?: number) {
-        console.warn("[OwnCoder] Stub codemap: search() called but returning empty results");
-        return [];
-      },
-      async impact(_query: string, _depth?: number) {
-        console.warn("[OwnCoder] Stub codemap: impact() called but returning empty results");
-        return {
-          focal: {
-            id: "",
-            name: "",
-            kind: "",
-            path: "",
-            startLine: 0,
-            endLine: 0,
-            language: "",
-          },
-          callers: [],
-          callees: [],
-          likelyTests: [],
-          directCallers: 0,
-          transitiveCallers: 0,
-          riskLevel: "low",
-          riskScore: 0,
-          explanation: "Stub implementation - no impact analysis available",
-        };
-      },
-    };
-  }
-
-  /**
-   * 延迟辅助函数
-   */
-  private sleep(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
-  }
+  /** Codemap 子系统（lazy 初始化、重试、损坏重建、stub 降级、agent 查询）——见 codemap-manager.ts。 */
+  private codemapManager = new CodemapManager(() => this.state.workspace?.root ?? null);
 
   /** Access the embedded CodeGraph engine through OwnCoder's private API. */
   async getCodemap(): Promise<CodemapClient> {
-    return this.getCodemapClient();
-  }
-
-  /**
-   * Ensure the Codemap graph is fresh before an agent query. If a rebuild is
-   * pending (file changed but the debounce window hasn't elapsed), flush it
-   * immediately instead of waiting, so the agent reads the latest graph. On the
-   * steady state (no changes, already built) this is a no-op and the search
-   * hits the native layer directly.
-   */
-  private async flushCodemapForQuery(): Promise<void> {
-    // Never build the whole workspace synchronously from an agent tool call.
-    // The desktop UtilityProcess owns indexing; queries use the latest snapshot.
+    return this.codemapManager.get();
   }
 
   async searchCodemapForAgent(query: string, limit = 12): Promise<CodemapSearchHit[]> {
-    await this.flushCodemapForQuery();
-    const codemap = await this.getCodemapClient();
-    const t = Date.now();
-    const hits = await codemap.search(query, limit);
-    console.warn(
-      `[owncoder/codemap] search query=${JSON.stringify(query)} ${Date.now() - t}ms results=${hits.length}`,
-    );
-    return hits;
+    return this.codemapManager.search(query, limit);
   }
 
   async impactCodemapForAgent(nodeId: string, depth = 3): Promise<CodemapImpact> {
-    await this.flushCodemapForQuery();
-    const codemap = await this.getCodemapClient();
-    const t = Date.now();
-    const impact = await codemap.impact(nodeId, depth);
-    console.warn(
-      `[owncoder/codemap] impact nodeId=${JSON.stringify(nodeId)} ${Date.now() - t}ms`,
-    );
-    return impact;
+    return this.codemapManager.impact(nodeId, depth);
   }
 
   /** FS watcher for live incremental index updates; closed on workspace switch. */
-  private fileWatcher: FSWatcher | null = null;
-  /** Per-path debounce timers for the file watcher, so repeated save events
-   * (e.g. editor auto-save) collapse into a single `invalidate` call. */
-  private fileWatchTimers: Map<string, NodeJS.Timeout> = new Map();
+  private fileWatcher = new WorkspaceFileWatcher();
   private confirmDangerousBash: ((command: string, sessionId?: string) => Promise<boolean>) | null = null;
+  /** 危险 bash 自动批准开关（settings modes.agent.autoApproveBash），随 setWorkflow 同步。 */
+  private autoApproveDangerousBash = false;
   private askUserHandler: ((req: AskUserRequest, sessionId?: string) => Promise<string>) | null = null;
   private renderPageHandler: AgentLoopOpts["renderPage"] | null = null;
   private llmApiKey: string | null = null;
   private projectRules = "";
+  /** Discovered skills (project + user + bundled), including disabled ones. */
+  private skillsIndex: SkillMetadata[] = [];
+  /** Pre-formatted catalog of enabled skills, injected into the system prompt. */
+  private skillsCatalogText = "";
+  /** User-level skills root, injected by the desktop host at startup. */
+  private userSkillsRoot: string | null = null;
 
   private mcp = new McpManager();
   private memoryStore: UserMemoryStore | null = null;
   private projectMemoryStore: UserMemoryStore | null = null;
-  /** Adaptive prompt optimizer; persists learned failure patterns across turns. */
-  private promptOptimizer = new AdaptivePromptOptimizer();
   /** 历史向量检索基础设施（可选，由 desktop 层注入 sqlite-vec + embedding）。 */
   private historyVector: AgentLoopOpts["historyVector"] | undefined;
+  /**
+   * 代码语义检索端口（可选，由 desktop 层启动时注入）。sessionIndex 的
+   * 查询客户端携带它后 ragSearch 才真正生效；未注入（CLI/headless）时
+   * 维持空结果，消费方 hybrid 自动降级 FTS。
+   */
+  private indexSemanticPort: SemanticSearchPort | undefined;
   /** Desktop IndexHost sink: forward dirty paths to the writable UtilityProcess. */
   private indexDirtySink: ((batch: { files: string[]; directories: string[] }) => void) | null = null;
 
+  /** Plans/tasks/checkpoints/changes 子系统桥（见 session-plans.ts）。 */
+  private readonly plansHost: PlansHost = {
+    rt: (id) => this.rt(id),
+    rtOpt: (id) => this.rtOpt(id),
+    sessionWorkspaceRoot: (id) => this.sessionWorkspaceRoot(id),
+    workspaceRoot: () => this.state.workspace?.root ?? null,
+    focusSessionId: () => this.state.activeSessionId,
+    setFocusMode: (mode) => {
+      this.state.mode = mode;
+    },
+    index: this.index,
+    persist: (sessionId, activityUpdatedAt) => this.persist(sessionId, activityUpdatedAt),
+    getState: (sessionId) => this.getState(sessionId),
+    enqueueActivePlanUpdate: (update, sessionId) => this.enqueueActivePlanUpdate(update, sessionId),
+  };
+
+  /** Spec 工作流审批闸门桥（见 session-specs.ts）。 */
+  private readonly specsHost: SpecsHost = {
+    rt: (id) => this.rt(id),
+    sessionWorkspaceRoot: (id) => this.sessionWorkspaceRoot(id),
+    focusSessionId: () => this.state.activeSessionId,
+    setFocusMode: (mode) => {
+      this.state.mode = mode;
+    },
+    persist: (sessionId, activityUpdatedAt) => this.persist(sessionId, activityUpdatedAt),
+    getState: (sessionId) => this.getState(sessionId ?? undefined),
+  };
+
+  /** 会话快照装入桥（见 session-load.ts）。 */
+  private readonly loadHost: SessionLoadHost = {
+    runtimes: this.runtimes,
+    sessionRoots: this.sessionRoots,
+    state: this.state,
+    workspaceRoot: () => this.state.workspace?.root ?? null,
+    isSessionIncomplete: (id) => this.isSessionIncomplete(id),
+  };
+
   setDangerousBashConfirmer(fn: ((command: string, sessionId?: string) => Promise<boolean>) | null): void {
     this.confirmDangerousBash = fn;
+  }
+
+  /** 设置危险 bash 自动批准开关（settings modes.agent.autoApproveBash）。 */
+  setAutoApproveDangerousBash(enabled: boolean): void {
+    this.autoApproveDangerousBash = enabled;
   }
 
   /** Wire a host-supplied ask-user bridge (main process → renderer UI → answer). */
@@ -666,6 +397,14 @@ export class SessionOrchestrator {
   }
 
   /**
+   * 注入代码语义检索端口（bge 嵌入 + sqlite-vec 加载器）。桌面端启动时
+   * 调用一次；sessionIndex 的查询客户端随后创建时携带它，ragSearch 生效。
+   */
+  setIndexSemanticPort(port: SemanticSearchPort | undefined): void {
+    this.indexSemanticPort = port;
+  }
+
+  /**
    * Point the session at a global memories directory. Creates a
    * `UserMemoryStore` backed by `<dir>/memories.json` and loads it.
    * Typically called once from the desktop main process at startup.
@@ -691,6 +430,15 @@ export class SessionOrchestrator {
     const p = join(workspaceRoot, ".owncoder", "memories.json");
     this.projectMemoryStore = new UserMemoryStore(p);
     void this.projectMemoryStore.load();
+  }
+
+  /**
+   * Point the session at the user-level skills directory. Called once from
+   * the desktop main process at startup (mirrors setMemoriesDir).
+   */
+  setSkillsUserDir(dir: string): void {
+    this.userSkillsRoot = dir || null;
+    void this.reloadProjectSkills();
   }
 
   getProjectMemoryStore(): UserMemoryStore | null {
@@ -753,6 +501,7 @@ export class SessionOrchestrator {
       workflow: this.state.workflow,
       activePlanPath: r?.activePlanPath ?? null,
       lastPlanPath: r?.lastPlanPath ?? null,
+      currentFeature: r?.currentFeature ?? null,
       todoAnchor: r?.todoAnchor ?? null,
       lastCheckpointId: r?.lastCheckpointId ?? null,
       documentWorkflow: r?.documentWorkflow ?? null,
@@ -900,10 +649,16 @@ export class SessionOrchestrator {
   }
 
   setWorkflow(workflow: SystemWorkflowConfig): void {
+    const prevSkills = this.state.workflow.skills;
     this.state.workflow = workflow;
     this.index.setExtraIgnore?.(workflow.index.extraIgnore ?? []);
+    // 危险 bash 自动批准开关随 workflow 同步到执行层（bash 工具读取）。
+    this.autoApproveDangerousBash = workflow.modes.agent.autoApproveBash ?? false;
 
     this.syncMcp();
+    if (JSON.stringify(prevSkills) !== JSON.stringify(workflow.skills)) {
+      void this.reloadProjectSkills();
+    }
   }
 
   setTodoAnchor(todo: string | null, sessionId?: string): void {
@@ -952,6 +707,7 @@ export class SessionOrchestrator {
 
     // 重新加载项目规则（轻量级操作）
     await this.reloadProjectRules();
+    await this.reloadProjectSkills();
 
     // 读取该工作区的活跃会话；已在内存中的 runtime 优先，避免覆盖运行中状态。
     const listed = await listSessionMetas(root);
@@ -967,6 +723,7 @@ export class SessionOrchestrator {
       this.state.activeSessionId = id;
       this.state.mode = existing.mode;
       this.state.sessionTitle = existing.sessionTitle;
+      await setActiveSessionId(root, id);
     } else {
       const saved = await loadSessionById(root, id);
       if (saved) {
@@ -1025,6 +782,7 @@ export class SessionOrchestrator {
     const active = await readActiveMeta(root);
     const activePlanPath = active?.path ?? null;
     await this.reloadProjectRules();
+    await this.reloadProjectSkills();
 
     const listed = await listSessionMetas(root);
     let id = listed.activeId ?? listed.sessions[0]?.id ?? null;
@@ -1039,6 +797,7 @@ export class SessionOrchestrator {
       this.state.activeSessionId = id;
       this.state.mode = existing.mode;
       this.state.sessionTitle = existing.sessionTitle;
+      await setActiveSessionId(root, id);
       const r = this.rtOpt();
       if (r) r.activePlanPath = activePlanPath;
       return;
@@ -1062,204 +821,15 @@ export class SessionOrchestrator {
    * set) are skipped so we never re-index `node_modules`, `.git`, etc.
    */
   private startFileWatcher(root: string): void {
-    // Close any watcher / pending timers from a previous workspace.
-    this.fileWatcher?.close();
-    this.fileWatcher = null;
-    for (const t of this.fileWatchTimers.values()) clearTimeout(t);
-    this.fileWatchTimers.clear();
-
-    const skip = new Set([
-      "node_modules",
-      ".git",
-      ".venv",
-      "venv",
-      "target",
-      "dist",
-      "build",
-      ".next",
-      ".owncoder",
-      "__pycache__",
-      "vendor",
-      "out",
-      "bin",
-      "obj",
-    ]);
-
-    const shouldSkip = (absPath: string): boolean => {
-      const rel = absPath.split(/[\\/]/);
-      return rel.some((seg) => skip.has(seg));
-    };
-
-    const DEBOUNCE_MS = 300;
-    try {
-      const watcher = watch(
-        root,
-        { recursive: true },
-        (_event, filename) => {
-          if (!filename) return;
-          const absPath = join(root, filename);
-          if (shouldSkip(absPath)) return;
-          // Debounce: collapse bursts of change events (e.g. editor
-          // auto-save) for the same path into a single `invalidate`, which
-          // re-parses the file (or drops it if deleted) without a full rescan.
-          const existing = this.fileWatchTimers.get(absPath);
-          if (existing) clearTimeout(existing);
-          this.fileWatchTimers.set(
-            absPath,
-            setTimeout(() => {
-              this.fileWatchTimers.delete(absPath);
-              // Determine whether this is a directory delete. On Windows a
-              // deleted non-empty directory may only report the directory
-              // itself (not each file), so we strip the whole subtree to avoid
-              // leaving stale entries in the symbol index.
-              let isDirOrGone = false;
-              try {
-                isDirOrGone = statSync(absPath).isDirectory();
-              } catch {
-                isDirOrGone = true; // deleted: can't tell file vs dir → treat as dir
-              }
-              if (isDirOrGone) {
-                this.index.invalidateDir?.(absPath);
-                this.indexDirtySink?.({ files: [], directories: [absPath] });
-              } else {
-                this.index.invalidate?.(absPath);
-                this.indexDirtySink?.({ files: [absPath], directories: [] });
-              }
-              // The desktop IndexHost receives this path through indexDirtySink.
-              // Codemap updates are intentionally not built in the main process.
-            }, DEBOUNCE_MS),
-          );
-        },
-      );
-      this.fileWatcher = watcher;
-    } catch {
-      // Recursive watch can fail on some platforms; live updates simply won't
-      // run, but the open-time diff still keeps the index correct.
-      this.fileWatcher = null;
-    }
+    this.fileWatcher.start(root, {
+      invalidate: (path) => this.index.invalidate?.(path),
+      invalidateDir: (path) => this.index.invalidateDir?.(path),
+      onDirty: (batch) => this.indexDirtySink?.(batch),
+    });
   }
 
-  private applyLoadedSession(saved: {
-    id?: string;
-    title?: string;
-    createdAt?: string;
-    mode: AgentMode;
-    history: ChatTurn[];
-    terminalLog: TerminalEntry[];
-    lastPlanPath: string | null;
-    todoAnchor: string | null;
-    lastCheckpointId: string | null;
-    documentWorkflow?: DocumentWorkflowState | null;
-    queuedMessages?: QueuedMessage[] | string[];
-    taskRunState?: TaskRunState | null;
-  }): void {
-    const id = saved.id ?? null;
-    if (!id) {
-      console.error('[session] applyLoadedSession: 缺少会话ID');
-      return;
-    }
-    
-    let r = this.runtimes.get(id);
-    const isNewRuntime = !r;
-    
-    if (!r) {
-      r = createSessionRuntime(id, saved.mode);
-      r.workspaceRoot = this.state.workspace?.root ?? null;
-      this.runtimes.set(id, r);
-    } else if (this.isSessionIncomplete(id)) {
-      // 运行中/未完成：切回项目时绝不能用磁盘快照覆盖内存中的流式、队列、计划。
-      this.state.activeSessionId = id;
-      this.state.mode = r.mode;
-      this.state.sessionTitle = r.sessionTitle;
-      return;
-    } else {
-      // 如果运行时已存在且有内容，需要谨慎合并而不是直接覆盖
-      if (r.history.length > 0 && saved.history.length === 0) {
-        console.warn(`[session] 磁盘会话数据为空，保留内存中的历史 (${r.history.length} 条)`);
-        // 保留内存中的数据，只更新其他字段
-        r.mode = saved.mode;
-        r.lastPlanPath = saved.lastPlanPath;
-        r.todoAnchor = saved.todoAnchor;
-        r.lastCheckpointId = saved.lastCheckpointId;
-        r.documentWorkflow = saved.documentWorkflow ?? null;
-        r.sessionTitle = saved.title ?? r.sessionTitle;
-        r.sessionCreatedAt = saved.createdAt ?? r.sessionCreatedAt;
-        // 不覆盖 history 和 terminalLog
-        this.state.activeSessionId = id;
-        this.state.mode = saved.mode;
-        this.state.sessionTitle = r.sessionTitle;
-        return;
-      }
-      
-      // 如果内存和磁盘都有内容，比较数量，优先使用内容更多的
-      if (r.history.length > saved.history.length) {
-        console.warn(`[session] 内存历史更完整 (${r.history.length}条) > 磁盘历史 (${saved.history.length}条)，保留内存数据`);
-        this.state.activeSessionId = id;
-        this.state.mode = r.mode;
-        this.state.sessionTitle = r.sessionTitle;
-        return;
-      }
-    }
-    if (r.workspaceRoot) this.sessionRoots.set(id, r.workspaceRoot);
-    
-    // 安全地应用磁盘数据
-    try {
-      // 迁移旧格式历史记录（阶段三架构）
-      let fullHistory = Array.isArray(saved.history) ? saved.history : [];
-      if (fullHistory.length > 0) {
-        try {
-          if (needsMigration(fullHistory)) {
-            console.log(`[SessionOrchestrator] Migrating session ${r.id} to structured message format`);
-            fullHistory = migrateHistory(fullHistory);
-          }
-        } catch (err) {
-          console.warn(`[SessionOrchestrator] Migration failed, using original history:`, err);
-        }
-      }
-
-      // Only keep the tail of history in the runtime to bound startup memory.
-      // The full transcript lives in the conversation store for UI pagination.
-      const RECENT_LIMIT = 20;
-      const recentHistory = fullHistory.slice(-RECENT_LIMIT);
-      r.history = recentHistory;
-      r.terminalLog = Array.isArray(saved.terminalLog) ? saved.terminalLog.slice(-20) : [];
-      r.mode = saved.mode || 'agent';
-      r.lastPlanPath = saved.lastPlanPath;
-      r.todoAnchor = saved.todoAnchor;
-      r.lastCheckpointId = saved.lastCheckpointId;
-      r.documentWorkflow = saved.documentWorkflow ?? null;
-      r.queuedMessages = sanitizeQueuedMessages(saved.queuedMessages);
-      r.taskRunState = restoreTaskRunState(saved.taskRunState, id) ?? null;
-      r.sessionTitle = saved.title ?? null;
-      r.sessionCreatedAt = saved.createdAt ?? null;
-      r.sessionRestored = fullHistory.length > 0 || (saved.terminalLog?.length ?? 0) > 0;
-
-      // Migrate the full legacy history to the conversation store in the
-      // background so the UI can paginate older turns without keeping them
-      // in the runtime. fire-and-forget, errors are non-fatal.
-      if (fullHistory.length > RECENT_LIMIT && r.workspaceRoot) {
-        const root = r.workspaceRoot;
-        void migrateLegacyHistory(root, id, fullHistory).catch((err) => {
-          console.warn(`[session] background conversation migration failed for ${id}:`, err);
-        });
-      }
-
-      console.log(`[session] ${isNewRuntime ? '创建新运行时' : '更新现有运行时'}: ${id}, 历史: ${r.history.length}/${fullHistory.length}条, 终端: ${r.terminalLog.length}条`);
-    } catch (error) {
-      console.error(`[session] 应用会话数据失败: ${id}`, error);
-      // 如果应用失败，至少确保运行时处于可用状态
-      if (isNewRuntime) {
-        r.history = [];
-        r.terminalLog = [];
-        r.mode = 'agent';
-        r.sessionTitle = '恢复失败的会话';
-      }
-    }
-    
-    // Make this the focus session.
-    this.state.activeSessionId = id;
-    this.state.mode = r.mode;
-    this.state.sessionTitle = r.sessionTitle;
+  private applyLoadedSession(saved: LoadedSession): void {
+    applyLoadedSession(this.loadHost, saved);
   }
 
   async listChatSessions(): Promise<{ activeId: string | null; sessions: SessionMeta[] }> {
@@ -1275,15 +845,11 @@ export class SessionOrchestrator {
     const previousId = this.state.activeSessionId;
     if (previousId) {
       await this.persist(previousId);
-      const previousRuntime = this.runtimes.get(previousId);
-      if (previousRuntime) {
-        await previousRuntime.persistQueue;
-      }
     }
     const focusMode = this.rtOpt()?.mode ?? "agent";
     const created = await createSessionFile(ws.root, {
       title: title || "新会话",
-      mode: focusMode === "plan" ? "plan" : "agent",
+      mode: focusMode === "spec" ? "spec" : "agent",
     });
     this.applyLoadedSession(created.session);
     const r = this.rtOpt();
@@ -1320,13 +886,8 @@ export class SessionOrchestrator {
         ? this.state.activeSessionId
         : null;
     if (previousId) {
-      // 关键修复：等待持久化完成，确保当前会话状态被正确保存
+      // 等待持久化完成，确保当前会话状态被正确保存
       await this.persist(previousId);
-      // 额外等待持久化队列完全清空，防止竞态条件
-      const currentRuntime = this.runtimes.get(previousId);
-      if (currentRuntime) {
-        await currentRuntime.persistQueue;
-      }
     }
     // If the target runtime is already loaded (e.g. running in background),
     // just switch focus to it — do not overwrite its in-memory state.
@@ -1390,7 +951,7 @@ export class SessionOrchestrator {
     }
     
     // 验证加载的会话数据完整性
-    if (!this.validateSessionData(saved)) {
+    if (!validateSessionData(saved)) {
       console.error(`[session] 会话数据验证失败: ${id}`, saved);
       // 如果内存中有更好的状态，使用内存状态
       const memoryRuntime = this.runtimes.get(id);
@@ -1403,8 +964,10 @@ export class SessionOrchestrator {
         if (previousId) this.unloadIdleRuntime(previousId);
         return this.getState(id);
       }
+      // 磁盘数据无效且内存中无可用状态，抛出错误防止应用损坏数据
+      throw new Error(`会话数据验证失败: ${id}`);
     }
-    
+
     await setActiveSessionId(ws.root, id);
     this.applyLoadedSession(saved);
     if (previousId) this.unloadIdleRuntime(previousId);
@@ -1525,18 +1088,7 @@ export class SessionOrchestrator {
     if (!persistRoot) return;
     const run = async () => {
       try {
-        const meta = await saveSessionById(persistRoot, sid, {
-          mode: r.mode,
-          history: r.history,
-          terminalLog: r.terminalLog.slice(-80),
-          lastPlanPath: r.lastPlanPath,
-          todoAnchor: r.todoAnchor,
-          lastCheckpointId: r.lastCheckpointId,
-          documentWorkflow: r.documentWorkflow,
-          queuedMessages: r.queuedMessages,
-          taskRunState: r.taskRunState,
-          createdAt: r.sessionCreatedAt ?? undefined,
-        }, activityUpdatedAt);
+        const meta = await saveSessionById(persistRoot, sid, buildSessionPersistPayload(r), activityUpdatedAt);
         r.sessionTitle = meta.title;
         if (sid === this.state.activeSessionId) {
           this.state.sessionTitle = meta.title;
@@ -1548,63 +1100,7 @@ export class SessionOrchestrator {
         throw error;
       }
     };
-    r.persistQueue = r.persistQueue.then(run, run);
-    return r.persistQueue;
-  }
-
-  /**
-   * 验证会话数据的完整性
-   */
-  private validateSessionData(session: PersistedSession): boolean {
-    try {
-      // 基本结构验证
-      if (!session || typeof session !== 'object') {
-        console.warn('[session] 会话数据不是有效对象');
-        return false;
-      }
-      
-      // 版本验证
-      if (session.version !== 1) {
-        console.warn(`[session] 不支持的会话版本: ${session.version}`);
-        return false;
-      }
-      
-      // 历史数据验证
-      if (!Array.isArray(session.history)) {
-        console.warn('[session] 会话历史不是数组');
-        return false;
-      }
-      
-      // 验证历史条目结构
-      for (let i = 0; i < session.history.length; i++) {
-        const turn = session.history[i];
-        if (!turn || typeof turn !== 'object') {
-          console.warn(`[session] 历史条目 ${i} 结构无效`);
-          return false;
-        }
-        if (!turn.role || !['user', 'assistant', 'tool', 'system'].includes(turn.role)) {
-          console.warn(`[session] 历史条目 ${i} 角色无效: ${turn.role}`);
-          return false;
-        }
-      }
-      
-      // 终端日志验证
-      if (session.terminalLog && !Array.isArray(session.terminalLog)) {
-        console.warn('[session] 终端日志不是数组');
-        return false;
-      }
-      
-      // 模式验证
-      if (session.mode && !['agent', 'spec'].includes(session.mode)) {
-        console.warn(`[session] 未知的会话模式: ${session.mode}`);
-        return false;
-      }
-      
-      return true;
-    } catch (error) {
-      console.error('[session] 验证会话数据时发生错误:', error);
-      return false;
-    }
+    return enqueueSessionPersist(r, run);
   }
 
   /** 等待所有 session 的持久化队列完成，用于应用退出前 flush，防止 pending persist 丢失。 */
@@ -1665,6 +1161,7 @@ export class SessionOrchestrator {
     if (!ws) throw new Error(ERR_NO_WORKSPACE);
     const info = await writeRule(ws.root, name, content);
     await this.reloadProjectRules();
+    await this.reloadProjectSkills();
     return info;
   }
 
@@ -1673,6 +1170,132 @@ export class SessionOrchestrator {
     if (!ws) throw new Error(ERR_NO_WORKSPACE);
     await deleteRule(ws.root, name);
     await this.reloadProjectRules();
+    await this.reloadProjectSkills();
+  }
+
+  // ── Skills ──────────────────────────────────────────────────────────────
+
+  private disabledSkillIds(): Set<string> {
+    return new Set(this.state.workflow.skills?.disabled ?? []);
+  }
+
+  /**
+   * Re-scan the project + user + bundled skill directories and rebuild the
+   * system-prompt catalog. Cheap (two small directory scans); called on
+   * workspace switch, skill writes/deletes and skills config changes.
+   */
+  async reloadProjectSkills(): Promise<void> {
+    const skillsConfig = this.state.workflow.skills;
+    if (skillsConfig?.enabled === false) {
+      this.skillsIndex = [];
+      this.skillsCatalogText = "";
+      return;
+    }
+    const ws = this.state.workspace;
+    const { skills } = await discoverSkills({
+      workspaceRoot: ws ? ws.root : null,
+      userSkillsRoot: this.userSkillsRoot,
+      bundled: BUNDLED_SKILLS,
+      disabledIds: this.disabledSkillIds(),
+    });
+    this.skillsIndex = skills;
+    this.skillsCatalogText = buildSkillsCatalogSection(
+      skills.filter((s) => s.enabled),
+      { projectDir: ws ? join(ws.root, SKILLS_DIR) : null, userDir: this.userSkillsRoot },
+    );
+  }
+
+  getSkillsCatalogText(): string {
+    return this.skillsCatalogText;
+  }
+
+  /** Skill loading API injected into the agent loop (backs the use_skill tool). */
+  getSkillsApi(): SkillsApi {
+    return {
+      loadSkill: async (name: string) => {
+        let meta = this.skillsIndex.find((s) => s.name === name);
+        if (meta && !meta.enabled) return null;
+        if (!meta) {
+          // Cache miss: a skill file may have appeared since the last scan
+          // (e.g. an agent just wrote one via the install-skill flow).
+          // Re-scan once (cheap: two small directories) and retry.
+          await this.reloadProjectSkills();
+          meta = this.skillsIndex.find((s) => s.name === name);
+        }
+        if (!meta || !meta.enabled) return null;
+        const bundledBody = meta.source === "bundled"
+          ? BUNDLED_SKILLS.find((b) => b.name === meta.name)?.content
+          : undefined;
+        return loadSkillContent(meta, { bundledBody });
+      },
+      listNames: async () => this.skillsIndex.filter((s) => s.enabled).map((s) => s.name),
+    };
+  }
+
+  /** All discovered skills (including disabled) for the settings UI. */
+  async listSkills(): Promise<SkillMetadata[]> {
+    return this.skillsIndex;
+  }
+
+  /** Raw SKILL.md document (frontmatter included) for the settings editor. */
+  async readSkillRaw(name: string): Promise<{ meta: SkillMetadata; raw: string }> {
+    const meta = this.skillsIndex.find((s) => s.name === name);
+    if (!meta) throw new Error(`技能不存在：${name}`);
+    if (meta.source === "bundled") throw new Error("内置技能不可编辑");
+    const raw = await readSkillRaw(meta);
+    return { meta, raw };
+  }
+
+  /**
+   * Create or overwrite a skill. `raw` (a full SKILL.md document) takes
+   * precedence over the structured fields; both paths validate that the
+   * frontmatter name matches the skill name.
+   */
+  async writeSkill(input: {
+    scope: "project" | "user";
+    name: string;
+    description: string;
+    whenToUse?: string;
+    body: string;
+    raw?: string;
+  }): Promise<SkillMetadata[]> {
+    const ws = this.state.workspace;
+    if (input.scope === "project" && !ws) throw new Error(ERR_NO_WORKSPACE);
+    const root = input.scope === "project" ? join(ws!.root, SKILLS_DIR) : this.userSkillsRoot;
+    if (!root) throw new Error("用户级技能目录不可用");
+    const name = validateSkillName(input.name);
+    if (input.raw !== undefined && input.raw.trim()) {
+      const { frontmatter } = parseSkillMarkdown(input.raw);
+      const fmName = frontmatter.name?.trim();
+      if (!fmName) throw new Error("SKILL.md 的 frontmatter 必须包含 name 字段");
+      if (fmName !== name) {
+        throw new Error(`frontmatter 中的 name（${fmName}）与技能名（${name}）不一致`);
+      }
+      await writeSkillRaw(root, name, input.raw);
+    } else {
+      const structured: SkillWriteInput = {
+        name,
+        description: input.description,
+        whenToUse: input.whenToUse,
+        body: input.body,
+      };
+      await writeSkillFiles(root, structured);
+    }
+    await this.reloadProjectSkills();
+    return this.skillsIndex;
+  }
+
+  async deleteSkill(name: string): Promise<SkillMetadata[]> {
+    const meta = this.skillsIndex.find((s) => s.name === name);
+    if (!meta) throw new Error(`技能不存在：${name}`);
+    if (meta.source === "bundled") throw new Error("内置技能不可删除");
+    const ws = this.state.workspace;
+    if (meta.scope === "project" && !ws) throw new Error(ERR_NO_WORKSPACE);
+    const root = meta.scope === "project" ? join(ws!.root, SKILLS_DIR) : this.userSkillsRoot;
+    if (!root) throw new Error("用户级技能目录不可用");
+    await deleteSkillDir(root, name);
+    await this.reloadProjectSkills();
+    return this.skillsIndex;
   }
 
   async restoreProjectContext(): Promise<{ rules: number; memories: number }> {
@@ -1683,6 +1306,7 @@ export class SessionOrchestrator {
     await Promise.all(rules.map((rule) => deleteRule(ws.root, rule.name)));
     const memories = this.projectMemoryStore?.clear() ?? 0;
     await this.reloadProjectRules();
+    await this.reloadProjectSkills();
     return { rules: rules.length, memories };
   }
 
@@ -1697,56 +1321,25 @@ export class SessionOrchestrator {
    * Omitting `sessionId` (legacy callers) returns the unfiltered list.
    */
   async listPlans(sessionId?: string): Promise<PlanInfo[]> {
-    const root = sessionId ? this.sessionWorkspaceRoot(sessionId) : this.state.workspace?.root;
-    if (!root) return [];
-    const plans = await listPlans(root);
-    if (!sessionId) return plans;
-    return plans.filter((p) => p.sessionId === sessionId);
+    return listPlans(this.plansHost, sessionId);
   }
 
   async readPlan(relPath: string): Promise<string> {
-    const ws = this.state.workspace;
-    if (!ws) throw new Error(ERR_NO_WORKSPACE);
-    return readPlanFile(ws.root, relPath);
+    return readPlan(this.plansHost, relPath);
   }
 
   async getActivePlan(sessionId?: string): Promise<ActivePlanMeta | null> {
-    const sid = sessionId ?? this.state.activeSessionId;
-    const root = sid ? this.sessionWorkspaceRoot(sid) : this.state.workspace?.root;
-    if (!root) return null;
-    return readActiveMeta(root, sid ?? undefined);
+    return getActivePlan(this.plansHost, sessionId);
   }
 
   async updateTask(taskId: string, status: TaskStatus, result?: string, sessionId?: string): Promise<ActivePlanMeta | null> {
-    const sid = sessionId ?? this.state.activeSessionId;
-    const root = sid ? this.sessionWorkspaceRoot(sid) : this.state.workspace?.root;
-    if (!root) throw new Error(ERR_NO_WORKSPACE);
-    return this.enqueueActivePlanUpdate(async () => {
-      const meta = await readActiveMeta(root, sid ?? undefined);
-      if (!meta) throw new Error("没有活动计划");
-      const t = meta.tasks.find((x) => x.id === taskId);
-      if (!t) throw new Error(`找不到任务 ${taskId}`);
-      t.status = status;
-      if (result !== undefined) t.result = result.slice(0, 400);
-      if (status === "in_progress") meta.currentTaskId = taskId;
-      if (meta.currentTaskId === null || meta.currentTaskId === taskId) {
-        const next = selectNextPendingTask(meta.tasks);
-        meta.currentTaskId = status === "completed" || status === "failed" || status === "skipped"
-          ? (next?.id ?? null)
-          : meta.currentTaskId;
-      }
-      await writeActiveMeta(root, meta, sid ?? undefined);
-      return meta;
-    }, sessionId);
+    return updateTask(this.plansHost, taskId, status, result, sessionId);
   }
 
   async listCheckpoints(): Promise<
     Array<{ id: string; createdAt: string; touched: string[]; historyLen: number }>
   > {
-    const ws = this.state.workspace;
-    const sessionId = this.state.activeSessionId;
-    if (!ws || !sessionId) return [];
-    return listCheckpoints(ws.root, sessionId);
+    return listCheckpoints(this.plansHost);
   }
 
   async getPendingChanges(sessionId?: string): Promise<{
@@ -1755,67 +1348,20 @@ export class SessionOrchestrator {
     /** True when this session had a checkpoint but it is gone from disk. */
     expired?: boolean;
   }> {
-    const root = sessionId ? this.sessionWorkspaceRoot(sessionId) : this.state.workspace?.root;
-    const r = this.rtOpt(sessionId);
-    if (!root || !r || !r.lastCheckpointId) {
-      return { checkpointId: null, files: [] };
-    }
-    const cp = await loadCheckpoint(root, r.lastCheckpointId);
-    if (!cp) {
-      // The checkpoint this session pointed at is no longer on disk (pruned, or
-      // deleted externally). Say so instead of reporting "no pending changes",
-      // which reads as "nothing to undo" and silently drops undo capability.
-      console.log(
-        `[checkpoint] session checkpoint ${r.lastCheckpointId} is missing; undo unavailable`,
-      );
-      r.lastCheckpointId = null;
-      return { checkpointId: null, files: [], expired: true };
-    }
-    const files = (await buildChangesFromCheckpoint(root, cp)).filter(
-      (f) => !r.keptPaths.has(f.path),
-    );
-    return { checkpointId: cp.id, files };
+    return getPendingChanges(this.plansHost, sessionId);
   }
 
   /** Accept all pending file changes (keep on disk). */
   async keepAllChanges(sessionId?: string): Promise<void> {
-    const r = this.rtOpt(sessionId);
-    if (r) {
-      r.keptPaths.clear();
-      r.lastCheckpointId = null;
-      await this.persist(sessionId);
-    }
+    return keepAllChanges(this.plansHost, sessionId);
   }
 
   async keepChange(path: string, sessionId?: string): Promise<void> {
-    const r = this.rtOpt(sessionId);
-    if (!r) return;
-    r.keptPaths.add(path);
-    const pending = await this.getPendingChanges(sessionId);
-    if (pending.files.length === 0) {
-      r.keptPaths.clear();
-      r.lastCheckpointId = null;
-      await this.persist(sessionId);
-    }
+    return keepChange(this.plansHost, path, sessionId);
   }
 
   async undoChange(path: string, sessionId?: string): Promise<void> {
-    const root = sessionId ? this.sessionWorkspaceRoot(sessionId) : this.state.workspace?.root;
-    const r = this.rtOpt(sessionId);
-    if (!root || !r || !r.lastCheckpointId) throw new Error("没有可撤销的变更");
-    const cp = await loadCheckpoint(root, r.lastCheckpointId);
-    if (!cp) throw new Error("找不到检查点");
-    const snap = cp.files.find((f) => f.path === path);
-    if (!snap) throw new Error(`检查点中无文件：${path}`);
-    await restoreSingleFile(root, snap);
-    this.index.invalidate(path);
-    r.keptPaths.add(path);
-    const pending = await this.getPendingChanges(sessionId);
-    if (pending.files.length === 0) {
-      r.keptPaths.clear();
-      r.lastCheckpointId = null;
-    }
-    await this.persist(sessionId);
+    return undoChange(this.plansHost, path, sessionId);
   }
 
   /**
@@ -1830,44 +1376,7 @@ export class SessionOrchestrator {
     restored: string[];
     checkpointId: string;
   }> {
-    const r = this.rt(sessionId);
-    const root = this.sessionWorkspaceRoot(r.id);
-    const activeSessionId = r.id;
-    let targetId = id ?? r.lastCheckpointId ?? null;
-    if (!targetId) {
-      // Fall back to the newest checkpoint that belongs to this session.
-      const list = await listCheckpoints(root, activeSessionId);
-      targetId = list[0]?.id ?? null;
-    }
-    if (!targetId) throw new Error("没有可回滚的检查点");
-    const cp = await loadCheckpoint(root, targetId);
-    if (!cp) throw new Error(`找不到检查点：${targetId}`);
-
-    const owner = cp.sessionId ?? null;
-    if (owner && activeSessionId && owner !== activeSessionId) {
-      throw new Error(
-        `检查点 ${cp.id} 属于另一个会话，拒绝回滚（避免覆盖当前会话的文件与对话历史）。`,
-      );
-    }
-
-    const restored = await restoreCheckpointFiles(root, cp);
-    for (const p of restored) {
-      this.index.invalidate(p);
-    }
-    // Only adopt the checkpoint's conversation when we can prove it is ours.
-    // Legacy checkpoints carry no sessionId; restoring their files is fine, but
-    // replacing the live history with a foreign one is unrecoverable.
-    if (owner && activeSessionId && owner === activeSessionId) {
-      r.history = (cp.history as ChatTurn[]).map((h) => ({ ...h }));
-    }
-    r.lastCheckpointId = null;
-    r.keptPaths.clear();
-    r.history.push({
-      role: "assistant",
-      content: `已回滚检查点 ${cp.id}（${restored.length} 个文件）。`,
-    });
-    await this.persist(sessionId);
-    return { restored, checkpointId: cp.id };
+    return rollbackCheckpoint(this.plansHost, id, sessionId);
   }
 
   async approvePlan(opts?: {
@@ -1876,85 +1385,42 @@ export class SessionOrchestrator {
     title?: string;
     tasks?: TaskItem[];
   }, sessionId?: string): Promise<SessionState> {
-    const r = this.rt(sessionId);
-    const root = this.sessionWorkspaceRoot(r.id);
-
-    let path = opts?.path?.trim();
-    if (path) {
-      if (!isPlanPath(path)) {
-        throw new Error("批准路径必须在 .owncoder/plans/ 下");
-      }
-    } else if (opts?.content?.trim()) {
-      path = await writePlanFile(root, opts.content, { title: opts.title, sessionId: r.id });
-    } else if (r.lastPlanPath) {
-      path = r.lastPlanPath;
-    } else {
-      const lastAssistant = [...r.history]
-        .reverse()
-        .find((h) => h.role === "assistant" && h.content.trim().length > 40);
-      if (!lastAssistant) {
-        throw new Error("没有可批准的计划 - 请先 save_plan 或传入内容");
-      }
-      path = await writePlanFile(root, lastAssistant.content, {
-        title: opts?.title ?? "已批准的计划",
-        sessionId: r.id,
-      });
-    }
-
-    // 防重复批准：该计划已是活动计划则拒绝，闭环状态机
-    if (r.activePlanPath === path) {
-      throw new Error("该计划已批准并切换到 Agent 模式，无需重复操作");
-    }
-
-    const body = await readPlanFile(root, path);
-    const tasks = normalizeTasks(opts?.tasks && opts.tasks.length > 0 ? opts.tasks : parseTasksFromMarkdown(body));
-    const firstPending = selectNextPendingTask(tasks);
-    const meta: ActivePlanMeta = {
-      path,
-      approvedAt: new Date().toISOString(),
-      title: extractTitle(body, path),
-      tasks,
-      currentTaskId: firstPending?.id ?? null,
-      status: "approved",
-      sessionId: r.id,
-    };
-    await writeActiveMeta(root, meta, r.id);
-
-    // 清除 checkpoint 引用：Plan 模式生成的文档文件（PRD/TDD 等）以 existed=false
-    // 记录在 checkpoint 中，若不清除，后续 rollback 会因 existed=false 将其删除。
-    // 批准即视为用户确认所有生成产物，无需保留回滚能力。
-    r.keptPaths.clear();
-    r.lastCheckpointId = null;
-
-    r.activePlanPath = path;
-    r.lastPlanPath = path;
-    r.mode = "agent";
-    r.todoAnchor = null;
-    if (r.id === this.state.activeSessionId) {
-      this.state.mode = "agent";
-    }
-
-    r.history.push({
-      role: "assistant",
-      content: `✅ 计划已批准 → 已切换到 Agent 模式。\n\n📋 **活动计划**：${path}\n📊 **任务总数**：${tasks.length}\n\n💡 **下一步**：在下方输入框发送消息（如"开始执行"）即可触发 Agent 按顺序执行任务。`,
-    });
-
-    await this.persist(sessionId);
-    return this.getState(sessionId);
+    return approvePlan(this.plansHost, opts, sessionId);
   }
 
   async clearActivePlan(sessionId?: string): Promise<SessionState> {
-    const sid = sessionId ?? this.state.activeSessionId;
-    const root = sid ? this.sessionWorkspaceRoot(sid) : this.state.workspace?.root;
-    if (root && sid) {
-      // 删除 session-scoped 的活动计划文件
-      const activePath = resolve(root, ACTIVE_DIR, `${sid}.json`);
-      await fs.unlink(activePath).catch(() => undefined);
-    }
-    const r = this.rtOpt(sessionId);
-    if (r) r.activePlanPath = null;
-    await this.persist(sessionId);
-    return this.getState(sessionId);
+    return clearActivePlan(this.plansHost, sessionId);
+  }
+
+  // ── Spec 工作流（Kiro 风格 spec → design → tasks）────────────
+
+  async listSpecs(sessionId?: string): Promise<SpecFeatureDto[]> {
+    return listSpecFeatures(this.specsHost, sessionId);
+  }
+
+  async readSpec(feature: string, phase: SpecPhaseDto): Promise<string> {
+    return readSpecDocument(this.specsHost, feature, phase);
+  }
+
+  async getSpecStatus(feature: string): Promise<SpecStatusDto> {
+    return getSpecFeatureStatus(this.specsHost, feature);
+  }
+
+  async saveSpecDoc(
+    feature: string,
+    phase: SpecPhaseDto,
+    content: string,
+    sessionId?: string,
+  ): Promise<SessionState> {
+    return saveSpecDocument(this.specsHost, feature, phase, content, sessionId);
+  }
+
+  async approveSpec(feature: string, sessionId?: string): Promise<SessionState> {
+    return approveSpecPhase(this.specsHost, feature, sessionId);
+  }
+
+  async rejectSpec(feature: string, feedback: string, sessionId?: string): Promise<SessionState> {
+    return rejectSpecPhase(this.specsHost, feature, feedback, sessionId);
   }
 
   cancelTurn(sessionId?: string): void {
@@ -2025,35 +1491,19 @@ export class SessionOrchestrator {
    */
   compactNow(sessionId?: string): ChatTurn[] {
     const r = this.rtOpt(sessionId);
-    const history = r?.history ?? [];
-    const budget = 120 * 1024;
-    const recentWindow = 20;
-    const size = (turn: ChatTurn) => turn.content.length * 2;
-    let total = history.reduce((n, turn) => n + size(turn), 0);
-    if (total <= budget || history.length <= recentWindow) return this.getHistory(sessionId);
-    const keepFrom = Math.max(0, history.length - recentWindow);
-    const old = history.slice(0, keepFrom);
-    const summary = old.map((turn) => `${turn.role}: ${turn.content.slice(0, 240)}`).join("\n").slice(0, 16 * 1024);
-    const compacted: ChatTurn = {
-      role: "system",
-      content: `[历史摘要，共 ${old.length} 条，原始内容已压缩]\n${summary}`,
-      metadata: { isCompressed: true, originalLength: old.length, compressedAt: new Date().toISOString(), compressionReason: "manual" },
-    };
-    const next = [compacted, ...history.slice(keepFrom)];
-    while (total > budget && next.length > recentWindow + 1) {
-      next.splice(1, 1);
-      total = next.reduce((n, turn) => n + size(turn), 0);
-    }
-    r!.history = next;
-    if (r!.taskRunState) {
-      r!.taskRunState = applyTaskEvent(r!.taskRunState, {
+    if (!r) return this.getHistory(sessionId);
+    const outcome = compactHistory(r.history, { recentWindow: 20, budgetBytes: 120 * 1024, reason: "manual" });
+    if (!outcome.compacted) return this.getHistory(sessionId);
+    r.history = outcome.history;
+    if (r.taskRunState) {
+      r.taskRunState = applyTaskEvent(r.taskRunState, {
         type: "observability",
-        taskId: r!.taskRunState.taskId,
+        taskId: r.taskRunState.taskId,
         contextCompressions: 1,
       });
     }
     void this.persist(sessionId);
-    return next.map((turn) => ({ ...turn }));
+    return outcome.history.map((turn) => ({ ...turn }));
   }
 
   async sendMessage(
@@ -2128,433 +1578,60 @@ export class SessionOrchestrator {
   ): Promise<AgentLoopResult> {
     const r = this.rt(sessionId);
     const ws = this.sessionWorkspace(sessionId);
-    const trimmed = text.trim();
-    
+
     // 使用协调器的 AbortController 而不是自己创建
     const abortController = this.coordinator.getAbortController(sessionId);
     if (!abortController) {
       throw new Error(`No abort controller for session ${sessionId}`);
     }
-    
+
     // 兼容：也更新 runtime 的 abort 引用（供其他代码使用）
     r.abort = abortController;
 
-    // 创建 MessageProjector 用于构建结构化消息
-    const { MessageProjector } = await import("./message-projector.js");
-    const projector = new MessageProjector();
-
-    // Capture workspace root for persist. openWorkspace() may switch the active
-    // workspace and clear runtimes while sendMessage is still running. Using
-    // this.state.workspace / this.runtimes for the final persist would then save
-    // to the wrong project or silently skip (map entry removed). The captured
-    // root + direct reference to `r` survive the workspace switch.
-    const capturedRoot = ws.root;
-    const timingContext = `sid=${sessionId} turn=${turnId}`;
-    const logTiming = (step: string, started: number, status = "done") => {
-      console.log(`[turn] ${timingContext} step=${step} status=${status} duration=${Math.round(performance.now() - started)}ms`);
-    };
-    const timed = async <T>(step: string, run: () => Promise<T>): Promise<T> => {
-      const started = performance.now();
-      let status = "error";
-      console.log(`[turn] ${timingContext} step=${step} start`);
-      try {
-        const value = await run();
-        status = "done";
-        return value;
-      } finally {
-        logTiming(step, started, status);
-      }
-    };
-    const directPersist = (): Promise<void> => {
-      const queuedAt = performance.now();
-      const run = async () => {
-        logTiming("session_queue_wait", queuedAt);
-        return timed("session_save", async () => {
-          const timestamp = new Date().toISOString();
-          console.log(`[${timestamp}] [persist] sid=${r.id} historyLen=${r.history.length} terminalLogLen=${r.terminalLog.length}`);
-          const meta = await saveSessionById(capturedRoot, r.id, {
-            mode: r.mode,
-            history: r.history,
-            terminalLog: r.terminalLog.slice(-80),
-            lastPlanPath: r.lastPlanPath,
-            todoAnchor: r.todoAnchor,
-            lastCheckpointId: r.lastCheckpointId,
-            documentWorkflow: r.documentWorkflow,
-            queuedMessages: r.queuedMessages,
-            taskRunState: r.taskRunState,
-            createdAt: r.sessionCreatedAt ?? undefined,
-          });
-          r.sessionTitle = meta.title;
-        });
-      };
-      r.persistQueue = r.persistQueue.then(run, run);
-      return r.persistQueue;
-    };
-
-    let activePlan: { path: string; content: string } | null = null;
-    let activeTasks: TaskItem[] | undefined;
-    let currentTaskId: string | null | undefined;
-    if (r.mode === "agent" && r.activePlanPath) {
-      try {
-        const content = await readPlanFile(ws.root, r.activePlanPath);
-        activePlan = { path: r.activePlanPath, content };
-        const meta = await readActiveMeta(ws.root);
-        if (meta && meta.tasks.length > 0) {
-          activeTasks = meta.tasks;
-          currentTaskId = meta.currentTaskId;
-        }
-      } catch {
-        activePlan = null;
-      }
-    }
-
-    const onTaskUpdate = async (tasks: TaskItem[], nextId: string | null) => {
-      const activePlanPath = r.activePlanPath;
-      if (!activePlanPath) return;
-      const snapshot = JSON.parse(JSON.stringify(tasks)) as TaskItem[];
-      await this.enqueueActivePlanUpdate(async () => {
-        const meta = await readActiveMeta(ws.root);
-        if (!meta) throw new Error("活动计划在任务执行期间丢失");
-        if (meta.path !== activePlanPath) {
-          throw new Error("活动计划已切换，拒绝写入过期的任务状态");
-        }
-        meta.tasks = snapshot;
-        meta.currentTaskId = nextId;
-        await writeActiveMeta(ws.root, meta);
-      }, sessionId);
-      onEvent?.(stampTurnEvent({ type: "task_update", tasks: snapshot, currentTaskId: nextId }, sessionId));
-    };
-
-    const fileSnapshots: FileSnapshot[] = [];
-    const touchedPaths: string[] = [];
-    const historyBefore = r.history.map((h) => ({ ...h }));
-    const checkpointEnabled = this.state.workflow.harness.checkpoint;
-
-    // user 消息不在此预先追加，统一由 stage-handlers 在 loop 内注入 history，
-    // 避免与 stage-handlers 的 history.push(user) 双重写入导致用户消息重复落盘。
-    // turn 完成后由 result.history 覆盖并 persist；loop 抛错时在 catch 中补写。
-    
-    // 为此会话注册日志目录，确保多工作区场景下日志写入正确的位置
-    const { registerTaskLogDir } = await import("@owncoder/llm");
-    registerTaskLogDir(r.id, ws.root);
-    
-    let eventPersist: Promise<unknown> = Promise.resolve();
-    const persistEvent = (ev: TurnEvent) => {
-      // Stream deltas are presentation-only and must never create one durable
-      // row per token. Persist lifecycle/tool/task events only; the final
-      // transcript remains in the existing session snapshot for compatibility.
-      if (ev.type === "thinking_delta" || ev.type === "assistant_delta" ||
-          ev.type === "minimum_context_decision" || ev.type === "minimum_context_read_follow_up") {
-        return;
-      }
-      // Large tool/terminal bodies are truncated inside appendTurnEvent
-      // (slimDurableEvent) so every write path stays bounded.
-      const payload = ev;
-      eventPersist = eventPersist.then(() => appendTurnEvent(capturedRoot, sessionId, turnId, payload, {
-        eventType: ev.type,
-      })).catch((error) => {
-        console.warn(`[conversation] turn event append failed (${turnId}):`, error);
-      });
-    };
-
-    let result: AgentLoopResult;
-    try {
-      result = await runAgentLoop({
-      mode: r.mode,
-      workspaceRoot: ws.root,
-      sessionId: r.id,
+    // 实际的轮次执行与收尾逻辑见 turn-execution.ts；这里只负责
+    // 把会话运行时、全局配置与宿主桥接组装成 AgentTurnContext。
+    return executeAgentTurn({
+      sessionId,
+      text,
       turnId,
+      onEvent,
+      attachments,
+      runtime: r,
+      workspaceRoot: ws.root,
+      abortController,
       workflow: this.state.workflow,
+      checkpointEnabled: this.state.workflow.harness.checkpoint,
       index: this.sessionIndex(sessionId, ws.root),
       codemap: {
         search: (query, limit) => this.searchCodemapForAgent(query, limit),
         impact: (nodeId, depth) => this.impactCodemapForAgent(nodeId, depth),
       },
-      history: r.history,
-      userMessage: trimmed,
-      attachments,
-      signal: abortController.signal,
-      onEvent: (ev) => {
-        const stamped = stampTurnEvent(ev, sessionId);
-        persistEvent(stamped);
-        // 将事件传递给 projector
-        projector.handleEvent(stamped);
-        
-        if (stamped.type === "terminal") {
-          const idx = r.terminalLog.findIndex((t) => t.id === stamped.entry.id);
-          if (idx >= 0) r.terminalLog[idx] = stamped.entry;
-          else r.terminalLog.push(stamped.entry);
-          // Cap terminal log during live turns to bound memory growth.
-          // The 80-entry limit was only enforced on disk restore; a long
-          // agent turn with many bash calls could accumulate unboundedly.
-          const MAX_TERMINAL_LIVE = 80;
-          if (r.terminalLog.length > MAX_TERMINAL_LIVE) {
-            r.terminalLog = r.terminalLog.slice(-MAX_TERMINAL_LIVE);
-          }
-        }
-        if (
-          stamped.type === "task_decomposition" ||
-          stamped.type === "stage_done"
-        ) {
-          void directPersist();
-        }
-        onEvent?.(stamped);
-      },
-      activePlan,
-      activeTasks,
-      currentTaskId,
-      onTaskUpdate,
-      todoAnchor: r.mode === "agent" ? r.todoAnchor : null,
+      llmApiKey: this.llmApiKey,
       projectRules: this.projectRules || null,
-      documentWorkflow: r.documentWorkflow,
-      taskRunState: r.taskRunState,
-
-      fileSnapshots: checkpointEnabled ? fileSnapshots : undefined,
-      touchedPaths: checkpointEnabled ? touchedPaths : undefined,
+      skillsCatalog: this.skillsCatalogText || null,
+      skills: this.getSkillsApi(),
+      memoriesBlock: this.buildMemoriesBlock() || null,
+      mcp: this.mcp,
+      memoryStore: this.memoryStore,
+      projectMemoryStore: this.projectMemoryStore,
+      historyVector: this.historyVector,
       confirmDangerousBash: this.confirmDangerousBash
         ? (command: string) => this.confirmDangerousBash!(command, sessionId)
         : undefined,
+      autoApproveDangerousBash: this.autoApproveDangerousBash,
       askUser: this.askUserHandler
         ? (req: AskUserRequest) => this.askUserHandler!(req, sessionId)
         : undefined,
       renderPage: this.renderPageHandler ?? undefined,
-      llmApiKey: this.llmApiKey,
-      mcp: this.mcp,
-      memoryStore: this.memoryStore ?? undefined,
-      projectMemoryStore: this.projectMemoryStore ?? undefined,
-      memoriesBlock: this.buildMemoriesBlock() || null,
-      promptOptimizer: this.promptOptimizer,
-      historyVector: this.historyVector,
       sessionChanges: {
         getPendingChanges: () => this.getPendingChanges(sessionId),
         undoChange: (path: string) => this.undoChange(path, sessionId),
       },
-      });
-    } catch (error) {
-      const finalizeStarted = performance.now();
-      const messageStarted = performance.now();
-      // 判断是否是用户中止
-      const isAborted = error instanceof Error && error.name === 'AbortError';
-      
-      // loop 失败时，用户消息已在 sendMessage 中可靠落盘；这里只补写助手错误消息。
-      // 不要再次追加 user，否则失败回合会产生重复的 ChatTurn。
-      
-      // ✅ 准备错误或中止状态的 metadata
-      const errorMetadata: Partial<MessageMetadata> = isAborted
-        ? { aborted: true, abortReason: '用户中止', isPartial: true }
-        : { error: error instanceof Error ? error.message : String(error), isPartial: true };
-      
-      // ✅ 完成 projector，传入错误 metadata（保证不可变性）
-      const { parts, metadata } = projector.finalize(errorMetadata);
-
-      // Expand tool_use/tool_result into independent tool ChatTurns so the UI
-      // process panel still lists every step after an LLM/runtime failure.
-      // Previously partsToContent() collapsed them into one assistant blob,
-      // which made "执行过程 · N 步" look like only the last few tools survived.
-      const errorSuffix = isAborted
-        ? "\n\n[用户已中止]"
-        : `\n\n[错误: ${metadata.error}]`;
-      const expanded = MessageProjector.partsToChatTurns(parts, {
-        assistantSuffix: parts.length > 0 ? errorSuffix : undefined,
-        metadata,
-      });
-      if (expanded.length > 0) {
-        r.history.push(...expanded);
-      } else {
-        const errorMsg = isAborted
-          ? "[用户已中止]"
-          : `[执行失败: ${metadata.error}]`;
-        r.history.push({
-          role: "assistant",
-          content: errorMsg,
-          parts: [{ type: "text", text: errorMsg }],
-          metadata,
-        });
-      }
-      
-      logTiming("final_message", messageStarted);
-      await directPersist();
-      await timed("events_drain", () => eventPersist);
-      await timed("completeTurn", () => completeTurn(capturedRoot, sessionId, turnId, { error: metadata.error, aborted: isAborted }, isAborted ? "cancelled" : "failed"));
-      const notifyStarted = performance.now();
-      // 收尾落盘完成后再发 turn_complete，让界面「已完成」与 sendChat 返回对齐。
-      if (onEvent) {
-        onEvent(stampTurnEvent({
-          type: "turn_complete",
-          parts,
-          metadata,
-        }, sessionId));
-      }
-      logTiming("turn_complete_emit", notifyStarted, onEvent ? "done" : "skipped");
-      logTiming("finalize_total", finalizeStarted, isAborted ? "cancelled" : "failed");
-      r.abort = null;
-      
-      // 注销会话日志目录映射
-      const { unregisterTaskLogDir } = await import("@owncoder/llm");
-      unregisterTaskLogDir(r.id);
-      
-      throw error;
-    }
-
-    const finalizeStarted = performance.now();
-    const projectorStarted = performance.now();
-    // 完成 projector，获取结构化消息
-    // timestamp 已在 finalize() 中自动设置，无需额外处理
-    const { parts, metadata } = projector.finalize();
-    
-    // ✅ 更新 runtime 的 history 为 loop 返回的完整 history
-    r.history = result.history;
-    logTiming("projector_finalize", projectorStarted);
-    const compactStarted = performance.now();
-    let compactedHistory = false;
-
-    // Auto-compact: bound in-memory history after each turn to prevent
-    // unbounded heap growth during long sessions. The manual compactNow()
-    // has the same logic but is only triggered by /compact; this keeps the
-    // runtime size under control automatically.
-    const AUTO_COMPACT_BUDGET = 120 * 1024; // bytes (UTF-16 char count × 2)
-    const AUTO_COMPACT_WINDOW = 30;          // keep at most this many recent turns
-    if (r.history.length > AUTO_COMPACT_WINDOW) {
-      const size = (turn: ChatTurn) => turn.content.length * 2;
-      let total = r.history.reduce((n, t) => n + size(t), 0);
-      if (total > AUTO_COMPACT_BUDGET) {
-        const keepFrom = Math.max(0, r.history.length - AUTO_COMPACT_WINDOW);
-        const old = r.history.slice(0, keepFrom);
-        const summary = old.map((t) => `${t.role}: ${t.content.slice(0, 240)}`).join("\n").slice(0, 16 * 1024);
-        const compacted: ChatTurn = {
-          role: "system",
-          content: `[历史摘要，共 ${old.length} 条，原始内容已压缩]\n${summary}`,
-          metadata: { isCompressed: true, originalLength: old.length, compressedAt: new Date().toISOString(), compressionReason: "auto" },
-        };
-        r.history = [compacted, ...r.history.slice(keepFrom)];
-        compactedHistory = true;
-        if (r.taskRunState && sessionId) {
-          r.taskRunState = applyTaskEvent(r.taskRunState, {
-            type: "observability",
-            taskId: r.taskRunState.taskId,
-            contextCompressions: 1,
-          });
-          onEvent?.({
-            type: "task_run_state",
-            sessionId,
-            taskId: r.taskRunState.taskId,
-            phase: r.taskRunState.phase,
-            verificationStatus: r.taskRunState.verification.status,
-            verificationPassed: r.taskRunState.verification.passed,
-            verificationSummary: r.taskRunState.verification.summary,
-            repairAttempts: r.taskRunState.repairAttempts,
-            maxRepairAttempts: r.taskRunState.maxRepairAttempts,
-            label: taskRunPhaseLabel(r.taskRunState.phase),
-            metrics: taskRunMetricsSnapshot(r.taskRunState.metrics),
-            totalDurationMs: taskRunTotalDurationMs(r.taskRunState.metrics),
-          });
-        }
-        console.log(`[session] auto-compact: ${old.length} old turns → summary, kept ${AUTO_COMPACT_WINDOW} recent`);
-      }
-    }
-
-    logTiming("history_compact", compactStarted, compactedHistory ? "done" : "skipped");
-    const messageStarted = performance.now();
-    // 循环内已把最终报告写入 history。不要把整轮 projector parts
-    //（含每一次 assistant_delta）再叠到最后一条消息 / turn_complete 上，
-    // 否则用户会看到同一份最终报告两次。
-    let completeParts = parts;
-    if (r.history.length > 0) {
-      const lastMsg = r.history[r.history.length - 1];
-      if (lastMsg && lastMsg.role === "assistant") {
-        lastMsg.metadata = metadata;
-        if (!lastMsg.content || !lastMsg.content.trim()) {
-          lastMsg.parts = parts;
-          lastMsg.content = MessageProjector.partsToContent(parts);
-        } else {
-          const thinkingParts = parts.filter((part) => part.type === "thinking");
-          completeParts = [...thinkingParts, { type: "text", text: lastMsg.content }];
-          lastMsg.parts = completeParts;
-        }
-      }
-    }
-    
-    if (result.lastPlanPath) {
-      r.lastPlanPath = result.lastPlanPath;
-    }
-    if (result.documentWorkflow !== undefined) {
-      r.documentWorkflow = result.documentWorkflow;
-    }
-    if (result.taskRunState !== undefined) {
-      r.taskRunState = result.taskRunState;
-    }
-
-    logTiming("final_message", messageStarted);
-    const persistStarted = performance.now();
-    let checkpointMs = 0;
-    if (checkpointEnabled && (fileSnapshots.length > 0 || touchedPaths.length > 0)) {
-      const cp = {
-        id: newCheckpointId(),
-        createdAt: new Date().toISOString(),
-        historyLen: historyBefore.length,
-        history: historyBefore,
-        files: fileSnapshots,
-        touched: [...new Set(touchedPaths)],
-        sessionId: r.id ?? null,
-      };
-      const checkpointStarted = performance.now();
-      await timed("checkpoint", () => persistCheckpoint(ws.root, cp));
-      checkpointMs = Math.round(performance.now() - checkpointStarted);
-      r.lastCheckpointId = cp.id;
-      r.keptPaths.clear();
-
-      // present_changes disabled or autoKeep → keep all (no review UI)
-      if (result.presentChanges === false) {
-        for (const p of cp.touched) r.keptPaths.add(p);
-      }
-    }
-
-    if (!checkpointEnabled || (fileSnapshots.length === 0 && touchedPaths.length === 0)) {
-      logTiming("checkpoint", performance.now(), "skipped");
-    }
-    const sessionStarted = performance.now();
-    await directPersist();
-    const sessionMs = Math.round(performance.now() - sessionStarted);
-    const eventsStarted = performance.now();
-    await timed("events_drain", () => eventPersist);
-    const eventsMs = Math.round(performance.now() - eventsStarted);
-    const completeStarted = performance.now();
-    await timed("completeTurn", () => completeTurn(capturedRoot, sessionId, turnId, result));
-    const completeMs = Math.round(performance.now() - completeStarted);
-    console.log(`[turn] ${timingContext} persist checkpoint=${checkpointMs}ms session=${sessionMs}ms events=${eventsMs}ms completeTurn=${completeMs}ms total=${Math.round(performance.now() - persistStarted)}ms`);
-    const notifyStarted = performance.now();
-    // 收尾落盘完成后再发 turn_complete，让界面「已完成」与 sendChat 返回对齐。
-    if (onEvent) {
-      onEvent(stampTurnEvent({
-        type: "turn_complete",
-        parts: completeParts,
-        metadata,
-      }, sessionId));
-    }
-    logTiming("turn_complete_emit", notifyStarted, onEvent ? "done" : "skipped");
-    logTiming("finalize_total", finalizeStarted);
-    r.abort = null;
-    
-    // 注销会话日志目录映射
-    const { unregisterTaskLogDir } = await import("@owncoder/llm");
-    unregisterTaskLogDir(r.id);
-    
-    return result;
+      enqueueActivePlanUpdate: <T>(update: () => Promise<T>) => this.enqueueActivePlanUpdate(update, sessionId),
+    });
   }
 }
 
 export function createSession(): SessionOrchestrator {
   return new SessionOrchestrator();
 }
-
-
-export { listSessionMetas } from "./session-store.ts";
-
-export {
-  COMPATIBILITY_ADAPTER_MODULE_ID,
-  createCompatibilityAdapter,
-  type CompatibilityAdapter,
-} from "./compatibility-adapter.ts";
-
-export { installLspsForFileTypes } from "./harness/lsp-client.ts";
-

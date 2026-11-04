@@ -4,7 +4,6 @@
  */
 import { utilityProcess, type UtilityProcess } from "electron";
 import { basename, join } from "node:path";
-import { pathToFileURL } from "node:url";
 
 export type IndexHostStatus = {
   kind: "idle" | "building" | "ready" | "error";
@@ -49,7 +48,7 @@ export class IndexHost {
     return join(mainDir, "index-worker.js");
   }
 
-  start(root: string, extraIgnore: string[] = []): void {
+  start(root: string, extraIgnore: string[] = [], embeddingModelDir?: string): void {
     if (this.currentRoot === root && this.child) {
       return;
     }
@@ -108,7 +107,7 @@ export class IndexHost {
       }
     });
 
-    child.postMessage({ type: "open", root, extraIgnore });
+    child.postMessage({ type: "open", root, extraIgnore, embeddingModelDir });
   }
 
   invalidate(batch: { files?: string[]; directories?: string[] }): void {
@@ -139,10 +138,3 @@ export class IndexHost {
 }
 
 export const indexHost = new IndexHost();
-
-/** Dev helper: resolve file URL for debugging. */
-export function indexWorkerUrl(): string {
-  let mainDir = __dirname;
-  if (basename(mainDir) === "chunks") mainDir = join(mainDir, "..");
-  return pathToFileURL(join(mainDir, "index-worker.js")).href;
-}

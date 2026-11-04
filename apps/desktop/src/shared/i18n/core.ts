@@ -17,8 +17,6 @@ export type MsgParams = Record<string, string | number>;
 
 export type { MsgId };
 
-const LOCALES: readonly Locale[] = ["zh", "en"];
-
 export function isLocale(value: unknown): value is Locale {
   return value === "zh" || value === "en";
 }
@@ -77,6 +75,3 @@ export function t(id: MsgId, params?: MsgParams): string {
 export function resolveLocale(pref: LocalePref, osLocale: string | null | undefined): Locale {
   return pref === "system" ? detectLocale(osLocale) : pref;
 }
-
-/** 全部受支持语言（供设置界面枚举）。 */
-export const SUPPORTED_LOCALES = LOCALES;

@@ -164,7 +164,7 @@ export function registerSettingsHandlers(ctx: IpcContext): void {
   });
 
   ipcMain.handle("settings:restorePipeline", (_e, mode: unknown) => {
-    if (mode !== "plan" && mode !== "agent") {
+    if (mode !== "spec" && mode !== "agent") {
       throw new Error("Invalid pipeline mode");
     }
     const effective = settingsStore.restoreUserPipeline(mode);

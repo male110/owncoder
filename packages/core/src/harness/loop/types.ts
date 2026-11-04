@@ -11,7 +11,6 @@ import type { AgentPlan, ReasoningTrace } from "../agent-reasoning.ts";
 import type { MemoryManager } from "../memory.ts";
 import type { Tracer } from "../observability.ts";
 import type { UserMemoryStore } from "../../user-memories.ts";
-import type { AdaptivePromptOptimizer } from "../prompt-optimizer.ts";
 import type { TaskItem } from "../../plans.ts";
 import type { TraceReport } from "../observability.ts";
 import type { ContextControlState } from "./context-control.ts";
@@ -32,14 +31,34 @@ export interface ReactDecisionSummary {
  * Discriminated event payloads. `sessionId` is stamped at the loop / session
  * boundary so individual emit sites can omit it; the stamp rejects empty ids.
  */
+/**
+ * 子智能体（Explore）来源标识。子循环的工具事件镜像到父回合时携带该字段，
+ * 前端据此把工具流折叠进对应的子智能体卡片，而不是与主循环工具混排。
+ * id 与包裹它的 stage_start/stage_done 事件 id 相同，用于关联开闭。
+ */
+export interface SubagentProvenance {
+  /** 固定为 "Explore"，当前唯一支持的子智能体类型。 */
+  agentType: string;
+  /** 子智能体阶段 id，与 stage_start/stage_done 的 id 一致。 */
+  id: string;
+  /** 派发给子智能体的任务摘要（截断），用于卡片标题。 */
+  task: string;
+}
+
 type TurnEventFields =
+  /**
+   * 「截至目前」的累积文本快照，不是增量片段：codec 每次下发的是该文本
+   * 段的完整内容（渲染端按替换语义渲染连续气泡）。累积消费用
+   * applyStreamSnapshot / pushStreamSnapshot，直接 += 会产生 O(n²) 重复。
+   * 一次性整段文本（finalReport 等）也走该事件，追加语义由前者保留。
+   */
   | { type: "assistant_delta"; text: string }
   | { type: "thinking_delta"; text: string }
-  | { type: "tool_start"; id: string; name: string; args: Record<string, unknown> }
-  | { type: "tool_end"; id: string; name: string; ok: boolean; output: string; metadata?: ToolResultMetadata; skipped?: boolean }
+  | { type: "tool_start"; id: string; name: string; args: Record<string, unknown>; subagent?: SubagentProvenance }
+  | { type: "tool_end"; id: string; name: string; ok: boolean; output: string; metadata?: ToolResultMetadata; skipped?: boolean; subagent?: SubagentProvenance }
   | { type: "terminal"; entry: TerminalEntry }
   | { type: "stage_start"; id: string; nodeType: string; label: string }
-  | { type: "stage_done"; id: string; nodeType: string; label: string }
+  | { type: "stage_done"; id: string; nodeType: string; label: string; ok?: boolean; report?: string }
   /**
    * Result of the task_decompose stage: the user's intent, the durable user
    * constraints, and the tasks (each with its ordered steps, information needs
@@ -51,6 +70,8 @@ type TurnEventFields =
       intent: string;
       userConstraints: string[];
       tasks: TaskDecompositionDto["tasks"];
+      /** 任务相关历史：与 tasks 同级，简单任务无需分解时仍提取。 */
+      relevantHistory: string;
       /** True when the LLM call failed and the shown plan is a local heuristic fallback. */
       fallback: boolean;
     }
@@ -74,7 +95,6 @@ type TurnEventFields =
       omittedCandidates: number;
       materializedCandidates: number;
       indexedPaths: number;
-      requiresFreshRead: number;
       budgetUsed: number;
       tokenBudget: number;
     }
@@ -262,7 +282,7 @@ export interface ChatTurn {
 }
 
 /** Document type classification for workflow tracking. */
-export type DocumentType = "prd" | "tdd" | "design" | "architecture" | "other";
+export type DocumentType = "spec" | "design" | "tasks" | "other";
 
 /** Document status in the workflow. */
 export type DocumentStatus = "pending_approval" | "approved" | "modified";
@@ -281,9 +301,13 @@ export interface DocumentMetadata {
   basedOn?: string[];
 }
 
-/** Persisted state for the staged PRD → TDD → implementation-plan workflow. */
+/** Persisted state for the staged spec → design → tasks approval workflow. */
 export interface DocumentWorkflowState {
-  stage: "awaiting_prd_confirmation" | "awaiting_tdd_confirmation";
+  stage:
+    | "awaiting_spec_confirmation"
+    | "awaiting_design_confirmation"
+    | "awaiting_tasks_confirmation"
+    | "spec_workflow_done";
   /** Current document awaiting approval (for backward compatibility) */
   documentPath: string;
   updatedAt: string;
@@ -320,8 +344,14 @@ export interface AgentLoopOpts {
     index?: IndexClient,
   ) => Promise<string[]>;
   activePlan?: { path: string; content: string } | null;
+  /** Spec feature carried into the loop so save_spec/save_design/save_tasks can track it. */
+  currentFeature?: string;
   todoAnchor?: string | null;
   projectRules?: string | null;
+  /** Pre-formatted available-skills catalog injected into the system prompt. */
+  skillsCatalog?: string | null;
+  /** Skill loading API backing the use_skill tool. */
+  skills?: ToolContext["skills"];
   /** Staged document workflow state owned and persisted by the session. */
   documentWorkflow?: DocumentWorkflowState | null;
 
@@ -331,6 +361,8 @@ export interface AgentLoopOpts {
    * The context gatherer injects these so the model knows to re-read them. */
   recentlyTouchedPaths?: string[];
   confirmDangerousBash?: (command: string) => Promise<boolean>;
+  /** Auto-approve dangerous bash commands (settings modes.agent.autoApproveBash). */
+  autoApproveDangerousBash?: boolean;
   /** Ask the user a question (options or free text) and block until answered. */
   askUser?: (request: AskUserRequest) => Promise<string>;
   /**
@@ -364,10 +396,15 @@ export interface AgentLoopOpts {
   enableAutoFix?: boolean;
   /** Disable knowledge graph population from the index */
   disableKnowledgeGraph?: boolean;
-  /** Adaptive prompt optimizer owned by the session (persists across turns). */
-  promptOptimizer?: AdaptivePromptOptimizer;
   /** Structured task list from the approved plan (agent mode, hard step driver). */
   activeTasks?: TaskItem[];
+  /** Shared bounded evidence cache for fresh source reads in this turn. */
+  evidenceStore?: import("../evidence-store.ts").EvidenceStore;
+  /**
+   * 动态任务清单更新闭包（update_tasks 工具）。任务图路径由调度器注入
+   * （改共享 tasks 数组）；顺序路径由 react.ts 兜底安装（改 ctx.tasks）。
+   */
+  updateTasks?: (ops: import("../../plans.ts").TaskListOps) => Promise<import("../../plans.ts").TaskListApplyOutcome>;
   /**
    * 历史向量检索基础设施（可选）。由调用方（Electron main）注入 sqlite-vec +
    * embedding 实现；未注入时 `history_compact` 退化为原有「最近 N 轮 → LLM 过滤」行为。
@@ -410,12 +447,42 @@ export interface AgentLoopOpts {
    * declare an explicit `allowedTools` whitelist.
    */
   readOnly?: boolean;
+
+  /**
+   * Override the system prompt derived from the pipeline node. Used by
+   * subagents (Explore) which carry their own specialist prompt instead of
+   * the normal plan/agent pipeline prompt.
+   */
+  systemPromptOverride?: string;
+
+  /**
+   * Lean pipeline: skip context_gather / task_decompose / verify /
+   * post_verify / present_changes and run only the tool stage. Used by
+   * subagents which do their own focused research and must produce a plain
+   * text report without the full task-driven turn machinery.
+   */
+  leanPipeline?: boolean;
+
+  /**
+   * When the iteration budget is exhausted without a report, issue one
+   * tool-free model call that forces a write-up of the evidence gathered so
+   * far, instead of returning an empty/placeholder result. Used by Explore so
+   * a search that spends every turn on tool calls still yields partial
+   * findings plus an explicit gap statement.
+   */
+  forcedFinalReportOnLimit?: boolean;
+  /** Shared request budget; child loops reuse the same monotonic ledger. */
+  budget?: import("../budget-ledger.ts").BudgetLedger;
+  /** Deterministic local route chosen before pipeline execution. */
+  requestRoute?: import("./request-router.ts").RequestRoute;
 }
 
 export interface AgentLoopResult {
   history: ChatTurn[];
   assistantText: string;
   lastPlanPath?: string;
+  /** Spec feature most recently saved this turn (spec workflow tracking). */
+  currentFeature?: string;
   /** Undefined = unchanged; null = implementation plan saved and the flow completed. */
   documentWorkflow?: DocumentWorkflowState | null;
   /** Public bounded summaries of ReAct choices. */
@@ -428,6 +495,13 @@ export interface AgentLoopResult {
   taskRunState?: import("../../task-run.ts").TaskRunState | null;
   /** 成功门禁拒绝时为 true（验证未通过却试图报告成功）。 */
   successRejected?: boolean;
+  /**
+   * 达到硬限制（迭代/工具调用/成本上限）而结束，产出可能不完整。
+   * Explore 子智能体据此把"部分结果"显式标注给父智能体。
+   */
+  blocked?: boolean;
+  /** blocked 为 true 时的人类可读原因（如"已达到最大迭代限制（40 次）"）。 */
+  blockedReason?: string;
 }
 
 export interface ReActLoopArgs {
@@ -460,4 +534,20 @@ export interface ReActLoopArgs {
   maxRedundantRangesPerFile?: number;
   /** ReAct loop sub-steps config — from node.params.reactSteps. Falls back to defaultReactSteps(). */
   reactSteps?: import("@owncoder/settings").ReactStepConfig[];
+  /** 思考配置：覆盖 workflow.thinking.defaultEffort，优先级更高。 */
+  thinking?: import("@owncoder/llm").ThinkingConfig;
+  /** 本轮 task_decompose 的原始分解结果（供顺序任务执行与历史归档）。 */
+  rawDecompose?: {
+    intent: string;
+    userConstraints?: string[];
+    relevantHistory?: import("../../plans.ts").TaskRelevantHistory;
+    tasks: Array<{
+      id: string;
+      title?: string;
+      description: string;
+      prompt: string;
+      kind?: "implementation" | "verification";
+      dependsOn?: string[];
+    }>;
+  };
 }

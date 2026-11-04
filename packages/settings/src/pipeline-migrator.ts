@@ -109,18 +109,18 @@ export function migratePipeline(
     }
   }
 
-  // save_plan → explore_tools/execute_tools.allowPlanFiles
+  // save_plan → explore_tools/execute_tools.allowSpecFiles
   for (const sp of linear.filter((n) => n.type === "save_plan")) {
     const target = findType("explore_tools") ?? findType("execute_tools");
     if (target) {
       const tgtNode = byId.get(target.id)!;
-      tgtNode.params = { ...tgtNode.params, allowPlanFiles: sp.enabled !== false };
+      tgtNode.params = { ...tgtNode.params, allowSpecFiles: sp.enabled !== false };
       report.moved.push({
         fromType: "save_plan",
         fromId: sp.id,
         toType: target.type,
         toId: target.id,
-        paramMap: { enabled: "allowPlanFiles" },
+        paramMap: { enabled: "allowSpecFiles" },
       });
     } else {
       report.dropped.push({

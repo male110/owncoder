@@ -3,6 +3,7 @@ import type { ChatSessionMetaDto, ProjectDto } from "../../../preload/index";
 import type { WorkspaceInfo } from "@owncoder/shared";
 import type { SessionStatus } from "../store/chat-store";
 import { ProjectFileTree } from "./ProjectFileTree";
+import { MarqueeText } from "./MarqueeText";
 import { isDefaultSessionTitle } from "../utils/sessionTitle";
 import { t } from "../../../shared/i18n/core";
 import { useI18n } from "../i18n";
@@ -210,46 +211,65 @@ export function AgentSidebar({
       {collapsed ? (
         <>
           <div className="nav-header">
-            <button type="button" className="nav-item collapse-btn" onClick={onToggleCollapse} title={t("展开侧边栏")}>
-              <span className="nav-item-icon">«</span>
+            <button type="button" className="nav-icon-btn" onClick={onToggleCollapse} title={t("展开侧边栏")}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="m9 18 6-6-6-6" />
+              </svg>
             </button>
           </div>
           <nav className="nav-menu">
-            <button type="button" className="nav-item primary" onClick={() => void onNewSession()} title={t("新建对话")} disabled={disabled}>
-              <span className="nav-item-icon">＋</span>
+            <button type="button" className="nav-item" onClick={() => void onNewSession()} title={t("新建对话")} disabled={disabled}>
+              <svg className="nav-item-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                <path d="M12 8v6" /><path d="M9 11h6" />
+              </svg>
             </button>
             <button type="button" className="nav-item" onClick={() => void onAddProject()} title={t("添加项目")} disabled={disabled}>
-              <span className="nav-item-icon">📁</span>
+              <svg className="nav-item-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />
+                <path d="M12 10v6" /><path d="M9 13h6" />
+              </svg>
             </button>
           </nav>
           <div className="nav-footer">
-            <button type="button" className="nav-item settings" onClick={onOpenSettings} title={t("设置")}>
-              <span className="nav-item-icon">⚙</span>
+            <button type="button" className="nav-item" onClick={onOpenSettings} title={t("设置")}>
+              <svg className="nav-item-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+                <circle cx="12" cy="12" r="3" />
+              </svg>
             </button>
           </div>
         </>
       ) : (
         <>
           <div className="nav-header">
-            <button type="button" className="nav-item collapse-btn" onClick={onToggleCollapse} title={t("收缩侧边栏")}>
-              <span className="nav-item-icon">»</span>
+            <button type="button" className="nav-icon-btn" onClick={onToggleCollapse} title={t("收缩侧边栏")}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="m15 18-6-6 6-6" />
+              </svg>
             </button>
           </div>
           <nav className="nav-menu">
-            <button type="button" className="nav-item primary" onClick={() => void onNewSession()} disabled={disabled}>
-              <span className="nav-item-icon">＋</span>
+            <button type="button" className="nav-item" onClick={() => void onNewSession()} disabled={disabled}>
+              <svg className="nav-item-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                <path d="M12 8v6" /><path d="M9 11h6" />
+              </svg>
               <span className="nav-item-label">{t("新建对话")}</span>
               <kbd>Ctrl+N</kbd>
             </button>
             <button type="button" className="nav-item" onClick={() => void onAddProject()} disabled={disabled}>
-              <span className="nav-item-icon">📁</span>
+              <svg className="nav-item-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />
+                <path d="M12 10v6" /><path d="M9 13h6" />
+              </svg>
               <span className="nav-item-label">{t("添加项目")}</span>
             </button>
           </nav>
 
-          <div className="nav-section-label">{t("项目")}</div>
-
-          <div className="project-tree">
+          <div className="side-list-box">
+            <div className="nav-section-label">{t("项目")}</div>
+            <div className="project-tree">
             {projects.length === 0 ? (
               <p className="nav-empty">{t("内置 OwnCoderProject 将自动出现；也可点击「添加项目」打开本地仓库。")}</p>
             ) : (
@@ -303,31 +323,26 @@ export function AgentSidebar({
 
                       <button
                         type="button"
-                        className="project-chevron"
-                        title={open ? t("折叠") : t("展开")}
-                        onClick={() => onToggleExpand?.(p.root)}
-                      >
-                        <svg
-                          className="chev-icon"
-                          width="12"
-                          height="12"
-                          viewBox="0 0 12 12"
-                          style={{ transform: open ? "rotate(90deg)" : "none" }}
-                        >
-                          <path d="M4 2 L8 6 L4 10" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                        </svg>
-                      </button>
-                      <button
-                        type="button"
                         className="project-row"
                         aria-current={workspace?.root === p.root ? "true" : undefined}
+                        aria-expanded={open}
                         title={p.root}
                         draggable={!disabled}
                         onClick={async () => {
+                          // onSelectProject：切换到该项目；点击当前项目时仅切换展开/折叠
                           await onSelectProject(p.root);
                         }}
                         disabled={disabled}
                       >
+                        <svg className="project-folder-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                          {open ? (
+                            <>
+                              <path d="m6 14 1.5-2.7A2 2 0 0 1 9.2 10H20a2 2 0 0 1 1.94 2.5l-1.55 6a2 2 0 0 1-1.94 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2" />
+                            </>
+                          ) : (
+                            <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />
+                          )}
+                        </svg>
                         <span className="project-name">
                           {(() => {
                             const { name, parent } = parseProjectPath(p.root);
@@ -510,12 +525,12 @@ export function AgentSidebar({
                                 disabled={disabled}
                               >
                                 {s.pinned ? <span title="已置顶" aria-label="已置顶">📌</span> : null}
-                                <span className="session-title" onDoubleClick={(event) => {
+                                <MarqueeText className="session-title" onDoubleClick={(event) => {
                                   event.stopPropagation();
                                   if (disabled || savingName || !onRenameSession) return;
                                   setRename({ id: s.id, root: p.root, title: s.title, originalTitle: s.title });
                                   setMenu(null);
-                                }}>{isDefaultSessionTitle(s.title) ? t("新会话") : s.title}</span>
+                                }}>{isDefaultSessionTitle(s.title) ? t("新会话") : s.title}</MarqueeText>
                                 <span className="session-time">{relativeTime(s.updatedAt)}</span>
                               </button>}
 
@@ -583,11 +598,15 @@ export function AgentSidebar({
                 );
               })
             )}
+            </div>
           </div>
 
           <div className="nav-footer">
-            <button type="button" className="nav-item settings" onClick={onOpenSettings}>
-              <span className="nav-item-icon">⚙</span>
+            <button type="button" className="nav-item" onClick={onOpenSettings}>
+              <svg className="nav-item-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+                <circle cx="12" cy="12" r="3" />
+              </svg>
               <span className="nav-item-label">{t("设置")}</span>
             </button>
           </div>

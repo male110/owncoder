@@ -14,6 +14,23 @@ import { mt } from "./i18n";
 import { indexHost } from "./index-host";
 import { disposeWebFetchRenderer, renderPage } from "./web-fetch-render";
 import { registerExternalLinks } from "./external-links";
+import * as sqliteVec from "sqlite-vec";
+import {
+  configureEmbeddingCacheDir,
+  embeddingModelAvailable,
+  getSharedEmbeddingService,
+} from "./embedding-service";
+
+/**
+ * 嵌入模型目录：打包后随 resources 分发，开发期在 assets。
+ * main 进程与 index-worker 共用同一算法（worker 经 open 消息接收目录，
+ * UtilityProcess 没有 electron app 模块，不能自行解析）。
+ */
+function resolveEmbeddingModelDir(): string {
+  return app.isPackaged
+    ? join(process.resourcesPath, "embedding-model")
+    : join(app.getAppPath(), "assets", "embedding-model");
+}
 
 /**
  * electron-vite 产物布局：
@@ -119,9 +136,32 @@ const recentStore = new RecentStore(userDataDir);
 const secretsStore = new SecretsStore(userDataDir);
 
 const session = createCompatibilityAdapter();
+
+// 代码语义检索查询端口（main 进程只读连接）：bge 与历史向量共享单例，
+// 首次 ragSearch 才懒加载模型；sqlite-vec 加载器供 adapter.open 注册
+// vec0 模块。模型缺失时不注入——sessionIndex 查询客户端 ragSearch 维持
+// 空，消费方 hybrid 自动降级 FTS。
+configureEmbeddingCacheDir(resolveEmbeddingModelDir());
+if (embeddingModelAvailable()) {
+  const embeddingService = getSharedEmbeddingService();
+  session.setIndexSemanticPort({
+    embedBatch: (texts) => embeddingService.embedBatch(texts),
+    embedQuery: (text) => embeddingService.embed(text),
+    loadVec: (db) => {
+      try {
+        sqliteVec.load(db as Parameters<typeof sqliteVec.load>[0]);
+      } catch (error) {
+        console.warn("[main] sqlite-vec load failed:", error);
+      }
+    },
+  });
+} else {
+  console.log("[main] embedding model unavailable; code semantic search disabled");
+}
 session.setWorkflow(settingsStore.getEffective());
 session.setLlmApiKey(secretsStore.load().llmApiKey);
 session.setMemoriesDir(settingsStore.memoriesDir);
+session.setSkillsUserDir(settingsStore.skillsDir);
 
 let mainWindow: BrowserWindow | null = null;
 let settingsPanelOpen = false;
@@ -308,7 +348,7 @@ async function openWorkspaceRoot(root: string): Promise<{ root: string; name: st
   // Writable index build runs in a UtilityProcess so the main V8 heap never
   // holds whole-repo file contents during startup.
   const workflow = settingsStore.getEffective();
-  indexHost.start(root, workflow.index?.extraIgnore ?? []);
+  indexHost.start(root, workflow.index?.extraIgnore ?? [], resolveEmbeddingModelDir());
   return { root, name };
 }
 
@@ -327,7 +367,7 @@ async function switchWorkspaceRoot(root: string): Promise<{ root: string; name: 
   recentStore.setLastWorkspace(root, name);
   chatBufferRef.flushAll();
   const workflow = settingsStore.getEffective();
-  indexHost.start(root, workflow.index?.extraIgnore ?? []);
+  indexHost.start(root, workflow.index?.extraIgnore ?? [], resolveEmbeddingModelDir());
   return { root, name };
 }
 
@@ -575,11 +615,8 @@ app.whenReady().then(async () => {
     if (historyVectorReady) return historyVectorReady;
     historyVectorReady = (async () => {
       try {
-        const { createHistoryVector, configureEmbeddingCacheDir } = await import("./history-vector");
-        const embeddingDir = app.isPackaged
-          ? join(process.resourcesPath, "embedding-model")
-          : join(app.getAppPath(), "assets", "embedding-model");
-        configureEmbeddingCacheDir(embeddingDir);
+        const { createHistoryVector } = await import("./history-vector");
+        configureEmbeddingCacheDir(resolveEmbeddingModelDir());
         const hv = createHistoryVector(join(userData, "history-vector.db"));
         session.setHistoryVector(hv);
         console.log("[history-vector] 历史向量检索已启用（lazy）");

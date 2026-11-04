@@ -137,8 +137,12 @@ function hasSensitiveReadInUnsafeCommand(
   const patterns = [...BUILTIN_SENSITIVE_FILES, ...(options?.sensitiveFiles ?? [])];
   for (const part of splitShellCommands(command)) {
     // 去掉赋值和读取表达式的外壳，保留文件路径用于敏感文件归因。
-    const expression = part.replace(/^\$[A-Za-z_][\w]*\s*=\s*/, "");
-    const nested = expression.match(/^\(\s*(Get-Content|gc)\s+(.+?)\)\s*(?:\.\w+\(\))?$/i);
+    // bash 形态（默认壳已随包 bash 化）：value=$(cat .env)、$(head -1 .env)
+    // ——赋值 $ 前缀可选，POSIX/PowerShell 读取命令一视同仁。
+    const expression = part.replace(/^\$?[A-Za-z_][\w]*\s*=\s*/, "");
+    const nested = expression.match(
+      /^\$?\(\s*(Get-Content|gc|cat|head|tail)\s+(.+?)\)\s*(?:\.\w+\(\))?$/i,
+    );
     const candidate = nested ? `${nested[1]} ${nested[2]}` : expression;
     if (/\$[A-Za-z_]|\$\{|%[A-Za-z_][A-Za-z0-9_]*%|[*?\[\]]/.test(candidate)) continue;
     const read = parseStaticFileRead(candidate, false);

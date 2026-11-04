@@ -192,27 +192,172 @@ export function softParseArgs(raw: string | undefined): Record<string, unknown> 
  * meaningful BEFORE jsonrepair runs — repair closes exactly these holes.
  */
 function looksTruncatedJson(text: string): boolean {
-  let inString = false;
+  const issue = scanUnterminatedString(text);
+  return issue !== null;
+}
+
+/**
+ * 轻量级语法预检：扫描原始文本，检测未闭合的字符串引号与括号不匹配。
+ *
+ * 与 looksTruncatedJson 的区别：后者只回答"是否截断"（布尔值），本函数
+ * 返回结构化的诊断信息——问题类型、位置（行/列）、问题点附近的原文片段，
+ * 供调用方生成"包含具体位置和修复建议"的错误提示。
+ *
+ * 扫描规则（与 JSON/JS 公共子集一致）：
+ * - 双引号字符串：跟踪转义（\ 跳过下一字符）
+ * - 单引号字符串：同样跟踪转义（JS 允许，弱模型常混用）
+ * - 模板字符串：`...`，同样跟踪转义
+ * - 正则字面量：/.../，跟踪转义；前一个非空白字符不是 ) ] } 或
+ *   标识符/数字时，/ 视为正则开始而非除法（避免把 /^\.\// 结尾的
+ *   // 误判为行注释——那会吞掉整行剩余字符，导致括号栈残留并误报
+ *   后续合法的闭括号）
+ * - 括号深度：{ } [ ] ( ) 配对；深度为负说明有多余的闭括号
+ * - 行注释（双斜杠）与块注释（斜杠星号…星号斜杠）内的引号/括号不计
+ *
+ * 返回 null 表示未发现结构性问题；否则返回诊断对象。
+ * 注意：这是启发式预检，不替代真正的解析器——只用于在把载荷交给
+ * jsonrepair / vm.Script 之前拦截明显的截断与引号错乱。
+ */
+export function scanUnterminatedString(text: string): {
+  kind: "unterminated_string" | "unclosed_bracket" | "extra_closer";
+  /** 问题点在原文中的字符偏移（0-based）。 */
+  index: number;
+  /** 问题点所在行（1-based）。 */
+  line: number;
+  /** 问题点所在列（1-based）。 */
+  column: number;
+  /** 问题点附近的原文片段（含前后上下文，便于定位）。 */
+  snippet: string;
+  /** 人类可读的问题描述。 */
+  detail: string;
+} | null {
+  let inString: '"' | "'" | "`" | null = null;
   let escaped = false;
-  let depth = 0;
-  for (const ch of text) {
+  let inLineComment = false;
+  let inBlockComment = false;
+  let inRegex = false;
+  const stack: Array<{ ch: string; line: number; column: number; index: number }> = [];
+  let line = 1;
+  let lineStart = 0;
+
+  const snippetAround = (idx: number): string => {
+    const start = Math.max(0, idx - 30);
+    const end = Math.min(text.length, idx + 30);
+    return (start > 0 ? "…" : "") + text.slice(start, end) + (end < text.length ? "…" : "");
+  };
+
+  // 判断位置 i 的 "/" 是正则开始还是除号：前一个非空白字符若是
+  // ) ] } 或标识符/数字，则为除法；否则（行首、运算符后、( [ , = : 等
+  // 之后）为正则开始。
+  const slashStartsRegex = (i: number): boolean => {
+    for (let j = i - 1; j >= 0; j--) {
+      const p = text[j]!;
+      if (p === " " || p === "\t" || p === "\n" || p === "\r") continue;
+      return !/[)\]\}\w$]/.test(p);
+    }
+    return true;
+  };
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i]!;
+    if (ch === "\n") {
+      line++;
+      lineStart = i + 1;
+      if (inLineComment) inLineComment = false;
+      continue;
+    }
+    if (inLineComment) continue;
+    if (inBlockComment) {
+      if (ch === "*" && text[i + 1] === "/") {
+        inBlockComment = false;
+        i++;
+      }
+      continue;
+    }
+    if (inRegex) {
+      if (escaped) {
+        escaped = false;
+      } else if (ch === "\\") {
+        escaped = true;
+      } else if (ch === "/") {
+        inRegex = false;
+      }
+      continue;
+    }
     if (inString) {
       if (escaped) {
         escaped = false;
       } else if (ch === "\\") {
         escaped = true;
-      } else if (ch === '"') {
-        inString = false;
+      } else if (ch === inString) {
+        inString = null;
       }
       continue;
     }
-    if (ch === '"') inString = true;
-    else if (ch === "{" || ch === "[") depth++;
-    else if (ch === "}" || ch === "]") depth--;
+    // 非字符串、非注释状态
+    if (ch === "/" && text[i + 1] === "/") {
+      inLineComment = true;
+      i++;
+      continue;
+    }
+    if (ch === "/" && text[i + 1] === "*") {
+      inBlockComment = true;
+      i++;
+      continue;
+    }
+    if (ch === "/" && slashStartsRegex(i)) {
+      inRegex = true;
+      escaped = false;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === "`") {
+      inString = ch;
+      continue;
+    }
+    if (ch === "{" || ch === "[" || ch === "(") {
+      stack.push({ ch, line, column: i - lineStart + 1, index: i });
+      continue;
+    }
+    if (ch === "}" || ch === "]" || ch === ")") {
+      const expected = ch === "}" ? "{" : ch === "]" ? "[" : "(";
+      const top = stack[stack.length - 1];
+      if (top && top.ch === expected) {
+        stack.pop();
+      } else {
+        return {
+          kind: "extra_closer",
+          index: i,
+          line,
+          column: i - lineStart + 1,
+          snippet: snippetAround(i),
+          detail: `多余的闭括号 \`${ch}\`（第 ${line} 行第 ${i - lineStart + 1} 列）没有与之配对的开括号`,
+        };
+      }
+    }
   }
-  // An unterminated string or an unclosed object/array means the tail is gone.
-  // Extra closers (depth < 0) are malformed but complete — jsonrepair's job.
-  return inString || depth > 0;
+
+  if (inString) {
+    return {
+      kind: "unterminated_string",
+      index: text.length,
+      line,
+      column: text.length - lineStart + 1,
+      snippet: snippetAround(text.length),
+      detail: `字符串以 ${inString} 开头但从未闭合——载荷在字符串中间被截断，或字符串内含有未转义的 ${inString}`,
+    };
+  }
+  if (stack.length) {
+    const top = stack[stack.length - 1]!;
+    return {
+      kind: "unclosed_bracket",
+      index: top.index,
+      line: top.line,
+      column: top.column,
+      snippet: snippetAround(top.index),
+      detail: `开括号 \`${top.ch}\`（第 ${top.line} 行第 ${top.column} 列）没有闭合——载荷在括号配对完成前被截断`,
+    };
+  }
+  return null;
 }
 
 /**
@@ -298,9 +443,6 @@ export function normalizeToolName(name: string): string {
       return "write_file";
     case "edit":
       return "apply_patch";
-    case "list":
-    case "ls":
-      return "list_dir";
     case "search":
     case "search_code":
       return "search_symbols";
@@ -317,8 +459,6 @@ export function normalizeToolName(name: string): string {
       return "apply_patch";
     case "append":
       return "append_file";
-    case "git":
-      return "git_status";
     case "typecheck":
     case "type_check":
       return "type_check";
@@ -341,13 +481,9 @@ export function normalizeToolName(name: string): string {
       return "read_outline";
     case "symbol":
       return "read_symbol";
-    case "grep":
-    case "find":
-      return "grep";
     case "codemap":
-      return "codemap_search";
     case "impact":
-      return "codemap_impact";
+      return "graph_search";
     case "map":
       return "repo_map";
     case "spec":
@@ -365,8 +501,6 @@ export function normalizeToolName(name: string): string {
     case "block":
     case "blocker":
       return "report_blocker";
-    case "lsp":
-      return "lsp_hover";
     case "diagnostics":
       return "lsp_diagnostics";
     default:

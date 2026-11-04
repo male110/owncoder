@@ -2,6 +2,7 @@ import { useMemo, useRef, useEffect, useCallback } from "react";
 import type { VirtuosoHandle } from "react-virtuoso";
 import { useChatStore } from "../store/chat-store";
 import type { ChatSessionRuntime } from "../store/chat-store";
+import { useSessionStore } from "../store/session-store";
 import { removeMessage } from "../hooks/queue-controller";
 import type { TabId } from "../SettingsPanel";
 import { ChatLog } from "./ChatLog";
@@ -66,6 +67,8 @@ export function SessionChatPanel({
   }, [t]);
 
   const rt = useSessionRuntime(sessionId);
+  // 本会话活动计划的任务（含执行状态），供任务分解卡片联动执行进度。
+  const planTasks = useSessionStore((s) => s.activePlanMetaBySession[sessionId]?.tasks);
   const {
     history,
     historyBeforeSeq,
@@ -229,6 +232,7 @@ export function SessionChatPanel({
               if (historyHasMore && !historyLoading) void onLoadOlder();
             }}
             active={isActive}
+            planTasks={planTasks}
           />
         </>
       )}

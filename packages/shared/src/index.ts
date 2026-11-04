@@ -96,7 +96,7 @@ export function deserializeError(raw: string): AppError {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-export type AgentMode = "plan" | "agent";
+export type AgentMode = "spec" | "agent";
 
 
 export type IndexStatusKind = "idle" | "building" | "ready" | "error";
@@ -132,18 +132,18 @@ export interface WorkspaceInfo {
 /** Task decomposition snapshot shared by Core, preload, and renderer. */
 export interface TaskDecompositionTaskDto {
   id: string;
+  /** 短标题（节点式分解产出；旧数据可能缺失）。 */
+  title?: string;
   description: string;
-  userConstraints: string[];
-  relevantHistory: string;
-  progressStatus: string;
-  steps: TaskDecompositionStepDto[];
-}
-
-export interface TaskDecompositionStepDto {
-  id: string;
-  description: string;
-  dependsOn: string[];
-  relevantHistory?: string;
+  /**
+   * 节点执行指令（原 guidance）：关键入口、注意点、建议验证方式
+   * （不是强制步骤）。旧数据仍可能以 guidance 字段持久化，读时映射到此处。
+   */
+  prompt: string;
+  /** 本节点依赖的其他节点 id（真实依赖，不是线性顺序）。 */
+  dependsOn?: string[];
+  /** @deprecated 旧字段，读时映射到 prompt。 */
+  guidance?: string;
 }
 
 /** Structured metadata attached to a completed tool event. */
@@ -153,5 +153,7 @@ export interface TaskDecompositionDto {
   intent: string;
   userConstraints: string[];
   tasks: TaskDecompositionTaskDto[];
+  /** 任务相关历史：与 tasks 同级，简单任务无需分解时仍提取，供后续轮次复用。 */
+  relevantHistory: string;
   fallback: boolean;
 }

@@ -1,9 +1,8 @@
-import { useMemo, useState, useEffect, useRef, useCallback, memo } from "react";
+import { useMemo, useState, useEffect, useRef, useCallback } from "react";
 import { Virtuoso } from "react-virtuoso";
 import type { VirtuosoHandle } from "react-virtuoso";
-import type { ChatTurnDto } from "../../../preload/index";
-import { Markdown } from "./Markdown";
-import type { DecompositionSnapshot, LiveEvent, PendingTool } from "../store/chat-store";
+import type { ChatTurnDto, TaskItemDto } from "../../../preload/index";
+import type { LiveEvent } from "../store/chat-store";
 import { useI18n } from "../i18n";
 import {
   buildChatItems,
@@ -16,6 +15,12 @@ import {
   type ChatItem,
   type LogBlock,
 } from "./chat-log-model";
+import { AssistantBubble } from "./chat-log/AssistantBubble";
+import { DecomposeCard } from "./chat-log/DecomposeCard";
+import { LiveEventStream } from "./chat-log/LiveEventStream";
+import { ProcessSteps } from "./chat-log/ProcessSteps";
+import { UserBubble } from "./chat-log/UserBubble";
+import { useCopyMenu } from "./chat-log/useCopyMenu";
 
 
 
@@ -27,704 +32,6 @@ export function toolStatusLabel(
 ): string {
   return toolStatusLabelFromModel(phase, name, args);
 }
-
-
-const PLAN_MARKER = "\n\n<!--plan_saved:";
-
-function extractPlanPath(content: string): string | null {
-  const idx = content.lastIndexOf(PLAN_MARKER);
-  if (idx < 0) return null;
-  const rest = content.slice(idx + PLAN_MARKER.length);
-  const endIdx = rest.indexOf("-->");
-  if (endIdx < 0) return null;
-  return rest.slice(0, endIdx).trim();
-}
-
-function stripPlanMarker(content: string): string {
-  const idx = content.lastIndexOf(PLAN_MARKER);
-  if (idx < 0) return content;
-  return content.slice(0, idx).trimEnd();
-}
-
-// ── Arg summary for tool cards ────────────────────────────────────────────────
-
-function summarizeArgs(name: string, args: Record<string, unknown>): string {
-  const pick = (k: string) => (typeof args[k] === "string" ? String(args[k]) : undefined);
-  if (name === "read_file" || name === "write_file" || name === "list_dir" || name === "apply_patch" || name === "read_outline" || name === "read_symbol") {
-    const p = pick("path") ?? pick("filePath") ?? pick("file_path") ?? "";
-    // Show only the last 2 path segments to keep it compact
-    const parts = p.replace(/\\/g, "/").split("/").filter(Boolean);
-    return parts.slice(-2).join("/");
-  }
-  if (name === "bash") return (pick("command") ?? pick("cmd") ?? "").slice(0, 80);
-  if (name === "search_code" || name === "search_symbols" || name === "grep") return pick("query") ?? pick("pattern") ?? "";
-  const first = Object.values(args).find((v) => typeof v === "string");
-  return first ? String(first) : "";
-}
-
-/** Read params for read_file: Limit and Offset */
-function readFileParams(args: Record<string, unknown>): string {
-  const limit  = args.limit  != null ? `Limit:${args.limit}`  : null;
-  const offset = args.offset != null ? `Offset:${args.offset}` : null;
-  if (limit || offset) return [limit, offset].filter(Boolean).join(" | ");
-  return "";
-}
-
-// ── Diff stat helper (for write/patch results) ────────────────────────────────
-
-function parseDiffStat(output: string): { added: number; removed: number } | null {
-  // Output format from write_file / apply_patch: "Wrote path (+N -M)"
-  const m = output.match(/\(\+(\d+)\s+-(\d+)\)/);
-  if (m) return { added: Number(m[1]), removed: Number(m[2]) };
-  // Count raw +/- lines if full diff is emitted
-  let added = 0; let removed = 0;
-  for (const line of output.split("\n")) {
-    if (line.startsWith("+") && !line.startsWith("+++")) added++;
-    else if (line.startsWith("-") && !line.startsWith("---")) removed++;
-  }
-  return added + removed > 0 ? { added, removed } : null;
-}
-
-// ── 工具参数格式化辅助函数：处理 omitted 标记 ────────────────────────────────
-
-function formatToolArgs(args: Record<string, unknown>): string {
-  // 递归处理参数，将 omitted 标记替换为友好提示
-  function processValue(value: unknown): unknown {
-    if (value == null) return value;
-    if (typeof value !== "object") return value;
-    
-    // 检查是否是 omitted 标记
-    if (
-      typeof (value as { omitted?: unknown }).omitted === "boolean" &&
-      (value as { omitted: boolean }).omitted === true
-    ) {
-      const reason = (value as { reason?: string }).reason;
-      if (reason === "nested_arg_omitted") return "<嵌套对象已省略>";
-      if (reason === "deeply_nested") return "<深层嵌套已省略>";
-      return "<内容已省略>";
-    }
-    
-    // 处理数组
-    if (Array.isArray(value)) {
-      return value.map(processValue);
-    }
-    
-    // 处理对象
-    const processed: Record<string, unknown> = {};
-    for (const [key, val] of Object.entries(value as Record<string, unknown>)) {
-      processed[key] = processValue(val);
-    }
-    return processed;
-  }
-  
-  const processed = processValue(args);
-  return JSON.stringify(processed, null, 2);
-}
-
-// ── LiveToolCard (current turn) ───────────────────────────────────────────────
-
-function LiveToolCardImpl({ tool }: { tool: PendingTool }) {
-  const running   = tool.status === "running";
-  const [open, setOpen] = useState(false);  // collapsed by default; expand on click
-  const bodyRef   = useRef<HTMLDivElement>(null);
-  const wasRunning = useRef(running);
-  const { t } = useI18n();
-
-  // Auto-expand while running so user sees progress
-  useEffect(() => { if (running) setOpen(true); }, [running]);
-
-  // Auto-collapse when done
-  useEffect(() => {
-    if (wasRunning.current && !running) setOpen(false);
-    wasRunning.current = running;
-  }, [running]);
-
-  useEffect(() => {
-    if (open && tool.output && bodyRef.current) {
-      requestAnimationFrame(() => { bodyRef.current?.scrollTo(0, bodyRef.current.scrollHeight); });
-    }
-  }, [tool.output, open]);
-
-  const isWrite = tool.name === "write_file" || tool.name === "apply_patch";
-  const isRead  = tool.name === "read_file";
-  const isBash  = tool.name === "bash";
-  const diff    = isWrite && tool.output ? parseDiffStat(tool.output) : null;
-  const argSummary = summarizeArgs(tool.name, tool.args);
-  const readParams = isRead ? readFileParams(tool.args) : "";
-
-  return (
-    <div className={`tool-card live ${running ? "running" : tool.status}`}>
-      <button type="button" className="tool-card-head" onClick={() => setOpen((v) => !v)}>
-
-        {/* Icon */}
-        <span className="tool-card-icon">
-          {running
-            ? <span className="tool-spinner" />
-            : tool.status === "error" ? "✕"
-            : tool.status === "skipped" ? "–"
-            : isWrite ? "✏" : isBash ? "▶" : "⚙"}
-        </span>
-
-        {/* Tool name + arg summary */}
-        <span className="tool-card-label">
-          <span className="tool-verb">{tool.name}</span>
-          {argSummary ? <span className="tool-path"> {argSummary}</span> : null}
-          {isRead && readParams ? <span className="tool-read-params">{readParams}</span> : null}
-        </span>
-
-        {/* Diff stat for write/patch */}
-        {!running && diff ? (
-          <span className="tool-diff-stat">
-            <span className="diff-added">+{diff.added}</span>
-            {" "}
-            <span className="diff-removed">-{diff.removed}</span>
-          </span>
-        ) : null}
-
-        {/* Status badge */}
-        <span className={`tool-status ${running ? "running" : tool.status}`}>
-          {running ? t("运行中") : tool.status === "error" ? t("失败") : tool.status === "skipped" ? t("已跳过") : t("完成")}
-        </span>
-
-        <span className="activity-chev">{open ? "▾" : "▸"}</span>
-      </button>
-
-      {open && (tool.output || running || Object.keys(tool.args).length > 0) ? (
-        <div className="tool-card-body" ref={bodyRef}>
-          {Object.keys(tool.args).length > 0 ? (
-            <div className="tool-card-content-wrap">
-              <div className="tool-card-result-label">参数</div>
-              <pre>{formatToolArgs(tool.args)}</pre>
-            </div>
-          ) : null}
-          {tool.output ? (
-            <div className="tool-card-content-wrap">
-              <div className="tool-card-result-label">{t("结果")}</div>
-              <pre>{tool.output}</pre>
-              <button
-                type="button"
-                className="tool-card-copy-btn"
-                onClick={() => {
-                  navigator.clipboard.writeText(tool.output || "");
-                }}
-                title={t("复制内容")}
-              >
-                {t("📋 复制")}
-              </button>
-            </div>
-          ) : null}
-          {running && !tool.output ? <div className="tool-progress">{t("执行中...")}</div> : null}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-// ── ThinkingBlock ─────────────────────────────────────────────────────────────
-
-function ThinkingBlockImpl({ content, streaming, stage }: { content: string; streaming: boolean; stage?: "decompose" | "react" }) {
-  const [open, setOpen] = useState(streaming);
-  const { t } = useI18n();
-  const bodyRef = useRef<HTMLDivElement>(null);
-  const wasStreaming = useRef(streaming);
-
-  useEffect(() => { if (streaming) setOpen(true); }, [streaming]);
-
-  useEffect(() => {
-    if (wasStreaming.current && !streaming) setOpen(false);
-    wasStreaming.current = streaming;
-  }, [streaming]);
-
-  useEffect(() => {
-    if (open && streaming && bodyRef.current) {
-      requestAnimationFrame(() => { bodyRef.current?.scrollTo(0, bodyRef.current.scrollHeight); });
-    }
-  }, [content, open, streaming]);
-
-  if (!content) return null;
-
-  const stageClass = stage === "decompose" ? "stage-decompose" : stage === "react" ? "stage-react" : "";
-
-  return (
-    <div className={`thinking-block ${streaming ? "streaming" : ""} ${stageClass}`}>
-      <button type="button" className="thinking-head" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
-        <span className="thinking-icon">⊗</span>
-        <span className="thinking-label">{streaming ? t("思考中…") : t("思考过程")}</span>
-        <span className="activity-chev">{open ? "▾" : "▸"}</span>
-      </button>
-      {open ? (
-        <div className="thinking-body" ref={bodyRef}>
-          <Markdown content={content} showCopy={false} />
-          {streaming ? <span className="stream-cursor" /> : null}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-// ── LiveEventStream: renders liveEvents[] in order ───────────────────────────
-
-function LiveEventStreamImpl({ events }: { events: LiveEvent[] }) {
-  if (events.length === 0) return null;
-  return (
-    <div className="live-event-stream">
-      {events.map((ev) => {
-        if (ev.kind === "thinking") {
-          return (
-            <ThinkingBlock
-              key={ev.id}
-              content={ev.text}
-              streaming={ev.streaming}
-              stage={ev.stage}
-            />
-          );
-        }
-        if (ev.kind === "tool") {
-          return <LiveToolCard key={`tool-${ev.tool.id}`} tool={ev.tool} />;
-        }
-        // decompose events are rendered by ChatLog inside the current-turn
-        // assistant container, before the live event stream; skip here.
-        if (ev.kind === "decompose") return null;
-        // text (must narrow the union — ev may be "structured" which has no .text)
-        if (ev.kind !== "text") return null;
-        if (!ev.text) return null;
-        return (
-          <div key={ev.id} className={`msg assistant${ev.streaming ? " streaming" : ""}`}>
-            <Markdown content={ev.text} />
-            {ev.streaming ? <span className="stream-cursor" /> : null}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-// ── DecomposeCard: task_decompose result (intent + tasks) ────────────────────
-// 仅在 pnpm dev（import.meta.env.DEV）时由 ChatLog footer 渲染。
-
-function DecomposeCard({ decomposition }: { decomposition: DecompositionSnapshot }) {
-  const [open, setOpen] = useState(true);
-  const { t } = useI18n();
-  const { intent, userConstraints, tasks, fallback } = decomposition;
-  const taskCount = tasks?.length ?? 0;
-
-  const title = fallback
-    ? t("任务分解（本地回退）")
-    : taskCount === 0
-      ? t("任务分解：无需计划")
-      : t("任务分解：{{count}} 个任务", { count: taskCount });
-
-  return (
-    <div className={`decompose-card${fallback ? " fallback" : ""}`}>
-      <button type="button" className="decompose-head" onClick={() => setOpen((v) => !v)}>
-        <span className="decompose-icon">🗂</span>
-        <span className="decompose-title">{title}</span>
-        <span className="activity-chev">{open ? "▾" : "▸"}</span>
-      </button>
-      {open ? (
-        <div className="decompose-body">
-          {intent ? (
-            <div className="decompose-section">
-              <div className="decompose-section-label">{t("意图")}</div>
-              <div className="decompose-intent">{intent}</div>
-            </div>
-          ) : null}
-          {userConstraints?.length > 0 ? (
-            <div className="decompose-section">
-              <div className="decompose-section-label">{t("用户约束")}</div>
-              <ul className="decompose-constraints">
-                {userConstraints.map((c, i) => (
-                  <li key={`${c}-${i}`}>{c}</li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
-          {tasks?.length > 0 ? (
-            <div className="decompose-section">
-              <div className="decompose-section-label">{t("任务")}</div>
-              {tasks.map((task) => (
-                <div key={task.id} className="decompose-task">
-                  <div className="decompose-task-head">
-                    <span className="decompose-step-id">{task.id}</span>
-                    {task.description ? (
-                      <span className="decompose-step-desc">{task.description}</span>
-                    ) : null}
-                  </div>
-                  <ol className="decompose-steps">
-                    {task.steps.map((s) => (
-                      <li key={s.id} className="decompose-step">
-                        <div className="decompose-step-head">
-                          <span className="decompose-step-id">{s.id}</span>
-                          <span className="decompose-step-desc">{s.description}</span>
-                          {s.dependsOn?.length > 0 ? (
-                            <span className="decompose-step-deps" title={t("依赖的前序步骤")}>
-                              ⇦ {s.dependsOn.join(", ")}
-                            </span>
-                          ) : null}
-                        </div>
-
-                      </li>
-                    ))}
-                  </ol>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="decompose-empty">
-              {t("本次请求未产生计划步骤（琐碎任务 / 提问 / 交还用户）。")}
-            </div>
-          )}
-          {fallback ? (
-            <div className="decompose-fallback-note">
-              {t("分解调用失败，以上为本地启发式回退结果，仅供粗略参考。")}
-            </div>
-          ) : null}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-// ── Bubbles ───────────────────────────────────────────────────────────────────
-
-function UserBubbleImpl({
-  turn,
-  stopping = false,
-  onDelete,
-  onDiscardInflight,
-}: {
-  turn: ChatTurnDto;
-  /** 「正在停止…」窗口：乐观行无 turnId，需要单独放开删除入口。 */
-  stopping?: boolean;
-  onDelete?: (turnId: string) => void;
-  onDiscardInflight?: () => void;
-}) {
-  const [copied, setCopied] = useState(false);
-  const [confirming, setConfirming] = useState(false);
-  const { t } = useI18n();
-
-  // 已落盘（有 turnId）走整轮删除；停止窗口里的乐观行（无 turnId）走本地丢弃。
-  const canDeletePersisted = Boolean(turn.turnId) && Boolean(onDelete);
-  const canDiscardOptimistic = !turn.turnId && stopping && Boolean(onDiscardInflight);
-
-  const isCompressed = turn.isCompressed === true;
-  const compressionRatio = turn.originalLength && turn.content.length
-    ? Math.round((turn.content.length / turn.originalLength) * 100)
-    : null;
-  const hasImportantSnippets = turn.importantSnippets && turn.importantSnippets.length > 0;
-
-  const onCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(turn.content);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch { /* ignore */ }
-  };
-
-  return (
-    <div className={`msg user ${isCompressed ? "compressed" : ""}`}>
-      <div className="user-bubble-wrap">
-        <div className="msg-bubble">
-          <Markdown content={turn.content} />
-          {isCompressed && (
-            <div className="compression-indicator">
-              <span className="compression-icon" title={t("已压缩内容")}>🗜️</span>
-              {compressionRatio && (
-                <span className="compression-ratio">{t("压缩{{percent}}%", { percent: compressionRatio })}</span>
-              )}
-              {hasImportantSnippets && (
-                <div className="important-snippets-tooltip">
-                  <strong>{t("保留的重要片段：")}</strong>
-                  <ul>
-                    {turn.importantSnippets!.slice(0, 3).map((snippet, i) => (
-                      <li key={`${snippet}-${i}`}>{snippet}</li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-        <div className="msg-actions">
-          <button type="button" className="msg-action-btn" onClick={() => void onCopy()} title={t("复制")}>
-            {copied ? t("已复制") : t("复制")}
-          </button>
-          {canDeletePersisted || canDiscardOptimistic ? (
-            confirming ? (
-              <>
-                <button
-                  type="button"
-                  className="msg-action-btn danger"
-                  onClick={() => {
-                    // 已落盘轮走整轮删除；停止窗口的乐观行走本地丢弃。
-                    if (canDeletePersisted) onDelete!(turn.turnId!);
-                    else onDiscardInflight!();
-                    setConfirming(false);
-                  }}
-                  title={t("确认删除")}
-                >
-                  {t("确认删除该输入及回复？")}
-                </button>
-                <button
-                  type="button"
-                  className="msg-action-btn"
-                  onClick={() => setConfirming(false)}
-                >
-                  {t("取消")}
-                </button>
-              </>
-            ) : (
-              <button
-                type="button"
-                className="msg-action-btn"
-                onClick={() => setConfirming(true)}
-                title={t("删除该输入及对应回复")}
-              >
-                {t("删除")}
-              </button>
-            )
-          ) : null}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function PlanCard({ planPath, onOpen }: { planPath: string; onOpen: (path: string) => void }) {
-  const fileName = planPath.split("/").pop() ?? planPath;
-  const { t } = useI18n();
-  return (
-    <div className="plan-card">
-      <div className="plan-card-icon">📋</div>
-      <div className="plan-card-body">
-        <div className="plan-card-title">{t("已生成计划")}</div>
-        <div className="plan-card-filename">{fileName}</div>
-        <div className="plan-card-path">{planPath}</div>
-      </div>
-      <button type="button" className="plan-card-open" onClick={() => onOpen(planPath)} title={t("在编辑器中打开")}>
-        {t("打开 →")}
-      </button>
-    </div>
-  );
-}
-
-function AssistantBubbleImpl({
-  turn,
-  canRegenerate,
-  regenerating,
-  onRegenerate,
-  onOpenFile,
-  workspaceRoot,
-  onDelete,
-}: {
-  turn: ChatTurnDto;
-  canRegenerate: boolean;
-  regenerating: boolean;
-  onRegenerate?: () => void;
-  onOpenFile?: (path: string) => void;
-  workspaceRoot?: string;
-  onDelete?: (turnId: string) => void;
-}) {
-  const { t } = useI18n();
-  const [copied, setCopied] = useState(false);
-  const [confirming, setConfirming] = useState(false);
-
-  const planPath      = extractPlanPath(turn.content);
-  const displayContent = planPath ? stripPlanMarker(turn.content) : turn.content;
-
-  // 压缩相关信息
-  const isCompressed = turn.isCompressed === true;
-  const compressionRatio = turn.originalLength && turn.content.length
-    ? Math.round((turn.content.length / turn.originalLength) * 100)
-    : null;
-  const hasImportantSnippets = turn.importantSnippets && turn.importantSnippets.length > 0;
-
-  const onCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(displayContent);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch { /* ignore */ }
-  };
-
-  return (
-    <div className={`msg assistant ${isCompressed ? "compressed" : ""}`}>
-      {isCompressed && (
-        <div className="compression-header">
-          <div className="compression-stats">
-            <strong>{t("压缩信息：")}</strong>
-            {turn.compressionReason && (
-              <span className="reason">{t("原因：")}{
-                turn.compressionReason === 'context_limit' ? t("上下文限制") :
-                turn.compressionReason === 'manual' ? t("手动压缩") :
-                turn.compressionReason === 'auto' ? t("自动压缩") :
-                turn.compressionReason === 'disk_save' ? t("磁盘保存") :
-                turn.compressionReason === 'retained' ? t("完整保留") : turn.compressionReason
-              }</span>
-            )}
-            {turn.originalLength && (
-              <span className="ratio">{t("压缩率：{{ratio}}% ({{cur}}/{{orig}}字符)", { ratio: compressionRatio ?? 0, cur: turn.content.length, orig: turn.originalLength })}</span>
-            )}
-            {turn.compressedAt && (
-              <span className="time">{t("时间：{{time}}", { time: new Date(turn.compressedAt).toLocaleString() })}</span>
-            )}
-          </div>
-          {hasImportantSnippets && (
-            <div className="important-snippets">
-              <strong>{t("保留的重要片段：")}</strong>
-              <ul>
-                {turn.importantSnippets!.map((snippet, i) => (
-                  <li key={`${snippet}-${i}`} title={snippet}>{snippet}</li>
-                ))}
-              </ul>
-            </div>
-          )}
-        </div>
-      )}
-      <Markdown content={displayContent} onOpenFile={onOpenFile} workspaceRoot={workspaceRoot} />
-      {planPath ? <PlanCard planPath={planPath} onOpen={(p) => onOpenFile?.(p)} /> : null}
-      <div className="msg-actions">
-        <button type="button" className="msg-action-btn" onClick={() => void onCopy()} title={t("复制")}>
-          {copied ? t("已复制") : t("复制")}
-        </button>
-        {canRegenerate && onRegenerate ? (
-          <button
-            type="button"
-            className="msg-action-btn"
-            disabled={regenerating}
-            onClick={onRegenerate}
-            title={t("重新生成")}
-          >
-            {regenerating ? t("生成中…") : t("重新生成")}
-          </button>
-        ) : null}
-        {turn.turnId && onDelete ? (
-          confirming ? (
-            <>
-              <button
-                type="button"
-                className="msg-action-btn danger"
-                onClick={() => {
-                  onDelete(turn.turnId!);
-                  setConfirming(false);
-                }}
-                title={t("确认删除")}
-              >
-                {t("确认删除该回复及输入？")}
-              </button>
-              <button
-                type="button"
-                className="msg-action-btn"
-                onClick={() => setConfirming(false)}
-              >
-                {t("取消")}
-              </button>
-            </>
-          ) : (
-            <button
-              type="button"
-              className="msg-action-btn"
-              onClick={() => setConfirming(true)}
-              title={t("删除该回复及对应输入")}
-            >
-              {t("删除")}
-            </button>
-          )
-        ) : null}
-        {isCompressed && (
-          <span className="compression-badge" title={t("已压缩内容")}>
-            {t("🗜️ 压缩")}
-          </span>
-        )}
-      </div>
-    </div>
-  );
-}
-
-
-const LiveToolCard = memo(LiveToolCardImpl, (prev, next) =>
-  prev.tool === next.tool ||
-  (prev.tool.id === next.tool.id &&
-    prev.tool.status === next.tool.status &&
-    prev.tool.output === next.tool.output &&
-    prev.tool.name === next.tool.name)
-);
-
-const UserBubble = memo(UserBubbleImpl, (prev, next) =>
-  (prev.turn === next.turn ||
-    (prev.turn.id === next.turn.id &&
-      prev.turn.content === next.turn.content &&
-      prev.turn.isCompressed === next.turn.isCompressed &&
-      prev.turn.originalLength === next.turn.originalLength)) &&
-  prev.onDelete === next.onDelete
-);
-
-const ThinkingBlock = memo(ThinkingBlockImpl, (prev, next) =>
-  prev.content === next.content && prev.streaming === next.streaming
-);
-
-const LiveEventStream = memo(LiveEventStreamImpl, (prev, next) => prev.events === next.events);
-
-const AssistantBubble = memo(AssistantBubbleImpl, (prev, next) =>
-  (prev.turn === next.turn ||
-    (prev.turn.id === next.turn.id &&
-      prev.turn.content === next.turn.content &&
-      prev.turn.isCompressed === next.turn.isCompressed &&
-      prev.turn.originalLength === next.turn.originalLength)) &&
-  prev.canRegenerate === next.canRegenerate &&
-  prev.regenerating === next.regenerating &&
-  prev.onRegenerate === next.onRegenerate &&
-  prev.onOpenFile === next.onOpenFile &&
-  prev.workspaceRoot === next.workspaceRoot &&
-  prev.onDelete === next.onDelete
-);
-
-// ── ProcessSteps: 已完成轮次的过程步骤（工具链 + 中间过程文本）折叠控件 ──────
-
-function ProcessStepsImpl({ items }: { items: ChatTurnDto[] }) {
-  const [open, setOpen] = useState(false);
-  const { t } = useI18n();
-  if (items.length === 0) return null;
-  return (
-    <div className="process-block">
-      <button type="button" className="process-head" onClick={() => setOpen((v) => !v)}>
-        <span className="process-icon">⚙</span>
-        <span className="process-title">{t("执行过程 · {{count}} 步", { count: items.length })}</span>
-        <span className="activity-chev">{open ? "▾" : "▸"}</span>
-      </button>
-      {open ? (
-        <div className="process-body">
-          {items.map((it, idx) => {
-            const key = it.id ?? `p-${idx}`;
-            if (it.role === "tool") {
-              const failed = it.content.startsWith("Error:");
-              return (
-                <div key={key} className="process-step">
-                  <LiveToolCard
-                    tool={{
-                      id: it.id ?? key,
-                      name: it.toolName ?? "unknown",
-                      args: it.toolArgs ?? {},
-                      status: failed ? "error" : "done",
-                      output: it.content || undefined,
-                    }}
-                  />
-                </div>
-              );
-            }
-            return (
-              <div key={key} className="process-step-text">
-                <Markdown content={it.content} showCopy={false} />
-              </div>
-            );
-          })}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-const ProcessSteps = memo(ProcessStepsImpl, (prev, next) => prev.items === next.items);
 
 // ── ChatLog ───────────────────────────────────────────────────────────────────
 
@@ -753,6 +60,8 @@ interface Props {
    * 作为「切换到本会话」信号，重新触发初始滚动到底部。
    */
   active?: boolean;
+  /** 会话活动计划的任务（含执行状态），供任务分解卡片联动执行进度。 */
+  planTasks?: TaskItemDto[];
 }
 
 export function ChatLog({
@@ -771,6 +80,7 @@ export function ChatLog({
   onStartReached,
   scrollerRef,
   active = true,
+  planTasks,
 }: Props) {
   const { t } = useI18n();
   const blocks = useMemo(
@@ -910,7 +220,7 @@ export function ChatLog({
   // scroll to the top — keep pinning until the scroller actually settles so
   // switching sessions lands on the latest messages.
   const initialBottomAppliedRef = useRef(false);
-  
+
   // 面板常驻挂载：active 的 false→true 边沿才是真正的「切换到本会话」。
   // 此时重置初始钉底标志，确保切到正在 streaming 的会话也会重新贴底。
   const prevActiveRef = useRef(active);
@@ -994,11 +304,17 @@ export function ChatLog({
       // 短会话始终无 overflow：等若干帧高度稳定后再允许 settle。
       // The outer scroller can appear settled while Virtuoso has only measured
       // the first batch. Wait for its last item before releasing the pin.
-      const readyToSettle = isInitialScrollReady(
-        lastRenderedIndexRef.current,
-        items.length > 0 ? firstItemIndex + items.length - 1 : null,
-        atBottom, heightStable, overflow, attempts,
-      );
+      // 空时间线（切换后会话历史尚未水合完成）永远不能 settle：否则会在
+      // 顶部提前闩锁 initialBottomAppliedRef，后续历史/live 内容到达时
+      // pin() 直接返回，不再贴底。会话切换先重置为跟随，
+      // 等真实内容 commit 后再按 following 状态贴底。
+      const readyToSettle =
+        items.length > 0 &&
+        isInitialScrollReady(
+          lastRenderedIndexRef.current,
+          firstItemIndex + items.length - 1,
+          atBottom, heightStable, overflow, attempts,
+        );
       settledFrames = readyToSettle ? settledFrames + 1 : 0;
       if (settledFrames >= 3) {
         initialBottomAppliedRef.current = true;
@@ -1026,9 +342,11 @@ export function ChatLog({
       if (markSettledIfReady(el, heightStable)) return;
       if (attempts >= MAX_FRAMES) {
         // 停止 rAF 空转；只有确实贴底才锁定，否则留给 ResizeObserver 继续钉。
+        // 与 markSettledIfReady 同理：空时间线不锁定，历史到达后 effect
+        // 会因 items.length 变化重跑并重新钉底。
         const { atBottom } = readBottomState(el);
-        if (atBottom && heightStable &&
-          (items.length === 0 || lastRenderedIndexRef.current === firstItemIndex + items.length - 1)) {
+        if (atBottom && heightStable && items.length > 0 &&
+          lastRenderedIndexRef.current === firstItemIndex + items.length - 1) {
           initialBottomAppliedRef.current = true;
         }
         return;
@@ -1072,73 +390,7 @@ export function ChatLog({
     [header],
   );
 
-  // ── LLM 输出区域自定义右键菜单（仅含「复制」） ───────────────────────────
-  const [copyMenu, setCopyMenu] = useState<{ x: number; y: number; text: string } | null>(null);
-  const copyMenuRef = useRef<HTMLDivElement | null>(null);
-  const copyTimerRef = useRef<number | null>(null);
-
-  // 右键菜单处理：仅当选中文本时弹出「复制」菜单，无选区则抑制默认菜单且不弹菜单
-  const handleContextMenu = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    const sel = window.getSelection();
-    const text = sel?.toString() ?? "";
-    if (!sel || sel.isCollapsed || !text) {
-      // 无选中文本：抑制默认右键菜单，不弹出任何菜单
-      setCopyMenu(null);
-      return;
-    }
-    const menuW = 130;
-    const menuH = 40;
-    const x = Math.max(4, Math.min(e.clientX, window.innerWidth - menuW - 8));
-    const y = Math.max(4, Math.min(e.clientY, window.innerHeight - menuH - 8));
-    setCopyMenu({ x, y, text });
-  }, []);
-
-  const closeCopyMenu = useCallback(() => setCopyMenu(null), []);
-
-  const handleCopy = useCallback(() => {
-    const text = copyMenu?.text ?? "";
-    if (text) void navigator.clipboard.writeText(text).catch(() => {});
-    closeCopyMenu();
-  }, [copyMenu, closeCopyMenu]);
-
-  // 点击菜单外部区域关闭
-  useEffect(() => {
-    if (!copyMenu) return;
-    const onDocClick = (e: MouseEvent) => {
-      if (copyMenuRef.current && !copyMenuRef.current.contains(e.target as Node)) closeCopyMenu();
-    };
-    document.addEventListener("mousedown", onDocClick, true);
-    return () => document.removeEventListener("mousedown", onDocClick, true);
-  }, [copyMenu, closeCopyMenu]);
-
-  // 按 Esc 键关闭
-  useEffect(() => {
-    if (!copyMenu) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") closeCopyMenu();
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [copyMenu, closeCopyMenu]);
-
-  // 选区变化时自动关闭菜单（拖动改变选区、点击其他位置等）
-  useEffect(() => {
-    if (!copyMenu) return;
-    const onSelChange = () => {
-      // 延迟执行，避免在刚选中文字触发 contextmenu 时 selectionchange 立即清除菜单
-      if (copyTimerRef.current) window.clearTimeout(copyTimerRef.current);
-      copyTimerRef.current = window.setTimeout(() => {
-        const sel = window.getSelection();
-        if (!sel || sel.isCollapsed) closeCopyMenu();
-      }, 0);
-    };
-    document.addEventListener("selectionchange", onSelChange);
-    return () => {
-      document.removeEventListener("selectionchange", onSelChange);
-      if (copyTimerRef.current) window.clearTimeout(copyTimerRef.current);
-    };
-  }, [copyMenu, closeCopyMenu]);
+  const { copyMenu, copyMenuRef, handleContextMenu, handleCopy } = useCopyMenu();
 
   return (
     <div className="chat-log wide">
@@ -1185,7 +437,11 @@ export function ChatLog({
                 {decompositionCards.length > 0 ? (
                   <div className="chat-log-decomposition">
                     {decompositionCards.map((ev) => (
-                      <DecomposeCard key={ev.id} decomposition={ev.decomposition} />
+                      <DecomposeCard
+                        key={ev.id}
+                        decomposition={ev.decomposition}
+                        planTasks={planTasks}
+                      />
                     ))}
                   </div>
                 ) : null}

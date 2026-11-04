@@ -13,6 +13,7 @@
  */
 
 import type { ChatTurn, TurnEvent, MessagePart, MessageMetadata } from "./harness/loop/types";
+import { pushStreamSnapshot } from "./harness/loop/streaming-snapshot";
 
 /**
  * MessageProjector - 事件流到结构化消息的投影器
@@ -36,7 +37,8 @@ export class MessageProjector {
       switch (ev.type) {
         case "thinking_delta":
           if (typeof ev.text === 'string') {
-            this.thinkingChunks.push(ev.text);
+            // delta 事件携带的是累积快照（替换语义），不是增量片段
+            pushStreamSnapshot(this.thinkingChunks, ev.text);
           }
           break;
 
@@ -44,7 +46,7 @@ export class MessageProjector {
           if (typeof ev.text === 'string') {
             // 封闭当前 thinking（如果有）
             this.sealThinking();
-            this.textChunks.push(ev.text);
+            pushStreamSnapshot(this.textChunks, ev.text);
           }
           break;
 

@@ -1,5 +1,12 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type {
+  TerminalCompletionAcceptRequest,
+  TerminalCompletionRequest,
+  TerminalCompletionResult,
+  TerminalContextEvent,
+  TerminalShellContext,
+} from "../shared/terminal-completion";
+import type {
   AgentMode,
   IndexStatus,
   TaskDecompositionDto,
@@ -104,17 +111,26 @@ export interface MessageMetadataDto {
   compressedAt?: string;
   compressionReason?: "context_limit" | "manual" | "auto" | "disk_save" | "retained";
   importantSnippets?: string[];
+  /** 用户中止本轮时为 true（用于跳过结构化消息回灌，避免与持久化历史重复）。 */
+  aborted?: boolean;
+}
+
+/** 子智能体（Explore）来源标识，镜像后端 SubagentProvenance。 */
+export interface SubagentProvenanceDto {
+  agentType: string;
+  id: string;
+  task: string;
 }
 
 type ChatEventFields =
   | { type: "assistant_delta"; text: string }
   | { type: "thinking_delta"; text: string }
-  | { type: "tool_start"; id: string; name: string; args: Record<string, unknown> }
-  | { type: "tool_end"; id: string; name: string; ok: boolean; output: string; metadata?: ToolEndMetadataDto; skipped?: boolean }
+  | { type: "tool_start"; id: string; name: string; args: Record<string, unknown>; subagent?: SubagentProvenanceDto }
+  | { type: "tool_end"; id: string; name: string; ok: boolean; output: string; metadata?: ToolEndMetadataDto; skipped?: boolean; subagent?: SubagentProvenanceDto }
   | { type: "turn_complete"; parts: MessagePartDto[]; metadata: MessageMetadataDto }
   | { type: "terminal"; entry: TerminalEntryDto }
   | { type: "stage_start"; id: string; nodeType: string; label: string }
-  | { type: "stage_done"; id: string; nodeType: string; label: string }
+  | { type: "stage_done"; id: string; nodeType: string; label: string; ok?: boolean; report?: string }
   | ({ type: "task_decomposition" } & TaskDecompositionDto)
   | { type: "error"; message: string }
   | { type: "warning"; message: string }
@@ -218,6 +234,37 @@ export interface ActivePlanMetaDto {
   status?: PlanStatusDto;
 }
 
+// ── Spec workflow (Kiro 风格 spec → design → tasks) ─────────────────────────
+
+export type SpecPhaseDto = "spec" | "design" | "tasks";
+
+export type SpecStageDto =
+  | "awaiting_spec_approval"
+  | "spec_approved"
+  | "awaiting_design_approval"
+  | "design_approved"
+  | "awaiting_tasks_approval"
+  | "approved";
+
+export interface SpecFeatureDto {
+  name: string;
+  title: string;
+  phases: SpecPhaseDto[];
+  complete: boolean;
+  mtimeMs: number;
+  stage: SpecStageDto | null;
+}
+
+export interface SpecStatusDto {
+  feature: string;
+  hasSpec: boolean;
+  hasDesign: boolean;
+  hasTasks: boolean;
+  tasks: TaskItemDto[];
+  phase: "empty" | "spec" | "design" | "tasks" | "ready";
+  stage: SpecStageDto | null;
+}
+
 export interface CheckpointInfoDto {
   id: string;
   createdAt: string;
@@ -271,6 +318,8 @@ export interface SessionStateDto {
   matchesBuiltin: boolean;
   activePlanPath: string | null;
   lastPlanPath: string | null;
+  /** Spec feature this session is working on (spec → design → tasks chain). */
+  currentFeature: string | null;
   todoAnchor: string | null;
   lastCheckpointId: string | null;
   sessionRestored: boolean;
@@ -308,6 +357,39 @@ export interface RuleFileDto {
   path: string;
   size: number;
   mtimeMs: number;
+}
+
+export interface SkillSummaryDto {
+  /** `${scope}:${name}` — stable identity used by the enabled/disabled list. */
+  id: string;
+  name: string;
+  description: string;
+  whenToUse?: string;
+  scope: "system" | "user" | "project";
+  source: "bundled" | "disk";
+  enabled: boolean;
+  sizeBytes: number;
+  mtimeMs: number;
+  /** Absolute SKILL.md path; empty for bundled skills. */
+  path: string;
+  /** Absolute skill directory; empty for bundled skills. */
+  directory: string;
+}
+
+export interface SkillDetailDto {
+  meta: SkillSummaryDto;
+  /** Raw SKILL.md document (frontmatter included) for the editor. */
+  raw: string;
+}
+
+export interface SkillWriteDto {
+  scope: "project" | "user";
+  name: string;
+  description: string;
+  whenToUse?: string;
+  body: string;
+  /** Full SKILL.md document; takes precedence over the structured fields. */
+  raw?: string;
 }
 
 export interface SecretsDto {
@@ -425,6 +507,13 @@ export interface DesktopApi {
   clearActivePlan: (sessionId?: string) => Promise<{ activePlanPath: string | null }>;
   getActivePlan: (sessionId?: string) => Promise<ActivePlanMetaDto | null>;
   updateTask: (taskId: string, status: TaskStatusDto, result?: string, sessionId?: string) => Promise<ActivePlanMetaDto | null>;
+  // ── Spec workflow（spec → design → tasks 审批流） ──
+  listSpecs: (sessionId?: string) => Promise<SpecFeatureDto[]>;
+  readSpec: (feature: string, phase: SpecPhaseDto) => Promise<string>;
+  getSpecStatus: (feature: string) => Promise<SpecStatusDto>;
+  saveSpecDoc: (feature: string, phase: SpecPhaseDto, content: string, sessionId?: string) => Promise<Partial<SessionStateDto>>;
+  approveSpec: (feature: string, sessionId?: string) => Promise<Partial<SessionStateDto>>;
+  rejectSpec: (feature: string, feedback: string, sessionId?: string) => Promise<Partial<SessionStateDto>>;
   setTodoAnchor: (todo: string | null) => Promise<unknown>;
   compactHistory: (sessionId?: string) => Promise<ChatTurnDto[]>;
   wipeSession: () => Promise<{ history: ChatTurnDto[]; terminal: TerminalEntryDto[] }>;
@@ -454,6 +543,11 @@ export interface DesktopApi {
   deleteRule: (name: string) => Promise<boolean>;
   getCombinedRules: () => Promise<string>;
   restoreProjectContext: () => Promise<{ rules: number; memories: number }>;
+  listSkills: () => Promise<SkillSummaryDto[]>;
+  readSkill: (name: string) => Promise<SkillDetailDto>;
+  writeSkill: (input: SkillWriteDto) => Promise<SkillSummaryDto[]>;
+  deleteSkill: (name: string) => Promise<SkillSummaryDto[]>;
+  setSkillEnabled: (id: string, enabled: boolean) => Promise<SkillSummaryDto[]>;
   getTerminalLog: (sessionId?: string) => Promise<TerminalEntryDto[]>;
   clearTerminal: () => Promise<boolean>;
   /** Spawn an interactive PTY; resolves to a terminal id. */
@@ -461,6 +555,10 @@ export interface DesktopApi {
   writeTerminal: (id: string, data: string) => void;
   resizeTerminal: (id: string, cols: number, rows: number) => void;
   killTerminal: (id: string) => void;
+  getTerminalContext: (id: string) => Promise<TerminalShellContext | null>;
+  completeTerminal: (request: TerminalCompletionRequest) => Promise<TerminalCompletionResult | null>;
+  acceptTerminalCompletion: (request: TerminalCompletionAcceptRequest) => Promise<boolean>;
+  onTerminalContext: (handler: (ev: TerminalContextEvent) => void) => () => void;
   onTerminalData: (handler: (ev: { id: string; data: string }) => void) => () => void;
   onTerminalExit: (handler: (ev: { id: string; code: number }) => void) => () => void;
   getIndexStatus: () => Promise<IndexStatus>;
@@ -476,7 +574,7 @@ export interface DesktopApi {
     | { status: "error"; added: number; skipped: number; invalid: number; message: string }
   >;
   restoreFactorySettings: () => Promise<SettingsSnapshotDto>;
-  restorePipelineSettings: (mode: "plan" | "agent") => Promise<SettingsSnapshotDto>;
+  restorePipelineSettings: (mode: "spec" | "agent") => Promise<SettingsSnapshotDto>;
   getSecrets: () => Promise<SecretsDto>;
   setLlmApiKey: (apiKey: string | null) => Promise<SecretsDto>;
   pickAndPreviewRedaction: () => Promise<RedactionPreviewDto>;
@@ -624,18 +722,37 @@ const api: DesktopApi = {
   listMcpTools: () => ipcRenderer.invoke("mcp:listTools"),
   listPlans: (sessionId?: string) => ipcRenderer.invoke("plans:list", sessionId),
   readPlan: (path) => ipcRenderer.invoke("plans:read", path),
+  listSpecs: (sessionId?: string) => ipcRenderer.invoke("specs:list", sessionId),
+  readSpec: (feature, phase) => ipcRenderer.invoke("specs:read", feature, phase),
+  getSpecStatus: (feature) => ipcRenderer.invoke("specs:status", feature),
+  saveSpecDoc: (feature, phase, content, sessionId) => ipcRenderer.invoke("specs:save", feature, phase, content, sessionId),
+  approveSpec: (feature, sessionId) => ipcRenderer.invoke("specs:approve", feature, sessionId),
+  rejectSpec: (feature, feedback, sessionId) => ipcRenderer.invoke("specs:reject", feature, feedback, sessionId),
   listRules: () => ipcRenderer.invoke("rules:list"),
   readRule: (name) => ipcRenderer.invoke("rules:read", name),
   writeRule: (name, content) => ipcRenderer.invoke("rules:write", name, content),
   deleteRule: (name) => ipcRenderer.invoke("rules:delete", name),
   getCombinedRules: () => ipcRenderer.invoke("rules:combined"),
   restoreProjectContext: () => ipcRenderer.invoke("project:restoreContext"),
+  listSkills: () => ipcRenderer.invoke("skills:list"),
+  readSkill: (name) => ipcRenderer.invoke("skills:read", name),
+  writeSkill: (input) => ipcRenderer.invoke("skills:write", input),
+  deleteSkill: (name) => ipcRenderer.invoke("skills:delete", name),
+  setSkillEnabled: (id, enabled) => ipcRenderer.invoke("skills:setEnabled", id, enabled),
   getTerminalLog: (sessionId?) => ipcRenderer.invoke("terminal:log", sessionId),
   clearTerminal: () => ipcRenderer.invoke("terminal:clear"),
   createTerminal: (opts) => ipcRenderer.invoke("pty:create", opts),
   writeTerminal: (id, data) => ipcRenderer.send("pty:input", id, data),
   resizeTerminal: (id, cols, rows) => ipcRenderer.send("pty:resize", id, cols, rows),
   killTerminal: (id) => ipcRenderer.send("pty:kill", id),
+  getTerminalContext: (id) => ipcRenderer.invoke("terminal:context/get", id),
+  completeTerminal: (request) => ipcRenderer.invoke("terminal:complete", request),
+  acceptTerminalCompletion: (request) => ipcRenderer.invoke("terminal:accept-completion", request),
+  onTerminalContext: (handler) => {
+    const listener = (_: Electron.IpcRendererEvent, ev: TerminalContextEvent) => handler(ev);
+    ipcRenderer.on("terminal:context", listener);
+    return () => ipcRenderer.removeListener("terminal:context", listener);
+  },
   onTerminalData: (handler) => {
     const listener = (_: Electron.IpcRendererEvent, ev: { id: string; data: string }) => handler(ev);
     ipcRenderer.on("pty:data", listener);

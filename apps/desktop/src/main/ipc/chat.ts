@@ -18,6 +18,9 @@ export function registerChatHandlers(ctx: IpcContext): void {
   const buffer = createChatEventBuffer({
     charThreshold: 800,
     flushIntervalMs: 3000,
+    // 思考增量（含任务分解阶段的思考过程）用更短的间隔呈现，避免用户
+    // 在等待分解结果时感觉长时间无输出。
+    thinkingFlushIntervalMs: 500,
     sendBatch(sessionId, events) {
       sendToRenderer({ getWindow, isRendererReady }, "chat:event", { sessionId, events });
     },

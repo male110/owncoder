@@ -5,7 +5,8 @@ export default defineConfig({
   test: {
     globals: true,
     environment: "node",
-    include: ["src/renderer/src/**/*.test.ts", "src/renderer/src/**/*.test.tsx", "src/renderer/src/**/*.bench.ts"],
+    include: ["src/renderer/src/**/*.test.ts", "src/renderer/src/**/*.test.tsx", "src/renderer/src/**/*.bench.ts", "src/main/terminal/**/*.test.ts", "src/main/__tests__/semantic-eval.test.ts"],
+    // 注意：semantic-eval 默认由 ONWCODER_SEMANTIC_EVAL env 门控跳过，不入常规 CI。
     // Keep renderer typecheck exclude in sync: tests are not part of tsconfig.web.
   },
   resolve: {

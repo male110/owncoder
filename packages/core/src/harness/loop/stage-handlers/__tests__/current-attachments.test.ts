@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { chatCompletion } from "@owncoder/llm";
+import { chatCompletionStream } from "@owncoder/llm";
 import { BUILTIN_WORKFLOW } from "@owncoder/settings";
 import { contextBudgets } from "../../../budget.ts";
 import { injectHistoryAndUserMessage } from "../index.ts";
@@ -10,7 +10,7 @@ import type { ChatAttachment } from "@owncoder/llm";
 vi.mock("@owncoder/llm", async (importOriginal) => ({
   ...await importOriginal<typeof import("@owncoder/llm")>(),
   assertLlmAuth: vi.fn(),
-  chatCompletion: vi.fn(),
+  chatCompletionStream: vi.fn(),
   writeEventLog: vi.fn(),
 }));
 
@@ -47,13 +47,11 @@ function makeContext(attachments: ChatAttachment[], withHistory: boolean, packed
 describe("附件仅随上传所在轮次发送", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(chatCompletion).mockResolvedValue({
+    vi.mocked(chatCompletionStream).mockResolvedValue({
       choices: [{ message: { role: "assistant", content: JSON.stringify({
-        intent: "继续处理", tasks: [{ id: "task_1", description: "处理问题", steps: [
-          { id: "step_1", description: "检查代码", dependsOn: [] },
-        ] }],
+        intent: "继续处理", relevantHistory: "", tasks: [{ id: "task_1", description: "处理问题", guidance: "检查代码" }],
       }) } }],
-    } as Awaited<ReturnType<typeof chatCompletion>>);
+    } as Awaited<ReturnType<typeof chatCompletionStream>>);
   });
 
   it.each([
@@ -67,7 +65,7 @@ describe("附件仅随上传所在轮次发送", () => {
       ctx.opts, ctx.model, ctx.tracer, ctx.memory, ctx.reasoningTrace, ctx.budgets,
     );
     expect(result.fallback).toBe(false);
-    const sent = vi.mocked(chatCompletion).mock.calls[0][1];
+    const sent = vi.mocked(chatCompletionStream).mock.calls[0][1];
     const user = sent.find((message) => message.role === "user")!;
     expect(user.attachments).toEqual(attachments);
     expect(user.content).not.toContain(expiredAttachment.url);
@@ -92,9 +90,11 @@ describe("附件仅随上传所在轮次发送", () => {
       },
     } as NonNullable<typeof ctx.opts.historyVector>;
     await runTaskDecompose(ctx.opts, ctx.model, ctx.tracer, ctx.memory, ctx.reasoningTrace, ctx.budgets);
-    expect(chatCompletion).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(chatCompletion).mock.calls[0][2]?.tools).toBeUndefined();
-    expect(vi.mocked(chatCompletion).mock.calls[0][1][2]?.content).toContain("上一轮的结论");
+    expect(chatCompletionStream).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(chatCompletionStream).mock.calls[0][2]?.tools).toBeUndefined();
+    const sent = vi.mocked(chatCompletionStream).mock.calls[0][1];
+    const user = sent.find((message) => message.role === "user")!;
+    expect(user.content).toContain("上一轮的结论");
     expect(ctx.opts.historyVector.embedding.embed).not.toHaveBeenCalled();
     expect(ctx.opts.historyVector.store.search).not.toHaveBeenCalled();
   });

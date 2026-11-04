@@ -6,6 +6,7 @@ import { registerWorkspaceHandlers } from "./workspace";
 import { registerSessionHandlers } from "./session";
 import { registerChatHandlers } from "./chat";
 import { registerSettingsHandlers } from "./settings";
+import { registerSkillsHandlers } from "./skills";
 import { registerTerminalHandlers } from "./terminal";
 import { registerIndexHandlers } from "./index-ipc";
 import { registerUpdateHandlers } from "./updates";
@@ -21,6 +22,7 @@ export function registerAllHandlers(ctx: IpcContext): void {
   registerSessionHandlers(ctx);
   registerChatHandlers(ctx);
   registerSettingsHandlers(ctx);
+  registerSkillsHandlers(ctx);
   registerTerminalHandlers(ctx);
   registerIndexHandlers(ctx);
   registerUpdateHandlers(ctx);

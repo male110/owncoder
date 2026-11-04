@@ -32,6 +32,7 @@ import { SessionChatPanel } from "./components/SessionChatPanel";
 import { Composer } from "./components/Composer";
 import { ChangesBar } from "./components/ChangesBar";
 import { PlansBar } from "./components/PlansBar";
+import { SpecsBar } from "./components/SpecsBar";
 import { TaskListBar } from "./components/TaskListBar";
 import { TerminalDock } from "./components/TerminalDock";
 import { CommandPalette } from "./components/CommandPalette";
@@ -58,7 +59,9 @@ export function App() {
   const {
     workspace, projects, sessions, sessionsByProject, activeSessionId, sessionTitle,
     expanded, mode, modelLabel, availableModels, providers, llmConfigured,
-    activePlanPathBySession, activePlanMetaBySession, plansBySession, gitStatus, changesBySession, thinkingEffort,
+    activePlanPathBySession, activePlanMetaBySession, plansBySession,
+    currentFeatureBySession, specsBySession,
+    gitStatus, changesBySession, thinkingEffort,
     separateStageModels, reactModelId, reactProviderId, reactThinkingEffort,
   } = useSessionStore();
 
@@ -76,6 +79,12 @@ export function App() {
   const sessionPlans = activeSessionId
     ? (plansBySession[activeSessionId] ?? [])
     : [];
+  const sessionCurrentFeature = activeSessionId
+    ? (currentFeatureBySession[activeSessionId] ?? null)
+    : null;
+  const sessionSpecs = activeSessionId
+    ? (specsBySession[activeSessionId] ?? [])
+    : [];
 
   const historyLength = useChatStore((s) => s.history.length);
   const sending = useChatStore((s) => s.sending);
@@ -83,20 +92,66 @@ export function App() {
   const bySession = useChatStore((s) => s.bySession);
 
   const {
-    editorTabs, editorPath, diffDataByPath, chatWidth, isDragging, sidebarWidth, isSidebarDragging,
+    editorTabs, editorPath, diffDataByPath, editorWidth, isEditorDragging, sidebarWidth, isSidebarDragging,
     sidebarCollapsed, settingsOpen, settingsTab,
     searchOpen, modeMenuOpen, drafts, busy, keepAllBusy,
-    setEditorPath, openEditorDiff, setActiveEditorTab, closeEditorTab, setChatWidth, setIsDragging, setSidebarWidth, setIsSidebarDragging,
+    setEditorPath, openEditorDiff, setActiveEditorTab, closeEditorTab, setEditorWidth, setIsEditorDragging, setSidebarWidth, setIsSidebarDragging,
     setSidebarCollapsed, setSettingsOpen, setSettingsTab, setSearchOpen, setModeMenuOpen,
     setDraft, openSettings,
   } = useUiStore();
 
   // ── Layout refs ─────────────────────────────────────────────────────────────
 
+  /** 危险 bash 自动批准开关（settings modes.agent.autoApproveBash）。
+   *  本地镜像：挂载时与设置面板保存后从 settings 刷新，变更后 debounce 自动保存，
+   *  与 SettingsPanel 共享同一 settings 源（saveSettings → setWorkflow → core）。 */
+  const [autoApproveBash, setAutoApproveBash] = useState(false);
+  const autoApproveSaveTimer = useRef<number | null>(null);
+
+  // 从主进程读取当前 autoApproveBash，刷新本地镜像。
+  // 挂载时初始化一次；SettingsPanel 保存/还原（含一键还原工厂设置）后再次刷新，
+  // 避免 Composer 复选框与设置面板分叉。
+  const refreshAutoApproveBash = useCallback(() => {
+    void (async () => {
+      try {
+        const snap = await window.owncoder.getSettings();
+        setAutoApproveBash(snap.effective.modes.agent.autoApproveBash ?? false);
+      } catch (err) {
+        console.warn("[App] 读取 autoApproveBash 设置失败:", err);
+      }
+    })();
+  }, []);
+
+  // 挂载时读取当前 settings，初始化复选框状态。
+  useEffect(() => { void refreshAutoApproveBash(); }, [refreshAutoApproveBash]);
+
+  // 复选框变更：立即更新本地状态，700ms debounce 后持久化（与 SettingsPanel 同模式）。
+  const handleAutoApproveBashChange = useCallback((enabled: boolean) => {
+    setAutoApproveBash(enabled);
+    if (autoApproveSaveTimer.current !== null) {
+      window.clearTimeout(autoApproveSaveTimer.current);
+    }
+    autoApproveSaveTimer.current = window.setTimeout(() => {
+      autoApproveSaveTimer.current = null;
+      void (async () => {
+        try {
+          const snap = await window.owncoder.getSettings();
+          const config = { ...snap.effective };
+          if (!config.modes) config.modes = {} as any;
+          if (!config.modes.agent) config.modes.agent = {} as any;
+          config.modes.agent.autoApproveBash = enabled;
+          await window.owncoder.saveSettings(config);
+        } catch (err) {
+          console.error("[App] 保存 autoApproveBash 设置失败:", err);
+        }
+      })();
+    }, 700);
+  }, []);
+
   const bodyRef = useRef<HTMLDivElement | null>(null);
   const shellRef = useRef<HTMLDivElement | null>(null);
   const resizeFrameRef = useRef<number | null>(null);
-  const pendingChatWidthRef = useRef<number | null>(null);
+  const pendingEditorWidthRef = useRef<number | null>(null);
   const sidebarResizeFrameRef = useRef<number | null>(null);
   const pendingSidebarWidthRef = useRef<number | null>(null);
   /** 页签行右侧操作区宿主，供 EditorPane 通过 portal 挂载保存/重新加载。 */
@@ -107,7 +162,7 @@ export function App() {
 
   // ── Hooks ────────────────────────────────────────────────────────────────────
   const {
-    refreshChanges, refreshGit, refreshPlans, refreshActivePlan,
+    refreshChanges, refreshGit, refreshPlans, refreshActivePlan, refreshSpecs,
     refreshSessions, applySessionState, applyOpened,
     onAddProject, onSelectProject, onRemoveProject, onMoveProject, onToggleExpand,
     onNewSession, onSwitchSession, onDeleteSession, onPinSession, onRenameSession,
@@ -119,7 +174,7 @@ export function App() {
 
   const {
     onSend, onRegenerate,
-    onApprovePlan, onUpdateTask,
+    onApprovePlan, onApproveSpec, onRejectSpec, onSaveSpecDoc, onUpdateTask,
     onRollback, onKeepAll, onKeepFile, onUndoFile,
     onSelectModel, onMode, onSelectThinkingEffort, onSelectReactThinkingEffort, sendQueued,
   } = useChatActions({
@@ -128,6 +183,7 @@ export function App() {
     refreshGit,
     refreshSessions,
     refreshPlans,
+    refreshSpecs,
     refreshActivePlan,
     pendingNewSessionRef,
     createPendingSession,
@@ -162,11 +218,6 @@ export function App() {
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [setSearchOpen]);
-
-  // Collapse sidebar when editor opens; restore when it closes.
-  useEffect(() => {
-    setSidebarCollapsed(editorTabs.length > 0);
-  }, [editorTabs.length, setSidebarCollapsed]);
 
   const handleEditorDirtyChange = useCallback((path: string, dirty: boolean) => {
     setEditorDirtyByPath((prev) => {
@@ -210,39 +261,37 @@ export function App() {
     return parts[parts.length - 1] || path;
   }, []);
 
-  // Drag-resize handler for chat panel (right side).
+  // Drag-resize handler for the editor column (width measured from left edge).
   useEffect(() => {
-    if (!isDragging) return;
-    
+    if (!isEditorDragging) return;
+
     const onMove = (e: MouseEvent) => {
       if (!bodyRef.current) return;
       const rect = bodyRef.current.getBoundingClientRect();
-      // Calculate width from right edge
-      const widthPx = rect.right - e.clientX;
+      const widthPx = e.clientX - rect.left;
       const pct = (widthPx / rect.width) * 100;
-      const newWidth = Math.min(50, Math.max(15, pct));
-      pendingChatWidthRef.current = newWidth;
+      pendingEditorWidthRef.current = pct;
       if (resizeFrameRef.current !== null) return;
 
       resizeFrameRef.current = requestAnimationFrame(() => {
         resizeFrameRef.current = null;
-        if (pendingChatWidthRef.current !== null) {
-          setChatWidth(pendingChatWidthRef.current);
+        if (pendingEditorWidthRef.current !== null) {
+          setEditorWidth(pendingEditorWidthRef.current);
         }
       });
     };
-    
+
     const onUp = () => {
-      setIsDragging(false);
+      setIsEditorDragging(false);
       document.body.style.cursor = "";
       document.body.style.userSelect = "";
     };
-    
+
     document.addEventListener("mousemove", onMove);
     document.addEventListener("mouseup", onUp);
     document.body.style.cursor = "col-resize";
     document.body.style.userSelect = "none";
-    
+
     return () => {
       document.removeEventListener("mousemove", onMove);
       document.removeEventListener("mouseup", onUp);
@@ -250,9 +299,9 @@ export function App() {
         cancelAnimationFrame(resizeFrameRef.current);
         resizeFrameRef.current = null;
       }
-      pendingChatWidthRef.current = null;
+      pendingEditorWidthRef.current = null;
     };
-  }, [isDragging, setChatWidth, setIsDragging]);
+  }, [isEditorDragging, setEditorWidth, setIsEditorDragging]);
 
   // Drag-resize handler for left sidebar.
   useEffect(() => {
@@ -429,6 +478,28 @@ export function App() {
             onViewDiff={openEditorDiff}
             onOpenFile={openEditorFile}
           />
+          <SpecsBar
+            currentFeature={sessionCurrentFeature}
+            specs={sessionSpecs}
+            activePlanPath={sessionActivePlanPath}
+            busy={busy || sending}
+            onApprove={(feature) => void onApproveSpec(feature)}
+            onReject={(feature, feedback) => void onRejectSpec(feature, feedback)}
+            onReadSpec={(feature, phase) => window.owncoder.readSpec(feature, phase)}
+            onSaveSpec={(feature, phase, content) => void onSaveSpecDoc(feature, phase, content)}
+            onOpenFile={openEditorFile}
+          />
+          <SpecsBar
+            currentFeature={sessionCurrentFeature}
+            specs={sessionSpecs}
+            activePlanPath={sessionActivePlanPath}
+            busy={busy || sending}
+            onApprove={(feature) => void onApproveSpec(feature)}
+            onReject={(feature, feedback) => void onRejectSpec(feature, feedback)}
+            onReadSpec={(feature, phase) => window.owncoder.readSpec(feature, phase)}
+            onSaveSpec={(feature, phase, content) => void onSaveSpecDoc(feature, phase, content)}
+            onOpenFile={openEditorFile}
+          />
           <PlansBar
             plans={sessionPlans}
             activePlanPath={sessionActivePlanPath}
@@ -488,6 +559,8 @@ export function App() {
         onAddProject={handleAddProject}
         onSelectReactModel={handleSelectReactModel}
         onSelectReactThinkingEffort={handleSelectReactThinkingEffort}
+        autoApproveBash={autoApproveBash}
+        onAutoApproveBashChange={handleAutoApproveBashChange}
       />
     </>
   );
@@ -514,7 +587,7 @@ export function App() {
         style={
           sidebarCollapsed
             ? undefined
-            : { gridTemplateColumns: `${sidebarWidth}px 6px 1fr` }
+            : { gridTemplateColumns: `${sidebarWidth}px 5px 1fr` }
         }
       >
         <AgentSidebar
@@ -569,7 +642,7 @@ export function App() {
           <div ref={bodyRef} className={`agent-body${editorTabs.length > 0 ? " with-editor" : ""}`}>
             {editorTabs.length > 0 && editorPath ? (
               <>
-                <div className="editor-shell">
+                <div className="editor-shell" style={{ width: `${editorWidth}%` }}>
                   <div className="editor-tabs-row">
                     <div className="editor-tabs" role="tablist" aria-label={t("已打开文件")}>
                       {editorTabs.map((tabPath) => {
@@ -648,11 +721,12 @@ export function App() {
                 </div>
                 <div
                   className="editor-resize-handle"
-                  onMouseDown={() => setIsDragging(true)}
+                  onMouseDown={() => setIsEditorDragging(true)}
+                  title={t("拖动调整文件区域宽度")}
                 />
               </>
             ) : null}
-            <div className="agent-chat" style={editorTabs.length > 0 ? { width: `${chatWidth}%` } : undefined}>
+            <div className="agent-chat">
               {chatPanel}
             </div>
           </div>
@@ -711,7 +785,7 @@ export function App() {
               <SettingsPanel
                 open={settingsOpen}
                 onClose={() => setSettingsOpen(false)}
-                onSaved={() => void applySessionState()}
+                onSaved={() => { void applySessionState(); refreshAutoApproveBash(); }}
                 initialTab={settingsTab}
               />
             </Suspense>

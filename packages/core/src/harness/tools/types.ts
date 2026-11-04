@@ -9,6 +9,19 @@ import type { TerminalEntry } from "../terminal.ts";
 import type { MemoryManager } from "../memory.ts";
 import type { UserMemoryStore } from "../../user-memories.ts";
 import type { HistoryVectorStore, EmbeddingService } from "../loop/history-vector.ts";
+import type { SkillContent } from "../../skills.ts";
+import type { BudgetLedger } from "../budget-ledger.ts";
+
+/**
+ * Skill loading API injected by the session orchestrator. `loadSkill`
+ * resolves a skill by name (respecting the enabled/disabled list) and
+ * returns its frontmatter-stripped body; null when unknown or disabled.
+ */
+export interface SkillsApi {
+  loadSkill(name: string): Promise<SkillContent | null>;
+  /** Names of all enabled skills (for tool error hints). */
+  listNames(): Promise<string[]>;
+}
 
 /** Session pending-change surface shared with the UI Changes bar. */
 export interface SessionChangesApi {
@@ -69,6 +82,14 @@ export interface ToolContext {
   workspaceRoot: string;
   mode: AgentMode;
   workflow: SystemWorkflowConfig;
+  /** Effective tool names after mode, feature and role filtering; nested dispatch must not widen them. */
+  availableTools?: ReadonlySet<string>;
+  /** Request-scoped monotonic budget shared by nested tools and child loops. */
+  budget?: BudgetLedger;
+  /** Nested execution is narrower than the parent tool surface. */
+  nestedToolCall?: boolean;
+  /** Only the sandbox's fs compatibility helpers may use internal tools. */
+  internalToolCall?: boolean;
   /** Owning chat session id; tags artifacts (e.g. plan files) for per-session scoping. */
   sessionId?: string;
   index: IndexClient;
@@ -79,18 +100,21 @@ export interface ToolContext {
   };
   /** Paths successfully read this session (for read-before-write). */
   readSet: Set<string>;
-  /** mtime of each file when it was last read (for cross-session modification detection). */
-  readMtTimes?: Map<string, number>;
   maxOutputChars: number;
   /** Separate cap for bash/type_check output (default lower than maxOutputChars). */
   bashMaxChars: number;
   /** Last plan path written this turn (for approve UX). */
   lastPlanPath?: string;
+  /** Spec feature this turn is working on (spec → design → tasks chain). */
+  currentFeature?: string;
   /** Mutable file snapshots for the active turn checkpoint. */
   fileSnapshots?: FileSnapshot[];
   touchedPaths?: string[];
   /** Confirm dangerous bash when settings require it. */
   confirmDangerousBash?: (command: string) => Promise<boolean>;
+  /** Auto-approve dangerous bash commands (settings modes.agent.autoApproveBash).
+   *  When true, dangerous commands execute without user confirmation. */
+  autoApproveDangerousBash?: boolean;
   /** Ask the user a question and await their answer (options or free text). */
   askUser?: (request: AskUserRequest) => Promise<string>;
   /**
@@ -108,6 +132,8 @@ export interface ToolContext {
 
   mcp?: McpManager;
   projectRules?: string | null;
+  /** Skill loading API (use_skill tool); undefined when the host did not inject one. */
+  skills?: SkillsApi;
   llmApiKey?: string | null;
   signal?: AbortSignal;
   /** Memory manager for knowledge graph updates */
@@ -126,6 +152,21 @@ export interface ToolContext {
    * Changes bar. Injected by SessionOrchestrator so tools can list/undo.
    */
   sessionChanges?: SessionChangesApi;
+
+  /**
+   * Dispatch a read-only research task to a subagent (Explore) running in an
+   * isolated context. Injected by the turn executor; undefined when no host
+   * is available. Returns the subagent's final report.
+   */
+  dispatchSubagent?: (request: {
+    agentType: string;
+    task: string;
+    thoroughness?: string;
+  }) => Promise<string>;
+  /** Bounded fresh-read cache shared by the active sequential turn. */
+  evidenceStore?: import("../evidence-store.ts").EvidenceStore;
+  /** Dynamic task-list updates for the active sequential ReAct turn. */
+  updateTasks?: (ops: import("../../plans.ts").TaskListOps) => Promise<import("../../plans.ts").TaskListApplyOutcome>;
 }
 
 export interface ReadFileResultMetadata {

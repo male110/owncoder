@@ -47,6 +47,8 @@ export interface PersistedSession {
   history: ChatTurn[];
   terminalLog: TerminalEntry[];
   lastPlanPath: string | null;
+  /** Spec feature this session is working on (spec → design → tasks chain). */
+  currentFeature?: string | null;
   todoAnchor: string | null;
   lastCheckpointId: string | null;
   /** Optional for backward compatibility with saved pre-document-workflow sessions. */
@@ -288,6 +290,7 @@ async function createSessionFileLocked(
     history: [],
     terminalLog: [],
     lastPlanPath: null,
+    currentFeature: null,
     todoAnchor: null,
     lastCheckpointId: null,
     documentWorkflow: null,
@@ -345,6 +348,7 @@ async function saveSessionByIdLocked(
     history: sanitizeHistory(snap.history),
     terminalLog: (snap.terminalLog ?? []).slice(-MAX_TERMINAL),
     lastPlanPath: snap.lastPlanPath,
+    currentFeature: snap.currentFeature ?? null,
     todoAnchor: snap.todoAnchor,
     lastCheckpointId: snap.lastCheckpointId,
     documentWorkflow: snap.documentWorkflow ?? null,
@@ -417,29 +421,15 @@ export async function deleteSessionSidecars(workspaceRoot: string, id: string): 
     deleteConversationStore(workspaceRoot, id),
   ]);
 }
-
-
-export async function savePersistedSession(
-  workspaceRoot: string,
-  snap: Omit<PersistedSession, "version" | "updatedAt">,
-): Promise<void> {
-  const { activeId, sessions } = await listSessionMetas(workspaceRoot);
-  let id = activeId ?? sessions[0]?.id;
-  if (!id) {
-    const created = await createSessionFile(workspaceRoot, { mode: snap.mode });
-    id = created.meta.id;
-  }
-  await saveSessionById(workspaceRoot, id, snap);
-}
-
 export async function clearPersistedSession(workspaceRoot: string): Promise<void> {
   const { activeId } = await listSessionMetas(workspaceRoot);
   if (activeId) {
     await saveSessionById(workspaceRoot, activeId, {
-      mode: "plan",
+      mode: "spec",
       history: [],
       terminalLog: [],
       lastPlanPath: null,
+      currentFeature: null,
       todoAnchor: null,
       lastCheckpointId: null,
       documentWorkflow: null,
@@ -462,10 +452,12 @@ function sanitizeSession(data: PersistedSession): PersistedSession {
     title: data.title,
     updatedAt: data.updatedAt || data.createdAt || "",
     createdAt: data.createdAt,
-    mode: data.mode === "agent" ? "agent" : "plan",
+    // Legacy sessions call the read-only mode "plan" — migrate on load.
+    mode: data.mode === "agent" ? "agent" : "spec",
     history: sanitizeHistory(data.history),
     terminalLog: Array.isArray(data.terminalLog) ? data.terminalLog.slice(-MAX_TERMINAL) : [],
     lastPlanPath: data.lastPlanPath ?? null,
+    currentFeature: data.currentFeature ?? null,
     todoAnchor: data.todoAnchor ?? null,
     lastCheckpointId: data.lastCheckpointId ?? null,
     documentWorkflow: sanitizeDocumentWorkflow(data.documentWorkflow),
@@ -513,7 +505,12 @@ function sanitizeDocumentWorkflow(value: unknown): DocumentWorkflowState | null 
   if (!value || typeof value !== "object") return null;
   const state = value as Partial<DocumentWorkflowState>;
   if (
-    (state.stage !== "awaiting_prd_confirmation" && state.stage !== "awaiting_tdd_confirmation") ||
+    !(
+      state.stage === "awaiting_spec_confirmation" ||
+      state.stage === "awaiting_design_confirmation" ||
+      state.stage === "awaiting_tasks_confirmation" ||
+      state.stage === "spec_workflow_done"
+    ) ||
     typeof state.documentPath !== "string" ||
     !state.documentPath.trim() ||
     typeof state.updatedAt !== "string"

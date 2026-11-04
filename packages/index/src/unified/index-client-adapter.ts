@@ -16,12 +16,14 @@ import type {
   GraphResult,
   CallSite,
   RagHit,
+  SemanticSearchPort,
   SymbolSearchResult,
   SearchOptions,
 } from "../index.ts";
 import type { IndexStatus, MapOpts, Tag } from "@owncoder/shared";
 import { UnifiedIndex } from "./index.ts";
 import { buildIndexAsync, updateIndexAsync } from "./builder.ts";
+import { buildSemanticIndex, SEMANTIC_EMBED_DIM, toFloat32 } from "./semantic-index.ts";
 import { MAX_FILE_SIZE } from "./scanner.ts";
 
 /**
@@ -36,9 +38,14 @@ export class UnifiedIndexAdapter implements IndexClient {
   private buildPromise: Promise<void> | null = null;
   private readonlyMode = false;
   private fileTypeListener: ((fileTypes: string[]) => void | Promise<void>) | undefined;
+  /** 语义检索端口（桌面端注入：bge 嵌入 + sqlite-vec 加载）；缺省时整条语义通道降级。 */
+  private semantic: SemanticSearchPort | undefined;
+  /** sqlite-vec 是否已在本连接注册（幂等标志，构建写 vec0 / 查询 KNN 共用）。 */
+  private vecLoaded = false;
 
-  constructor() {
+  constructor(options?: { semantic?: SemanticSearchPort }) {
     this.index = new UnifiedIndex();
+    this.semantic = options?.semantic;
   }
 
   onFileTypes(listener: (fileTypes: string[]) => void | Promise<void>): void {
@@ -66,6 +73,18 @@ export class UnifiedIndexAdapter implements IndexClient {
         throw new Error("Failed to initialize database");
       }
 
+      // sqlite-vec 模块注册：构建侧写 vec0、查询侧 KNN 都需要模块在本连接注册。
+      // 幂等（每适配器实例一次）；失败仅禁用语义检索，不影响符号索引。
+      if (this.semantic && !this.vecLoaded) {
+        try {
+          this.semantic.loadVec(db);
+          this.vecLoaded = true;
+        } catch (error) {
+          console.warn("[UnifiedIndexAdapter] sqlite-vec load failed, semantic search disabled:", error);
+          this.semantic = undefined;
+        }
+      }
+
       if (this.readonlyMode) {
         const stats = this.index.getStats();
         this.kind = stats.files > 0 ? "ready" : "idle";
@@ -85,6 +104,13 @@ export class UnifiedIndexAdapter implements IndexClient {
           // Recompute cheap meta diff inside builder; do not force full rewrite.
           await this.doIncrementalBuild(db, root, { added: [], modified: [], removed: [] });
         }
+      }
+
+      // 后置语义通道（符号 chunk 嵌入 → sqlite-vec）。嵌入器以端口注入，
+      // index 包零 ONNX 依赖。best-effort：失败不阻塞构建（日志一行），
+      // ragSearch 降级为空，消费方 hybrid 回退 FTS。
+      if (!this.readonlyMode && this.semantic && this.vecLoaded) {
+        await this.runSemanticPass(db, root);
       }
 
       this.kind = "ready";
@@ -294,6 +320,9 @@ export class UnifiedIndexAdapter implements IndexClient {
     this.kind = "building";
     try {
       await this.doFullBuild(db, this.root);
+      if (this.semantic && this.vecLoaded) {
+        await this.runSemanticPass(db, this.root);
+      }
       this.kind = "ready";
     } catch (error) {
       this.kind = "error";
@@ -347,10 +376,59 @@ export class UnifiedIndexAdapter implements IndexClient {
     }
   }
 
-  // ========== 可选方法：RAG（暂不实现，返回空） ==========
+  // ========== 语义检索（ragSearch；rag* 其余成员为预留存根） ==========
 
-  async ragSearch(): Promise<RagHit[]> {
-    return [];
+  async ragSearch(query: string, topK: number): Promise<RagHit[]> {
+    if (!this.semantic || !this.vecLoaded) return [];
+    const db = this.index.getDatabase();
+    if (!db) return [];
+    try {
+      const vector = toFloat32(await this.semantic.embedQuery(query));
+      if (vector.length !== SEMANTIC_EMBED_DIM) return [];
+      const k = Math.max(1, Math.min(topK, 100));
+      const rows = db
+        .prepare(
+          `SELECT c.id, c.path, c.symbol_name, c.qualified_name, c.kind, c.start_line, c.end_line,
+                  c.content, f.language, v.distance
+           FROM (SELECT rowid, distance FROM code_chunks_vec WHERE embedding MATCH ? AND k = ?) v
+           JOIN code_chunks c ON c.id = v.rowid
+           JOIN files f ON f.path = c.path
+           ORDER BY v.distance ASC`,
+        )
+        .all(vector, k) as Array<{
+        id: number;
+        path: string;
+        symbol_name: string | null;
+        qualified_name: string | null;
+        kind: string | null;
+        start_line: number;
+        end_line: number;
+        content: string;
+        language: string | null;
+        distance: number;
+      }>;
+      return rows.map((r) => {
+        // sqlite-vec cosine distance: 0 = 相同，越大越远 → 转 [0,1] 相关度。
+        const distance = typeof r.distance === "number" && Number.isFinite(r.distance) ? r.distance : 1;
+        const score = Math.max(0, Math.min(1, 1 - distance));
+        return {
+          chunkId: String(r.id),
+          filePath: r.path,
+          symbol: r.qualified_name ?? r.symbol_name ?? r.path,
+          content: r.content,
+          startLine: r.start_line,
+          endLine: r.end_line,
+          language: r.language ?? "",
+          score,
+          semanticScore: score,
+        } satisfies RagHit;
+      });
+    } catch (error) {
+      // vec0 表缺失（语义通道未跑过的旧库）/ KNN 失败一律降级为空，
+      // 消费方 hybrid 回退 FTS。
+      console.error(`[UnifiedIndexAdapter] ragSearch failed:`, error);
+      return [];
+    }
   }
   async ragBuild(): Promise<void> {}
   async ragUpdate(): Promise<void> {}
@@ -415,6 +493,10 @@ export class UnifiedIndexAdapter implements IndexClient {
         removed: [],
       };
       await this.doIncrementalBuild(db, this.root, diff);
+      // 增量构建后同步语义通道（只重嵌入水位变化的文件——reconcile 内部比对）。
+      if (this.semantic && this.vecLoaded) {
+        await this.runSemanticPass(db, this.root);
+      }
     } catch (error) {
       console.error(`[UnifiedIndexAdapter] flushDirtyFiles failed:`, error);
     }
@@ -511,5 +593,38 @@ export class UnifiedIndexAdapter implements IndexClient {
   private estimateTokens(text: string): number {
     // 粗略估计：1 token ≈ 4 characters
     return Math.ceil(text.length / 4);
+  }
+
+  /**
+   * 后置语义通道：reconcile 嵌入变更文件的符号 chunk。
+   * 独立 try/catch——语义失败永不阻塞符号索引构建（降级由 ragSearch 空结果 + hybrid 兜底）。
+   */
+  private async runSemanticPass(db: Database.Database, root: string): Promise<void> {
+    if (!this.semantic) return;
+    try {
+      const stats = await buildSemanticIndex(db, root, {
+        embedder: { embedBatch: (texts) => this.semantic!.embedBatch(texts) },
+        ensureVecTable: (d) => {
+          d.exec(
+            `CREATE VIRTUAL TABLE IF NOT EXISTS code_chunks_vec USING vec0(
+              embedding float[${SEMANTIC_EMBED_DIM}] distance_metric=cosine
+            )`,
+          );
+        },
+        onProgress: (done, total, file) => {
+          if (done % 100 === 0 || done === total) {
+            console.log(`[UnifiedIndexAdapter] Semantic index: ${done}/${total} ${file}`);
+          }
+        },
+      });
+      if (stats.filesEmbedded > 0) {
+        console.log(
+          `[UnifiedIndexAdapter] Semantic index: ${stats.filesEmbedded} files, ` +
+            `${stats.chunksWritten} chunks embedded (${stats.chunksSkipped} skipped)`,
+        );
+      }
+    } catch (error) {
+      console.error("[UnifiedIndexAdapter] semantic index pass failed:", error);
+    }
   }
 }

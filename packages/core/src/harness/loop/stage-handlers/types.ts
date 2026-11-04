@@ -72,30 +72,17 @@ export interface SchedulerState {
   rawDecompose?: {
     intent: string;
     userConstraints?: string[];
-    progressStatus?: string;
+    /** 任务相关历史：与 tasks 同级，简单任务无分解时仍有历史可复用。 */
+    relevantHistory?: TaskRelevantHistory;
     tasks: Array<{
       id: string;
+      title?: string;
       description: string;
-      userConstraints?: string[];
-      relevantHistory?: TaskRelevantHistory;
-      progressStatus?: string;
-      steps: Array<{
-        id: string;
-        description: string;
-        dependsOn: string[];
-        verificationCriteria?: {
-          command: string;
-          expectedOutput: string;
-          exitCode?: number;
-        };
-        rollbackStrategy?: string;
-        estimatedComplexity?: "low" | "medium" | "high";
-        /** 本步可复用的全部相关历史（自由文本） */
-        relevantHistory?: TaskRelevantHistory;
-      }>;
+      /** 任务执行指令（原 guidance）：给执行者的建议性指导。 */
+      prompt: string;
+      kind?: "implementation" | "verification";
+      dependsOn?: string[];
     }>;
-    /** 整单共享可复用历史（兼容；优先使用 steps[].relevantHistory） */
-    relevantHistory?: TaskRelevantHistory;
   };
 }
 
@@ -115,6 +102,8 @@ export interface SchedulerContext {
   state: SchedulerState;
   hasToolStage: boolean;
   hasExecute: boolean;
+  /** Deterministic local route computed before the pipeline starts. */
+  requestRoute?: import("../request-router.ts").RequestRoute;
 
   taskClassification: ReturnType<typeof classifyTask>;
   /** Legacy load_anchors node (undefined after migration; kept for backward compat). */

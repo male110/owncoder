@@ -233,7 +233,8 @@ export class MemoryManager {
   addToolOutput(tool: string, output: string): void {
     this.working.recentToolOutputs.push({
       tool,
-      output: output.slice(0, 2000),
+      // 工作记忆保留原始结果；上下文容量由 ReAct 压缩流程管理。
+      output,
       timestamp: Date.now(),
     });
     if (this.working.recentToolOutputs.length > this.maxWorkingTools) {

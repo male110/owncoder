@@ -26,10 +26,6 @@ const TOOL_LABELS: Record<string, MsgId> = {
   search_code: "搜索代码",
   search_symbols: "搜索符号",
   graph_search: "图搜索",
-  codemap_search: "代码地图搜索",
-  codemap_impact: "影响分析",
-  list_dir: "列出目录",
-  grep: "搜索文本",
   bash: "运行命令",
   save_plan: "保存计划",
   repo_map: "仓库地图",
@@ -49,14 +45,13 @@ const TOOL_LABELS: Record<string, MsgId> = {
   lsp_go_to_definition: "跳转定义",
   lsp_find_references: "查找引用",
   lsp_hover: "悬停信息",
-  lsp_document_symbols: "文档符号",
-  lsp_workspace_symbols: "工作区符号",
   lsp_diagnostics: "LSP 诊断",
   lsp_code_actions: "代码操作",
   save_experience: "保存经验",
-  save_spec: "保存规格",
-  save_design: "保存设计",
-  list_sdd: "列出 SDD",
+  save_spec: "保存需求规格",
+  save_design: "保存技术设计",
+  save_tasks: "保存任务清单",
+  list_specs: "列出 Spec",
   analyze_issue: "分析问题",
   report_blocker: "报告阻塞",
 };
@@ -103,10 +98,10 @@ export function toolStatusLabel(
     apply_patch: "编辑文件",
     search_code: "搜索代码",
     search_symbols: "搜索符号",
-    list_dir: "列出目录",
-    grep: "搜索文本",
     bash: "运行命令",
     save_plan: "保存计划",
+    save_tasks: "保存任务清单",
+    list_specs: "列出 Spec",
     repo_map: "生成仓库地图",
     git_status: "查看 Git 状态",
     type_check: "类型检查",
@@ -145,7 +140,7 @@ export function buildLogBlocks(
     rounds[rounds.length - 1]!.push(t);
   }
 
-  const lastRoundActive = sending || liveEventCount > 0;
+  const lastRoundActive = sending;
 
   rounds.forEach((round, ri) => {
     const active = ri === rounds.length - 1 && lastRoundActive;

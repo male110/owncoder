@@ -45,20 +45,36 @@ test("formatFinalTaskReports composes every retained task report", () => {
     },
   ];
 
-  const text = formatFinalTaskReports(reports, { done: 1, total: 2 });
+  const text = formatFinalTaskReports(reports);
 
-  assert.match(text, /本次对话最终报告/);
-  assert.match(text, /进度：1\/2/);
-  assert.match(text, /任务 1 \(task_1\) — completed/);
-  assert.match(text, /Fix A/);
-  assert.match(text, /Changed file A\./);
-  assert.match(text, /任务 2 \(task_2\) — failed/);
-  assert.match(text, /Blocked on missing credential\./);
+  assert.equal(text, "Changed file A.\n\nBlocked on missing credential.");
+  assert.doesNotMatch(text, /本次对话最终报告/);
+  assert.doesNotMatch(text, /进度/);
+  assert.doesNotMatch(text, /任务/);
 });
 
-test("formatFinalTaskReports falls back when no reports were retained", () => {
-  assert.equal(
-    formatFinalTaskReports([], { done: 0, total: 2 }),
-    "All tasks processed (0/2 completed).",
-  );
+test("formatFinalTaskReports keeps one final report for a single task and removes repeated paragraphs", () => {
+  const report = "调查结论和代码证据。\n\n修复建议。";
+  assert.equal(formatFinalTaskReports([
+    { taskId: "task_1", description: "Investigate", status: "completed", report: `${report}\n\n${report}` },
+  ]), report);
+});
+
+test("formatFinalTaskReports keeps the latest retry result for a task", () => {
+  assert.equal(formatFinalTaskReports([
+    { taskId: "task_1", description: "Investigate", status: "failed", report: "中间失败状态" },
+    { taskId: "task_1", description: "Investigate", status: "completed", report: "最终调查结论及证据" },
+  ]), "最终调查结论及证据");
+});
+
+test("formatFinalTaskReports removes identical report text but preserves distinct task reports", () => {
+  assert.equal(formatFinalTaskReports([
+    { taskId: "task_1", description: "A", status: "completed", report: "相同结论" },
+    { taskId: "task_2", description: "B", status: "completed", report: " 相同结论 " },
+    { taskId: "task_3", description: "C", status: "failed", report: "不同的失败报告" },
+  ]), "相同结论\n\n不同的失败报告");
+});
+
+test("formatFinalTaskReports returns an empty body when no reports were retained", () => {
+  assert.equal(formatFinalTaskReports([]), "");
 });

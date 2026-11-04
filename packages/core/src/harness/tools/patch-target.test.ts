@@ -37,9 +37,15 @@ describe("补丁目标解析", () => {
   });
 
   it("agent 和 plan 的参数契约一致", () => {
-    for (const options of [{ mode: "agent" as const }, { mode: "plan" as const, planCanEdit: true }]) {
+    for (const options of [{ mode: "agent" as const }, { mode: "spec" as const, planCanEdit: true }]) {
       const tool = allEnhancedTools(options).find((entry) => entry.function.name === "apply_patch");
-      expect(tool?.function.parameters.required).toEqual(["file_path", "patch"]);
+      // old_string / new_string 是首选编辑方式，二者均非 schema 级必填——
+      // 工具运行时要求 old_string 或 patch 至少提供一个。
+      expect(tool?.function.parameters.required).toEqual(["file_path"]);
+      const props = tool?.function.parameters.properties as Record<string, unknown>;
+      for (const key of ["file_path", "old_string", "new_string", "replace_all", "patch"]) {
+        expect(props).toHaveProperty(key);
+      }
     }
   });
 });
@@ -78,6 +84,21 @@ it("多文件读取后的执行链路：只修改明确目标，拒绝无路径�
     expect((await run({ file_path: "other.txt", patch: "--- a/other.txt\n+++ b/other.txt\n@@ -1 +0,0 @@\n-final\n" })).ok).toBe(true);
     expect(await readFile(join(root, "other.txt"), "utf8")).toBe("");
     expect((await run({ patch: `../outside.txt\n${block}` })).ok).toBe(false);
+
+    // old_string / new_string 片段改写主路径
+    await writeFile(join(root, "target.txt"), "alpha\nbeta\ngamma\n");
+    expect((await run({ file_path: "target.txt", old_string: "beta", new_string: "BETA" })).ok).toBe(true);
+    expect(await readFile(join(root, "target.txt"), "utf8")).toBe("alpha\nBETA\ngamma\n");
+    // replace_all 替换全部出现位置
+    await writeFile(join(root, "target.txt"), "a\nx\na\n");
+    expect((await run({ file_path: "target.txt", old_string: "a", new_string: "z", replace_all: true })).ok).toBe(true);
+    expect(await readFile(join(root, "target.txt"), "utf8")).toBe("z\nx\nz\n");
+    // 不唯一且未设 replace_all → 失败且不修改文件
+    await writeFile(join(root, "target.txt"), "dup\ndup\n");
+    expect((await run({ file_path: "target.txt", old_string: "dup", new_string: "one" })).ok).toBe(false);
+    expect(await readFile(join(root, "target.txt"), "utf8")).toBe("dup\ndup\n");
+    // 两者都缺失 → 参数错误
+    expect((await run({ file_path: "target.txt" })).ok).toBe(false);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

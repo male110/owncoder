@@ -33,7 +33,7 @@ async function runCalls(calls: Call[], extra: Partial<ReActLoopArgs> = {}) {
     }],
   } as Awaited<ReturnType<typeof chatCompletionStream>>);
   const args = {
-    opts: { mode: "plan", sessionId: "args-test", userMessage: "检查工具参数", onEvent: (ev: TurnEvent) => events.push(ev) },
+    opts: { mode: "spec", sessionId: "args-test", userMessage: "检查工具参数", onEvent: (ev: TurnEvent) => events.push(ev) },
     model: { model: "test-model" },
     messages: [{ role: "user", content: "检查工具参数" }],
     history,
@@ -66,7 +66,7 @@ describe("ReAct 工具历史参数", () => {
     const calls: Call[] = [
       { id: "outline", name: "read_outline", arguments: { file_path: "src/index.ts" } },
       { id: "read", name: "read_file", arguments: { file_path: "src/index.ts", offset: 12, limit: 8 } },
-      { id: "status", name: "git_status", arguments: {} },
+      { id: "deps", name: "project_deps", arguments: {} },
     ];
     const { history, events } = await runCalls(calls);
     const tools = history.filter((turn) => turn.role === "tool");

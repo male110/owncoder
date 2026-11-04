@@ -332,13 +332,6 @@ function buildAutoFixPrompt(state: AutoFixState, errorSummary: string, maxAttemp
     ``,
     errorSummary,
     ``,
-    `### 接下来应该做什么`,
-    `1. 逐个分析错误的根因；如果错误涉及的代码不在上下文中，先用 read_file 查看报错位置`,
-    `2. 只修复你引入的错误，不要修改不相关的代码，也不要用删除功能或绕过检查的方式“修复”`,
-    `3. 用 apply_patch 修复已有文件（仅新文件才用 write_file）`,
-    `4. 修复完成后停止调用工具，我会重新验证`,
-    `5. 如果报错含义不清楚、仓库里没有对应文档，或这是第 2 次及以上修复尝试，先用 web_search 搜索完整报错再改，不要靠猜测连改`,
-    ``,
     state.fixAttempts >= maxAttempts - 1
       ? `⚠️ 这是最后一次修复机会。如果这次失败，错误将被报告给用户。`
       : `你还有 ${maxAttempts - state.fixAttempts} 次修复尝试。`,

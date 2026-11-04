@@ -48,7 +48,7 @@ function stripDeprecatedNodes(data: Record<string, unknown>): Record<string, unk
   const deprecated = new Set(["think", "intent"]);
   const modes = data.modes as Record<string, unknown> | undefined;
   if (!modes) return data;
-  for (const modeKey of ["plan", "agent"]) {
+  for (const modeKey of ["spec", "agent"]) {
     const mode = modes[modeKey] as Record<string, unknown> | undefined;
     const pipeline = mode?.pipeline as Record<string, unknown> | undefined;
     const nodes = pipeline?.nodes as Array<Record<string, unknown>> | undefined;
@@ -126,7 +126,7 @@ function readModelOverlay(file: string): ModelSettingsOverlay | null {
  *  removed intent routers) in effective config after merge. Surfaces a report via
  *  console so drops are not silent (spec 5.4). */
 function migratePipelines(config: SystemWorkflowConfig): SystemWorkflowConfig {
-  for (const modeKey of ["plan", "agent"] as const) {
+  for (const modeKey of ["spec", "agent"] as const) {
     const pipeline = config.modes[modeKey].pipeline;
     const hasLegacy = pipeline.nodes.some((n) => LEGACY_PIPELINE_TYPES.has(n.type));
     if (hasLegacy) {
@@ -175,6 +175,11 @@ export class SettingsStore {
   /** Directory used for global user data (memories, etc.). */
   get memoriesDir(): string {
     return this.userDir;
+  }
+
+  /** Directory holding user-level skills (<userData>/owncoder/skills). */
+  get skillsDir(): string {
+    return join(this.userDir, "skills");
   }
 
   /**
@@ -320,7 +325,7 @@ export class SettingsStore {
     // Build the workflow overlay, preserving untouched builtin pipelines.
     const overlay = workflow;
     const existing = readOverlay(this.userWorkflowPath);
-    for (const mode of ["plan", "agent"] as const) {
+    for (const mode of ["spec", "agent"] as const) {
       if (JSON.stringify(migrated.modes[mode].pipeline) !== JSON.stringify(this.cached.modes[mode].pipeline)) {
         continue;
       }
@@ -340,7 +345,7 @@ export class SettingsStore {
   }
 
   /** Remove only one global pipeline override so the current builtin graph is used. */
-  restoreUserPipeline(mode: "plan" | "agent"): SystemWorkflowConfig {
+  restoreUserPipeline(mode: "spec" | "agent"): SystemWorkflowConfig {
     const existing = readOverlay(this.userWorkflowPath);
     if (!existing?.modes?.[mode]?.pipeline) return this.reload();
 

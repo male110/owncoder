@@ -22,10 +22,10 @@ export function wrapWithTag(tag: string, content: string): string {
 
 /**
  * Core system instructions (highest priority, immutable by user).
- * This is the base prompt (BUILTIN_PLAN_PROMPT or BUILTIN_AGENT_PROMPT).
+ * This is the base prompt (BUILTIN_SPEC_PROMPT or BUILTIN_AGENT_PROMPT).
  */
 export function tagSystemInstructions(content: string): string {
-  return wrapWithTag("", content);
+  return wrapWithTag("system", content);
 }
 
 /**
@@ -59,25 +59,6 @@ export function tagCurrentTask(content: string): string {
 export function tagUserInput(content: string): string {
   return wrapWithTag("user_input", content);
 }
-
-/**
- * Injected code snippets, file contents, or other reference material.
- * Reference only, never overrides user instructions.
- */
-export function tagInjectedContext(content: string): string {
-  return wrapWithTag("injected_context", content);
-}
-
-/**
- * Tool execution results or observations.
- */
-export function tagToolResult(content: string, tool?: string): string {
-  const attr = tool ? ` tool="${tool}"` : "";
-  const trimmed = content.trim();
-  if (!trimmed) return "";
-  return `<tool_result${attr}>\n${trimmed}\n</tool_result>`;
-}
-
 /**
  * Memory or working state from previous interactions.
  */
@@ -91,20 +72,3 @@ export function tagMemory(content: string): string {
 export function tagPlatformInfo(content: string): string {
   return wrapWithTag("platform_info", content);
 }
-
-/**
- * Verification results or test outputs.
- */
-export function tagVerificationResult(content: string): string {
-  return wrapWithTag("verification_result", content);
-}
-
-/**
- * Build multiple tagged sections into a single string.
- * Automatically filters out empty sections.
- */
-export function buildTaggedMessage(...sections: string[]): string {
-  return sections.filter(s => s.trim()).join("\n\n");
-}
-
-

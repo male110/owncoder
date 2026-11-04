@@ -159,8 +159,31 @@ function parseSearchReplaceBlocks(patch: string): ParsedBlocks {
   let i = 0;
   let blockNo = 0;
 
+  // A marker can be glued to the last content line when the model copies a
+  // file's final line (which often has no trailing newline) straight into the
+  // block: `const b = 2;=======`. A line is a marker only if it ends with a
+  // marker pattern; when a non-empty prefix precedes it we split the line into
+  // content + marker so the edit still parses instead of dying with a
+  // confusing "reached end of patch while reading SEARCH" error.
+  const GLUED_RE = /^(.*?)(<{5,9}\s*SEARCH\s*|={5,9}\s*$|>{5,9}\s*REPLACE\s*)$/;
+
+  const isMarker = (raw: string, re: RegExp): boolean => re.test(stripEol(raw).trim());
+
+  // Rewrite glued lines into separate content + marker lines (in place).
+  for (let k = 0; k < lines.length; k++) {
+    const line = lines[k];
+    const body = stripEol(line);
+    if (body.trim() === "" || isMarker(line, HEAD_RE) || isMarker(line, DIVIDER_RE) || isMarker(line, UPDATED_RE)) {
+      continue;
+    }
+    const m = body.match(GLUED_RE);
+    if (!m || !m[1]) continue;
+    const eol = line.slice(body.length);
+    lines.splice(k, 1, m[1] + eol, m[2].trim() + "\n");
+  }
+
   while (i < lines.length) {
-    if (!HEAD_RE.test(stripEol(lines[i]).trim())) {
+    if (!isMarker(lines[i], HEAD_RE)) {
       i++;
       continue;
     }
@@ -171,9 +194,9 @@ function parseSearchReplaceBlocks(patch: string): ParsedBlocks {
 
     // --- SEARCH section: everything up to the divider line ---
     const searchParts: string[] = [];
-    while (i < lines.length && !DIVIDER_RE.test(stripEol(lines[i]).trim())) {
+    while (i < lines.length && !isMarker(lines[i], DIVIDER_RE)) {
       // A REPLACE marker before the divider means the divider was omitted.
-      if (UPDATED_RE.test(stripEol(lines[i]).trim())) {
+      if (isMarker(lines[i], UPDATED_RE)) {
         return {
           error:
             `Block #${blockNo}: malformed patch — missing the "=======" divider line ` +
@@ -195,10 +218,10 @@ function parseSearchReplaceBlocks(patch: string): ParsedBlocks {
 
     // --- REPLACE section: everything up to the closing marker ---
     const replaceParts: string[] = [];
-    while (i < lines.length && !UPDATED_RE.test(stripEol(lines[i]).trim())) {
+    while (i < lines.length && !isMarker(lines[i], UPDATED_RE)) {
       // A second divider inside the REPLACE section is almost always a
       // malformed/truncated patch rather than literal content.
-      if (DIVIDER_RE.test(stripEol(lines[i]).trim())) {
+      if (isMarker(lines[i], DIVIDER_RE)) {
         return {
           error:
             `Block #${blockNo}: malformed patch — unexpected extra "=======" divider at line ` +
@@ -229,6 +252,18 @@ function parseSearchReplaceBlocks(patch: string): ParsedBlocks {
 
 // --- matching ---
 
+/**
+ * Line-level exact matches, tolerating a missing line ending on the *last* line
+ * of either side. Models routinely copy a file's final line verbatim into the
+ * SEARCH block; when that line has no trailing newline, `ensureTrailingNewline`
+ * on the SEARCH side introduces a phantom empty line that breaks equality.
+ * Comparing with `stripEol` avoids that asymmetry without affecting interior
+ * lines (which always keep their endings on both sides).
+ */
+function lineEqualsExact(contentLine: string, searchLine: string): boolean {
+  return contentLine === searchLine || stripEol(contentLine) === stripEol(searchLine);
+}
+
 /** Line-level exact matches. Returns every occurrence (for uniqueness checks). */
 function findExactLineMatches(contentLines: string[], searchLines: string[]): TextMatch[] {
   const results: TextMatch[] = [];
@@ -239,7 +274,7 @@ function findExactLineMatches(contentLines: string[], searchLines: string[]): Te
   for (let i = 0; i + m <= n; i++) {
     let ok = true;
     for (let k = 0; k < m; k++) {
-      if (contentLines[i + k] !== searchLines[k]) {
+      if (!lineEqualsExact(contentLines[i + k], searchLines[k])) {
         ok = false;
         break;
       }
@@ -411,10 +446,83 @@ function findTrailingWhitespaceFlexibleMatch(content: string, search: string): T
   return undefined;
 }
 
+/**
+ * Match a SEARCH block whose leading and/or trailing blank lines were added by
+ * the model as "context padding" but do not exist in the file (a very common
+ * failure at the file's start and end). The interior lines must still match
+ * exactly — the blank padding is dropped, never guessed around.
+ *
+ * `replace` is trimmed by the same amount so the replacement keeps its own
+ * relative blank-line structure.
+ */
+function findBlankPaddedMatch(
+  content: string,
+  search: string,
+  replace: string,
+): { match: TextMatch; replacement: string } | undefined {
+  const contentLines = splitLinesKeepEnds(content);
+  const searchLines = splitLinesKeepEnds(search);
+  const replaceLines = splitLinesKeepEnds(replace);
+  const m = searchLines.length;
+
+  // Count leading/trailing blank lines in SEARCH that have no counterpart in
+  // the file at the corresponding boundary.
+  let lead = 0;
+  while (lead < m && searchLines[lead].trim() === "") lead++;
+  if (lead === m) return undefined; // SEARCH is entirely blank — nothing real to find
+
+  let trail = 0;
+  while (trail < m - lead && searchLines[m - 1 - trail].trim() === "") trail++;
+
+  if (lead === 0 && trail === 0) return undefined; // no padding to strip
+
+  const strippedSearch = searchLines.slice(lead, m - trail);
+  const strippedReplace = replaceLines.slice(lead, replaceLines.length - trail);
+  if (strippedSearch.length === 0) return undefined;
+
+  const exacts = findExactLineMatches(contentLines, strippedSearch);
+  // Padding must resolve to exactly one location. More than one hit means the
+  // stripped content is a duplicate and the padding was the model's guess, not
+  // the file's structure — picking arbitrarily would silently edit the wrong
+  // copy, so refuse and let the caller's "not unique" diagnostic surface it.
+  if (exacts.length !== 1) return undefined;
+
+  // Even with a unique stripped match, the padding must be *real* — i.e. the
+  // matches must not be resolvable without stripping. If the padded SEARCH
+  // also matches somewhere verbatim, the normal exact path already handles it;
+  // and if removing the padding changed how many locations match, the padding
+  // was load-bearing and stripping it is unsafe.
+  if (findExactLineMatches(contentLines, searchLines).length > 0) return undefined;
+
+  const match = exacts[0];
+  const replacement = ensureTrailingNewline(strippedReplace.join(""));
+  return { match, replacement };
+}
+
+/**
+ * Count how many locations `searchLines` could plausibly refer to in the file,
+ * ignoring leading/trailing blank padding the model added. The flexible
+ * matchers each return the first hit they find, so any SEARCH that is
+ * ambiguous *after* stripping padding must be rejected up front — otherwise
+ * one of those matchers would silently pick a copy.
+ */
+function countCandidateLocations(contentLines: string[], searchLines: string[]): number {
+  const m = searchLines.length;
+  if (m === 0) return 0;
+
+  let lead = 0;
+  while (lead < m && searchLines[lead].trim() === "") lead++;
+  let trail = 0;
+  while (trail < m - lead && searchLines[m - 1 - trail].trim() === "") trail++;
+  const core = searchLines.slice(lead, m - trail);
+  if (core.length === 0) return 0;
+
+  return findExactLineMatches(contentLines, core).length;
+}
+
 /** Line-level similarity ratio: 2*LCS / (len(a)+len(b)), treating lines as atoms. */
 function lineRatio(a: string[], b: string[]): number {
-  const m = a.length;
-  const n = b.length;
+  const m = a.length;  const n = b.length;
   if (m === 0 && n === 0) return 1;
   if (m === 0 || n === 0) return 0;
   const dp = new Array<number>(n + 1).fill(0);
@@ -695,18 +803,40 @@ function applyBlock(
   const contentLines = splitLinesKeepEnds(content);
   const searchLines = splitLinesKeepEnds(search);
 
-  // 1. Line-level exact match (+ uniqueness check)
-  const exacts = findExactLineMatches(contentLines, searchLines);
-  if (exacts.length > 1) {
+  // 1. No-op block — SEARCH and REPLACE are identical, so there is nothing to
+  //    change regardless of where it would match. Checked first because later
+  //    stages would otherwise report a phantom "1 change" success.
+  if (search === replace) {
     return {
       success: false,
       error:
-        `Block #${blockIndex + 1}: SEARCH text is not unique — found ${exacts.length} matches.\n\n` +
+        `Block #${blockIndex + 1}: SEARCH and REPLACE are identical — this block changes nothing. ` +
+        `Remove it, or put the intended new content in REPLACE.`,
+      replacements: 0,
+    };
+  }
+
+  // 2. Global ambiguity check across every matching strategy. The flexible
+  //    matchers below each return the FIRST location they find, so a SEARCH
+  //    that is ambiguous under any of them would silently edit an arbitrary
+  //    copy (e.g. the second of two identical methods). Detect it once here
+  //    and ask for more context instead. Exact-stripped comparison is used so
+  //    a missing trailing newline on the file's last line cannot hide a real
+  //    duplicate.
+  const ambiguity = countCandidateLocations(contentLines, searchLines);
+  if (ambiguity > 1) {
+    return {
+      success: false,
+      error:
+        `Block #${blockIndex + 1}: SEARCH text is not unique — found ${ambiguity} matches.\n\n` +
         `Add more surrounding lines to the SEARCH block so it matches exactly one location.\n\n` +
         `SEARCH text (first 200 chars):\n${search.slice(0, 200)}`,
       replacements: 0,
     };
   }
+
+  // 3. Line-level exact match (uniqueness already established by step 2)
+  const exacts = findExactLineMatches(contentLines, searchLines);
   if (exacts.length === 1) {
     const match = exacts[0];
     return {
@@ -719,7 +849,21 @@ function applyBlock(
     };
   }
 
-  // 2. Line-ending-equivalent match (CRLF/LF/CR)
+  // 3. Blank-padding-flexible match (model added blank lines around the block
+  //    that don't exist in the file — most common at file start/end)
+  const bp = findBlankPaddedMatch(content, search, replace);
+  if (bp) {
+    return {
+      success: true,
+      content:
+        content.slice(0, bp.match.start) +
+        buildReplacement(content, bp.match, bp.replacement) +
+        content.slice(bp.match.end),
+      replacements: 1,
+    };
+  }
+
+  // 3. Line-ending-equivalent match (CRLF/LF/CR)
   const eolMatch = findLineEndingEquivalentMatch(content, search);
   if (eolMatch) {
     return {
@@ -732,7 +876,7 @@ function applyBlock(
     };
   }
 
-  // 3. Leading-whitespace-flexible match (uniform indent drift)
+  // 4. Leading-whitespace-flexible match (uniform indent drift)
   const ws = findLeadingWhitespaceFlexibleMatch(content, search, replace);
   if (ws) {
     return {
@@ -745,7 +889,7 @@ function applyBlock(
     };
   }
 
-  // 4. Trailing-whitespace-flexible match (trailing spaces/tabs)
+  // 5. Trailing-whitespace-flexible match (trailing spaces/tabs)
   const tw = findTrailingWhitespaceFlexibleMatch(content, search);
   if (tw) {
     return {
@@ -758,7 +902,21 @@ function applyBlock(
     };
   }
 
-  // 5. Fail with enhanced diagnostic — do NOT fuzzy-replace.
+  // 6. SEARCH/REPLACE swapped — the model put the new text in SEARCH and the
+  //    old text in REPLACE. Detecting this turns a baffling "not found" into
+  //    an actionable diagnosis instead of a wasted retry loop.
+  if (replace.trim() && findExactLineMatches(contentLines, splitLinesKeepEnds(replace)).length > 0) {
+    return {
+      success: false,
+      error:
+        `Block #${blockIndex + 1}: SEARCH and REPLACE appear to be swapped — the REPLACE text ` +
+        `was found verbatim in the file, but the SEARCH text was not. Put the current file text ` +
+        `in SEARCH and the intended new text in REPLACE.`,
+      replacements: 0,
+    };
+  }
+
+  // 7. Fail with enhanced diagnostic — do NOT fuzzy-replace.
   const lineDiff = generateLineDiff(search, content);
   const diffDiagnostic = formatLineDiff(lineDiff);
   

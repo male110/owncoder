@@ -36,7 +36,7 @@ function stubIndex(): IndexClient {
 function ctxFor(root: string): ToolContext {
   return {
     workspaceRoot: root,
-    mode: "plan",
+    mode: "spec",
     workflow: BUILTIN_WORKFLOW,
     index: stubIndex(),
     readSet: new Set(),
@@ -136,7 +136,7 @@ test("read_file 在访问文件前拒绝缺失路径和错误参数", async () =
 });
 
 test("read_file 执行入口接受正常路径和合法行范围", async () => {
-  for (const mode of ["agent", "plan"] as const) {
+  for (const mode of ["agent", "spec"] as const) {
     const tool = allEnhancedTools({ mode }).find((entry) => entry.function.name === "read_file");
     assert.deepEqual(tool?.function.parameters.required, ["file_path"]);
     const properties = tool?.function.parameters.properties as Record<string, unknown>;
@@ -160,7 +160,7 @@ test("read_file 执行入口接受正常路径和合法行范围", async () => {
 });
 
 test("两种反代协议保留实际读取工具说明和行范围参数", async () => {
-  for (const mode of ["agent", "plan"] as const) {
+  for (const mode of ["agent", "spec"] as const) {
     const tools = allEnhancedTools({ mode }).filter((tool) =>
       ["read_file", "read_outline", "read_symbol"].includes(tool.function.name),
     );

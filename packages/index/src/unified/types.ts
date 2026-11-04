@@ -14,17 +14,6 @@ export interface UnifiedIndexOptions {
   /** 排除的目录模式 */
   excludeDirs?: string[];
 }
-
-export interface FileRecord {
-  id: number;
-  path: string;
-  language: string | null;
-  size: number;
-  hash: string;
-  indexed_at: number;
-  mtime: number;
-}
-
 export interface SymbolRecord {
   id: number;
   file_id: number;
@@ -39,15 +28,6 @@ export interface SymbolRecord {
   signature: string | null;
   doc: string | null;
 }
-
-export interface ReferenceRecord {
-  id: number;
-  from_symbol_id: number;
-  to_symbol_id: number;
-  ref_type: string;
-  line: number;
-}
-
 export interface SearchResult {
   type: "file" | "symbol" | "reference";
   path: string;
@@ -137,96 +117,3 @@ export interface ManifestDiff {
   modified: string[];
   removed: string[];
 }
-
-/**
- * 支持的编程语言 (基于 tree-sitter-wasms)
- * 
- * 共支持 35+ 种编程语言
- */
-export const SUPPORTED_LANGUAGES = [
-  // Web & JavaScript 生态
-  "typescript",
-  "javascript",
-  "tsx",
-  "jsx",
-  
-  // 系统编程
-  "c",
-  "cpp",
-  "rust",
-  "go",
-  "zig",
-  "swift",
-  
-  // JVM 语言
-  "java",
-  "kotlin",
-  "scala",
-  
-  // 脚本语言
-  "python",
-  "ruby",
-  "php",
-  "lua",
-  "bash",
-  "dart",
-  
-  // 函数式语言
-  "elixir",
-  "elm",
-  "ocaml",
-  "rescript",
-  "elisp",
-  
-  // .NET 生态
-  "csharp",
-  
-  // 前端样式
-  "css",
-  "html",
-  "vue",
-  
-  // 数据格式
-  "json",
-  "yaml",
-  "toml",
-  
-  // 其他
-  "objc",
-  "solidity",
-  "ql",
-] as const;
-
-export type SupportedLanguage = (typeof SUPPORTED_LANGUAGES)[number];
-
-/**
- * 符号类型
- */
-export const SYMBOL_KINDS = [
-  "function",
-  "method",
-  "class",
-  "interface",
-  "type",
-  "variable",
-  "constant",
-  "enum",
-  "property",
-  "parameter",
-] as const;
-
-export type SymbolKind = (typeof SYMBOL_KINDS)[number];
-
-/**
- * 引用类型
- */
-export const REFERENCE_TYPES = [
-  "call",      // 函数调用
-  "import",    // 导入
-  "extends",   // 继承
-  "implements",// 实现
-  "type",      // 类型引用
-  "reference", // 普通引用
-] as const;
-
-export type ReferenceType = (typeof REFERENCE_TYPES)[number];

@@ -124,7 +124,7 @@ export class UnifiedCodemapAdapter implements CodemapClient {
 
   async impact(nodeIdOrName: string, depth = 3): Promise<CodemapImpact> {
     try {
-      // 解析nodeId格式: path:name:line（codemap_search返回的格式）
+      // 解析nodeId格式: path:name:line（graph_search 走 codemap 回退时传入的格式）
       const parsed = this.parseNodeId(nodeIdOrName);
       
       let result;

@@ -303,10 +303,10 @@ console.log("— workflow diff / summary —");
   assert.ok(sum.defaultModel.includes("qwen2.5"));
 
   // Dual-mode pipelines: context → call model → (review)
-  const planPipe = modePipeline(BUILTIN_WORKFLOW, "plan");
+  const planPipe = modePipeline(BUILTIN_WORKFLOW, "spec");
   const agentPipe = modePipeline(BUILTIN_WORKFLOW, "agent");
   assert.ok(planPipe.nodes.some((n) => n.type === "explore_tools"));
-  assert.ok(planPipe.nodes.some((n) => n.type === "document_intent_router"));
+  // document_intent_router is a legacy node type, no longer in the builtin spec pipeline
   assert.ok(agentPipe.nodes.some((n) => n.type === "execute_tools"));
   assert.ok(agentPipe.nodes.some((n) => n.type === "present_changes"));
   assert.ok(!planPipe.nodes.some((n) => n.type === "intent"));
@@ -317,25 +317,25 @@ console.log("— workflow diff / summary —");
   assert.equal(ctx?.params?.injectAnchors, true);
 
   // Disable llm node → ordered list skips it
-  let withDisabled = updatePipelineNode(BUILTIN_WORKFLOW, "plan", "llm", {
+  let withDisabled = updatePipelineNode(BUILTIN_WORKFLOW, "spec", "llm", {
     enabled: false,
   });
-  const ordered = orderedEnabledNodes(withDisabled.modes.plan.pipeline);
+  const ordered = orderedEnabledNodes(withDisabled.modes.spec.pipeline);
   assert.ok(!ordered.some((n) => n.type === "explore_tools"));
 
   // Merge overlay restores / overlays pipeline node
   const merged = mergeWorkflow(BUILTIN_WORKFLOW, {
     version: 1,
     modes: {
-      plan: {
+      spec: {
         pipeline: {
           nodes: [{ id: "llm", type: "explore_tools", enabled: false }],
-          edges: BUILTIN_WORKFLOW.modes.plan.pipeline.edges,
+          edges: BUILTIN_WORKFLOW.modes.spec.pipeline.edges,
         },
       },
     },
   });
-  assert.equal(isNodeEnabled(merged.modes.plan.pipeline, "explore_tools"), false);
+  assert.equal(isNodeEnabled(merged.modes.spec.pipeline, "explore_tools"), false);
 
   // Agent llm prompt change shows in diff
   const execNode = BUILTIN_WORKFLOW.modes.agent.pipeline.nodes.find(

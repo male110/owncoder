@@ -666,7 +666,7 @@ function synthesizeFallbackResponse(state: LoopState): string {
   
   // Summarize based on last tool call
   if (lastTool.name === "report_blocker") {
-    return lastTool.result.slice(0, 500);
+    return lastTool.result;
   }
   
   if (["write_file", "apply_patch", "save_plan"].includes(lastTool.name)) {

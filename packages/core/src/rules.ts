@@ -3,7 +3,7 @@ import upath from "upath";
 import { join, resolve } from "node:path";
 
 const RULES_DIR = ".owncoder/rules";
-const MAX_COMBINED_CHARS = 3500;
+
 
 export interface RuleFileInfo {
   /** Filename only, e.g. `style.md` */
@@ -94,13 +94,13 @@ export async function deleteRule(workspaceRoot: string, name: string): Promise<v
 /** Load all rules sorted by filename into one markdown block for system injection. */
 export async function loadCombinedRules(
   workspaceRoot: string,
-  maxChars = MAX_COMBINED_CHARS,
+
 ): Promise<string> {
   const files = await listRules(workspaceRoot);
   if (files.length === 0) return "";
 
   const parts: string[] = [];
-  let used = 0;
+
   for (const f of files) {
     let text: string;
     try {
@@ -110,17 +110,7 @@ export async function loadCombinedRules(
     }
     if (!text) continue;
     const chunk = `### ${f.name}\n${text}`;
-    if (used + chunk.length + 2 > maxChars) {
-      const remain = maxChars - used - 40;
-      if (remain > 80) {
-        parts.push(chunk.slice(0, remain) + "\n…[rules truncated]");
-      } else {
-        parts.push("…[additional rules omitted for context budget]");
-      }
-      break;
-    }
     parts.push(chunk);
-    used += chunk.length + 2;
   }
   return parts.join("\n\n");
 }

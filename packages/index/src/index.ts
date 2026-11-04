@@ -59,6 +59,25 @@ export interface IndexOpenOptions {
   mode?: IndexOpenMode;
 }
 
+/**
+ * 语义检索端口（代码向量索引的可选能力）。
+ *
+ * 构建侧（index-worker）：embedBatch 用于符号 chunk 批量嵌入；
+ * 查询侧（main）：embedQuery 用于 ragSearch 的查询嵌入；
+ * loadVec 在 adapter open 时注册 sqlite-vec 模块（构建写 vec0、查询 KNN
+ * 都需要模块在本连接注册）。桌面端注入（bge-small + sqlite-vec 均在
+ * desktop 依赖里）；CLI/headless 无端口 → ragSearch 维持空数组，
+ * 消费方 hybrid 自动降级 FTS。
+ */
+export interface SemanticSearchPort {
+  /** 批量嵌入（构建侧 chunk；查询侧亦可单条调用）。 */
+  embedBatch(texts: string[]): Promise<Array<Float32Array | number[]>>;
+  /** 嵌入单个查询文本（查询侧 ragSearch）。 */
+  embedQuery(text: string): Promise<Float32Array | number[]>;
+  /** 在已打开的连接上注册 sqlite-vec 模块（幂等，由适配器按实例缓存）。 */
+  loadVec(db: unknown): void;
+}
+
 export interface IndexClient {
   open(root: string, diff?: ManifestDiff, options?: IndexOpenOptions): Promise<void>;
   /** 在扫描阶段报告工作区中实际发现的文件类型。 */
@@ -152,9 +171,14 @@ class StubIndexClient implements IndexClient {
 
 import { UnifiedIndexAdapter } from "./unified/index-client-adapter.ts";
 
-export function createIndexClient(): IndexClient {
+export interface CreateIndexClientOptions {
+  /** 语义检索端口（嵌入 + sqlite-vec 加载）；缺省时 ragSearch 维持空，整体降级 FTS。 */
+  semantic?: SemanticSearchPort;
+}
+
+export function createIndexClient(options?: CreateIndexClientOptions): IndexClient {
   try {
-    return new UnifiedIndexAdapter();
+    return new UnifiedIndexAdapter(options);
   } catch (error) {
     console.warn(`[index] Failed to create UnifiedIndexAdapter, falling back to stub:`, error);
     return new StubIndexClient();

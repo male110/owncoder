@@ -55,7 +55,7 @@ export async function toolUndoSessionChange(
   if (!ctx.sessionChanges) {
     return fail("Session changes API is not available in this context.");
   }
-  if (ctx.mode === "plan") {
+  if (ctx.mode === "spec") {
     return fail("Plan mode cannot undo session file changes.");
   }
   const raw = path.trim();
@@ -103,8 +103,6 @@ export async function toolUndoSessionChange(
   // Force a fresh read if the model looks at this path again this turn.
   ctx.readSet.delete(match.path);
   ctx.readSet.delete(rel);
-  ctx.readMtTimes?.delete(match.path);
-  ctx.readMtTimes?.delete(rel);
 
   // Drop from the live turn touch list so post-verify / present don't treat it
   // as still modified by this turn after a successful undo.

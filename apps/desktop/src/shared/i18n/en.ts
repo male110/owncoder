@@ -9,9 +9,21 @@
 export const en = {
   // ── 通用 ──────────────────────────────────────────────────────────────────
   "确定": "OK",
+  "终端补全": "Terminal completions",
+  "终端启动失败": "Failed to start terminal",
+  "↑↓ 选择 · Tab / Enter 补全 · Esc 关闭": "↑↓ Select · Tab / Enter Complete · Esc Dismiss",
   "取消": "Cancel",
   "关闭": "Close",
   "删除": "Delete",
+  "确认删除该回复及输入？": "Delete this reply and its input?",
+  "删除该回复及对应输入": "Delete this reply and its input",
+  "图片预览": "Image preview",
+  "点击预览": "Click to preview",
+  "上传中": "Uploading",
+  "上传文件": "Upload file",
+  "上传图片或文件": "Upload images or files",
+  "文件": "File",
+  "移除附件": "Remove attachment",
   "编辑": "Edit",
   "保存": "Save",
   "打开": "Open",
@@ -47,6 +59,9 @@ export const en = {
   "待执行": "Pending",
   "执行中": "In progress",
   "完成": "Done",
+  "查看全部 {{count}} 个调用": "Show all {{count}} calls",
+  "收起旧调用，仅显示最近 {{limit}} 个": "Collapse older calls, show the latest {{limit}}",
+  "节点报告": "Node report",
   "项目": "Projects",
   "会话": "Session",
   "新会话": "New session",
@@ -85,6 +100,8 @@ export const en = {
   "正在停止…": "Stopping…",
   "选择项目目录，输入任务描述开始": "Choose a project folder, then describe your task to begin",
   "拖动调整左侧宽度": "Drag to resize the left pane",
+  "拖动调整右侧宽度": "Drag to resize the right pane",
+  "拖动调整文件区域宽度": "Drag to resize the file pane",
   "拖动排序项目；方向键调整位置": "Drag to reorder; use arrow keys to move",
   "调整项目顺序": "Reorder project",
   "已打开文件": "Open files",
@@ -313,23 +330,25 @@ export const en = {
   "结果": "Result",
   "复制内容": "Copy content",
   "📋 复制": "\ud83d\udccb Copy",
-  "执行中...": "Running…",
   "思考中…": "Thinking…",
   "思考过程": "Thought process",
+  "{{n}}秒": "{{n}}s",
   "任务分解（本地回退）": "Task breakdown (local fallback)",
   "任务分解：无需计划": "Task breakdown: no plan needed",
   "任务分解：{{count}} 个任务": "Task breakdown: {{count}} tasks",
+  "进程 {{done}}/{{total}}": "Progress {{done}}/{{total}}",
   "执行过程 · {{count}} 步": "Process · {{count}} steps",
   "+ 添加全局偏好": "Add global preference",
   "+ 添加项目偏好": "Add project preference",
   "意图": "Intent",
   "任务": "Task",
   "用户约束": "User constraints",
-  "步骤": "Steps",
-  "依赖的前序步骤": "Depends on earlier steps",
-  "停读条件：": "Stop reading when: ",
-  "本次请求未产生计划步骤（琐碎任务 / 提问 / 交还用户）。":
-    "This request produced no plan steps (trivial task / question / handed back to you).",
+  "如何完成": "How to complete",
+  "交付目标": "Deliverable",
+  "依赖": "Depends on",
+  "相关历史": "Relevant history",
+  "本次请求未产生任务（琐碎请求 / 提问 / 交还用户）。":
+    "This request produced no tasks (trivial request / question / handed back to you).",
   "分解调用失败，以上为本地启发式回退结果，仅供粗略参考。":
     "The breakdown call failed; the above is a local heuristic fallback for rough reference only.",
   "已压缩内容": "Compressed content",
@@ -395,7 +414,11 @@ export const en = {
   "保存经验": "Save experience",
   "保存规格": "Save spec",
   "保存设计": "Save design",
+  "保存需求规格": "Save requirements spec",
+  "保存技术设计": "Save technical design",
+  "保存任务清单": "Save task list",
   "列出 SDD": "List SDD",
+  "列出 Spec": "List specs",
   "分析问题": "Analyze issue",
   "报告阻塞": "Report blocker",
   "正在{{label}}{{tail}}…": "{{label}}{{tail}}…",
@@ -415,6 +438,7 @@ export const en = {
   "已保留原始历史；下次请求将由模型生成任务摘要":
     "Original history kept; the model will generate a task summary on the next request",
   "已切换到 Plan 模式": "Switched to Plan mode",
+  "已切换到 Spec 模式": "Switched to Spec mode",
   "已切换到 Agent 模式": "Switched to Agent mode",
   "可用命令：\n/compact — 压缩历史\n/clear — 清空对话\n/plan — Plan 模式\n/agent — Agent 模式\n/undo — 撤销上次改动\n/help — 显示帮助":
     "Available commands:\n/compact — compress history\n/clear — clear the chat\n/plan — Plan mode\n/agent — Agent mode\n/undo — undo the last change\n/help — show this help",
@@ -621,6 +645,13 @@ export const en = {
   "React 循环模型": "React loop model",
   "开启后，React 循环使用单独的模型和思考强度": "When enabled, React loop uses a separate model and thinking effort",
   "默认配置用于任务分解和不分阶段模式，执行阶段可选单独配置": "Default config is used for decomposition and non-staged mode; React stage can optionally use separate settings",
+  "自动批准所有 bash 命令": "Auto-approve all bash commands",
+  "自动批准 bash": "Auto-approve bash",
+  "勾选后所有 bash 命令（含危险命令）不再弹出确认，直接执行。":
+    "When checked, all bash commands (including dangerous ones) run immediately without asking for confirmation.",
+  "危险命令将跳过确认直接执行，请仅在可信环境中开启。":
+    "Dangerous commands will run without confirmation. Only enable this in trusted environments.",
+  "自动批准所有 bash 命令（含危险命令）": "Auto-approve all bash commands (including dangerous ones)",
 
   // ── 主进程对话框 / 错误 ───────────────────────────────────────────────────
   "OwnCoder 需要你确认": "OwnCoder needs your confirmation",
@@ -641,6 +672,62 @@ export const en = {
   "请输入要分析的符号": "Enter a symbol to analyze",
   "模型和思考强度选择在输入框下方：": "Model and thinking effort selectors are below the input box:",
   "循环执行思考强度": "React loop thinking effort",
+
+  // ── 技能（Skills）─────────────────────────────────────────────────────────
+  "技能": "Skills",
+  "技能是包含 SKILL.md 的目录：frontmatter 声明名称与描述，正文是给模型的一次性指令。任务匹配时模型会自动调用 use_skill 工具加载正文；系统提示中只注入名称与描述目录。":
+    "A skill is a directory containing SKILL.md: frontmatter declares the name and description, and the body is one-shot instructions for the model. When a task matches, the model loads the body automatically via the use_skill tool; only names and descriptions are injected into the system prompt.",
+  "项目技能": "Project skills",
+  "用户技能": "User skills",
+  "内置技能": "Built-in skills",
+  "暂无项目技能": "No project skills yet",
+  "暂无用户技能": "No user skills yet",
+  "暂无内置技能": "No built-in skills",
+  "+ 新建项目技能": "+ New project skill",
+  "+ 新建用户技能": "+ New user skill",
+  "新建技能": "New skill",
+  "编辑技能": "Edit skill",
+  "名称": "Name",
+  "描述": "Description",
+  "使用时机（when_to_use，可选）": "When to use (when_to_use, optional)",
+  "正文（Markdown 指令）": "Body (Markdown instructions)",
+  "作用域": "Scope",
+  "一句话说明何时使用": "One line describing when to use it",
+  "正文支持 ${OWNCODER_SKILL_DIR} 变量引用技能目录下的资源文件":
+    "The body can reference resource files inside the skill directory via the ${OWNCODER_SKILL_DIR} variable",
+  "直接编辑完整 SKILL.md（含 frontmatter）；name 必须与技能名一致":
+    "Edit the full SKILL.md (frontmatter included); name must match the skill name",
+  "删除此技能？": "Delete this skill?",
+  "内置技能不可编辑或删除": "Built-in skills cannot be edited or deleted",
+  "无描述": "No description",
+  "用户": "User",
+  "内置": "Built-in",
+  "操作失败：": "Operation failed: ",
+
+  // ── Spec 工作流（spec → design → tasks）──────────────────────────────────
+  "只读 · 需求与设计": "Read-only · requirements & design",
+  "描述一个功能需求，生成 spec → design → tasks…":
+    "Describe a feature to generate spec → design → tasks…",
+  "Spec": "Spec",
+  "待审批": "Awaiting review",
+  "Requirements": "Requirements",
+  "Design": "Design",
+  "Tasks": "Tasks",
+  "正在加载文档…": "Loading document…",
+  "保存修改": "Save changes",
+  "批准并进入下一阶段": "Approve & continue to the next phase",
+  "批准任务并开始执行": "Approve tasks & start execution",
+  "驳回：写下修改意见（留空则直接驳回）":
+    "Request changes: describe what to fix (empty to reject outright)",
+  "驳回修改": "Request changes",
+  "已保存修改，等待审批。": "Saved. Awaiting review.",
+  "任务已批准。请先配置 LLM，再发送消息开始执行。":
+    "Tasks approved. Configure the LLM first, then send a message to start.",
+  "任务已批准，自动开始执行 {{count}} 个任务…":
+    "Tasks approved, automatically executing {{count}} tasks…",
+  "请根据以下反馈修改并重新保存：" : "Please revise per this feedback and re-save: ",
+  "请重新审视该文档并修改后重新保存。":
+    "Please review this document, revise it, and re-save.",
 } as const;
 
 /** msgid 全集（key 即中文文案源）；t() 的合法入参类型。 */

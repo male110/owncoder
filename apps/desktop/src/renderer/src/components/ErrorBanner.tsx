@@ -107,21 +107,3 @@ export function extractHistoryError(
   }
   return null;
 }
-
-// Back-compat shim so any surviving call-sites still compile during migration.
-/** @deprecated Use toAppError() instead */
-export function friendlyErrorMessage(raw: string): {
-  message: string;
-  showSettings: boolean;
-  detail?: string;
-} {
-  const err = toAppError(raw);
-  return {
-    message: err.message,
-    showSettings:
-      err.code === ErrorCode.AUTH_MISSING_KEY ||
-      err.code === ErrorCode.AUTH_INVALID_KEY ||
-      err.code === ErrorCode.NET_UNREACHABLE,
-    detail: err.detail,
-  };
-}

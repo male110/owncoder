@@ -47,7 +47,15 @@ function encodeInputMessages(messages: ChatMessage[]): unknown[] {
 function responseToChat(json: unknown): ChatResponse {
   const value = json as {
     id?: string;
-    output?: Array<{ type?: string; role?: string; content?: Array<{ type?: string; text?: string }>; call_id?: string; name?: string; arguments?: string }>;
+    output?: Array<{
+      type?: string;
+      role?: string;
+      content?: Array<{ type?: string; text?: string }>;
+      call_id?: string;
+      name?: string;
+      arguments?: string;
+      summary?: Array<{ type?: string; text?: string }>;
+    }>;
     output_text?: string;
     usage?: { input_tokens?: number; output_tokens?: number; total_tokens?: number; [key: string]: unknown };
   };
@@ -58,6 +66,13 @@ function responseToChat(json: unknown): ChatResponse {
     .filter((part) => part.type === "output_text" && typeof part.text === "string")
     .map((part) => part.text)
     .join("");
+  // Responses API 的思考过程放在 output 的 reasoning 项里（summary_text 片段）。
+  const reasoning = output
+    .filter((item) => item.type === "reasoning")
+    .flatMap((item) => item.summary ?? [])
+    .filter((part) => part.type === "summary_text" && typeof part.text === "string")
+    .map((part) => part.text)
+    .join("");
   const toolCalls: ToolCall[] = output
     .filter((item) => item.type === "function_call")
     .map((item, index) => ({
@@ -66,7 +81,12 @@ function responseToChat(json: unknown): ChatResponse {
       function: { name: item.name || "unknown", arguments: item.arguments || "{}" },
     }));
   if (!text && !toolCalls.length) throw new Error("LLM returned no output");
-  const message: ChatChoiceMessage = { role: "assistant", content: text || null, tool_calls: toolCalls.length ? toolCalls : undefined };
+  const message: ChatChoiceMessage = {
+    role: "assistant",
+    content: text || null,
+    reasoning_content: reasoning || null,
+    tool_calls: toolCalls.length ? toolCalls : undefined,
+  };
   return {
     id: value.id,
     choices: [{ message, finish_reason: toolCalls.length ? "tool_calls" : "stop" }],

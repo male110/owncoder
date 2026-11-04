@@ -71,6 +71,7 @@ function makeCtx(hits: HistorySearchHit[]): ToolContext {
   };
 }
 
+
 test("historyRecallQuery reads query or keyword", () => {
   assert.equal(historyRecallQuery({ query: "向量召回" }), "向量召回");
   assert.equal(historyRecallQuery({ keyword: "fallback" }), "fallback");

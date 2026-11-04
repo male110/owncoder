@@ -159,20 +159,6 @@ export function dropQueue(sid: string): void {
   stopRequested.delete(sid);
 }
 
-/**
- * Drop every queued message for a session without deleting the queue slot.
- * Used when the user clicks 停止 — after the in-flight turn aborts the
- * drain loop would otherwise immediately dequeue the next message and
- * spin up a new sendChat, making stop appear to do nothing.
- */
-export function clearQueue(sid: string): void {
-  const q = queues.get(sid);
-  if (!q || q.length === 0) return;
-  queues.set(sid, []);
-  syncStore(sid);
-  persist(sid);
-}
-
 /** Continue executing a restored queue, if any and not already running. */
 export function resumeQueue(sid: string): void {
   const q = queues.get(sid);

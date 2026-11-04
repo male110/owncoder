@@ -24,6 +24,9 @@ interface BufferedSessionState {
 export interface ChatEventBufferOptions {
   charThreshold?: number;
   flushIntervalMs?: number;
+  /** 预留：assistant/thinking 事件独立的 flush 间隔（当前统一走 flushIntervalMs）。 */
+  assistantFlushIntervalMs?: number;
+  thinkingFlushIntervalMs?: number;
   sendBatch: (sessionId: string | null, events: ChatEventDto[]) => void;
   sendSingle: (sessionId: string | null, ev: ChatEventDto) => void;
 }
@@ -91,10 +94,19 @@ export function createChatEventBuffer(options: ChatEventBufferOptions) {
       return;
     }
     if (!state.timer) {
+      // 分类型间隔：thinking_delta 走 thinkingFlushIntervalMs（更快，让分解/
+      // 推理阶段的思考过程尽早呈现），assistant_delta 走 assistantFlushIntervalMs，
+      // 其余沿用通用 flushIntervalMs。首个入队事件决定本批计时器间隔。
+      const interval =
+        ev.type === "thinking_delta" && options.thinkingFlushIntervalMs != null
+          ? options.thinkingFlushIntervalMs
+          : ev.type === "assistant_delta" && options.assistantFlushIntervalMs != null
+            ? options.assistantFlushIntervalMs
+            : flushIntervalMs;
       state.timer = setTimeout(() => {
         state.timer = null;
         flushSession(sessionId);
-      }, flushIntervalMs);
+      }, interval);
     }
   }
 

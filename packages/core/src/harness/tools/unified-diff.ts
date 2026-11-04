@@ -115,26 +115,3 @@ export function applyUnifiedDiff(
     };
   }
 }
-
-/**
- * Generate a unified diff between two file contents.
- * Useful for creating preview diffs or generating patches programmatically.
- * 
- * @param filePath File path (used in diff headers)
- * @param originalContent Original file content
- * @param newContent New file content
- * @returns Unified diff string
- */
-export function generateUnifiedDiff(
-  filePath: string,
-  originalContent: string,
-  newContent: string,
-): string {
-  return createPatch(
-    filePath,
-    originalContent,
-    newContent,
-    "original",
-    "modified",
-  );
-}

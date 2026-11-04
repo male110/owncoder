@@ -28,14 +28,13 @@ function stubIndex(): IndexClient {
   } as IndexClient;
 }
 
-function baseCtx(root: string, mode: "agent" | "plan" = "agent"): ToolContext {
+function baseCtx(root: string, mode: "agent" | "spec" = "agent"): ToolContext {
   return {
     workspaceRoot: root,
     mode,
     workflow: BUILTIN_WORKFLOW,
     index: stubIndex(),
     readSet: new Set(["src/a.ts"]),
-    readMtTimes: new Map([["src/a.ts", 1]]),
     touchedPaths: ["src/a.ts", "src/b.ts"],
     maxOutputChars: 24_000,
     bashMaxChars: 10_000,
@@ -43,7 +42,7 @@ function baseCtx(root: string, mode: "agent" | "plan" = "agent"): ToolContext {
 }
 
 test("tool defs: list always, undo only in agent", () => {
-  const plan = allEnhancedTools({ mode: "plan" }).map((t) => t.function.name);
+  const plan = allEnhancedTools({ mode: "spec" }).map((t) => t.function.name);
   const agent = allEnhancedTools({ mode: "agent" }).map((t) => t.function.name);
   assert.ok(plan.includes("list_session_changes"));
   assert.ok(!plan.includes("undo_session_change"));
@@ -126,7 +125,7 @@ test("undo_session_change rejects unknown path and plan mode", async () => {
     assert.equal(miss.ok, false);
     assert.match(miss.output, /Not in pending session changes/);
 
-    const plan = baseCtx(root, "plan");
+    const plan = baseCtx(root, "spec");
     plan.sessionChanges = agent.sessionChanges;
     const blocked = await toolUndoSessionChange(plan, "src/a.ts");
     assert.equal(blocked.ok, false);

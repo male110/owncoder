@@ -23,6 +23,7 @@ import { normalizeUsage } from "../../observability.ts";
 import type { StageHandler, SchedulerContext } from "./types.ts";
 import { pushCurrentUserMessageOnce } from "./history.ts";
 import { taskDecomposeHandler, buildDecomposeContext } from "./task-decompose.ts";
+import { applyStreamSnapshot } from "../streaming-snapshot";
 import { exploreToolsHandler, executeToolsHandler } from "./tools.ts";
 import { verifyHandler, postVerifyHandler } from "./verify.ts";
 
@@ -44,8 +45,6 @@ export {
 
 export {
   parseDecomposeAnswer,
-
-  injectStopConditions,
   runTaskDecompose,
   taskDecomposeHandler,
   extractStructuredHistory,
@@ -89,13 +88,8 @@ export async function injectHistoryAndUserMessage(ctx: SchedulerContext): Promis
     recentFileHints = formatRecentFileHints(rounds);
   }
 
-  // currentTaskId 是任务 ID，必须从 task 级字段读取，不能按扁平 step 查找。
-  const currentTaskId = opts.currentTaskId;
-  const currentTask = currentTaskId
-    ? state.rawDecompose?.tasks.find((task) => task.id === currentTaskId)
-    : undefined;
-  const relevantHistory = currentTask?.relevantHistory
-    ?? state.turnInformationTask?.relevantHistory
+  // 历史与 tasks 同级（顶层 relevantHistory）；分解未覆盖时退到 turn 任务级。
+  const relevantHistory = state.turnInformationTask?.relevantHistory
     ?? state.rawDecompose?.relevantHistory;
 
   const packedHistory = relevantHistory?.trim() ?? "";
@@ -123,16 +117,16 @@ export async function injectHistoryAndUserMessage(ctx: SchedulerContext): Promis
       message: "使用任务分解带回的可复用历史，跳过完整历史注入",
       details: {
         historyChars: packedHistory.length,
-        source: currentTask?.relevantHistory ? "task" : state.turnInformationTask?.relevantHistory ? "turn_task" : "shared",
+        source: state.turnInformationTask?.relevantHistory ? "turn_task" : "shared",
       },
     });
-  } else if (opts.mode === "plan") {
+  } else if (opts.mode === "spec") {
     // plan 模式不经过任务分解节点，无法像 agent 模式那样由分解 LLM 消化历史。
-    // 这里复用任务分解阶段的历史处理逻辑（持久化轮次优先 → 最近五轮 → 滚动压缩 →
+    // 这里复用任务分解阶段的历史处理逻辑（持久化轮次优先 → 预算触发语义压缩 →
     // 启发式回退，工具结果不注入），把此前轮次作为只读背景放在当前请求之前。
     // 仅作用于 plan 模式；agent 模式历史已由分解阶段消化，不在此重复注入。
     const historyBlock = (
-      await buildDecomposeContext(opts, ctx.budgets, "", { historyOnly: true })
+      await buildDecomposeContext(opts, ctx.budgets, messages.map((message) => String(message.content ?? "")).join("\n") + opts.userMessage, { historyOnly: true, model: ctx.model })
     ).trim();
     if (historyBlock) {
       const { tagConversationHistory } = await import("../../message-tags.js");
@@ -204,7 +198,7 @@ export async function doPlainCompletion(ctx: SchedulerContext): Promise<string> 
       apiKey: opts.llmApiKey,
       purpose: "plain_completion",
       taskId: opts.sessionId,
-      onDelta: (text: string) => { accumulated += text; opts.onEvent?.({ type: "assistant_delta", text }); },
+      onDelta: (text: string) => { accumulated = applyStreamSnapshot(accumulated, text); opts.onEvent?.({ type: "assistant_delta", text }); },
       onThinkingDelta: (text: string) => opts.onEvent?.({ type: "thinking_delta", text }),
       thinking: { effort: opts.workflow.thinking?.defaultEffort },
     });

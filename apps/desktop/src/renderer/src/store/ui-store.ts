@@ -17,8 +17,9 @@ export interface UiState {
   editorTabs: string[];
   editorPath: string | null;
   diffDataByPath: Record<string, { before: string; after: string }>;
-  chatWidth: number;
-  isDragging: boolean;
+  /** 右侧编辑器栏占工作区宽度的百分比（三栏布局：左栏项目 / 中栏对话 / 右栏编辑器） */
+  editorWidth: number;
+  isEditorDragging: boolean;
 
   // Sidebar
   sidebarWidth: number;
@@ -51,8 +52,8 @@ export interface UiActions {
   setActiveEditorTab: (path: string) => void;
   /** 关闭指定 tab；若关闭的是当前激活，则激活相邻 tab。 */
   closeEditorTab: (path: string) => void;
-  setChatWidth: (width: number) => void;
-  setIsDragging: (v: boolean) => void;
+  setEditorWidth: (width: number) => void;
+  setIsEditorDragging: (v: boolean) => void;
   setSidebarWidth: (width: number) => void;
   setIsSidebarDragging: (v: boolean) => void;
   setSidebarCollapsed: (v: boolean) => void;
@@ -159,8 +160,8 @@ export const useUiStore = create<UiState & UiActions>()((set) => ({
   editorTabs: [],
   editorPath: null,
   diffDataByPath: {},
-  chatWidth: 20,
-  isDragging: false,
+  editorWidth: 70,
+  isEditorDragging: false,
   sidebarWidth: 260,
   isSidebarDragging: false,
   sidebarCollapsed: false,
@@ -205,8 +206,8 @@ export const useUiStore = create<UiState & UiActions>()((set) => ({
         editorTabs[Math.min(idx, editorTabs.length - 1)] ?? null;
       return { editorTabs, editorPath: next, diffDataByPath };
     }),
-  setChatWidth: (chatWidth) => set({ chatWidth }),
-  setIsDragging: (isDragging) => set({ isDragging }),
+  setEditorWidth: (editorWidth) => set({ editorWidth: Math.min(75, Math.max(60, editorWidth)) }),
+  setIsEditorDragging: (isEditorDragging) => set({ isEditorDragging }),
   setSidebarWidth: (sidebarWidth) => set({ sidebarWidth }),
   setIsSidebarDragging: (isSidebarDragging) => set({ isSidebarDragging }),
   setSidebarCollapsed: (sidebarCollapsed) => set({ sidebarCollapsed }),

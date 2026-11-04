@@ -70,7 +70,8 @@ describe("conversation store", () => {
       {
         type: "task_decomposition",
         intent: "意图",
-        tasks: [{ id: "task_1", description: "任务", steps: [{ id: "s1", description: "one", dependsOn: [], informationNeeds: [] }] }],
+        relevantHistory: "hist",
+        tasks: [{ id: "task_1", description: "任务", guidance: "one" }],
       },
       { eventType: "task_decomposition" },
     );
@@ -81,7 +82,8 @@ describe("conversation store", () => {
       user: user("input"),
       taskDecomposition: {
         intent: "意图",
-        tasks: [{ id: "task_1", description: "任务", steps: [{ id: "s1", description: "one", dependsOn: [], informationNeeds: [] }] }],
+        relevantHistory: "hist",
+        tasks: [{ id: "task_1", description: "任务", guidance: "one" }],
       },
       report: { summary: "done" },
     });
@@ -128,7 +130,7 @@ describe("conversation store", () => {
     expect(page.turns).toHaveLength(2);
     expect(page.turns[0]!.user).toEqual(assistant("leading"));
     expect(page.turns[0]!.events.map((e) => e.payload)).toEqual([
-      { role: "tool", content: "", outputOmitted: true },
+      { role: "tool", content: "tool output" },
     ]);
     expect(page.turns[1]!.user).toEqual(user("next"));
     expect(page.turns[1]!.events.map((e) => e.payload)).toEqual([assistant("reply")]);
@@ -375,10 +377,10 @@ describe("conversation store", () => {
     db.close();
 
     const page = await loadRecentTurns(r, "s", 10);
-    expect(page.turns[0]?.final).toMatchObject({ omitted: true, reason: "final_json_too_large" });
-    expect(sanitizeOversizedFinalJson(r, "s")).toBe(1);
+    expect((page.turns[0]?.final as { history: Array<{ content: string }> }).history[0]?.content).toHaveLength(2_000_000);
+    expect(sanitizeOversizedFinalJson(r, "s")).toBe(0);
     const after = await loadRecentTurns(r, "s", 10);
-    expect(after.turns[0]?.final).toMatchObject({ omitted: true, reason: "final_json_too_large" });
+    expect((after.turns[0]?.final as { history: Array<{ content: string }> }).history[0]?.content).toHaveLength(2_000_000);
   });
 
   it("slimDurableEvent keeps bounded tool results and removes terminal streams", () => {
@@ -396,8 +398,7 @@ describe("conversation store", () => {
       name: "bash",
       ok: true,
     });
-    expect(toolEnd.output).toHaveLength(64_000 + "\n…[truncated 16000 chars]".length);
-    expect(JSON.stringify(toolEnd)).not.toContain(huge);
+    expect(toolEnd.output).toBe(huge);
 
     const toolStart = slimDurableEvent({
       type: "tool_start",
@@ -406,7 +407,7 @@ describe("conversation store", () => {
       args: { file_path: "a.ts", content: "C".repeat(20_000) },
     }) as { args: { file_path: string; content: string } };
     expect(toolStart.args.file_path).toBe("a.ts");
-    expect(toolStart.args.content.length).toBeLessThan(20_000);
+    expect(toolStart.args.content).toHaveLength(20_000);
 
     const terminal = slimDurableEvent({
       type: "terminal",
@@ -419,8 +420,8 @@ describe("conversation store", () => {
       },
     }) as { entry: { id: string; command: string; status: string; stdout?: string; stderr?: string } };
     expect(terminal.entry).toMatchObject({ id: "t1", command: "npm test", status: "ok" });
-    expect(terminal.entry.stdout).toBeUndefined();
-    expect(terminal.entry.stderr).toBeUndefined();
+    expect(terminal.entry.stdout).toContain("NEW_TAIL");
+    expect(terminal.entry.stderr).toHaveLength(80_000);
   });
 
   it("appendTurnEvent persists bounded tool_end output", async () => {
@@ -439,8 +440,7 @@ describe("conversation store", () => {
     const loaded = await loadTurn(r, "s", turn.turnId);
     const payload = loaded?.events[0]?.payload as { output?: string; id?: string };
     expect(payload).toMatchObject({ id: "c9" });
-    expect(payload?.output).toHaveLength(64_000 + "\n…[truncated 36000 chars]".length);
-    expect(JSON.stringify(loaded)).not.toContain(huge);
+    expect(payload?.output).toBe(huge);
 
     expect(projectConversationTurns([loaded!])).toEqual([
       { ...user("run"), turnId: turn.turnId },
@@ -468,11 +468,8 @@ describe("conversation store", () => {
     db.close();
 
     const page = await loadRecentTurns(r, "s", 10);
-    expect(page.turns[0]?.events[0]?.payload).toMatchObject({
-      omitted: true,
-      reason: "event_payload_too_large",
-    });
-    expect(sanitizeOversizedEventPayloads(r, "s")).toBe(1);
+    expect((page.turns[0]?.events[0]?.payload as { output: string }).output).toHaveLength(400_000);
+    expect(sanitizeOversizedEventPayloads(r, "s")).toBe(0);
   });
 
   it("deleteConversationStore closes the handle and removes sqlite sidecars", async () => {

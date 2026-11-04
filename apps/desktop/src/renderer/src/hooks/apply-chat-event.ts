@@ -12,6 +12,10 @@ import {
   sealTextFn,
   pushToolFn,
   updateToolFn,
+  ensureSubagentGroupFn,
+  pushSubagentToolFn,
+  updateSubagentToolFn,
+  setSubagentGroupStatusFn,
   upsertTextFn,
   type useChatStore,
 } from "../store/chat-store";
@@ -34,7 +38,9 @@ export function toolStatusLabel(
         ? ` → ${String(args?.path ?? args?.file ?? "")}`
         : name === "bash" || name === "run_command"
           ? ` → ${String(args?.command ?? "").slice(0, 60)}`
-          : "";
+          : name === "search_code" || name === "search_symbols"
+            ? ` → ${String(args?.pattern ?? args?.query ?? "")}${args?.glob ? ` in ${String(args.glob)}` : ""}`
+            : "";
     return t("工具调用：{{name}}{{hint}}", { name, hint });
   }
   if (status === "done") return t("已完成：{{name}}", { name });
@@ -68,9 +74,9 @@ export function applyChatEvent(
 
   // ── thinking_delta ────────────────────────────────────────────────────
   if (ev.type === "thinking_delta") {
-    // 任务分解是内部 JSON 协议，不应把任何 reasoning 泄露到用户聊天。
-    if (isDecomposing(chat, sid)) return;
-    // Atomic upsert — judgment and mutation happen inside one Zustand setter.
+    // 任务分解阶段的思考过程：允许前端展示渐进反馈，让用户知道
+    // 模型正在工作（而非长时间无输出）。思考内容通过独立的
+    // ThinkingBlock 渲染，不会混入 intent/tasks 等结构化字段。
     chat.patchLiveState((rt) => ({
       liveEvents: upsertThinkingFn(rt.liveEvents, ev.text, rt.currentStage || undefined),
       liveStatus: "",
@@ -90,6 +96,19 @@ export function applyChatEvent(
 
   // ── tool_start ────────────────────────────────────────────────────────
   if (ev.type === "tool_start") {
+    // 子智能体的工具调用：归入对应分组卡片，不与主循环工具混排。
+    if (ev.subagent) {
+      const { id: groupId, agentType, task } = ev.subagent;
+      chat.patchLiveState((rt) => ({
+        liveEvents: pushSubagentToolFn(
+          ensureSubagentGroupFn(rt.liveEvents, { id: groupId, agentType, task }),
+          groupId,
+          { id: ev.id, name: ev.name, args: ev.args, status: "running" },
+        ),
+        liveStatus: toolStatusLabel("running", ev.name, ev.args),
+      }), sid);
+      return;
+    }
     chat.patchLiveState((rt) => ({
       liveEvents: pushToolFn(sealTextFn(sealThinkingFn(rt.liveEvents)), {
         id: ev.id,
@@ -105,6 +124,16 @@ export function applyChatEvent(
   // ── tool_end ──────────────────────────────────────────────────────────
   if (ev.type === "tool_end") {
     const status = ev.skipped ? "skipped" : ev.ok ? "done" : "error";
+    if (ev.subagent) {
+      chat.patchLiveState((rt) => ({
+        liveEvents: updateSubagentToolFn(rt.liveEvents, ev.subagent!.id, ev.id, {
+          status,
+          output: ev.output,
+        }),
+        liveStatus: toolStatusLabel(status, ev.name),
+      }), sid);
+      return;
+    }
     chat.patchLiveState((rt) => ({
       liveEvents: updateToolFn(rt.liveEvents, ev.id, { status, output: ev.output }),
       liveStatus: toolStatusLabel(status, ev.name),
@@ -123,6 +152,7 @@ export function applyChatEvent(
           intent: ev.intent,
           userConstraints: ev.userConstraints,
           tasks: ev.tasks,
+          relevantHistory: ev.relevantHistory,
           fallback: ev.fallback,
         },
         sid,
@@ -145,6 +175,29 @@ export function applyChatEvent(
   if (ev.type === "stage_done") {
     chat.setLiveStatus("", sid);
     chat.patchLiveState(() => ({ currentStage: null }), sid);
+    // 子智能体阶段结束：终态由节点成败（stage_done.ok）决定并附带文字报告；
+    // 单个工具失败不作为组失败依据（LLM 下一步会自行修正重试）。
+    if (ev.nodeType === "subagent") {
+      chat.patchLiveState((rt) => {
+        let nextStatus: "done" | "error";
+        if (ev.ok === undefined) {
+          // 无 ok 字段（如 Explore 子智能体）：回退旧规则，检查组内是否已被标记 error
+          nextStatus = rt.liveEvents.some(
+            (event) =>
+              event.kind === "subagent" &&
+              event.group.id === ev.id &&
+              event.group.status === "error",
+          )
+            ? "error"
+            : "done";
+        } else {
+          nextStatus = ev.ok ? "done" : "error";
+        }
+        return {
+          liveEvents: setSubagentGroupStatusFn(rt.liveEvents, ev.id, nextStatus, ev.report),
+        };
+      }, sid);
+    }
     return;
   }
 
@@ -229,9 +282,13 @@ export function applyChatEvent(
       chat.setSending(false, sid);
       return;
     }
+    // 正文由 sendChat 的已提交 history 渲染；structured 只在实时结果先于 history 时暂存。
     chat.pushStructuredMessage(ev.parts, ev.metadata, sid);
+    // 清除流式正文、旧过程快照和结构化临时副本。完成的工具过程从 history 构造折叠块。
+    // 保留 decompose 事件：任务分解折叠条在回合结束后仍常驻，
+    // 下一次分解会经 pushDecompose 替换旧的。
     chat.setLiveEvents(
-      (events) => events.filter((event) => event.kind === "structured"),
+      (events) => events.filter((event) => event.kind !== "structured" && event.kind !== "text" && event.kind !== "thinking"),
       sid,
     );
     chat.markSessionCompleted(sid);

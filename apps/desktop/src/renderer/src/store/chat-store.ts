@@ -63,8 +63,22 @@ export type LiveEvent =
   | { kind: "text";     id: string; text: string; streaming: boolean }
   /** Task-decomposition result from the task_decompose stage (one per turn). */
   | { kind: "decompose"; id: string; decomposition: DecompositionSnapshot }
+  /** Explore 子智能体的工具流分组：内部工具只在该组内增删。 */
+  | { kind: "subagent"; group: SubagentGroup }
   /** Complete structured message from turn_complete event (阶段三). */
   | { kind: "structured"; id: string; parts: MessagePart[]; metadata: MessageMetadata };
+
+/** Explore 子智能体分组状态。 */
+export interface SubagentGroup {
+  /** 子智能体阶段 id（与 stage_start/stage_done 的 id 相同）。 */
+  id: string;
+  agentType: string;
+  task: string;
+  tools: PendingTool[];
+  status: "running" | "done" | "error";
+  /** stage_done 带回的节点文字报告（完成/失败摘要），展开卡片时展示。 */
+  report?: string;
+}
 
 export type DecompositionSnapshot = TaskDecompositionDto;
 
@@ -145,6 +159,17 @@ export interface ChatSessionRuntime {
    * 定位 turnId 并真正整轮删除（deleteTurnPair）。
    */
   pendingDelete: boolean;
+}
+
+function dedupeHistoryTurns(turns: ChatTurnDto[]): ChatTurnDto[] {
+  const seen = new Set<string>();
+  return turns.filter((turn) => {
+    if (!turn.id) return true;
+    const key = `${turn.role}:${turn.id}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function emptyRuntime(): ChatSessionRuntime {
@@ -229,6 +254,76 @@ export function updateToolFn(events: LiveEvent[], id: string, patch: Partial<Pen
   );
 }
 
+// ── Subagent group helpers ────────────────────────────────────────────────────
+
+/** 若对应分组尚不存在则创建（空工具、运行中）。 */
+export function ensureSubagentGroupFn(
+  events: LiveEvent[],
+  input: { id: string; agentType: string; task: string },
+): LiveEvent[] {
+  if (events.some((e) => e.kind === "subagent" && e.group.id === input.id)) return events;
+  return [
+    ...events,
+    {
+      kind: "subagent",
+      group: { id: input.id, agentType: input.agentType, task: input.task, tools: [], status: "running" },
+    },
+  ];
+}
+
+function mapSubagentGroup(
+  events: LiveEvent[],
+  id: string,
+  map: (group: SubagentGroup) => SubagentGroup,
+): LiveEvent[] {
+  return events.map((e) =>
+    e.kind === "subagent" && e.group.id === id ? { ...e, group: map(e.group) } : e,
+  );
+}
+
+/** 向子智能体分组追加一个运行中的工具。 */
+export function pushSubagentToolFn(
+  events: LiveEvent[],
+  groupId: string,
+  tool: PendingTool,
+): LiveEvent[] {
+  return mapSubagentGroup(events, groupId, (group) => ({
+    ...group,
+    tools: [...group.tools, tool],
+  }));
+}
+
+/** 更新子智能体分组内某个工具的状态/输出；工具失败时把分组标记为 error。 */
+export function updateSubagentToolFn(
+  events: LiveEvent[],
+  groupId: string,
+  toolId: string,
+  patch: Partial<PendingTool>,
+): LiveEvent[] {
+  return mapSubagentGroup(events, groupId, (group) => {
+    const tools = group.tools.map((tool) =>
+      tool.id === toolId ? { ...tool, ...patch } : tool,
+    );
+    // 不因单个工具失败把整组标 error：工具失败后 LLM 下一步会自行修正再调，
+    // 组的终态改由 stage_done（节点成败）决定。
+    return { ...group, tools };
+  });
+}
+
+/** 设置子智能体分组的整体状态（阶段结束时收口），可附带节点报告。 */
+export function setSubagentGroupStatusFn(
+  events: LiveEvent[],
+  groupId: string,
+  status: SubagentGroup["status"],
+  report?: string,
+): LiveEvent[] {
+  return mapSubagentGroup(events, groupId, (group) => ({
+    ...group,
+    status,
+    ...(report !== undefined ? { report } : {}),
+  }));
+}
+
 export function upsertTextFn(events: LiveEvent[], text: string): LiveEvent[] {
   const out = events.slice();
   const last = out[out.length - 1];
@@ -272,6 +367,23 @@ function boundLiveEvent(event: LiveEvent): LiveEvent {
   if (event.kind === "tool" && event.tool.output && event.tool.output.length > MAX_TOOL_OUTPUT) {
     return { ...event, tool: { ...event.tool, output: event.tool.output.slice(-MAX_TOOL_OUTPUT) } };
   }
+  if (event.kind === "subagent") {
+    const bounded = event.group.tools.some(
+      (tool) => tool.output && tool.output.length > MAX_TOOL_OUTPUT,
+    );
+    if (!bounded) return event;
+    return {
+      ...event,
+      group: {
+        ...event.group,
+        tools: event.group.tools.map((tool) =>
+          tool.output && tool.output.length > MAX_TOOL_OUTPUT
+            ? { ...tool, output: tool.output.slice(-MAX_TOOL_OUTPUT) }
+            : tool,
+        ),
+      },
+    };
+  }
   return event;
 }
 
@@ -304,6 +416,9 @@ export interface ChatState {
   dangerousConfirmations: DangerousCommandRequestDto[];
   askRequests: AskUserRequestDto[];
   currentStage: "decompose" | "react" | null;
+  /** 与 bySession[focus].stopping/pendingDelete 同步的焦点镜像。 */
+  stopping: boolean;
+  pendingDelete: boolean;
   status: SessionStatus;
 
   // Per-session storage + focus pointer
@@ -422,6 +537,8 @@ function readRuntime(s: ChatState & ChatActions, sid?: string): ChatSessionRunti
       askRequests: s.askRequests,
       currentStage: s.currentStage,
       status: s.status,
+      stopping: s.stopping,
+      pendingDelete: s.pendingDelete,
     };
   }
   return s.bySession[id] ?? emptyRuntime();
@@ -457,6 +574,8 @@ export const useChatStore = create<ChatState & ChatActions>()((set, get) => ({
   dangerousConfirmations: [],
   askRequests: [],
   currentStage: null,
+  stopping: false,
+  pendingDelete: false,
   status: "idle",
 
   activeSessionId: null,
@@ -486,6 +605,9 @@ export const useChatStore = create<ChatState & ChatActions>()((set, get) => ({
         taskRun: rt.taskRun,
         dangerousConfirmations: rt.dangerousConfirmations,
         askRequests: rt.askRequests,
+        currentStage: rt.currentStage,
+        stopping: rt.stopping,
+        pendingDelete: rt.pendingDelete,
         status: rt.status,
         bySession: existing ? s.bySession : { ...s.bySession, [id]: rt },
       };
@@ -541,7 +663,7 @@ export const useChatStore = create<ChatState & ChatActions>()((set, get) => ({
     set((s) => {
       const rt = readRuntime(s, sid);
       const history = typeof turns === "function" ? turns(rt.history) : turns;
-      return applyRuntime(s, sid, { history });
+      return applyRuntime(s, sid, { history: dedupeHistoryTurns(history) });
     }),
 
   removeTurnFromHistory: (turnId, sid) =>

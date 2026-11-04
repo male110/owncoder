@@ -115,17 +115,17 @@ export interface HistoryRoundInput {
   taskDecompose?: {
     intent: string;
     userConstraints: ReadonlyArray<string>;
+    /** 任务相关历史：与 tasks 同级，简单任务无分解时仍有历史可复用。 */
+    relevantHistory?: string;
     tasks: ReadonlyArray<{
       id: string;
+      title?: string;
       description: string;
-      userConstraints: ReadonlyArray<string>;
-      relevantHistory: string;
-      progressStatus: string;
-      steps: ReadonlyArray<{
-        id: string;
-        description: string;
-        dependsOn: ReadonlyArray<string>;
-      }>;
+      /** 任务执行指令（原 guidance）：给执行者的建议性指导。 */
+      prompt?: string;
+      dependsOn?: ReadonlyArray<string>;
+      /** @deprecated 旧字段，读时映射到 prompt。 */
+      guidance?: string;
     }>;
   };
   assistantReport?: string;

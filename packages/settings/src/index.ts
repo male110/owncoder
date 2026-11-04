@@ -4,13 +4,13 @@ import type { ModelRef } from "@owncoder/llm/browser";
 import { resolveApiFormat } from "@owncoder/llm/browser";
 import {
   BUILTIN_AGENT_PROMPT,
-  BUILTIN_PLAN_PROMPT,
+  BUILTIN_SPEC_PROMPT,
 } from "./builtin-prompts.js";
 
 import {
   ModePipelineSchema,
   builtinAgentPipeline,
-  builtinPlanPipeline,
+  builtinSpecPipeline,
   findPipelineNode,
   type ModePipeline,
   type PipelineNode,
@@ -25,7 +25,7 @@ export {
   ModePipelineSchema,
   NODE_TYPE_REGISTRY,
   resolveNodeType,
-  builtinPlanPipeline,
+  builtinSpecPipeline,
   builtinAgentPipeline,
   walkLinearNodes,
   findPipelineNode,
@@ -54,16 +54,8 @@ export {
 } from "./security-defaults.js";
 export {
   BUILTIN_AGENT_PROMPT,
-  BUILTIN_PLAN_PROMPT,
+  BUILTIN_SPEC_PROMPT,
 } from "./builtin-prompts.js";
-
-export {
-  VERIFICATION_COMMON,
-  VERIFICATION_GUIDELINES,
-  ERROR_RECOVERY_MATRIX,
-  SAFETY_BOUNDARIES,
-  CONTEXT_REFERENCE_GUIDE,
-} from "./builtin-verification.js";
 
 export { migratePipeline, LEGACY_PIPELINE_TYPES } from "./pipeline-migrator.js";
 export {
@@ -115,13 +107,15 @@ export const SystemWorkflowConfigSchema = z.object({
     }).optional(),
   }).optional(),
   modes: z.object({
-    plan: z.object({
+    spec: z.object({
       bash: z.enum(["deny", "readonly"]).default("deny"),
-      allowPlanFiles: z.boolean().default(true),
-      pipeline: ModePipelineSchema.default(() => builtinPlanPipeline()),
+      allowSpecFiles: z.boolean().default(true),
+      pipeline: ModePipelineSchema.default(() => builtinSpecPipeline()),
     }),
     agent: z.object({
       dangerousBashConfirm: z.boolean().default(true),
+      /** 勾选后所有 bash 命令（含危险命令）不再弹出确认，直接执行。 */
+      autoApproveBash: z.boolean().default(false),
       pipeline: ModePipelineSchema.default(() => builtinAgentPipeline()),
     }),
   }),
@@ -191,6 +185,9 @@ export const SystemWorkflowConfigSchema = z.object({
     reactProviderId: z.string().optional(),
     /** React 循环阶段思考强度（开启 separateStageModels 时生效，否则使用 thinking.defaultEffort） */
     reactThinkingEffort: z.enum(["none", "off", "disabled", "low", "minimal", "medium", "high", "max"]).optional(),
+    /** bash 搜索命令（grep/rg/find/ls -R）自动排除的目录名列表。
+     *  默认 [".owncoder"]；传空数组可关闭注入。 */
+    searchExclusions: z.array(z.string()).default([".owncoder"]),
   }),
   mcp: z
     .object({
@@ -218,6 +215,14 @@ export const SystemWorkflowConfigSchema = z.object({
       patterns: z.array(z.string()).default([]),
     })
     .default({ enabled: true, sensitiveFiles: [], patterns: [] }),
+  skills: z
+    .object({
+      /** Master switch for the skills feature (catalog injection + use_skill tool). */
+      enabled: z.boolean().default(true),
+      /** Skill ids (`scope:name`) the user switched off; enabled skills are not persisted. */
+      disabled: z.array(z.string()).default([]),
+    })
+    .default({ enabled: true, disabled: [] }),
 });
 
 export type SystemWorkflowConfig = z.infer<typeof SystemWorkflowConfigSchema>;
@@ -259,13 +264,14 @@ export const BUILTIN_WORKFLOW: SystemWorkflowConfig = SystemWorkflowConfigSchema
   providers: [],
   selectedModels: [],
   modes: {
-    plan: {
+    spec: {
       bash: "deny",
-      allowPlanFiles: true,
-      pipeline: builtinPlanPipeline(),
+      allowSpecFiles: true,
+      pipeline: builtinSpecPipeline(),
     },
     agent: {
       dangerousBashConfirm: true,
+      autoApproveBash: false,
       pipeline: builtinAgentPipeline(),
     },
   },
@@ -289,8 +295,10 @@ export const BUILTIN_WORKFLOW: SystemWorkflowConfig = SystemWorkflowConfigSchema
     bashMaxChars: 10000,
     checkpoint: true,
     locale: "system",
+    searchExclusions: [".owncoder"],
   },
   mcp: { servers: [] },
+  skills: { enabled: true, disabled: [] },
 });
 
 function pipelineFingerprint(p: ModePipeline): unknown {
@@ -309,6 +317,20 @@ function pipelineFingerprint(p: ModePipeline): unknown {
   };
 }
 
+/**
+ * Legacy workflow.json files name the read-only mode "plan". The overlay type no
+ * longer carries it, so reach in untyped to reuse its settings for "spec".
+ */
+function readLegacyPlanMode(
+  overlay: WorkflowOverlay | null | undefined,
+): Partial<SystemWorkflowConfig["modes"]["spec"]> | undefined {
+  const plan = (overlay as { modes?: { plan?: Record<string, unknown> } } | null | undefined)
+    ?.modes?.plan;
+  if (!plan) return undefined;
+  const { allowPlanFiles, ...rest } = plan;
+  return { ...rest, ...(typeof allowPlanFiles === "boolean" ? { allowSpecFiles: allowPlanFiles } : {}) };
+}
+
 export function mergeWorkflow(
   builtin: SystemWorkflowConfig,
   workflowOverlay?: WorkflowOverlay | null,
@@ -325,10 +347,12 @@ export function mergeWorkflow(
     providers: modelOverlay?.providers ?? builtin.providers,
     selectedModels: modelOverlay?.selectedModels ?? builtin.selectedModels,
     modes: {
-      plan: {
-        ...builtin.modes.plan,
-        ...workflowOverlay?.modes?.plan,
-        pipeline: builtinPlanPipeline(),
+      spec: {
+        ...builtin.modes.spec,
+        // Legacy workflow.json files call this mode "plan" — migrate on load.
+        ...(workflowOverlay?.modes?.spec ??
+          readLegacyPlanMode(workflowOverlay)),
+        pipeline: builtinSpecPipeline(),
       },
       agent: {
         ...builtin.modes.agent,
@@ -370,20 +394,25 @@ export function mergeWorkflow(
       sensitiveFiles: workflowOverlay?.secrets?.sensitiveFiles ?? builtin.secrets.sensitiveFiles,
       patterns: workflowOverlay?.secrets?.patterns ?? builtin.secrets.patterns,
     },
+    skills: {
+      enabled: workflowOverlay?.skills?.enabled ?? builtin.skills.enabled,
+      disabled: workflowOverlay?.skills?.disabled ?? builtin.skills.disabled,
+    },
   };
 
-  merged.modes.plan.bash = workflowOverlay?.modes?.plan?.bash ?? builtin.modes.plan.bash;
+  merged.modes.spec.bash =
+    workflowOverlay?.modes?.spec?.bash ??
+    readLegacyPlanMode(workflowOverlay)?.bash ??
+    builtin.modes.spec.bash;
   merged.modes.agent.dangerousBashConfirm =
     workflowOverlay?.modes?.agent?.dangerousBashConfirm ?? builtin.modes.agent.dangerousBashConfirm;
+  merged.modes.agent.autoApproveBash =
+    workflowOverlay?.modes?.agent?.autoApproveBash ?? builtin.modes.agent.autoApproveBash;
 
-  // save_plan / allowPlanFiles sync
-  const save = findPipelineNode(merged.modes.plan.pipeline, "save_plan");
-  if (save && merged.modes.plan.allowPlanFiles === false) {
-    save.enabled = false;
-  }
-  const planLlm = findPipelineNode(merged.modes.plan.pipeline, "explore_tools");
-  if (planLlm && merged.modes.plan.allowPlanFiles === false) {
-    planLlm.params = { ...planLlm.params, allowPlanFiles: false };
+  // allowSpecFiles sync into the spec-mode model node
+  const specLlm = findPipelineNode(merged.modes.spec.pipeline, "explore_tools");
+  if (specLlm && merged.modes.spec.allowSpecFiles === false) {
+    specLlm.params = { ...specLlm.params, allowSpecFiles: false };
   }
 
   return SystemWorkflowConfigSchema.parse(merged);
@@ -413,17 +442,17 @@ export function splitConfigForPersistence(
 }
 
 export function resolvePrompts(config: SystemWorkflowConfig): {
-  plan: string;
+  spec: string;
   agent: string;
 } {
   // Prompts are baked into the builtin pipeline nodes; there is no longer a
   // separate user-overridable `config.prompts` layer. The constants remain as
   // a defensive fallback if a node is ever missing.
-  const planLlm = findPipelineNode(config.modes.plan.pipeline, "explore_tools");
-  const draft = findPipelineNode(config.modes.plan.pipeline, "draft_plan");
+  const specLlm = findPipelineNode(config.modes.spec.pipeline, "explore_tools");
+  const draft = findPipelineNode(config.modes.spec.pipeline, "draft_plan");
   const exec = findPipelineNode(config.modes.agent.pipeline, "execute_tools");
   return {
-    plan: (planLlm?.prompt || draft?.prompt || "").trim() || BUILTIN_PLAN_PROMPT.trim(),
+    spec: (specLlm?.prompt || draft?.prompt || "").trim() || BUILTIN_SPEC_PROMPT.trim(),
     agent: (exec?.prompt || "").trim() || BUILTIN_AGENT_PROMPT.trim(),
   };
 }
@@ -432,8 +461,8 @@ export function resolvePrompts(config: SystemWorkflowConfig): {
  * Product runtime graph. After mergeWorkflow, saved overlays are discarded so
  * this is always the builtin pipeline (with hydrated prompts/params).
  */
-export function modePipeline(config: SystemWorkflowConfig, mode: "plan" | "agent"): ModePipeline {
-  return mode === "plan" ? config.modes.plan.pipeline : config.modes.agent.pipeline;
+export function modePipeline(config: SystemWorkflowConfig, mode: "spec" | "agent"): ModePipeline {
+  return mode === "spec" ? config.modes.spec.pipeline : config.modes.agent.pipeline;
 }
 
 export function workflowFingerprint(config: SystemWorkflowConfig): string {
@@ -441,13 +470,14 @@ export function workflowFingerprint(config: SystemWorkflowConfig): string {
     providers: (config.providers ?? []).map((p: Provider) => ({ id: p.id, name: p.name, baseUrl: p.baseUrl })),
     selectedModels: config.selectedModels ?? [],
     modes: {
-      plan: {
-        bash: config.modes.plan.bash,
-        allowPlanFiles: config.modes.plan.allowPlanFiles,
-        pipeline: pipelineFingerprint(config.modes.plan.pipeline),
+      spec: {
+        bash: config.modes.spec.bash,
+        allowSpecFiles: config.modes.spec.allowSpecFiles,
+        pipeline: pipelineFingerprint(config.modes.spec.pipeline),
       },
       agent: {
         dangerousBashConfirm: config.modes.agent.dangerousBashConfirm,
+        autoApproveBash: config.modes.agent.autoApproveBash,
         pipeline: pipelineFingerprint(config.modes.agent.pipeline),
       },
     },
@@ -467,12 +497,12 @@ export function workflowFingerprint(config: SystemWorkflowConfig): string {
 /** Patch a pipeline node in-place on a cloned config (UI helper). */
 export function updatePipelineNode(
   config: SystemWorkflowConfig,
-  mode: "plan" | "agent",
+  mode: "spec" | "agent",
   nodeId: string,
   patch: Partial<PipelineNode>,
 ): SystemWorkflowConfig {
   const next = structuredClone(config);
-  const pipe = mode === "plan" ? next.modes.plan.pipeline : next.modes.agent.pipeline;
+  const pipe = mode === "spec" ? next.modes.spec.pipeline : next.modes.agent.pipeline;
   const idx = pipe.nodes.findIndex((n) => n.id === nodeId);
   if (idx < 0) return config;
   const prev = pipe.nodes[idx]!;
@@ -482,11 +512,8 @@ export function updatePipelineNode(
     params: { ...prev.params, ...patch.params },
   };
   const t = pipe.nodes[idx]!.type;
-  if (t === "save_plan" && patch.enabled !== undefined) {
-    next.modes.plan.allowPlanFiles = patch.enabled;
-  }
-  if (t === "explore_tools" && patch.params?.allowPlanFiles !== undefined) {
-    next.modes.plan.allowPlanFiles = patch.params.allowPlanFiles;
+  if (t === "explore_tools" && patch.params?.allowSpecFiles !== undefined) {
+    next.modes.spec.allowSpecFiles = patch.params.allowSpecFiles;
   }
   return SystemWorkflowConfigSchema.parse(next);
 }

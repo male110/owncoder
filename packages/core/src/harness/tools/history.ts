@@ -2,9 +2,7 @@ import type { ToolContext, ToolResult } from "./types.ts";
 import { fail, ok, str } from "./shared.ts";
 import { searchHistory } from "../loop/history-vector.ts";
 
-const HISTORY_TOP_K = 5;
 const HISTORY_MIN_SCORE = 0.6;
-const HISTORY_FIELD_MAX_CHARS = 4_000;
 const NEAR_DUPLICATE_THRESHOLD = 0.8;
 
 export interface HistoryRecallOptions {
@@ -18,12 +16,11 @@ export interface HistoryRecallSource {
   sessionId?: string;
 }
 
-function compactField(value: unknown, allowFullReport = false): string {
+function compactField(value: unknown): string {
   const text = typeof value === "string"
     ? value
     : JSON.stringify(value ?? "(none)", null, 2);
-  if (allowFullReport || text.length <= HISTORY_FIELD_MAX_CHARS) return text;
-  return `${text.slice(0, HISTORY_FIELD_MAX_CHARS)}\n…[truncated]`;
+  return text;
 }
 
 /**
@@ -46,7 +43,6 @@ export async function recallHistoryBefore(
     1000,
     options.beforeTurnIndex,
   ))
-    .slice(0, HISTORY_TOP_K)
     .filter((hit) => hit.score >= HISTORY_MIN_SCORE);
 
   if (hits.length === 0) {
@@ -104,7 +100,7 @@ export async function recallHistoryBefore(
     `## Match ${index + 1}`,
     `User input:\n${compactField(round?.userInput ?? hit.content)}`,
     `Task decomposition:\n${compactField(round?.taskDecomposition)}`,
-    `LLM report:\n${compactField(round?.llmReport, true)}`,
+    `LLM report:\n${compactField(round?.llmReport)}`,
     `Evidence:\n${compactField(round?.evidence)}`,
     `Tool calls:\n${compactField(round?.toolCalls)}`,
   ].join("\n");
@@ -139,17 +135,16 @@ export async function recallHistory(ctx: ToolContext, options: HistoryRecallOpti
   }, options);
 }
 
-export async function toolRecallHistory(ctx: ToolContext, query: string): Promise<ToolResult> {
-  return recallHistory(ctx, { query });
-}
-
-export async function toolRecallHistoryBefore(
+export async function toolRecallHistory(
   ctx: ToolContext,
   query: string,
   beforeTurnIndex?: number,
 ): Promise<ToolResult> {
   if (!ctx.historyVector) return ok("No searchable session history is available.");
-  return recallHistoryBefore({ ...ctx.historyVector, sessionId: ctx.sessionId }, { query, beforeTurnIndex });
+  return recallHistoryBefore(
+    { ...ctx.historyVector, sessionId: ctx.sessionId },
+    { query, beforeTurnIndex },
+  );
 }
 
 export function historyRecallQuery(args: Record<string, unknown>): string {

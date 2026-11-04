@@ -8,8 +8,6 @@ import type { SystemWorkflowConfig, ContextConfig } from "@owncoder/settings";
  * - `systemPrompt`: the built-in system prompt template + tool definitions.
  *   This is the core instruction that is never trimmed.
  * - `platformInfo`: platform information (OS, shell, etc). Always sent.
- * - `promptOptimizer`: adaptive prompt optimizer output (performance feedback,
- *   failure patterns). Always sent, never truncated.
  * - `userInput`: the user's current message.
  * - `taskDecomposition`: output from task decomposition (when active).
  *
@@ -17,15 +15,13 @@ import type { SystemWorkflowConfig, ContextConfig } from "@owncoder/settings";
  * handled as candidates in the selection pipeline.
  *
  * The remaining budget is computed as:
- * `remaining = inputBudget - systemPrompt - platformInfo - promptOptimizer - userInput - taskDecomposition - activePlan`
+ * `remaining = inputBudget - systemPrompt - platformInfo - userInput - taskDecomposition - activePlan`
  */
 export interface FixedSegments {
   /** Built-in system prompt template + tool definitions. Never trimmed. */
   systemPrompt: number;
   /** Platform information (OS, shell, etc). Always sent. */
   platformInfo: number;
-  /** Adaptive prompt optimizer output. Always sent, never truncated. */
-  promptOptimizer: number;
   /** @reserved Tool definitions — currently included in systemPrompt. */
   toolDefs: number;
   /** User's input message. */
@@ -157,7 +153,6 @@ export function computeContextBudget(
   const fixedTotal =
     fixed.systemPrompt +
     fixed.platformInfo +
-    fixed.promptOptimizer +
     fixed.toolDefs +
     fixed.userInput +
     fixed.taskDecomposition +

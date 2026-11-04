@@ -9,26 +9,126 @@ import type {
 } from "./types.js";
 import { normalizeApiBaseUrl } from "./url.js";
 
+/** 思考字段构建结果 */
+type ThinkingFields = {
+  body: Record<string, unknown>;
+  extraBody?: Record<string, unknown>;
+};
+
+/** OpenAI 标准 reasoning_effort 字段 */
+const openaiEffort = (effort: string): ThinkingFields => ({ body: { reasoning_effort: effort } });
+/** 仅厂商扩展字段（body 为空对象） */
+const extraOnly = (extraBody: Record<string, unknown>): ThinkingFields => ({ body: {}, extraBody });
+/** 模型不支持关闭思考：警告并保持模型默认行为（不发参数） */
+function warnCannotDisable(family: string): null {
+  console.warn(`[llm] ${family} 系列不支持关闭思考模式，将使用模型默认行为`);
+  return null;
+}
+
+/**
+ * 单条模型家族的思考参数规则。采用数据驱动的目录式组织：新增家族只需
+ * 往表尾追加规则，不用改动函数体。
+ */
+interface ThinkingRule {
+  /** 模型名（小写）匹配正则；按数组顺序首个匹配生效 */
+  match: RegExp;
+  /** 关闭思考 (effort=none/off/disabled) 时的字段；null = 不发参数 */
+  disabled: (model: string) => ThinkingFields | null;
+  /** 启用思考时的字段；null = 不发参数 */
+  enabled: (model: string, effort: string) => ThinkingFields | null;
+}
+
+const THINKING_RULES: ThinkingRule[] = [
+  // Anthropic Claude：思考走 Anthropic thinking 块，不是 reasoning_effort；省略以免 400。
+  {
+    match: /claude|anthropic|^opus-|^sonnet-|^haiku-/,
+    disabled: () => null,
+    enabled: () => null,
+  },
+  // OpenAI: GPT-5, o1, o3
+  {
+    match: /^(gpt-|o1-|o3-|chatgpt)/i,
+    disabled: () => openaiEffort("none"),
+    enabled: (_model, effort) => openaiEffort(effort),
+  },
+  // DeepSeek: DeepSeek-V3/V4/R1
+  {
+    match: /deepseek/i,
+    disabled: () => extraOnly({ thinking: { type: "disabled" } }),
+    enabled: (_model, effort) => ({
+      body: { reasoning_effort: effort },
+      extraBody: { thinking: { type: "enabled" } },
+    }),
+  },
+  // Qwen: Qwen3.x, QwQ
+  {
+    match: /qwen|qwq/i,
+    disabled: () => extraOnly({ enable_thinking: false }),
+    enabled: () => extraOnly({ enable_thinking: true }),
+  },
+  // GLM: GLM-5.x（GLM-5.3 不支持关闭）
+  {
+    match: /^glm-/i,
+    disabled: (model) =>
+      /glm-5\.3/i.test(model) ? warnCannotDisable("GLM-5.3") : openaiEffort("none"),
+    enabled: (_model, effort) => openaiEffort(effort),
+  },
+  // 豆包
+  {
+    match: /doubao/i,
+    disabled: () => extraOnly({ thinking: { type: "disabled" } }),
+    enabled: () => extraOnly({ thinking: { type: "enabled" } }),
+  },
+  // 腾讯混元
+  {
+    match: /hunyuan|^hy\d/i,
+    disabled: () => extraOnly({ thinking: { type: "disabled" } }),
+    enabled: (_model, effort) => ({
+      body: { reasoning_effort: effort },
+      extraBody: { thinking: { type: "enabled" } },
+    }),
+  },
+  // Kimi: K2.x/K3（K3/K2.7 不支持关闭）
+  {
+    match: /kimi/i,
+    disabled: (model) =>
+      /k3|k2\.7/i.test(model)
+        ? warnCannotDisable("Kimi K3/K2.7")
+        : extraOnly({ enable_thinking: false }),
+    enabled: () => extraOnly({ enable_thinking: true }),
+  },
+  // MiniMax: M2/M3（M3 支持 adaptive；M2.x 强制启用，不传参数）
+  {
+    match: /minimax/i,
+    disabled: (model) =>
+      /m2\./i.test(model) ? warnCannotDisable("MiniMax M2.x") : extraOnly({ thinking: "disabled" }),
+    enabled: (model) => (/m3/i.test(model) ? extraOnly({ thinking: "adaptive" }) : null),
+  },
+  // Stepfun
+  {
+    match: /step/i,
+    disabled: () => extraOnly({ enable_thinking: false }),
+    enabled: () => extraOnly({ enable_thinking: true }),
+  },
+  // 百灵大模型（蚂蚁 ant-ling / 蚂蚁科大 MaaS）：Ling 为通用非思考线
+  // （flash/tiny 等），Ring 为深度思考线。Ling 不发送思考参数——向不支持
+  // reasoning_effort 的网关乱塞参数只会换来 400 或异常行为；Ring 启用时
+  // 走 OpenAI 标准 reasoning_effort。
+  {
+    match: /ling|ring|bailing/i,
+    disabled: () => null,
+    enabled: (model, effort) => (/ring/i.test(model) ? openaiEffort(effort) : null),
+  },
+];
+
 /**
  * 根据模型名构建思考参数
  *
  * 策略：
  * 1. 用户未设置 (effort=undefined) → 返回 null，不传任何参数
- * 2. 用户设置 + 已知模型 → 按厂商适配参数格式
+ * 2. 用户设置 + 已知模型家族 → 按厂商适配参数格式（规则表首个匹配生效）
  * 3. 关闭思考 + 未知/Claude 模型 → 不传参数（避免 reasoning_effort 触发 400）
  * 4. 启用思考 + 未知模型 → 尝试 OpenAI 标准 reasoning_effort
- *
- * 支持的模型：
- * - OpenAI: GPT-5, o1, o3
- * - Anthropic: Claude (Opus / Sonnet / Haiku)
- * - DeepSeek: DeepSeek-V3/V4/R1
- * - Qwen: Qwen3.x, QwQ
- * - GLM: GLM-5.x
- * - 豆包: Doubao
- * - 腾讯混元: Hunyuan
- * - Kimi: Kimi-K2.x/K3
- * - MiniMax: MiniMax-M2/M3
- * - Stepfun: Step
  *
  * 注意：这里按模型名识别 Claude 并省略 reasoning_effort，是 OpenAI 兼容路径上的
  * 厂商参数适配，不是协议选择。Claude 走 OpenAI 网关时必须保留此行为。
@@ -36,84 +136,16 @@ import { normalizeApiBaseUrl } from "./url.js";
 export function buildThinkingFields(
   model: string,
   effort?: ThinkingEffort,
-): {
-  body: Record<string, unknown>;
-  extraBody?: Record<string, unknown>;
-} | null {
+): ThinkingFields | null {
   // 用户未设置 → 不传参数，使用模型默认行为
   if (!effort) {
     return null;
   }
 
   const modelLower = model.toLowerCase();
+  const isOff = effort === "none" || effort === "off" || effort === "disabled";
 
-  // 识别模型厂商
-  const isOpenAI = /^(gpt-|o1-|o3-|chatgpt)/i.test(modelLower);
-  const isClaude = /claude|anthropic|^opus-|^sonnet-|^haiku-/.test(modelLower);
-  const isDeepSeek = /deepseek/i.test(modelLower);
-  const isQwen = /qwen|qwq/i.test(modelLower);
-  const isGLM = /^glm-/i.test(modelLower);
-  const isDoubao = /doubao/i.test(modelLower);
-  const isHunyuan = /hunyuan|^hy\d/i.test(modelLower);
-  const isKimi = /kimi/i.test(modelLower);
-  const isMiniMax = /minimax/i.test(modelLower);
-  const isStepfun = /step/i.test(modelLower);
-
-  // ===== 关闭思考 =====
-  if (effort === "none" || effort === "off" || effort === "disabled") {
-    // Claude / 未知网关不认 OpenAI 的 reasoning_effort。关思考时省略该字段，
-    // 否则会变成 HTTP 400（Upstream error: invalid_request_error）。
-    if (isClaude) {
-      return null;
-    }
-    if (isOpenAI) {
-      return { body: { reasoning_effort: "none" } };
-    }
-    if (isDeepSeek) {
-      return { body: {}, extraBody: { thinking: { type: "disabled" } } };
-    }
-    if (isQwen) {
-      return { body: {}, extraBody: { enable_thinking: false } };
-    }
-    if (isGLM) {
-      // GLM-5.3 不支持关闭
-      if (/glm-5\.3/i.test(modelLower)) {
-        console.warn("[llm] GLM-5.3 系列不支持关闭思考模式，将使用模型默认行为");
-        return null;
-      }
-      return { body: { reasoning_effort: "none" } };
-    }
-    if (isDoubao) {
-      return { body: {}, extraBody: { thinking: { type: "disabled" } } };
-    }
-    if (isHunyuan) {
-      return { body: {}, extraBody: { thinking: { type: "disabled" } } };
-    }
-    if (isKimi) {
-      // Kimi K3/K2.7 不支持关闭
-      if (/k3|k2\.7/i.test(modelLower)) {
-        console.warn("[llm] Kimi K3/K2.7 系列不支持关闭思考模式，将使用模型默认行为");
-        return null;
-      }
-      return { body: {}, extraBody: { enable_thinking: false } };
-    }
-    if (isMiniMax) {
-      // MiniMax M2.x 不支持关闭
-      if (/m2\./i.test(modelLower)) {
-        console.warn("[llm] MiniMax M2.x 系列不支持关闭思考模式，将使用模型默认行为");
-        return null;
-      }
-      return { body: {}, extraBody: { thinking: "disabled" } };
-    }
-    if (isStepfun) {
-      return { body: {}, extraBody: { enable_thinking: false } };
-    }
-    // 未知模型 + 要求关闭 → 不传思考字段。
-    // 乱塞 OpenAI 的 reasoning_effort 会被 Claude 等网关直接 400。
-    return null;
-  }
-
-  // ===== 启用思考 + 强度映射 =====
+  // 启用思考 + 强度映射
   const effortMap: Record<string, string> = {
     low: "low",
     minimal: "low",
@@ -123,57 +155,21 @@ export function buildThinkingFields(
   };
   const mappedEffort = effortMap[effort] || "high";
 
-  if (isClaude) {
-    // Claude 思考走 Anthropic thinking 块，不是 reasoning_effort；省略以免 400。
-    return null;
-  }
-  if (isOpenAI) {
-    return { body: { reasoning_effort: mappedEffort } };
-  }
-  if (isDeepSeek) {
-    return {
-      body: { reasoning_effort: mappedEffort },
-      extraBody: { thinking: { type: "enabled" } },
-    };
-  }
-  if (isQwen) {
-    return {
-      body: {},
-      extraBody: { enable_thinking: true },
-    };
-  }
-  if (isGLM) {
-    return { body: { reasoning_effort: mappedEffort } };
-  }
-  if (isDoubao) {
-    return { body: {}, extraBody: { thinking: { type: "enabled" } } };
-  }
-  if (isHunyuan) {
-    return {
-      body: { reasoning_effort: mappedEffort },
-      extraBody: { thinking: { type: "enabled" } },
-    };
-  }
-  if (isKimi) {
-    return { body: {}, extraBody: { enable_thinking: true } };
-  }
-  if (isMiniMax) {
-    // MiniMax M3 支持 adaptive
-    if (/m3/i.test(modelLower)) {
-      return { body: {}, extraBody: { thinking: "adaptive" } };
+  const rule = THINKING_RULES.find((r) => r.match.test(modelLower));
+
+  // 未知模型：要求关闭 → 不传思考字段（乱塞 OpenAI 的 reasoning_effort 会被
+  // Claude 等网关直接 400）；要求启用 → 尝试 OpenAI 标准。
+  if (!rule) {
+    if (isOff) {
+      return null;
     }
-    // M2.x 强制启用，不传参数
-    return null;
-  }
-  if (isStepfun) {
-    return { body: {}, extraBody: { enable_thinking: true } };
+    console.warn(
+      `[llm] 未识别的模型 "${model}"，尝试使用 OpenAI 标准参数 reasoning_effort="${mappedEffort}"`,
+    );
+    return { body: { reasoning_effort: mappedEffort } };
   }
 
-  // 未知模型 + 启用思考 → 尝试 OpenAI 标准
-  console.warn(
-    `[llm] 未识别的模型 "${model}"，尝试使用 OpenAI 标准参数 reasoning_effort="${mappedEffort}"`,
-  );
-  return { body: { reasoning_effort: mappedEffort } };
+  return isOff ? rule.disabled(modelLower) : rule.enabled(modelLower, mappedEffort);
 }
 
 function decodeOpenAiResponse(json: unknown): ChatResponse {

@@ -5,16 +5,6 @@ import type { ChatTurn } from "./harness/loop/types.ts";
 
 export type ConversationTurnStatus = "running" | "completed" | "cancelled" | "failed";
 
-export interface ConversationRecord {
-  seq: number;
-  turnId: string;
-  type: "turn_begin" | "turn_event" | "turn_complete" | "turn_failed";
-  roundSeq?: number;
-  eventType?: string;
-  payload?: unknown;
-  at: string;
-}
-
 export interface ConversationTurn {
   turnId: string;
   turnSeq: number;
@@ -42,21 +32,7 @@ const locks = new Map<string, Promise<unknown>>();
 
 /** Keep final_json bounded. Older builds stored the entire AgentLoopResult.history
  * (full-session transcript + tool payloads) and single turns grew past 300MB. */
-const MAX_FINAL_JSON_CHARS = 1_500_000;
-const MAX_ASSISTANT_CONTENT_CHARS = 200_000;
-/** Durable event payloads must stay pageable. Durable transcripts remain
- * persist tool call metadata but not tool result bodies; other string fields
- * stay bounded. */
-const MAX_EVENT_PAYLOAD_CHARS = 250_000;
-const MAX_TOOL_ARG_STRING_CHARS = 4_000;
-const MAX_TOOL_OUTPUT_CHARS = 64_000;
-const MAX_GENERIC_STRING_CHARS = 64_000;
-const MAX_REASONING_CHARS = 16_000;
-
-function truncateText(value: string, max: number): string {
-  if (value.length <= max) return value;
-  return `${value.slice(0, max)}\n…[truncated ${value.length - max} chars]`;
-}
+// Durable transcripts retain complete content; pagination limits rows, not payloads.
 
 function slimChatTurn(turn: unknown): ChatTurn | null {
   if (!turn || typeof turn !== "object") return null;
@@ -72,13 +48,13 @@ function slimChatTurn(turn: unknown): ChatTurn | null {
   if (typeof row.content !== "string") return null;
   const slim: ChatTurn = {
     role: row.role,
-    content: row.role === "tool" ? truncateText(row.content, MAX_TOOL_OUTPUT_CHARS) : truncateText(row.content, MAX_ASSISTANT_CONTENT_CHARS),
+    content: row.content,
   };
   if (typeof row.id === "string") slim.id = row.id;
   if (typeof row.turnId === "string") slim.turnId = row.turnId;
   if (typeof row.toolName === "string") slim.toolName = row.toolName;
   if (row.toolArgs && typeof row.toolArgs === "object" && !Array.isArray(row.toolArgs)) {
-    slim.toolArgs = slimToolArgs(row.toolArgs);
+    slim.toolArgs = row.toolArgs;
   }
   if (Array.isArray(row.attachments) && row.attachments.length) {
     const attachments = row.attachments.filter((item): item is NonNullable<ChatTurn["attachments"]>[number] =>
@@ -114,9 +90,7 @@ export function slimTurnFinal(result: unknown): unknown {
     return slimChatTurn(row);
   }
 
-  // AgentLoopResult used to persist the entire session `history` here and
-  // ballooned past 300MB/turn. Keep only the final assistant text (+ tiny
-  // metadata). Tool timelines already live in the events table.
+  // Keep the final assistant text; the timeline and complete tool outputs live in events.
   let assistantText =
     typeof row.assistantText === "string" ? row.assistantText : "";
   if (!assistantText && Array.isArray(row.history)) {
@@ -131,7 +105,7 @@ export function slimTurnFinal(result: unknown): unknown {
 
   const slim: Record<string, unknown> = {
     role: "assistant",
-    content: truncateText(assistantText, MAX_ASSISTANT_CONTENT_CHARS),
+    content: assistantText,
   };
   if (row.lastPlanPath !== undefined) slim.lastPlanPath = row.lastPlanPath;
   if (row.documentWorkflow !== undefined) slim.documentWorkflow = row.documentWorkflow;
@@ -142,8 +116,8 @@ export function slimTurnFinal(result: unknown): unknown {
 }
 
 function finalJsonSelectExpr(): string {
-  // Skip oversized legacy blobs so history pagination cannot OOM the main process.
-  return `CASE WHEN final_json IS NOT NULL AND LENGTH(final_json) > ${MAX_FINAL_JSON_CHARS} THEN '{"omitted":true,"reason":"final_json_too_large"}' ELSE final_json END AS final_json`;
+  // Return legacy payloads intact too.
+  return "final_json";
 }
 
 /** One-shot repair for databases written before final_json was bounded. */
@@ -163,70 +137,13 @@ export function sanitizeOversizedFinalJson(root: string, sessionId: string): num
     ).get();
     if (!tableExists) return 0;
 
-    const stub = json({ omitted: true, reason: "final_json_too_large" });
-    const result = db
-      .prepare(
-        `UPDATE turns SET final_json = ? WHERE final_json IS NOT NULL AND LENGTH(final_json) > ?`,
-      )
-      .run(stub, MAX_FINAL_JSON_CHARS);
-    return Number(result.changes ?? 0);
+    // Legacy payloads must remain intact; nothing needs sanitizing.
+    return 0;
   } finally {
     if (!existing) db.close();
   }
 }
 
-function slimToolArgs(args: unknown): Record<string, unknown> | undefined {
-  if (!args || typeof args !== "object" || Array.isArray(args)) return undefined;
-  const out: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(args as Record<string, unknown>)) {
-    if (typeof value === "string") {
-      out[key] = truncateText(value, MAX_TOOL_ARG_STRING_CHARS);
-    } else if (typeof value === "number" || typeof value === "boolean" || value == null) {
-      out[key] = value;
-    } else if (Array.isArray(value)) {
-      // Keep short scalar arrays (line ranges, ids); drop nested blobs.
-      out[key] = value.slice(0, 50).map((item) =>
-        typeof item === "string" ? truncateText(item, MAX_TOOL_ARG_STRING_CHARS) : item,
-      );
-    } else {
-      // 保留一层嵌套对象的简化版本，递归处理其字段
-      const nested = value as Record<string, unknown>;
-      const slimNested: Record<string, unknown> = {};
-      let fieldCount = 0;
-      for (const [nestedKey, nestedValue] of Object.entries(nested)) {
-        if (fieldCount >= 20) break; // 限制嵌套对象的字段数量
-        if (typeof nestedValue === "string") {
-          slimNested[nestedKey] = truncateText(nestedValue, MAX_TOOL_ARG_STRING_CHARS);
-        } else if (typeof nestedValue === "number" || typeof nestedValue === "boolean" || nestedValue == null) {
-          slimNested[nestedKey] = nestedValue;
-        } else if (Array.isArray(nestedValue)) {
-          slimNested[nestedKey] = nestedValue.slice(0, 10).map((item) =>
-            typeof item === "string" ? truncateText(item, 200) : typeof item === "number" || typeof item === "boolean" || item == null ? item : { omitted: true }
-          );
-        } else {
-          // 二层嵌套用标记替换
-          slimNested[nestedKey] = { omitted: true, reason: "deeply_nested" };
-        }
-        fieldCount++;
-      }
-      out[key] = slimNested;
-    }
-  }
-  return out;
-}
-
-function slimStringFields(value: unknown, max: number, depth = 0): unknown {
-  if (typeof value === "string") return truncateText(value, max);
-  if (!value || typeof value !== "object" || depth > 4) return value;
-  if (Array.isArray(value)) {
-    return value.slice(0, 100).map((item) => slimStringFields(item, max, depth + 1));
-  }
-  const out: Record<string, unknown> = {};
-  for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
-    out[key] = slimStringFields(child, max, depth + 1);
-  }
-  return out;
-}
 
 /**
  * Bound a single durable turn-event payload before it hits SQLite.
@@ -236,65 +153,12 @@ function slimStringFields(value: unknown, max: number, depth = 0): unknown {
  */
 export function slimDurableEvent(event: unknown): unknown {
   if (event == null || typeof event !== "object") return event;
-  const row = event as Record<string, unknown>;
-  const type = typeof row.type === "string" ? row.type : undefined;
-  const slim: Record<string, unknown> = { ...row };
-
-  if (type === "tool_end") {
-    // Keep a bounded result so completed history can show the same tool detail as live runs.
-    if (typeof slim.output === "string") slim.output = truncateText(slim.output, MAX_TOOL_OUTPUT_CHARS);
-    if (slim.metadata != null) {
-      slim.metadata = slimStringFields(slim.metadata, MAX_TOOL_ARG_STRING_CHARS);
-    }
-  } else if (type === "tool_start") {
-    if (slim.args != null) slim.args = slimToolArgs(slim.args);
-  } else if (type === "terminal" && slim.entry && typeof slim.entry === "object") {
-    const entry = { ...(slim.entry as Record<string, unknown>) };
-    // Terminal streams are tool results for bash-like tools; drop on disk.
-    delete entry.stdout;
-    delete entry.stderr;
-    if (typeof entry.command === "string") entry.command = truncateText(entry.command, MAX_TOOL_ARG_STRING_CHARS);
-    slim.entry = entry;
-  } else if (type === "reasoning_step" || type === "trace_report" || type === "verification_result") {
-    if (typeof slim.content === "string") slim.content = truncateText(slim.content, MAX_REASONING_CHARS);
-    if (typeof slim.summary === "string") slim.summary = truncateText(slim.summary, MAX_REASONING_CHARS);
-  } else if (type === "error" || type === "warning" || type === "context_warning") {
-    if (typeof slim.message === "string") slim.message = truncateText(slim.message, MAX_REASONING_CHARS);
-  } else if (type === "task_decomposition") {
-    slim.intent =
-      typeof slim.intent === "string"
-        ? truncateText(slim.intent, MAX_GENERIC_STRING_CHARS)
-        : slim.intent;
-    slim.tasks = slimStringFields(slim.tasks, MAX_TOOL_ARG_STRING_CHARS);
-    slim.userConstraints = slimStringFields(slim.userConstraints, MAX_TOOL_ARG_STRING_CHARS);
-  } else if (typeof slim.content === "string") {
-    // Legacy `{ role, content }` rows: drop tool bodies, bound assistant text.
-    if (slim.role === "tool") {
-      slim.content = "";
-      slim.outputOmitted = true;
-    } else {
-      slim.content = truncateText(slim.content, MAX_ASSISTANT_CONTENT_CHARS);
-    }
-  } else {
-    // Catch-all for report / recovery / decision payloads with long strings.
-    return slimStringFields(slim, MAX_GENERIC_STRING_CHARS);
-  }
-
-  const encoded = json(slim);
-  if (encoded.length <= MAX_EVENT_PAYLOAD_CHARS) return slim;
-  return {
-    type: type ?? "unknown",
-    omitted: true,
-    reason: "event_payload_too_large",
-    id: typeof slim.id === "string" ? slim.id : undefined,
-    name: typeof slim.name === "string" ? slim.name : undefined,
-    ok: typeof slim.ok === "boolean" ? slim.ok : undefined,
-    originalChars: encoded.length,
-  };
+  // Persist the original payload so reloaded turns retain full tool results and metadata.
+  return event;
 }
 
 function eventPayloadSelectExpr(): string {
-  return `CASE WHEN payload_json IS NOT NULL AND LENGTH(payload_json) > ${MAX_EVENT_PAYLOAD_CHARS} THEN '{"omitted":true,"reason":"event_payload_too_large"}' ELSE payload_json END AS payload_json`;
+  return "payload_json";
 }
 
 /** One-shot repair for oversized event rows written before durable slimming. */
@@ -314,13 +178,8 @@ export function sanitizeOversizedEventPayloads(root: string, sessionId: string):
     ).get();
     if (!tableExists) return 0;
 
-    const stub = json({ omitted: true, reason: "event_payload_too_large" });
-    const result = db
-      .prepare(
-        `UPDATE events SET payload_json = ? WHERE payload_json IS NOT NULL AND LENGTH(payload_json) > ?`,
-      )
-      .run(stub, MAX_EVENT_PAYLOAD_CHARS);
-    return Number(result.changes ?? 0);
+    // Keep existing event payloads unchanged.
+    return 0;
   } finally {
     if (!existing) db.close();
   }
@@ -432,8 +291,8 @@ export async function beginTurn(root: string, sessionId: string, user: ChatTurn 
     const turnSeq = (db.prepare("SELECT COALESCE(MAX(turn_seq), 0) + 1 AS next FROM turns").get() as { next: number }).next;
     const userPayload =
       typeof user === "string"
-        ? { role: "user" as const, content: truncateText(user, MAX_ASSISTANT_CONTENT_CHARS) }
-        : slimChatTurn(user) ?? { role: "user" as const, content: truncateText(String((user as { content?: unknown }).content ?? ""), MAX_ASSISTANT_CONTENT_CHARS) };
+        ? { role: "user" as const, content: user }
+        : slimChatTurn(user) ?? { role: "user" as const, content: String((user as { content?: unknown }).content ?? "") };
     db.prepare("INSERT INTO turns(turn_id, turn_seq, status, started_at, user_json) VALUES (?, ?, 'running', ?, ?)").run(id, turnSeq, now, json(userPayload));
     return { turnId: id, turnSeq };
   });
@@ -583,6 +442,9 @@ export function projectConversationTurns(turns: ConversationTurn[]): ChatTurn[] 
       if (!payload || typeof payload !== "object") continue;
 
       if (payload.type === "tool_start" && typeof payload.id === "string") {
+        // 子智能体镜像工具不进入历史回放（见 tool_end 的同样分支）。
+        const subagent = (payload as { subagent?: unknown }).subagent;
+        if (subagent && typeof subagent === "object") continue;
         pendingTools.set(payload.id, {
           name: typeof payload.name === "string" ? payload.name : "unknown",
           args:
@@ -593,6 +455,13 @@ export function projectConversationTurns(turns: ConversationTurn[]): ChatTurn[] 
         continue;
       }
       if (payload.type === "tool_end" && typeof payload.id === "string") {
+        // 子智能体镜像的工具只是实时执行状态，最终结论已在 assistant 回复中；
+        // 历史回放不再把它们重建为普通工具行，避免与主流程工具混在执行过程里。
+        const subagent = (payload as { subagent?: unknown }).subagent;
+        if (subagent && typeof subagent === "object") {
+          pendingTools.delete(payload.id);
+          continue;
+        }
         const start = pendingTools.get(payload.id);
         const toolName =
           (typeof payload.name === "string" && payload.name) ||

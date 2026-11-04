@@ -92,7 +92,7 @@ function heuristicDecompose(request: string, _context: string): PlanStep[] {
     {
       pattern: /fix|debug|repair|解决|修复/,
       steps: [
-        { description: "定位问题根源 — 阅读相关代码和日志", deps: [] },
+        { description: "定位问题根源 — 仅读取报错涉及与出问题代码所在的文件", deps: [] },
         { description: "分析根因并提出修复方案", deps: [0] },
         { description: "实施修复", deps: [1] },
         { description: "验证修复 — 检查类型、运行测试", deps: [2] },
@@ -101,7 +101,7 @@ function heuristicDecompose(request: string, _context: string): PlanStep[] {
     {
       pattern: /add|implement|create|添加|实现|创建/,
       steps: [
-        { description: "理解现有代码结构和约定", deps: [] },
+        { description: "仅读取本次要改动的文件及其直接依赖的接口", deps: [] },
         { description: "设计实现方案", deps: [0] },
         { description: "实现核心逻辑", deps: [1] },
         { description: "集成和连线", deps: [2] },
@@ -111,7 +111,7 @@ function heuristicDecompose(request: string, _context: string): PlanStep[] {
     {
       pattern: /refactor|重构/,
       steps: [
-        { description: "分析现有代码结构和依赖关系", deps: [] },
+        { description: "仅读取重构目标所在文件及其直接依赖", deps: [] },
         { description: "设计重构方案", deps: [0] },
         { description: "逐步重构（保留行为不变）", deps: [1] },
         { description: "验证重构后功能一致", deps: [2] },
@@ -120,7 +120,7 @@ function heuristicDecompose(request: string, _context: string): PlanStep[] {
     {
       pattern: /optimize|优化|performance|性能/,
       steps: [
-        { description: "识别性能瓶颈（profile/分析）", deps: [] },
+        { description: "识别性能瓶颈（profile / 运行测试，仅读瓶颈所在文件）", deps: [] },
         { description: "提出优化策略", deps: [0] },
         { description: "实施优化", deps: [1] },
         { description: "基准测试验证效果", deps: [2] },

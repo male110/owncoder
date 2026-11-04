@@ -1,40 +1,34 @@
 import { type ParsedToolCall } from "./parser.ts";
 import type { ToolContext, ToolResult } from "./tools/types.ts";
 import { redactSecrets, isRedactionEnabled } from "./redact.ts";
-import { bool, cap, fail, num, ok, str } from "./tools/shared.ts";
+import { bool, fail, num, ok, str } from "./tools/shared.ts";
 import { statusEntry } from "./tools/shared.ts";
 import type { TerminalEntry } from "./terminal.ts";
 import { writeEventLog } from "@owncoder/llm";
 import {
   toolBash,
-  toolGitStatus,
-  toolGrep,
   toolList,
   toolPatch,
   toolRead,
   toolReadSymbol,
   toolReadOutline,
-  READ_FILE_OUTPUT_BUDGET,
   toolRepoMap,
   toolSaveExperience,
-  toolSavePlan,
   toolSaveSpec,
+  toolSaveTasks,
+  toolListSpecs,
   toolSaveDesign,
-  toolListSdd,
   toolAnalyzeIssue,
   toolGraphSearch,
   toolSearchSymbols,
+  toolGlob,
   toolWrite,
   toolAppend,
   toolProjectDeps,
+  toolGrep,
 } from "./tools/fs.ts";
-import { toolCodemapImpact, toolCodemapSearch } from "./tools/codemap.ts";
-import {
-  toolLspAction,
-  toolLspDiagnostics,
-  toolLspDocSymbols,
-  toolLspWorkspaceSymbols,
-} from "./tools/lsp.ts";
+
+import { toolLspDiagnostics } from "./tools/lsp.ts";
 import { toolTypeCheck } from "./tools/verify.ts";
 import { toolAskUser, toolReportBlocker, toolSemanticDiff, toolWebFetch, toolWebSearch } from "./tools/misc.ts";
 import {
@@ -47,11 +41,13 @@ import {
   toolListSessionChanges,
   toolUndoSessionChange,
 } from "./tools/session-changes.ts";
+import { toolUseSkill } from "./tools/skills.ts";
+import { toolRunScript } from "./tools/run-script.ts";
+import { toolUpdateTasks } from "./tools/update-tasks.ts";
 import {
   historyRecallBeforeTurn,
   historyRecallQuery,
   toolRecallHistory,
-  toolRecallHistoryBefore,
 } from "./tools/history.ts";
 
 export type { ToolContext, ToolResult, ToolEventSink } from "./tools/types.ts";
@@ -80,30 +76,22 @@ function redactToolOutput(ctx: ToolContext, output: string): string {
   }).text;
 }
 
-function modelOutputLimit(ctx: ToolContext, toolName: string): number {
-  if (["bash", "type_check", "lsp_diagnostics"].includes(toolName)) {
-    return ctx.bashMaxChars;
-  }
-  // read_file returns whole files by design (see toolRead); keep the egress cap
-  // in sync with its render budget so the promised line range isn't re-cut.
-  if (toolName === "read_outline") {
-    return Number.MAX_SAFE_INTEGER;
-  }
-  if (toolName === "read_file" || toolName === "read_symbol") {
-    return Math.max(ctx.maxOutputChars, READ_FILE_OUTPUT_BUDGET);
-  }
-  // 历史召回必须返回索引中的完整原文（尤其是 LLM 报告），不能再被工具出口 cap 裁短。
-  if (toolName === "recall_history") {
-    return Number.MAX_SAFE_INTEGER;
-  }
-  return ctx.maxOutputChars;
-}
-
 export async function executeTool(ctx: ToolContext, call: ParsedToolCall): Promise<ToolResult> {
   if (ctx.signal?.aborted) return fail("操作已停止");
 
   const name = call.name;
   const args = call.arguments;
+  // Enforce the effective tool surface at the execution boundary as well as
+  // when building the model tool list. This closes nested run_script bypasses.
+  const internalNestedTool = ctx.internalToolCall && name === "list_dir";
+  if (ctx.availableTools && !ctx.availableTools.has(name) && !internalNestedTool) {
+    return fail(`Tool not allowed in this role: ${name}`);
+  }
+  const budget = ctx.budget;
+  if (budget) {
+    const charge = budget.chargeTool(name, ctx.nestedToolCall === true);
+    if (!charge.ok) return fail(`Budget exhausted before ${name}: ${charge.reason ?? "tool call limit"}`);
+  }
 
   // Emit a live status entry so the UI shows "reading/writing file" progress
   // instead of appearing frozen. bash emits its own terminal entry internally,
@@ -121,21 +109,35 @@ export async function executeTool(ctx: ToolContext, call: ParsedToolCall): Promi
 
   try {
     const rawResult = await runTool(ctx, call);
+    if (
+      ctx.budget &&
+      rawResult.ok &&
+      (rawResult.metadata?.kind === "read_file" || rawResult.metadata?.kind === "read_outline")
+    ) {
+      const readCharge = ctx.budget.chargeRead(Buffer.byteLength(rawResult.output, "utf8"));
+      if (!readCharge.ok) {
+        const denied = fail(`Budget exhausted after ${name}: ${readCharge.reason ?? "read budget"}`);
+        if (status && ctx.onTerminal) {
+          ctx.onTerminal({
+            id: termId,
+            command: status.command,
+            status: "error",
+            stderr: denied.output.slice(0, 4000),
+            at: new Date().toISOString(),
+          } as TerminalEntry);
+        }
+        return denied;
+      }
+    }
     // If the underlying operation completed just after cancellation, do not
     // allow its result to drive another model iteration.
     const result = ctx.signal?.aborted
       ? fail("操作已停止")
       : {
           ...rawResult,
-          output: cap(
-            redactToolOutput(ctx, rawResult.output),
-            modelOutputLimit(ctx, name),
-          ),
+          output: redactToolOutput(ctx, rawResult.output),
         };
-    // Final egress guard: every built-in and MCP result is redacted and then
-    // capped before it can be appended to model context. Tool-specific paths
-    // may already redact earlier; this second pass is intentionally idempotent.
-    /* result is already normalized above */
+    // 工具出口保留完整脱敏结果，供模型消息、事件和历史使用。
     if (status && ctx.onTerminal) {
       ctx.onTerminal({
         id: termId,
@@ -203,9 +205,9 @@ function truncatedPayloadMessage(name: string): string {
       );
     case "append_file":
       return `${common} Keep each append under 50KB and split into multiple calls if needed.`;
-    case "save_plan":
     case "save_spec":
     case "save_design":
+    case "save_tasks":
       return (
         `${common}\n` +
         `Write the document in smaller pieces: save the first section, then extend it with append_file.`
@@ -245,14 +247,36 @@ async function runTool(ctx: ToolContext, call: ParsedToolCall): Promise<ToolResu
         return await toolReadSymbol(ctx, str(args.file_path), str(args.symbol), num(args.padding, 12));
       case "read_outline":
         return await toolReadOutline(ctx, str(args.file_path));
+      // list_dir remains an internal compatibility helper for run_script.
       case "list_dir":
         return await toolList(ctx, str(args.file_path ?? "."), bool(args.recursive));
+      case "glob":
+        return await toolGlob(
+          ctx,
+          str(args.pattern),
+          str(args.file_path).trim() || ".",
+          num(args.max_results ?? args.maxResults, 100),
+        );
       case "grep":
         return await toolGrep(
           ctx,
           str(args.pattern),
-          str(args.file_path ?? "."),
-          num(args.maxResults, 40),
+          str(args.file_path).trim() || ".",
+          num(args.max_results ?? args.maxResults, 40),
+          {
+            glob: args.glob === undefined ? undefined : str(args.glob),
+            type: args.type === undefined ? undefined : str(args.type),
+            outputMode: args.output_mode === undefined ? undefined : str(args.output_mode) as "content" | "files_with_matches" | "count",
+            beforeContext: num(args.before_context, 0),
+            afterContext: num(args.after_context, 0),
+            context: num(args.context, 0),
+            showLineNumbers: args.show_line_numbers === undefined ? undefined : bool(args.show_line_numbers),
+            onlyMatching: args.only_matching === undefined ? undefined : bool(args.only_matching),
+            ignoreCase: args.ignore_case === undefined ? undefined : bool(args.ignore_case),
+            headLimit: args.head_limit === undefined ? undefined : num(args.head_limit, 0),
+            offset: args.offset === undefined ? undefined : num(args.offset, 0),
+            multiline: args.multiline === undefined ? undefined : bool(args.multiline),
+          },
         );
       case "graph_search":
         return await toolGraphSearch(ctx, str(args.query), num(args.depth, 2));
@@ -263,32 +287,49 @@ async function runTool(ctx: ToolContext, call: ParsedToolCall): Promise<ToolResu
           str(args.query || args.pattern),
           num(args.limit, 20),
         );
-      case "codemap_search":
-        return await toolCodemapSearch(ctx, str(args.query), num(args.limit, 12));
-      case "codemap_impact":
-        return await toolCodemapImpact(ctx, str(args.nodeId), num(args.depth, 3));
       case "repo_map":
         return await toolRepoMap(ctx, str(args.hint ?? ""));
-      case "save_plan":
-        return await toolSavePlan(ctx, str(args.content), str(args.title ?? ""), str(args.filename ?? ""));
       // Truncated payloads for these are rejected before dispatch — see the
       // `args._truncated` guard at the top of runTool().
       case "apply_patch":
-        return await toolPatch(ctx, str(args.file_path), str(args.patch));
+        return await toolPatch(
+          ctx,
+          str(args.file_path),
+          str(args.patch),
+          str(args.old_string),
+          str(args.new_string),
+          bool(args.replace_all),
+        );
       case "write_file":
         return await toolWrite(ctx, str(args.file_path), str(args.content), bool(args.allow_shrink));
       case "append_file":
         return await toolAppend(ctx, str(args.file_path), str(args.content));
       case "bash":
         return await toolBash(ctx, str(args.command));
-      case "git_status":
-        return await toolGitStatus(ctx);
+      case "dispatch_agent": {
+        const agentType = str(args.agent_type ?? "Explore");
+        const task = str(args.task ?? args.prompt ?? "");
+        if (!task) {
+          return fail("dispatch_agent 参数错误：必须提供非空字符串 task，描述要子智能体完成的调研问题。");
+        }
+        if (!ctx.dispatchSubagent) {
+          return fail("dispatch_agent 当前不可用：宿主未提供子智能体运行环境。");
+        }
+        const thoroughness = str(args.thoroughness ?? "medium");
+        if (agentType !== "Explore") {
+          return fail(`dispatch_agent 暂不支持 agent_type="${agentType}"，目前只支持 "Explore"（只读代码调研）。`);
+        }
+        const report = await ctx.dispatchSubagent({ agentType, task, thoroughness });
+        return ok(report);
+      }
+      case "update_tasks":
+        // 动态任务清单（活清单，非定死）：参数整形 + 语义校验在 handler 内，
+        // 闭包由顺序路径（react.ts）或任务图调度器注入。
+        return await toolUpdateTasks(ctx, args);
       case "project_deps":
         return await toolProjectDeps(ctx);
       case "recall_history":
-        return await toolRecallHistory(ctx, historyRecallQuery(args));
-      case "recall_history_before":
-        return await toolRecallHistoryBefore(ctx, historyRecallQuery(args), historyRecallBeforeTurn(args));
+        return await toolRecallHistory(ctx, historyRecallQuery(args), historyRecallBeforeTurn(args));
       case "save_experience":
         return await toolSaveExperience(
           ctx,
@@ -313,26 +354,22 @@ async function runTool(ctx: ToolContext, call: ParsedToolCall): Promise<ToolResu
               "the JSON parser could not recover it. Please retry with the full design markdown in `content`.",
           );
         return await toolSaveDesign(ctx, str(args.feature), str(args.content));
+      case "save_tasks":
+        if (args.content == null)
+          return fail(
+            "save_tasks: `content` field is missing from the tool call arguments — " +
+              "the JSON parser could not recover it. Please retry with the full tasks markdown in `content`.",
+          );
+        return await toolSaveTasks(ctx, str(args.feature), str(args.content));
       case "list_sdd":
-        return await toolListSdd(ctx, args.feature ? str(args.feature) : undefined);
+      case "list_specs":
+        return await toolListSpecs(ctx, args.feature ? str(args.feature) : undefined);
       case "analyze_issue":
         return await toolAnalyzeIssue(ctx, str(args.description));
 
-      // ── NEW: LSP tools ──
-      case "lsp_go_to_definition":
-        return await toolLspAction(ctx, "goToDefinition", str(args.filePath), num(args.line, 1), num(args.column, 1));
-      case "lsp_find_references":
-        return await toolLspAction(ctx, "findReferences", str(args.filePath), num(args.line, 1), num(args.column, 1));
-      case "lsp_hover":
-        return await toolLspAction(ctx, "hover", str(args.filePath), num(args.line, 1), num(args.column, 1));
-      case "lsp_document_symbols":
-        return await toolLspDocSymbols(ctx, str(args.filePath));
-      case "lsp_workspace_symbols":
-        return await toolLspWorkspaceSymbols(ctx, str(args.query));
+      // ── LSP tools ──
       case "lsp_diagnostics":
         return await toolLspDiagnostics(ctx, str(args.filePath ?? ""));
-      case "lsp_code_actions":
-        return await toolLspAction(ctx, "codeActions", str(args.filePath), num(args.line, 1), num(args.column, 1));
 
       // ── Verification tools ──
       case "type_check":
@@ -400,19 +437,42 @@ async function runTool(ctx: ToolContext, call: ParsedToolCall): Promise<ToolResu
       case "undo_session_change":
         return await toolUndoSessionChange(ctx, str(args.file_path));
 
+      // ── Skills ──
+      case "use_skill": {
+        if (typeof args.skill !== "string" || !args.skill.trim()) {
+          return fail('use_skill 参数错误：必须提供非空字符串 skill，例如 {"skill":"code-review"}；参数名是 skill。');
+        }
+        const skillArgs = typeof args.args === "string" ? args.args : "";
+        return await toolUseSkill(ctx, args.skill, skillArgs);
+      }
+
+      // ── 沙箱脚本（Think-in-Code）：模型写 JS 编排只读工具 + bash，只有 console 输出进对话 ──
+      case "run_script": {
+        if (typeof args.code !== "string" || !args.code.trim()) {
+          return fail('run_script 参数错误：必须提供非空字符串 code，例如 {"code":"const r = await tools.call(\\"read_file\\", {file_path:\\"src/x.ts\\"}); console.log(r.output.split(\\"\\\\n\\").length + \\" lines\\")"}；参数名是 code。');
+        }
+        return await toolRunScript(ctx, args.code, {
+          timeoutMs: args.timeout_ms === undefined ? undefined : num(args.timeout_ms, 120_000),
+          intent: typeof args.intent === "string" ? args.intent : undefined,
+        });
+      }
+
       // ── MCP tools ──
       default:
         if (name.startsWith("mcp__") && ctx.mcp) {
           try {
             if (mcpToolNeedsConfirmation(name)) {
               if (!ctx.workflow.modes.agent.dangerousBashConfirm || !ctx.confirmDangerousBash) {
-                return fail(`Blocked potentially mutating MCP tool: ${name}`);
+                return fail(
+                  `Blocked potentially mutating MCP tool (no confirmation path: dangerousBashConfirm off or confirmer not wired): ${name}`,
+                );
               }
               const allowed = await ctx.confirmDangerousBash(`MCP tool: ${name}\nArguments: ${JSON.stringify(args)}`);
               if (!allowed) return fail(`MCP tool denied by user: ${name}`);
             }
             const out = await ctx.mcp.call(name, args as Record<string, unknown>);
-            return ok(cap(redactToolOutput(ctx, out), ctx.maxOutputChars));
+            // MCP 原始输出在统一出口脱敏；不在工具执行阶段裁剪。
+            return ok(out);
           } catch (e) {
             const err = e instanceof Error ? e.message : String(e);
             writeEventLog({

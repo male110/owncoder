@@ -14,8 +14,6 @@ export interface HistoryFilterSettings {
 }
 
 export interface ContextControlConfig {
-  /** Add navigation guidance for index-derived source references. */
-  progressiveExpansion: boolean;
   /** Retain ephemeral receipts for successful current-source reads. */
   freshnessTracking: boolean;
   /** Emit content-free decision, follow-up, and compression telemetry. */
@@ -62,7 +60,6 @@ const CASE_INSENSITIVE_PATHS = platform() === "win32";
 export function resolveContextControlConfig(raw: unknown): ContextControlConfig {
   const record = isRecord(raw) ? raw : {};
   return {
-    progressiveExpansion: record.progressiveExpansion !== false,
     freshnessTracking: record.freshnessTracking !== false,
     emitTelemetry: record.emitTelemetry !== false,
     historyFilter: isRecord(record.historyFilter)

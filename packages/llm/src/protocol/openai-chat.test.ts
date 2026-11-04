@@ -109,6 +109,31 @@ describe("openaiChatCodec", () => {
     expect(buildThinkingFields("gpt-5", "none")).toEqual({ body: { reasoning_effort: "none" } });
   });
 
+  it("recognizes Bailing Ling flash models and sends no thinking fields", () => {
+    // Ling flash/tiny 是非思考线：任何 effort 都不发参数（乱塞 reasoning_effort
+    // 会被网关拒绝或引发异常行为）
+    expect(buildThinkingFields("ling-3.1-flash", "high")).toBeNull();
+    expect(buildThinkingFields("Ling-3.0-flash", "low")).toBeNull();
+    expect(buildThinkingFields("ling-3.0-tiny", "none")).toBeNull();
+    expect(buildThinkingFields("lingdt-decision-1.0", "medium")).toBeNull();
+    const body = openaiChatCodec.encodeRequest({
+      model: "ling-3.1-flash",
+      messages,
+      stream: false,
+      thinking: { effort: "high" },
+    }) as Record<string, unknown>;
+    expect(body.reasoning_effort).toBeUndefined();
+    expect(body.thinking).toBeUndefined();
+    expect(body.enable_thinking).toBeUndefined();
+  });
+
+  it("recognizes Bailing Ring reasoning line and maps reasoning_effort", () => {
+    expect(buildThinkingFields("Ring-2.6-1T", "high")).toEqual({ body: { reasoning_effort: "high" } });
+    expect(buildThinkingFields("ring-3-flash", "low")).toEqual({ body: { reasoning_effort: "low" } });
+    // 关闭思考时省略参数
+    expect(buildThinkingFields("Ring-2.6-1T", "none")).toBeNull();
+  });
+
   it("parses OpenAI SSE deltas into the internal ChatResponse", () => {
     const deltas: string[] = [];
     const thoughts: string[] = [];
