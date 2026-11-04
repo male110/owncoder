@@ -477,7 +477,7 @@ export async function toolRunScript(
     // 或写了 cmd 专属语法）：旁补平台事实与跨平台替代写法，让下一轮自己纠正，
     // 而不是对着报错反复重试同一条命令。（子进程输出的宿主本地编码已由
     // child-process-shim 正确解码，模型拿到的是可读文本。Windows 上字符串
-    // 命令默认由随包 MSYS2 bash 执行——POSIX 管道/重定向可用，cmd 专属语法
+    // 命令默认由 PowerShell 执行——POSIX 管道/重定向不可用，cmd 专属语法
     // 才会撞墙。）
     const cmdFailHint = /Command failed/.test(errMsg)
       ? '脚本经 child_process 执行命令失败：不要重复重试同一条绝对路径 shell 命令。定位文件请改用 tools.call("glob", { pattern: "**/*目标文件名*", file_path: "." })，搜索内容请用 tools.call("grep", { pattern, file_path: ".", output_mode: "files_with_matches" })；这些工具使用当前 workspace 并自动过滤 .gitignore。Windows 上 /workspace、/e/... 等容器/MSYS 路径可能不存在。'

@@ -16,7 +16,7 @@
  *   且调用方未显式指定 shell 时，默认使用 Windows 内置 PowerShell。
  *   数组形式（execFile/execFileSync）与显式 shell 调用语义不变。
  * - 拦截文本类调用（encoding 缺省或 utf8），内部强制 encoding:'buffer'
- *   拿原始字节：先严格 UTF-8 解码——现代工具链（随包 bash、PowerShell
+ *   拿原始字节：先严格 UTF-8 解码——现代工具链（PowerShell
  *   包装层、输出 UTF-8 的程序）严格合法，通过即原样；非法 UTF-8 则只可能
  *   是宿主控制台代码页字节（中文 Windows 的 GBK 本地化报错等），按 GBK
  *   还原。

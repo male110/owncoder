@@ -67,7 +67,7 @@ export function isReadonlyBash(cmd: string): boolean {
 // 必须解析进工作区。模型"找不到入口就全盘 find /
 // ls 上级目录探位置"的兜底行为由此被拦死——find /、grep -r x /、ls ..、
 // ls ~，以及复合命令中混入的越界搜索段一律拒绝；工作区内（相对路径、
-// 工作区内绝对路径、随包 MSYS2 盘符风格 /e/…）不受影响。
+// 工作区内绝对路径不受影响。
 
 /** 搜索/列目录命令家族：命中其一才检查路径参数；读类命令（cat/head）不受限。 */
 const SEARCH_SCOPE_TOOLS =
@@ -146,8 +146,8 @@ function isInsideWorkspace(absPath: string, root: string): boolean {
 }
 
 /**
- * 单个 token 是否指向工作区之外。只判路径形态（绝对路径、MSYS2 盘符
- * 风格 /e/…、家目录 ~、以及 ../ 逃逸）；普通相对路径一律放行——
+ * 单个 token 是否指向工作区之外。只判路径形态（绝对路径、
+ * 家目录 ~、以及 ../ 逃逸）；普通相对路径一律放行——
  * bash 的 cwd 就是工作区根。返回越界路径原文（用于错误信息），否则 null。
  */
 function tokenOutsideWorkspace(token: string, root: string): string | null {
@@ -159,8 +159,7 @@ function tokenOutsideWorkspace(token: string, root: string): string | null {
   if (t === "~" || t.startsWith("~/") || t.startsWith("~\\")) return t;
   let abs: string;
   if (/^\/[A-Za-z]\//.test(t)) {
-    // 随包 MSYS2 bash 的盘符风格：/e/owncoder → E:\owncoder
-    abs = `${t.slice(1, 2).toUpperCase()}:${t.slice(2)}`;
+      abs = `${t.slice(1, 2).toUpperCase()}:${t.slice(2)}`;
   } else if (t.startsWith("/") || /^[A-Za-z]:[\\/]/.test(t)) {
     abs = t;
   } else if (

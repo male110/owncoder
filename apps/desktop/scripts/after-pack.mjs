@@ -1,5 +1,5 @@
 import { readdir, rm } from "node:fs/promises";
-import { cpSync, existsSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -125,24 +125,4 @@ export default async function afterPack(context) {
     }
   }
 
-  // ── bundle MSYS2 runtime (Windows only) ──────────────────────────
-  // 内置 POSIX bash 执行环境（bash tool 与 run_script 沙箱字符串命令）。
-  // prepare 管线产物在 apps/desktop/bundled-tools/msys2；Windows 构建必须
-  // 先跑 pnpm prepare:msys2，缺失即失败（platform_info 向模型承诺了
-  // POSIX bash，不能静默退化为 PowerShell 方言）。
-  if (platform === "win32") {
-    const msys2Src = resolve(
-      dirname(fileURLToPath(import.meta.url)),
-      "..",
-      "bundled-tools",
-      "msys2",
-    );
-    if (!existsSync(msys2Src)) {
-      throw new Error(
-        "[afterPack] bundled-tools/msys2 不存在——Windows 构建必须先跑 " +
-          "pnpm --filter @owncoder/desktop prepare:msys2（内置 MSYS2 运行时）",
-      );
-    }
-    cpSync(msys2Src, join(resourcesDir, "msys2"), { recursive: true });
-    console.log("[afterPack] bundled MSYS2 runtime → resources/msys2");
-  }}
+}

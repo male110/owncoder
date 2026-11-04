@@ -1,65 +1,39 @@
 import assert from "node:assert/strict";
-import { existsSync } from "node:fs";
-import { unlink, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-import { afterAll, beforeAll, describe, test } from "vitest";
+import { join } from "node:path";
+import { describe, test } from "vitest";
 import { injectOwncoderExclusion, runCommand } from "./shared.ts";
-import { resetWindowsShellCacheForTest } from "./windows-shell.ts";
 
-// runCommand 的 Windows 分支优先走随包 MSYS2 bash（OWNCODER_MSYS2_ROOT 由
-// 桌面端 bootstrap 注入）。以下用例在该平台且 bundle 就绪（prepare:msys2
-// 产物）时验证 POSIX 行为；bundle 缺失时跳过——回退 PowerShell 属历史
-// 行为，其 UTF-8 包装语义由 bash 工具的跨平台测试与 dev 冒烟覆盖。
-const msys2Root = resolve(
-  dirname(fileURLToPath(import.meta.url)),
-  "../../../../../apps/desktop/bundled-tools/msys2",
-);
-const bundleReady = process.platform === "win32" && existsSync(join(msys2Root, "usr/bin/bash.exe"));
-const prevRoot = process.env.OWNCODER_MSYS2_ROOT;
-
-beforeAll(() => {
-  if (bundleReady) process.env.OWNCODER_MSYS2_ROOT = msys2Root;
-  resetWindowsShellCacheForTest();
-});
-afterAll(() => {
-  if (prevRoot === undefined) delete process.env.OWNCODER_MSYS2_ROOT;
-  else process.env.OWNCODER_MSYS2_ROOT = prevRoot;
-  resetWindowsShellCacheForTest();
-});
-
-test.skipIf(!bundleReady)("bundled bash: stdout round-trips UTF-8", async () => {
-  const { stdout, stderr, code } = await runCommand("echo '中文输出测试'", process.cwd(), 30_000);
-  assert.equal(code, 0);
-  assert.equal(stdout.trim(), "中文输出测试");
-  assert.equal(stderr, "");
-});
-
-test.skipIf(!bundleReady)("bundled bash: POSIX pipes, /dev/null and exit codes", async () => {
-  const { stdout, code } = await runCommand("echo pipeline-ok | wc -c", process.cwd(), 30_000);
-  assert.equal(code, 0);
-  assert.equal(stdout.trim(), "12"); // "pipeline-ok\n" = 12 字节
-
-  const fail = await runCommand("ls /definitely-missing-path-xyz", process.cwd(), 30_000);
-  assert.notEqual(fail.code, 0);
-  assert.ok(fail.stderr.length > 0, "expected bash's own error on stderr");
-  // bash 自身错误输出是 UTF-8；若按控制台代码页误解码会出现 U+FFFD
-  assert.ok(!fail.stderr.includes("\u{FFFD}"), `mojibake in stderr: ${fail.stderr}`);
-});
-
-test.skipIf(!bundleReady)("bundled bash: cat reads UTF-8 BOM-less files", async () => {
-  const path = join(tmpdir(), `owncoder-shared-utf8-${Date.now()}.txt`);
+test.skipIf(process.platform !== "win32")("runCommand: PowerShell 执行变量、管道、重定向、UTF-8 和退出码", async () => {
+  const root = await mkdtemp(join(tmpdir(), "owncoder-powershell-"));
+  const input = join(root, "input.txt");
+  const output = join(root, "output.txt");
   try {
-    await writeFile(path, "无BOM中文文件内容", "utf8");
-    // bash 下双引号/单引号内的反斜杠路径不可靠，统一正斜杠（与调用点审计一致）
-    const posixPath = path.split("\\").join("/");
-    const { stdout, code } = await runCommand(`cat '${posixPath}'`, process.cwd(), 30_000);
-    assert.equal(code, 0);
-    assert.ok(stdout.includes("无BOM中文文件内容"), stdout);
+    await writeFile(input, "中文输入", "utf8");
+    const command = `$value = (Get-Content '${input}' -Raw).Trim(); $value | Set-Content '${output}' -Encoding utf8; Get-Content '${output}' -Raw`;
+    const result = await runCommand(command, root, 30_000);
+    assert.equal(result.code, 0);
+    assert.equal(result.stdout.trim(), "中文输入");
+    assert.equal(result.stderr, "");
+
+    const piped = await runCommand("Write-Output pipeline-ok | ForEach-Object { $_.ToUpperInvariant() }", root, 30_000);
+    assert.equal(piped.code, 0);
+    assert.equal(piped.stdout.trim(), "PIPELINE-OK");
+
+    const failed = await runCommand("Write-Error 'powershell-failure'; exit 7", root, 30_000);
+    assert.equal(failed.code, 7);
+    assert.match(failed.stderr, /powershell-failure/);
   } finally {
-    await unlink(path).catch(() => {});
+    await rm(root, { recursive: true, force: true });
   }
+});
+
+test.skipIf(process.platform !== "win32")("runCommand: 空命令由 PowerShell 稳定返回", async () => {
+  const result = await runCommand("", process.cwd(), 30_000);
+  assert.equal(result.code, 0);
+  assert.equal(result.stdout, "");
+  assert.equal(result.stderr, "");
 });
 
 // ── injectOwncoderExclusion 单元测试 ──────────────────────

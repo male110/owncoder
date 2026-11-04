@@ -43,5 +43,3 @@ run("pnpm", ["build"]);
 run("pnpm", ["exec", "electron-builder", "--win", "nsis"]);
 patchNodePty();
 run("pnpm", ["exec", "electron-builder", "--win", "nsis-web", `-c.nsisWeb.appPackageUrl=${appPackageUrl}`]);
-// 内置 MSYS2 运行时冒烟（空 PATH 自足性 + win-unpacked 落位）；失败阻断发布。
-run("node", ["./scripts/verify-msys2-runtime.mjs"]);

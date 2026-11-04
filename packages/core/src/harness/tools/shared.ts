@@ -287,7 +287,7 @@ export function runCommand(
     //   - $PSDefaultParameterValues makes Get-Content read files as UTF-8 by
     //     default instead of the system ANSI codepage, which is the root cause
     //     of mojibake when reading UTF-8 source files without a BOM.
-    // Windows 使用系统内置 powershell.exe，避免默认命令执行进入 MSYS2 bash。
+    // Windows 使用系统内置 powershell.exe 作为默认命令执行壳。
     const spawnedCommand = !IS_WINDOWS
       ? injectOwncoderExclusion(command, options?.searchExclusions ?? [".owncoder"])
       : command;

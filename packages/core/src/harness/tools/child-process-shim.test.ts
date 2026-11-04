@@ -1,17 +1,14 @@
 import assert from "node:assert/strict";
 import * as childProcess from "node:child_process";
-import { existsSync, mkdtempSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { promisify } from "node:util";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-import { afterAll, beforeAll, test } from "vitest";
+import { join } from "node:path";
+import { test } from "vitest";
 import { decodeChildOutput, wrapChildProcessModule } from "./child-process-shim.ts";
-import { resetWindowsShellCacheForTest } from "./windows-shell.ts";
 
-// cmd.exe「系统找不到指定的路径。」的 GBK(cp936) 原始字节——取自 Windows
-// 主机 execSync 失败 stderr 的实测捕获。严格 UTF-8 解码非法（这正是旧代码
-// 有损解码出 ϵͳҲα·汾 类乱码的字节），GBK 兜底必须逐字还原。
+// cmd.exe 中文错误的 GBK(cp936) 原始字节——取自 Windows 主机 execSync
+// 失败 stderr 的实测捕获。严格 UTF-8 解码非法时，GBK 兜底必须逐字还原。
 const GBK_PATH_NOT_FOUND = Buffer.from(
   "cfb5cdb3d5d2b2bbb5bdd6b8b6a8b5c4c2b7beb6a1a30d0a",
   "hex",
@@ -37,25 +34,6 @@ test("decodeChildOutput: 空 Buffer/已解码字符串/空值", () => {
 // ── 包装层（真实 child_process，跨平台） ──────────────────────
 
 const wrapped = wrapChildProcessModule(childProcess as unknown as Record<string, unknown>) as typeof childProcess;
-
-// Windows 默认壳用例需要随包 MSYS2 bundle（prepare:msys2 产物）；
-// 干净环境无 bundle 时跳过 bash 默认壳用例（回退 cmd.exe 由专门用例覆盖）。
-const msys2Root = resolve(
-  dirname(fileURLToPath(import.meta.url)),
-  "../../../../../apps/desktop/bundled-tools/msys2",
-);
-const bundleReady = process.platform === "win32" && existsSync(join(msys2Root, "usr/bin/bash.exe"));
-const prevRoot = process.env.OWNCODER_MSYS2_ROOT;
-
-beforeAll(() => {
-  if (bundleReady) process.env.OWNCODER_MSYS2_ROOT = msys2Root;
-  resetWindowsShellCacheForTest();
-});
-afterAll(() => {
-  if (prevRoot === undefined) delete process.env.OWNCODER_MSYS2_ROOT;
-  else process.env.OWNCODER_MSYS2_ROOT = prevRoot;
-  resetWindowsShellCacheForTest();
-});
 
 test("包装 facade:execSync 成功输出仍是字符串（缺省行为不变）", () => {
   const out = wrapped.execSync("echo hello-shim");
@@ -174,7 +152,7 @@ test("包装 facade:工作区内命令与无范围参数的模块不受影响", 
 test.skipIf(process.platform !== "win32")(
   "包装 facade:显式 shell 指定 cmd.exe 锁定 cmd 路径，GBK 本地化报错正确还原（用户复现命令）",
   () => {
-    // 默认壳已是随包 bash（POSIX 管道可用）；显式 shell 指定 cmd.exe，
+    // 默认壳是 PowerShell；显式 shell 指定 cmd.exe，
     // 用它锁定 cmd 路径验证 GBK 兜底解码仍然生效。
     assert.throws(
       () =>
@@ -191,40 +169,25 @@ test.skipIf(process.platform !== "win32")(
         assert.ok(!msg.includes("ϵ"), JSON.stringify(msg));
         // err.stderr 为正确解码的文本
         assert.equal(typeof err.stderr, "string");
-        const locale = Intl.DateTimeFormat().resolvedOptions().locale ?? "";
-        if (locale.toLowerCase().startsWith("zh")) {
-          assert.ok(msg.includes("系统找不到指定的路径"), JSON.stringify(msg));
-          assert.ok(String(err.stderr).includes("系统找不到指定的路径"));
-        }
+        assert.ok(
+          msg.includes("系统找不到指定的路径") || msg.includes("The system cannot find the path specified."),
+          JSON.stringify(msg),
+        );
+        assert.ok(
+          String(err.stderr).includes("系统找不到指定的路径") ||
+            String(err.stderr).includes("The system cannot find the path specified."),
+          String(err.stderr),
+        );
         return true;
       },
     );
   },
 );
 
-test.skipIf(!bundleReady)(
-  "包装 facade:Windows 字符串命令默认走随包 bash（POSIX 管道可用）",
-  () => {
-    const out = wrapped.execSync("printf bash-default-ok | wc -c", { encoding: "utf8" });
-    assert.equal(out.trim(), "15"); // printf 不带换行，"bash-default-ok" 共 15 字节
-  },
-);
-
 test.skipIf(process.platform !== "win32")(
-  "包装 facade:无随包 bundle 时回退 Node 默认壳仍可执行命令（不因缺 bundle 崩溃）",
+  "包装 facade:Windows 字符串命令默认使用 PowerShell 语法",
   () => {
-    const saved = process.env.OWNCODER_MSYS2_ROOT;
-    delete process.env.OWNCODER_MSYS2_ROOT;
-    resetWindowsShellCacheForTest();
-    try {
-      // 回退壳（cmd.exe/宿主环境）下 echo 均可用——只验证回退路径功能正常；
-      // “回退的是哪个壳”由 windows-shell.test.ts 的 resolver 用例覆盖。
-      const out = wrapped.execSync("echo fallback-shell-ok", { encoding: "utf8" });
-      assert.ok(out.includes("fallback-shell-ok"), out);
-    } finally {
-      if (saved === undefined) delete process.env.OWNCODER_MSYS2_ROOT;
-      else process.env.OWNCODER_MSYS2_ROOT = saved;
-      resetWindowsShellCacheForTest();
-    }
+    const out = wrapped.execSync("$value = 'powershell-default-ok'; Write-Output $value", { encoding: "utf8" });
+    assert.equal(out.trim(), "powershell-default-ok");
   },
 );

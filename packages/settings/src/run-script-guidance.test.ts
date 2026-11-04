@@ -38,4 +38,11 @@ describe("task-decompose run_script guidance", () => {
     expect(BUILTIN_TASK_DECOMPOSE_PROMPT).not.toContain("run_script");
     expect(BUILTIN_TASK_DECOMPOSE_PROMPT).not.toContain("RUN_SCRIPT_EXAMPLES");
   });
+
+  it("keeps code exploration guidance tool-oriented and command-agnostic", () => {
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain("use tools to search for or locate");
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain("Do not prescribe a search command, search method, search scope or starting directory");
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).not.toContain("rg --files");
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).not.toContain("先在仓库根目录");
+  });
 });

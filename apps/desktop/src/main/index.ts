@@ -75,17 +75,6 @@ function bootstrap(): void {
   process.env.OWNCODER_LSP_PREINSTALLED_PATH = app.isPackaged
     ? join(process.resourcesPath, "lsp-preinstalled")
     : "";
-  // 内置 MSYS2 运行时：Windows 上 bash tool 与 run_script 沙箱字符串命令
-  // 的 POSIX 执行环境（resources/msys2，afterPack 拷贝）。dev 未跑
-  // prepare:msys2 时目录不存在 → 不注入 → 运行期回退 PowerShell。
-  if (process.platform === "win32") {
-    const msys2Root = app.isPackaged
-      ? join(process.resourcesPath, "msys2")
-      : join(app.getAppPath(), "bundled-tools", "msys2");
-    if (existsSync(join(msys2Root, "usr", "bin", "bash.exe"))) {
-      process.env.OWNCODER_MSYS2_ROOT = msys2Root;
-    }
-  }
 }
 
 bootstrap();

@@ -10,7 +10,7 @@
 - 最多60次工具调用，默认120秒（最高300秒），返回输出上限24KB（超过8KB时，若 run_script 传了 intent 参数则按意图关键词开窗提取相关片段，而不是只留前缀）。下面的循环均有边界，不应盲目遍历整仓库。
 - 搜索或打印上限不是完整性保证。遇到截断，缩小范围或分页（`grep` 支持 `head_limit`/`offset`，`glob`/`grep` 支持 `max_results`）；保留未确认项，不用“没看到”代替“不存在”。
 - 脚本只写代码，不用写注释。
-- 工具路径全部是当前 workspace 的相对路径（`.` 表示工作区根），**不要使用 `/workspace`、`/e/...` 这类容器/MSYS 绝对路径**——它们在 Windows 上不存在。bash 工具与 child_process 字符串命令仅在确需外部命令（构建、版本探测等）时使用，且它们在所有平台都是 POSIX 方言（Windows 上是随包 MSYS2 bash）；Spec 模式的只读门禁只允许单条只读命令——该模式请直接用 `grep`/`glob`/`read_file` 编排。
+- 工具路径全部是当前 workspace 的相对路径（`.` 表示工作区根），**不要使用 `/workspace`、`/e/...` 这类容器绝对路径**——它们在 Windows 上不存在。bash 工具与 child_process 字符串命令仅在确需外部命令（构建、版本探测等）时使用：Windows 默认使用系统 PowerShell（`powershell.exe`），字符串命令应采用 PowerShell 语法，例如变量用 `$value = ...`，管道用 `|`，重定向用 `>` 或 `2>&1`，路径使用 `C:\work\file.txt` 或当前 workspace 相对路径；不要假设 POSIX 的 `/dev/null`、`$VAR`、`cat` 或 `/e/...` 路径可用。Spec 模式的只读门禁只允许单条只读命令——该模式请直接用 `grep`/`glob`/`read_file` 编排。
 - `node:vm` 不是安全隔离边界；脚本仍需遵守宿主权限和确认规则。脚本只能 `require` Node 内建模块（`fs`/`path`/`node:process` 等，`node:` 前缀可选）做计算辅助；动态 `import()` 与 `require` 等效，不支持静态 `import` 语句。`process`/`Buffer`/`__dirname`/`__filename`/`fetch` 全局不存在——需要时用 `require("node:process")` 等内建模块取。文件读写一律走 `tools.call`（`read_file`/`write_file`/`apply_patch`），文件搜索走 `grep`/`glob`，不要用 `fs` 直读直写。
 
 ## 1. 经典：找到调用方，排除测试、生成代码和定义

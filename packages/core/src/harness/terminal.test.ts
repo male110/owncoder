@@ -88,7 +88,7 @@ test("findSearchScopeViolation: 工作区根自身的绝对路径放行", () => 
 });
 
 test.skipIf(process.platform !== "win32")(
-  "findSearchScopeViolation: MSYS2 盘符风格 /e/… 按盘符解析",
+  "findSearchScopeViolation: 盘符风格 /e/… 按盘符解析",
   () => {
     assert.equal(findSearchScopeViolation("ls /e/ws/src", "E:\\ws"), null);
     assert.ok(findSearchScopeViolation("ls /e/other", "E:\\ws"));
