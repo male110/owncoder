@@ -11,9 +11,13 @@ export interface ParsedToolCall {
 /**
  * Forgiving tool-call parser for weaker models:
  * - valid OpenAI tool_calls JSON
- * - JSON object / array embedded in text
+ * - JSON object / array embedded in text (optionally fenced in Markdown)
  * - XML-ish <tool_call> blocks
- * - name({...}) plain patterns
+ * - name({...}) plain patterns (also inside Markdown fences / headings / lists)
+ *
+ * Markdown is the output contract: prose may contain headings, lists and code
+ * fences, so every extraction step strips fence wrapping before parsing while
+ * keeping all pre-existing lenient fallbacks.
  */
 export function parseToolCallsFromAssistant(opts: {
   content?: string | null;
@@ -36,12 +40,23 @@ export function parseToolCallsFromAssistant(opts: {
   const text = opts.content ?? "";
   if (!text.trim()) return out;
 
-  // ```json tool call blocks
-  const fence = /```(?:json)?\s*([\s\S]*?)```/gi;
+  // Markdown code fences: ```json … ``` (any language tag, and also an
+  // unterminated fence when the output was cut off). Inner content may be a
+  // JSON tool-call payload OR a `name({...})` call — both are attempted.
+  const fence = /```([a-zA-Z0-9_+-]*)[^\S\r\n]*\r?\n?([\s\S]*?)(?:```|$)/gi;
   let m: RegExpExecArray | null;
   while ((m = fence.exec(text))) {
-    const parsed = tryParseToolPayload(m[1] ?? "");
+    const lang = (m[1] ?? "").toLowerCase();
+    const inner = m[2] ?? "";
+    if (!inner.trim()) continue;
+    const parsed = tryParseToolPayload(inner);
     for (const p of parsed) out.push(p);
+    // name({...}) fallback only for JSON/tool-call-ish fences; arbitrary code
+    // samples (```ts, ```python …) must not be mistaken for tool invocations.
+    const nameCallFence = lang === "" || lang === "json" || lang === "tool" || lang === "tool_call";
+    if (!parsed.length && nameCallFence) {
+      for (const p of extractNameCalls(inner, out.length)) out.push(p);
+    }
   }
   if (out.length) return dedupe(out);
 
@@ -58,20 +73,38 @@ export function parseToolCallsFromAssistant(opts: {
   }
   if (out.length) return dedupe(out);
 
-  // tool_name({ ... })
+  // tool_name({ ... }) — including calls embedded in Markdown headings/lists.
+  // Fenced regions are excluded: their contents are code samples (or were
+  // already handled by the fence pass above), not inline tool-call directives.
+  for (const p of extractNameCalls(removeFencedBlocks(text), out.length)) out.push(p);
+
+  return dedupe(out);
+}
+
+/** Replace every Markdown code fence (closed or unterminated) with a blank. */
+function removeFencedBlocks(text: string): string {
+  return text.replace(/```[a-zA-Z0-9_+-]*[^\S\r\n]*\r?\n?[\s\S]*?(?:```|$)/gi, "");
+}
+
+/**
+ * Extract `tool_name({ ... })` style calls from text. `startIndex` seeds the
+ * generated call ids so ids stay unique across extraction passes.
+ */
+function extractNameCalls(text: string, startIndex: number): ParsedToolCall[] {
+  const out: ParsedToolCall[] = [];
   const callRe = /\b([a-zA-Z_][\w]*)\s*\(\s*(\{[\s\S]*?\})\s*\)/g;
+  let m: RegExpExecArray | null;
   while ((m = callRe.exec(text))) {
     const name = m[1]!;
     if (["if", "for", "while", "switch", "function", "return"].includes(name)) continue;
     out.push({
-      id: `call_${out.length + 1}`,
+      id: `call_${startIndex + out.length + 1}`,
       name,
       arguments: softParseArgs(m[2] ?? "{}"),
       rawArguments: m[2] ?? "{}",
     });
   }
-
-  return dedupe(out);
+  return out;
 }
 
 function tryParseToolPayload(raw: string): ParsedToolCall[] {
@@ -131,7 +164,7 @@ function extractName(obj: Record<string, unknown>): string {
 
 export function softParseArgs(raw: string | undefined): Record<string, unknown> {
   if (!raw || !raw.trim()) return {};
-  const text = raw.trim();
+  const text = stripMarkdownWrapping(raw);
 
   // 1. Standard JSON parse (fast path)
   try {
@@ -182,6 +215,28 @@ export function softParseArgs(raw: string | undefined): Record<string, unknown> 
   if (recovered) return truncated ? { ...recovered, _truncated: true } : { ...recovered, _invalid_json: true };
 
   return { raw: text, _invalid_json: true };
+}
+
+/**
+ * Strip Markdown wrapping from a tool-argument string before JSON parsing:
+ * a leading list/heading marker, and a full or unterminated code fence.
+ * Only strips when the remainder still looks like a JSON payload, so ordinary
+ * malformed JSON passes through untouched to the lenient recovery paths.
+ */
+function stripMarkdownWrapping(raw: string): string {
+  let text = raw.trim();
+  // Leading list-item / heading marker on the first line.
+  text = text.replace(/^\s*(?:[-*+]|\d+\.)\s+/, "").replace(/^\s*#{1,6}\s+/, "");
+  // Fully closed fence: ```json … ```
+  const closed = text.match(/^```[a-zA-Z0-9_+-]*[^\S\r\n]*\r?\n?([\s\S]*?)\r?\n?```$/i);
+  if (closed) return (closed[1] ?? "").trim();
+  // Unterminated opening fence (output cut off) wrapping a JSON payload.
+  const open = text.match(/^```[a-zA-Z0-9_+-]*[^\S\r\n]*\r?\n?([\s\S]*)$/i);
+  if (open) {
+    const rest = (open[1] ?? "").trim();
+    if (rest.startsWith("{") || rest.startsWith("[")) return rest;
+  }
+  return text;
 }
 
 /**

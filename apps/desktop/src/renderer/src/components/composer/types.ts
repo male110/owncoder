@@ -42,10 +42,6 @@ export interface ComposerProps {
   onAddProject: () => void;
   onSelectReactModel: (modelName: string, providerId: string) => void;
   onSelectReactThinkingEffort: (effort: ThinkingEffort) => void;
-
-  /** 危险 bash 自动批准开关（settings modes.agent.autoApproveBash）。 */
-  autoApproveBash: boolean;
-  onAutoApproveBashChange: (enabled: boolean) => void;
 }
 
 export interface AttachmentItem {

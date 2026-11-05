@@ -13,7 +13,13 @@ import type { AgentLoopOpts, ChatTurn } from "./types.ts";
 
 export const DEFAULT_VERIFY_PROMPT =
   "Audit the completed work against the user request using the conversation, tool results, and recorded checks. " +
-  "Return a verdict — Verified, Partially verified, or Not verified — with the requirement evidence and any gap.";
+  "Write your report in Markdown with this structure:\n" +
+  "## Verdict\n" +
+  "One of: **Verified**, **Partially verified**, or **Not verified**.\n" +
+  "## Evidence\n" +
+  "Bullets citing the concrete requirement evidence (files, symbols, commands, checks) that supports the verdict.\n" +
+  "## Gaps\n" +
+  "Bullets describing anything missing, unverified, or risky; write `None` when there are no gaps.";
 
 export async function runVerifyReport(
   opts: AgentLoopOpts,

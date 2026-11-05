@@ -15,6 +15,7 @@ import {
   assertLlmAuth,
   chatCompletionStream,
   writeEventLog,
+  type ChatMessage,
 } from "@owncoder/llm";
 import type { PipelineNode } from "@owncoder/settings";
 import { buildInitialContext } from "../context.ts";
@@ -191,9 +192,18 @@ export async function doPlainCompletion(ctx: SchedulerContext): Promise<string> 
   const { opts, model, messages, history, tracer } = ctx;
   assertLlmAuth(model, opts.llmApiKey);
   let accumulated = "";
+  // Call-only copy: append the Markdown output contract without mutating the
+  // persisted message history.
+  const callMessages: ChatMessage[] = [
+    ...messages,
+    {
+      role: "system",
+      content: "## Output format\nWrite your response in Markdown — use headings, bullet/numbered lists, bold emphasis and code fences where appropriate. Markdown is only the presentation format; the answer itself must stay complete.",
+    },
+  ];
   try {
     const spanId = tracer.startSpan("plain_completion", "llm_call");
-    const response = await chatCompletionStream(model, messages, {
+    const response = await chatCompletionStream(model, callMessages, {
       signal: opts.signal,
       apiKey: opts.llmApiKey,
       purpose: "plain_completion",
@@ -206,7 +216,7 @@ export async function doPlainCompletion(ctx: SchedulerContext): Promise<string> 
     const content = response.choices[0]!.message.content ?? "";
     const usage = normalizeUsage(
       response.usage,
-      messages.map((message) => String(message.content ?? "")).join("\n"),
+      callMessages.map((message) => String(message.content ?? "")).join("\n"),
       content,
     );
     tracer.recordTokenUsage(usage.promptTokens, usage.completionTokens);

@@ -30,6 +30,19 @@ test("softParseArgs: invalid JSON is marked unsafe instead of becoming writable 
   assert.equal(args._truncated, undefined);
 });
 
+test("softParseArgs: JSON wrapped in a markdown code fence is unwrapped", () => {
+  const args = softParseArgs('```json\n{"file_path":"a.ts","content":"x"}\n```');
+  assert.equal(args._invalid_json, undefined);
+  assert.equal(args.file_path, "a.ts");
+  assert.equal(args.content, "x");
+});
+
+test("softParseArgs: fenced JSON with list marker and unterminated fence is unwrapped", () => {
+  const args = softParseArgs('- ```json\n{"file_path":"b.ts"}');
+  assert.equal(args.file_path, "b.ts");
+  assert.equal(args._invalid_json, undefined);
+});
+
 
 test("parseToolCallsFromAssistant: single tool call is parsed correctly", () => {
   const calls = parseToolCallsFromAssistant({
@@ -54,6 +67,61 @@ test("parseToolCallsFromAssistant: multiple tool calls are parsed in order", () 
   assert.equal(calls.length, 2);
   assert.equal(calls[0]!.name, "read_file");
   assert.equal(calls[1]!.name, "write_file");
+});
+
+test("parseToolCallsFromAssistant: fenced JSON inside markdown prose is extracted", () => {
+  const content = [
+    "## Plan",
+    "I will read the target file first.",
+    "",
+    "```json",
+    '{"name": "read_file", "arguments": {"file_path": "src/main.ts"}}',
+    "```",
+  ].join("\n");
+  const calls = parseToolCallsFromAssistant({ content });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0]!.name, "read_file");
+  assert.equal(calls[0]!.arguments.file_path, "src/main.ts");
+});
+
+test("parseToolCallsFromAssistant: multiple fenced calls in a markdown list are extracted in order", () => {
+  const content = [
+    "### Steps",
+    "- read:",
+    "```json",
+    '[{"name": "read_file", "arguments": {"file_path": "a.ts"}},',
+    ' {"name": "read_outline", "arguments": {"file_path": "b.ts"}}]',
+    "```",
+  ].join("\n");
+  const calls = parseToolCallsFromAssistant({ content });
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0]!.name, "read_file");
+  assert.equal(calls[1]!.name, "read_outline");
+});
+
+test("parseToolCallsFromAssistant: name({...}) call in markdown heading/list text is extracted", () => {
+  const content = [
+    "## Running read_file now",
+    "- read_file({ \"file_path\": \"c.ts\" })",
+  ].join("\n");
+  const calls = parseToolCallsFromAssistant({ content });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0]!.name, "read_file");
+  assert.equal(calls[0]!.arguments.file_path, "c.ts");
+});
+
+test("parseToolCallsFromAssistant: name({...}) inside a bare fence is extracted", () => {
+  const content = "```\nread_file({\"file_path\": \"d.ts\"})\n```";
+  const calls = parseToolCallsFromAssistant({ content });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0]!.name, "read_file");
+  assert.equal(calls[0]!.arguments.file_path, "d.ts");
+});
+
+test("parseToolCallsFromAssistant: non-JSON code samples are not mistaken for tool calls", () => {
+  const content = "```ts\nconst x = foo({ a: 1 });\n```";
+  const calls = parseToolCallsFromAssistant({ content });
+  assert.equal(calls.length, 0);
 });
 
 test("normalizeToolName maps search aliases onto search_symbols", () => {

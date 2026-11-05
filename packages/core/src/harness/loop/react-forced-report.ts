@@ -12,8 +12,8 @@ import type { ReActLoopContext } from "./react-loop-context.ts";
 
 const FORCED_REPORT_INSTRUCTION = [
   "Your search budget is exhausted. Stop searching now.",
-  "Write your final report immediately based ONLY on the evidence already gathered above. Do not call any tools. Do not create files.",
-  "Your report must state: (1) what you searched (paths and patterns); (2) confirmed findings with workspace-relative paths and line numbers; (3) what remains unverified or could not be found. Partial findings are acceptable; returning no report is not.",
+  "Write your final report immediately in Markdown based ONLY on the evidence already gathered above. Do not call any tools. Do not create files.",
+  "Format the report with headings: `## Searched` (paths and patterns), `## Findings` (confirmed results with workspace-relative paths and line numbers as bullets), `## Gaps` (what remains unverified or could not be found). Partial findings are acceptable; returning no report is not.",
 ].join(" ");
 
 /** 收集历史中已有的 assistant 文本（去重、限量），作为无文本时的兜底。 */

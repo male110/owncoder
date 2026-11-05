@@ -47,7 +47,7 @@ import {
   LIST_SPECS_TOOL_DEF,
 } from "./enhanced-tools/specs.ts";
 import { DISPATCH_AGENT_TOOL_DEF } from "./enhanced-tools/subagent.ts";
-import { UPDATE_TASKS_TOOL_DEF } from "./enhanced-tools/task-list.ts";
+import { ADD_TASKS_TOOL_DEF, UPDATE_TASKS_TOOL_DEF } from "./enhanced-tools/task-list.ts";
 import { LIST_SDD_TOOL_DEF } from "./enhanced-tools/sdd.ts";
 import { USE_SKILL_TOOL_DEF } from "./enhanced-tools/skills.ts";
 import { RUN_SCRIPT_TOOL_DEF } from "./enhanced-tools/sandbox.ts";
@@ -166,7 +166,7 @@ export function allEnhancedTools(opts?: {
   };
 
   // 1) Controlled search first: no shell syntax or platform path guessing.
-  push(read("glob"), read("grep"), read("search_symbols"), read("search_semantic"));
+  push(read("glob"), read("grep"), read("search_semantic"), read("search_symbols"));
 
   // 2) Script orchestration and known-path reads.
   push(RUN_SCRIPT_TOOL_DEF, read("read_file"));
@@ -229,7 +229,7 @@ export function allEnhancedTools(opts?: {
   push(SAVE_EXPERIENCE_TOOL_DEF, DISPATCH_AGENT_TOOL_DEF, USE_SKILL_TOOL_DEF);
   // 动态任务清单（TodoWrite 式活清单）：任务图路径下与调度器共享数组，
   // 更新对新任务立即可见并经 readyTasks 自然派发。
-  push(UPDATE_TASKS_TOOL_DEF);
+  push(ADD_TASKS_TOOL_DEF, UPDATE_TASKS_TOOL_DEF);
   push(LIST_SDD_TOOL_DEF);
 
   return tools;

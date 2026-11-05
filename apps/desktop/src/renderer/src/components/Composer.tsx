@@ -47,8 +47,6 @@ function ComposerImpl({
   onAddProject,
   onSelectReactModel,
   onSelectReactThinkingEffort,
-  autoApproveBash,
-  onAutoApproveBashChange,
 }: ComposerProps) {
   const { t } = useI18n();
   const textareaRef = useComposerTextarea(activeSessionId, draft);
@@ -214,19 +212,6 @@ function ComposerImpl({
             </div>
           ) : null}
         </div>
-
-        {/* 危险 bash 自动批准：与模型选择同行，悬停 label 显示安全警告 */}
-        <label
-          className="check composer-auto-approve"
-          title={t("危险命令将跳过确认直接执行，请仅在可信环境中开启。")}
-        >
-          <input
-            type="checkbox"
-            checked={autoApproveBash}
-            onChange={(e) => onAutoApproveBashChange(e.target.checked)}
-          />
-          {t("自动批准 bash")}
-        </label>
 
         <div className="composer-actions">
           {sending ? (

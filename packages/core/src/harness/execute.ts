@@ -44,6 +44,7 @@ import {
 } from "./tools/session-changes.ts";
 import { toolUseSkill } from "./tools/skills.ts";
 import { toolRunScript } from "./tools/run-script.ts";
+import { toolAddTasks } from "./tools/add-tasks.ts";
 import { toolUpdateTasks } from "./tools/update-tasks.ts";
 import {
   historyRecallBeforeTurn,
@@ -321,9 +322,10 @@ async function runTool(ctx: ToolContext, call: ParsedToolCall): Promise<ToolResu
         const report = await ctx.dispatchSubagent({ agentType, task, thoroughness });
         return ok(report);
       }
+      case "add_tasks":
+        return await toolAddTasks(ctx, args);
       case "update_tasks":
-        // 动态任务清单（活清单，非定死）：参数整形 + 语义校验在 handler 内，
-        // 闭包由顺序路径（react.ts）或任务图调度器注入。
+        // 闭包由顺序路径（react.ts）或任务图调度器注入，并统一负责原子校验。
         return await toolUpdateTasks(ctx, args);
       case "project_deps":
         return await toolProjectDeps(ctx);

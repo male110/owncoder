@@ -15,7 +15,16 @@ import { useI18n } from "../i18n";
  * while the user is typing in the composer, keystrokes must not dismiss or
  * approve the prompt. Only an explicit click on 允许/拒绝 counts.
  */
-export function DangerousCommandBar() {
+interface DangerousCommandBarProps {
+  /** 危险 bash 自动批准开关（settings modes.agent.autoApproveBash）。 */
+  autoApproveBash: boolean;
+  onAutoApproveBashChange: (enabled: boolean) => void;
+}
+
+export function DangerousCommandBar({
+  autoApproveBash,
+  onAutoApproveBashChange,
+}: DangerousCommandBarProps) {
   const activeSessionId = useChatStore((s) => s.activeSessionId);
   const confirmations = useChatStore((s) => s.dangerousConfirmations);
   const { t: tr } = useI18n();
@@ -38,6 +47,19 @@ export function DangerousCommandBar() {
     <div className="danger-confirm-bar" role="alert" aria-live="assertive">
       <pre className="danger-confirm-bar-command">{current.command}</pre>
       <p className="danger-confirm-bar-desc">{description}</p>
+
+      {/* 危险 bash 自动批准：悬停 label 显示安全警告 */}
+      <label
+        className="check danger-confirm-bar-auto"
+        title={tr("危险命令将跳过确认直接执行，请仅在可信环境中开启。")}
+      >
+        <input
+          type="checkbox"
+          checked={autoApproveBash}
+          onChange={(e) => onAutoApproveBashChange(e.target.checked)}
+        />
+        {tr("自动批准 bash")}
+      </label>
 
       <div className="danger-confirm-bar-footer">
         <div className="danger-confirm-bar-meta">

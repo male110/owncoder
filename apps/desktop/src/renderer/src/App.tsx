@@ -515,7 +515,10 @@ export function App() {
               onUpdateTask={(id, s) => void onUpdateTask(id, s)}
             />
           ) : null}
-          <DangerousCommandBar />
+          <DangerousCommandBar
+            autoApproveBash={autoApproveBash}
+            onAutoApproveBashChange={handleAutoApproveBashChange}
+          />
           <AskUserCard />
         </>
       )}
@@ -559,8 +562,6 @@ export function App() {
         onAddProject={handleAddProject}
         onSelectReactModel={handleSelectReactModel}
         onSelectReactThinkingEffort={handleSelectReactThinkingEffort}
-        autoApproveBash={autoApproveBash}
-        onAutoApproveBashChange={handleAutoApproveBashChange}
       />
     </>
   );

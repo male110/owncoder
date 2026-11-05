@@ -93,7 +93,7 @@ describe("工具列表顺序：受控搜索优先于 run_script", () => {
 
   it("两种模式下 grep、glob、search_symbols、search_semantic 排在 run_script 之前", () => {
     for (const mode of ["agent", "spec"] as const) {
-      expect(names(mode).slice(0, 4)).toEqual(["glob", "grep", "search_symbols", "search_semantic"]);
+      expect(names(mode).slice(0, 4)).toEqual(["glob", "grep", "search_semantic", "search_symbols"]);
     }
     expect(names("agent")[4]).toBe("run_script");
   });
@@ -112,7 +112,7 @@ describe("工具列表顺序：受控搜索优先于 run_script", () => {
 
   it("关闭开关时对应工具从列表消失，其余顺序不变", () => {
     const closed = names("agent", { allowBash: false, enableLsp: false, enableWebSearch: false });
-    expect(closed.slice(0, 5)).toEqual(["glob", "grep", "search_symbols", "search_semantic", "run_script"]);
+    expect(closed.slice(0, 5)).toEqual(["glob", "grep", "search_semantic", "search_symbols", "run_script"]);
     expect(closed.slice(5, 7)).toEqual(["read_file", "apply_patch"]);
     expect(closed).not.toContain("bash");
     expect(closed).not.toContain("lsp_diagnostics");

@@ -253,7 +253,7 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
   // 否则 termination 层拿不到正确的 currentTask，容易空转到硬上限。
   syncLoopTask(ctx);
 
-  // update_tasks 顺序路径闭包（任务图路径由调度器经 opts.updateTasks 注入，
+  // 任务清单工具顺序路径闭包（任务图路径由调度器经 opts.updateTasks 注入，
   // 这里不覆盖）：直接改共享的 ctx.tasks——applyTaskListOps 原地修改保持数组
   // 引用，text-branch 的任务推进与 react-llm-call 每轮重注入的
   // formatCurrentTaskContext 看到的都是同一份；持久化走既有 persistTaskUpdate

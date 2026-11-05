@@ -783,6 +783,71 @@ export function formatTaskList(tasks: TaskItem[]): string {
   return lines.join("\n");
 }
 
+function addTaskListItems(
+  draft: TaskItem[],
+  byId: Map<string, TaskItem>,
+  adds: TaskListAddOp[],
+  depCheckList: Array<{ owner: string; dependsOn: string[] }>,
+  addedIds: string[],
+): TaskListApplyOutcome | null {
+  for (const op of adds) {
+    if (!op.description?.trim()) {
+      return { ok: false, error: `add 任务失败：description 必填（${op.id ? `id ${op.id}` : "无 id"}）。` };
+    }
+    const id = op.id?.trim() || nextAutoTaskId(byId);
+    if (byId.has(id)) {
+      return { ok: false, error: `add 任务失败：id "${id}" 已存在，换一个 id 或省略 id 自动分配。` };
+    }
+    const task: TaskItem = {
+      id,
+      description: op.description.trim(),
+      status: "pending",
+      dependsOn: op.dependsOn ? [...op.dependsOn] : [],
+      retryCount: 0,
+      maxRetries: 2,
+      ...(op.title?.trim() ? { progressStatus: op.title.trim() } : {}),
+      ...(op.prompt?.trim() ? { guidance: op.prompt.trim() } : {}),
+      ...(op.kind ? { kind: op.kind } : {}),
+    };
+    draft.push(task);
+    byId.set(id, task);
+    addedIds.push(id);
+    if (op.dependsOn?.length) depCheckList.push({ owner: id, dependsOn: op.dependsOn });
+  }
+  return null;
+}
+
+function updateTaskListItems(
+  byId: Map<string, TaskItem>,
+  updates: TaskListUpdateOp[],
+  depCheckList: Array<{ owner: string; dependsOn: string[] }>,
+): TaskListApplyOutcome | null {
+  for (const op of updates) {
+    const task = byId.get(op.id);
+    if (!task) return { ok: false, error: `update 任务失败：id "${op.id}" 不存在。` };
+    if (op.dependsOn) {
+      task.dependsOn = [...op.dependsOn];
+      depCheckList.push({ owner: op.id, dependsOn: op.dependsOn });
+    }
+    if (op.status !== undefined && !TASK_STATUS_VALUES.has(op.status)) {
+      return { ok: false, error: `update 任务失败：status "${op.status}" 不合法（pending/in_progress/completed/failed/skipped）。` };
+    }
+    if (op.status !== undefined) task.status = op.status;
+    if (op.description !== undefined) {
+      const description = op.description.trim();
+      if (!description) {
+        return { ok: false, error: `update 任务失败：任务 "${op.id}" 的 description 不能为空。` };
+      }
+      task.description = description;
+    }
+    if (op.title !== undefined) task.progressStatus = op.title;
+    if (op.prompt !== undefined) task.guidance = op.prompt;
+    if (op.kind !== undefined) task.kind = op.kind;
+    if (op.acceptance !== undefined) task.acceptance = op.acceptance;
+  }
+  return null;
+}
+
 /**
  * 把一批增删改应用到任务清单（原地）。
  *
@@ -813,56 +878,11 @@ export function applyTaskListOps(tasks: TaskItem[], ops: TaskListOps): TaskListA
   const depCheckList: Array<{ owner: string; dependsOn: string[] }> = [];
   const addedIds: string[] = [];
 
-  // ── 1. 新增（先落地，后续 update/remove 与依赖校验才能引用同批 id） ──
-  for (const op of adds) {
-    if (!op.description?.trim()) {
-      return { ok: false, error: `add 任务失败：description 必填（${op.id ? `id ${op.id}` : "无 id"}）。` };
-    }
-    const id = op.id?.trim() || nextAutoTaskId(byId);
-    if (byId.has(id)) {
-      return { ok: false, error: `add 任务失败：id "${id}" 已存在，换一个 id 或省略 id 自动分配。` };
-    }
-    const task: TaskItem = {
-      id,
-      description: op.description.trim(),
-      status: "pending",
-      dependsOn: op.dependsOn ? [...op.dependsOn] : [],
-      retryCount: 0,
-      maxRetries: 2,
-      ...(op.title?.trim() ? { progressStatus: op.title.trim() } : {}),
-      ...(op.prompt?.trim() ? { guidance: op.prompt.trim() } : {}),
-      ...(op.kind ? { kind: op.kind } : {}),
-    };
-    draft.push(task);
-    byId.set(id, task);
-    addedIds.push(id);
-    if (op.dependsOn?.length) depCheckList.push({ owner: id, dependsOn: op.dependsOn });
-  }
-
-  // ── 2. 更新 ──
-  for (const op of updates) {
-    const task = byId.get(op.id);
-    if (!task) return { ok: false, error: `update 任务失败：id "${op.id}" 不存在。` };
-    if (op.dependsOn) {
-      task.dependsOn = [...op.dependsOn];
-      depCheckList.push({ owner: op.id, dependsOn: op.dependsOn });
-    }
-    if (op.status !== undefined && !TASK_STATUS_VALUES.has(op.status)) {
-      return { ok: false, error: `update 任务失败：status "${op.status}" 不合法（pending/in_progress/completed/failed/skipped）。` };
-    }
-    if (op.status !== undefined) task.status = op.status;
-    if (op.description !== undefined) {
-      const description = op.description.trim();
-      if (!description) {
-        return { ok: false, error: `update 任务失败：任务 "${op.id}" 的 description 不能为空。` };
-      }
-      task.description = description;
-    }
-    if (op.title !== undefined) task.progressStatus = op.title;
-    if (op.prompt !== undefined) task.guidance = op.prompt;
-    if (op.kind !== undefined) task.kind = op.kind;
-    if (op.acceptance !== undefined) task.acceptance = op.acceptance;
-  }
+  // 新增与更新分别执行，新增先落地以允许同批任务互相依赖。
+  const addOutcome = addTaskListItems(draft, byId, adds, depCheckList, addedIds);
+  if (addOutcome) return addOutcome;
+  const updateOutcome = updateTaskListItems(byId, updates, depCheckList);
+  if (updateOutcome) return updateOutcome;
 
   // ── 3. 依赖校验（统一在 add/update 落地后：同批 id 可见，禁止自环与悬空） ──
   for (const { owner, dependsOn } of depCheckList) {

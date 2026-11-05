@@ -197,9 +197,9 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
       "save_plan", "save_spec", "save_design", "save_experience",
       "save_memory", "update_memory", "forget_memory",
       "undo_session_change", "run_script",
-      // 任务清单状态变更（活清单的增删改）同样是会话状态写入，readOnly
+      // 任务清单状态变更（活清单的新增与修改）同样是会话状态写入，readOnly
       // 会话（探索沙箱）不可用。
-      "update_tasks",
+      "add_tasks", "update_tasks",
     ]);
     toolsFinal = toolsFinal.filter((t) => !WRITE_TOOLS.has(t.function.name));
   }
@@ -612,6 +612,9 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
       );
       reportStatus = "done";
     } catch (verifyError) {
+      if (opts.signal?.aborted) {
+        state.aborted = true;
+      } else {
       // best-effort: a failed verification report must not break the turn
       const verifyErr = verifyError instanceof Error ? verifyError.message : String(verifyError);
       writeEventLog({
@@ -623,6 +626,7 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
           stack: verifyError instanceof Error ? verifyError.stack : undefined,
         },
       });
+      }
     }
   }
 

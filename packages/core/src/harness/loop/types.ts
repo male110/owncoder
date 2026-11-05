@@ -401,7 +401,7 @@ export interface AgentLoopOpts {
   /** Shared bounded evidence cache for fresh source reads in this turn. */
   evidenceStore?: import("../evidence-store.ts").EvidenceStore;
   /**
-   * 动态任务清单更新闭包（update_tasks 工具）。任务图路径由调度器注入
+   * 动态任务清单更新闭包（add_tasks / update_tasks 工具）。任务图路径由调度器注入
    * （改共享 tasks 数组）；顺序路径由 react.ts 兜底安装（改 ctx.tasks）。
    */
   updateTasks?: (ops: import("../../plans.ts").TaskListOps) => Promise<import("../../plans.ts").TaskListApplyOutcome>;

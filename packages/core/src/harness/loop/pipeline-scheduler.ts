@@ -45,6 +45,10 @@ export async function runPipelineScheduler(
   const ts = (label: string) => `[scheduler +${Math.round(performance.now() - t0)}ms] sid=${ctx.opts.sessionId ?? "unknown"} ${label}`;
 
   for (const node of stages) {
+    if (ctx.opts.signal?.aborted) {
+      ctx.state.aborted = true;
+      break;
+    }
     console.log(ts(`stage start: ${node.type}`));
     const stageT0 = performance.now();
     // A deterministic precise route is already fully located. Skip global
@@ -89,6 +93,10 @@ export async function runPipelineScheduler(
       try {
         await handler.run({ ...ctx, node });
       } catch (error) {
+        if (ctx.opts.signal?.aborted) {
+          ctx.state.aborted = true;
+          break;
+        }
         console.log(ts(`stage error: ${node.type} (+${Math.round(performance.now() - stageT0)}ms)`));
         throw error;
       }
@@ -103,7 +111,7 @@ export async function runPipelineScheduler(
   }
 
   // No tool stage and no post-model stages → plain completion at the end.
-  if (!ctx.hasToolStage && !plainCompletionDone && !modelCalled) {
+  if (!ctx.state.aborted && !ctx.opts.signal?.aborted && !ctx.hasToolStage && !plainCompletionDone && !modelCalled) {
     if (!ctx.state.userMessageInjected) {
       await injectHistoryAndUserMessage(ctx);
       ctx.state.userMessageInjected = true;

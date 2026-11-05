@@ -4731,31 +4731,6 @@ button.ghost.accent {
   margin-top: 8px;
 }
 
-/* Composer 工具栏内的危险 bash 自动批准复选框（与模型选择同行） */
-/* margin-left:auto 吸收行内剩余空间，将复选框推到行右侧，与模型选择区拉开距离 */
-/* margin-right 拉开复选框与发送按钮（.composer-actions）的间距，避免贴得太近 */
-.composer-auto-approve {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  flex-shrink: 0;
-  margin-left: auto;
-  margin-right: 12px;
-  padding: 0 2px;
-  font-size: 12px;
-  line-height: 1;
-  white-space: nowrap;
-  color: var(--muted);
-  cursor: pointer;
-  user-select: none;
-}
-
-.composer-auto-approve input {
-  margin: 0;
-  cursor: pointer;
-}
-
 .composer-settings-row {
   display: flex;
   align-items: center;
@@ -4841,9 +4816,9 @@ button.ghost.accent {
   background: #10b981;
 }
 
-/* 推右职责已交给前面的 .composer-auto-approve 的 margin-left:auto，这里不再重复吸收剩余空间 */
+/* 自动批准复选框已移入危险命令确认弹窗，发送按钮自行吸收剩余空间靠右 */
 .composer-actions {
-  margin-left: 0;
+  margin-left: auto;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -7577,6 +7552,26 @@ button.ghost.tiny.danger:hover {
   font-size: 12.5px;
   font-weight: 500;
   line-height: 1.4;
+}
+
+/* 危险 bash 自动批准复选框（从 composer 工具栏移入弹窗内部） */
+.danger-confirm-bar-auto {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 0 2px;
+  font-size: 12px;
+  line-height: 1;
+  white-space: nowrap;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.danger-confirm-bar-auto input {
+  margin: 0;
+  cursor: pointer;
 }
 
 .danger-confirm-bar-footer {
