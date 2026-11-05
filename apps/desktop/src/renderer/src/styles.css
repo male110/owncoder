@@ -4727,22 +4727,49 @@ button.ghost.accent {
   display: flex;
   flex-direction: row;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
+  row-gap: 6px;
   margin-top: 8px;
+  flex-wrap: wrap;
 }
 
 .composer-settings-row {
   display: flex;
   align-items: center;
   gap: 6px;
-  flex-wrap: nowrap;
+  row-gap: 6px;
+  flex-wrap: wrap;
+  min-width: 0;
+  flex: 1 1 auto;
 }
 
 .composer-bar .mode-picker {
   flex-shrink: 0;
 }
 
+.composer-bar .model-picker {
+  min-width: 0;
+}
+
 .composer-bar .model-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 1;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.model-chip-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 72px;
+  max-width: 100%;
+}
+
+.model-chip .mode-chevron,
+.model-chip .model-stage-indicator {
   flex-shrink: 0;
 }
 
@@ -8827,4 +8854,58 @@ button.ghost.tiny.danger:hover {
   font-family: var(--mono, ui-monospace, monospace);
   white-space: pre-wrap;
   word-break: break-word;
+}
+/* ===== 模型 + 思考等级成对贴近，共用圆弧边框，视觉上像一个整体 ===== */
+.composer .model-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  row-gap: 0;
+  flex-wrap: wrap;
+  min-width: 0;
+  padding: 2px;
+  border: 1px solid var(--glass-border);
+  border-radius: 10px;
+  background: var(--glass-bg);
+}
+
+/* 同一组内 picker 包装器与 chip 均不得带外边距，保证模型与思考等级紧贴无间距 */
+.composer .model-group > *,
+.composer .model-group :is(.model-chip, .thinking-chip) {
+  margin: 0;
+}
+
+.composer .model-group-decomposer {
+  border-color: rgba(59, 130, 246, 0.55);
+}
+
+.composer .model-group-react {
+  border-color: rgba(16, 185, 129, 0.55);
+}
+
+/* 组内 chip 隐去独立边框/底色，融入圆弧容器；hover 时显示为组内独立小块 */
+.composer .model-group :is(.model-chip, .thinking-chip) {
+  border-color: transparent;
+  background: transparent;
+}
+
+.composer .model-group :is(.model-chip, .thinking-chip):hover {
+  border-color: transparent;
+  background: var(--glass-bg-hover);
+}
+
+/* 浅色主题下基础 chip 规则特异性更高，需在此同层覆盖（本块位于样式表末尾） */
+:root[data-theme="light"] .composer .model-group :is(.model-chip, .thinking-chip) {
+  border-color: transparent;
+  background: transparent;
+}
+
+:root[data-theme="light"] .composer .model-group :is(.model-chip, .thinking-chip):hover {
+  border-color: transparent;
+  background: var(--glass-bg-hover);
+}
+
+/* 换行时发送/暂停按钮锚定第一行右侧（与任务分解组同行），执行组落到第二行 */
+.composer .composer-actions {
+  align-self: flex-start;
 }

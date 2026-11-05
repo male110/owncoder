@@ -107,7 +107,8 @@ export function ModelPicker({
   }, [open, selectedProviderId, groupedModels]);
 
   const pickerClassName = `model-picker${variant === "react" ? " model-picker-react" : ""}${stageIndicator ? " model-picker-decomposer" : ""}`;
-  const chipClassName = `model-chip${variant === "react" ? " model-chip-react" : ""}${stageIndicator ? " model-chip-decomposer" : ""}`;
+  // chip 自身不再带颜色左边框：颜色由外层 .model-group 的圆弧边框统一呈现。
+  const chipClassName = "model-chip";
   const chipTitle =
     variant === "react" ? t("循环执行模型") : stageIndicator ? "任务分解模型" : t("切换模型");
 
@@ -123,7 +124,7 @@ export function ModelPicker({
       >
         {stageIndicator ? <span className="model-stage-indicator">📋</span> : null}
         {variant === "react" ? <span className="model-stage-indicator">🔄</span> : null}
-        {label}
+        <span className="model-chip-label">{label}</span>
         <span className="mode-chevron" aria-hidden>
           ▾
         </span>

@@ -159,35 +159,35 @@ function ComposerImpl({
 
         <ModePicker mode={mode} open={modeMenuOpen} onOpenChange={onModeMenuOpen} onMode={onMode} />
 
-        {/* 所有设置项在同一行 */}
+        {/* 所有设置项在同一行；模型与思考等级成对贴近，共用圆弧边框像一个整体 */}
         <div className="composer-settings-row">
-          {/* 任务分解模型选择器 - 分阶段和非分阶段都显示 */}
-          <ModelPicker
-            open={modelMenuOpen}
-            onOpenChange={setModelMenuOpen}
-            groupedModels={groupedModels}
-            availableModels={availableModels}
-            label={modelLabel}
-            variant="decomposer"
-            stageIndicator={separateStageModels}
-            isSelected={(m) => m.providerId === availableModels[0]?.providerId && m.id === availableModels[0]?.id}
-            onSelect={(m) => onSelectModel(m.id, m.providerId)}
-            onOpenSettings={onOpenSettings}
-          />
+          {/* 任务分解：模型 + 思考等级（分阶段和非分阶段都显示） */}
+          <div className="model-group model-group-decomposer">
+            <ModelPicker
+              open={modelMenuOpen}
+              onOpenChange={setModelMenuOpen}
+              groupedModels={groupedModels}
+              availableModels={availableModels}
+              label={modelLabel}
+              variant="decomposer"
+              stageIndicator={separateStageModels}
+              isSelected={(m) => m.providerId === availableModels[0]?.providerId && m.id === availableModels[0]?.id}
+              onSelect={(m) => onSelectModel(m.id, m.providerId)}
+              onOpenSettings={onOpenSettings}
+            />
+            <ThinkingPicker
+              open={thinkingMenuOpen}
+              onOpenChange={setThinkingMenuOpen}
+              effort={thinkingEffort}
+              onSelect={onSelectThinkingEffort}
+              variant="decomposer"
+              stageIndicator={separateStageModels}
+            />
+          </div>
 
-          {/* 任务分解思考强度选择器 - 分阶段和非分阶段都显示 */}
-          <ThinkingPicker
-            open={thinkingMenuOpen}
-            onOpenChange={setThinkingMenuOpen}
-            effort={thinkingEffort}
-            onSelect={onSelectThinkingEffort}
-            variant="decomposer"
-            stageIndicator={separateStageModels}
-          />
-
-          {/* 循环执行模型选择器（仅分阶段模式显示） */}
+          {/* 循环执行：模型 + 思考等级（仅分阶段模式显示） */}
           {separateStageModels ? (
-            <div className="composer-settings-row">
+            <div className="model-group model-group-react">
               <ModelPicker
                 open={reactMenuOpen}
                 onOpenChange={setReactMenuOpen}
@@ -200,8 +200,6 @@ function ComposerImpl({
                 onSelect={(m) => onSelectReactModel(m.name, m.providerId)}
                 onOpenSettings={onOpenSettings}
               />
-
-              {/* 循环执行思考强度选择器 */}
               <ThinkingPicker
                 open={reactThinkingMenuOpen}
                 onOpenChange={setReactThinkingMenuOpen}

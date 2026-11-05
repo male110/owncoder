@@ -5,11 +5,11 @@ const { app, BrowserWindow } = require('electron');
 
 app.whenReady().then(async () => {
   const css = fs.readFileSync(path.join(__dirname, '../src/renderer/src/styles.css'), 'utf8');
-  const source = fs.readFileSync(path.join(__dirname, '../src/renderer/src/components/Composer.tsx'), 'utf8');
-  const positionStart = source.indexOf('      const updatePosition = () => {');
-  const positionEnd = source.indexOf('      models.scrollTop = 0;', positionStart);
+  const source = fs.readFileSync(path.join(__dirname, '../src/renderer/src/components/composer/ModelPicker.tsx'), 'utf8');
+  const positionStart = source.indexOf('    const updatePosition = () => {');
+  const positionEnd = source.indexOf('models.scrollTop = 0;', positionStart);
   assert.ok(positionStart >= 0 && positionEnd > positionStart, '找不到模型菜单定位逻辑');
-  const positionCode = source.slice(positionStart, positionEnd).replace(/<HTMLElement>/g, '');
+  const positionCode = source.slice(positionStart, positionEnd).replace(/<HTMLElement>/g, '').replace(/menuRef/g, 'ref');
   const win = new BrowserWindow({ show: false, webPreferences: { sandbox: true } });
   try {
     let cases = 0;
