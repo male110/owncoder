@@ -122,8 +122,6 @@ export function ModelPicker({
         onClick={() => onOpenChange(!open)}
         title={chipTitle}
       >
-        {stageIndicator ? <span className="model-stage-indicator">📋</span> : null}
-        {variant === "react" ? <span className="model-stage-indicator">🔄</span> : null}
         <span className="model-chip-label">{label}</span>
         <span className="mode-chevron" aria-hidden>
           ▾

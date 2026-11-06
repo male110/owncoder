@@ -67,6 +67,7 @@ export function formatCurrentTaskContext(task: TaskItem): string {
     "- If the task names an exact file/range or replacement text, do not search or inspect unrelated files; read only that target, then edit and verify.",
     "- Read only evidence required by this task. Search results and index hits are navigation pointers, not a checklist of files to open.",
     "- Reuse fresh evidence already in context; do not re-read an unchanged file or re-run an equivalent search.",
+    "- A line range already read in this session is fresh evidence: analyze from it instead of re-reading; when an outline or symbol index already gives a line range, read that range directly in one call.",
     "- When the evidence is sufficient, stop exploring immediately and edit, verify, report, or state the blocker.",
     `ID: ${task.id}`,
     `Description: ${task.description}`,

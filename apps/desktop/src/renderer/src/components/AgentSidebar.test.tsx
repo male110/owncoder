@@ -204,18 +204,38 @@ describe("项目标题栏拖动", () => {
     const [header] = find(tree, "project-header");
     const [row] = find(tree, "project-row");
     expect(find(tree, "project-drag-handle")).toHaveLength(0);
-    const [chevron] = find(tree, "project-chevron");
     expect(row.props.draggable).toBe(true);
-
-    expect(chevron.props.draggable).toBeUndefined();
     const setData = vi.fn();
     const transfer = { effectAllowed: "", setData };
     header.props.onDragStart({ dataTransfer: transfer });
     expect(transfer.effectAllowed).toBe("move");
     expect(setData).toHaveBeenCalledWith("text/plain", "a");
+    // 非当前项目且原本已展开（expanded 缺省视为展开）：点击只切换展开/折叠，不切换当前项目
     await row.props.onClick();
-    expect(onSelectProject).toHaveBeenCalledWith("a");
-    chevron.props.onClick();
-    expect(onToggleExpand).toHaveBeenCalledWith("a");
+    expect(onSelectProject).not.toHaveBeenCalled();
+    expect(onToggleExpand).toHaveBeenLastCalledWith("a");
+  });
+
+  it("点击其他已折叠项目时才切换当前项目", async () => {
+    const onSelectProject = vi.fn(async () => {});
+    const onToggleExpand = vi.fn();
+    const tree = AgentSidebar({
+      projects: [{ root: "a", name: "a" }, { root: "b", name: "b" }],
+      sessions: [], sessionsByProject: {}, workspace: { root: "a" }, activeSessionId: null,
+      expanded: { b: false },
+      onNewSession: vi.fn(), onAddProject: vi.fn(), onOpenSettings: vi.fn(),
+      onSelectProject, onToggleExpand, onRemoveProject: vi.fn(async () => {}),
+      onMoveProject: vi.fn(async () => {}),
+      onSwitchSession: vi.fn(async () => {}), onDeleteSession: vi.fn(),
+    });
+    const [rowA, rowB] = find(tree, "project-row");
+    // 当前项目：切换展开/折叠
+    await rowA.props.onClick();
+    expect(onSelectProject).not.toHaveBeenCalled();
+    expect(onToggleExpand).toHaveBeenLastCalledWith("a");
+    // 非当前项目且已折叠：切换当前项目
+    await rowB.props.onClick();
+    expect(onSelectProject).toHaveBeenCalledWith("b");
+    expect(onToggleExpand).toHaveBeenCalledTimes(1);
   });
 });

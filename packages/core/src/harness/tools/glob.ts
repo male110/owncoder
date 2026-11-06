@@ -48,6 +48,11 @@ export async function toolGlob(
     ctx.workspaceRoot,
     ctx.workflow.index?.extraIgnore ?? [],
   );
+  // 用户显式指定的搜索起点：即使它本身（或其后代）命中 .gitignore/extraIgnore
+  // 也不跳过——显式路径优先于忽略规则。node_modules/.git 等硬过滤仍生效。
+  const explicitRootRel = normalizeRel(ctx.workspaceRoot, root);
+  const isExplicitRoot = (rel: string): boolean =>
+    rel === explicitRootRel || (explicitRootRel !== "" && rel.startsWith(`${explicitRootRel}/`));
   const matches: Array<{ path: string; mtimeMs: number }> = [];
 
   async function walk(dir: string): Promise<void> {
@@ -60,12 +65,13 @@ export async function toolGlob(
     for (const item of items) {
       const full = join(dir, item.name);
       const rel = normalizeRel(ctx.workspaceRoot, full);
+      const exempt = isExplicitRoot(rel);
       if (item.isDirectory()) {
-        if (isSkipDirName(item.name) || pathIgnored(rel, true, ignoreRules)) continue;
+        if (isSkipDirName(item.name) || (!exempt && pathIgnored(rel, true, ignoreRules))) continue;
         await walk(full);
         continue;
       }
-      if (!item.isFile() || pathIgnored(rel, false, ignoreRules)) continue;
+      if (!item.isFile() || (!exempt && pathIgnored(rel, false, ignoreRules))) continue;
 
       const relativeToSearch = normalizeRel(root, full);
       if (!matcher(relativeToSearch, item.name)) continue;

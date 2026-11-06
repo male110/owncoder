@@ -38,7 +38,6 @@ export function ThinkingPicker({ open, onOpenChange, effort, onSelect, variant, 
         onClick={() => onOpenChange(!open)}
         title={chipTitle}
       >
-        <span className="thinking-icon">{stageIndicator ? "📋" : "💭"}</span>
         {effort === "low" ? t("低") : effort === "medium" ? t("中") : t("高")}
         <span className="mode-chevron" aria-hidden>
           ▾

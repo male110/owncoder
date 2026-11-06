@@ -10,7 +10,6 @@ function barHtml(staged) {
   const decomposerModel = `
     <div class="model-picker model-picker-decomposer">
       <button type="button" class="model-chip model-chip-decomposer">
-        ${staged ? '<span class="model-stage-indicator">📋</span>' : ''}
         <span class="model-chip-label">claude-sonnet-4-5-20250929</span>
         <span class="mode-chevron" aria-hidden="true">▾</span>
       </button>
@@ -18,7 +17,6 @@ function barHtml(staged) {
   const decomposerThinking = `
     <div class="thinking-picker">
       <button type="button" class="thinking-chip">
-        <span class="thinking-icon">${staged ? '📋' : '💭'}</span>
         <span class="mode-chevron" aria-hidden="true">▾</span>
       </button>
     </div>`;
@@ -26,14 +24,12 @@ function barHtml(staged) {
     ? `<div class="model-group model-group-react">
         <div class="model-picker model-picker-react">
           <button type="button" class="model-chip model-chip-react">
-            <span class="model-stage-indicator">🔄</span>
             <span class="model-chip-label">gpt-5.1-codex-2025-11</span>
             <span class="mode-chevron" aria-hidden="true">▾</span>
           </button>
         </div>
         <div class="thinking-picker thinking-picker-react">
           <button type="button" class="thinking-chip thinking-chip-react">
-            <span class="thinking-icon">💭</span>
             <span class="mode-chevron" aria-hidden="true">▾</span>
           </button>
         </div>
@@ -44,13 +40,11 @@ function barHtml(staged) {
       <input class="composer-file-input" type="file" />
       <button type="button" class="upload-trigger">＋</button>
       <div class="mode-picker"><button type="button" class="mode-trigger">⚡ <span class="mode-chevron">▾</span></button></div>
-      <div class="composer-settings-row">
-        <div class="model-group model-group-decomposer">
-          ${decomposerModel}
-          ${decomposerThinking}
-        </div>
-        ${reactGroup}
+      <div class="model-group model-group-decomposer">
+        ${decomposerModel}
+        ${decomposerThinking}
       </div>
+      ${reactGroup}
       <div class="composer-actions"><button type="button" class="send">➤</button></div>
     </div>`;
 }
@@ -99,14 +93,34 @@ app.whenReady().then(async () => {
                 if (!chipRects.some((o, j) => j < i && overlap(o, r))) rows++;
               });
               const allOneRow = chipRects.every(r => overlap(r, sendRect));
-              const settingsRow = bar.querySelector('.composer-settings-row');
-              const wrapEnabled = getComputedStyle(bar).flexWrap !== 'nowrap' &&
-                getComputedStyle(settingsRow).flexWrap !== 'nowrap';
+              // 以所有可见 flex 子项（排除隐藏的文件 input）聚类视觉行数，
+              // 堆叠场景下每个模型组整体只占一行，避免组内 chip 同行导致少计。
+              const flexItems = [...bar.children].filter(el => getComputedStyle(el).display !== 'none');
+              const itemRects = flexItems.map(el => el.getBoundingClientRect());
+              let itemRows = 0;
+              itemRects.forEach((r, i) => {
+                if (!itemRects.some((o, j) => j < i && overlap(o, r))) itemRows++;
+              });
+              const wrapEnabled = getComputedStyle(bar).flexWrap !== 'nowrap';
+              // 换行顺序：分解组与发送按钮同行、执行组独占第二行；发送按钮锚定第一行右侧。
+              const decomposerGroup = bar.querySelector('.model-group-decomposer');
+              const reactGroupEl = bar.querySelector('.model-group-react');
+              const uploadEl = bar.querySelector('.upload-trigger');
+              const decRect = decomposerGroup.getBoundingClientRect();
+              const reactRect = reactGroupEl ? reactGroupEl.getBoundingClientRect() : null;
+              const uploadRect = uploadEl.getBoundingClientRect();
               resolve({
+                barWidth: bar.clientWidth,
                 overflowX: bar.scrollWidth - bar.clientWidth,
                 hostOverflowX: document.getElementById('host').scrollWidth - document.getElementById('host').clientWidth,
                 chipCount: chips.length,
-                chipData, rows, allOneRow, wrapEnabled
+                chipData, rows: itemRows, allOneRow, wrapEnabled,
+                decWithSend: overlap(decRect, sendRect),
+                reactWithSend: reactRect ? overlap(reactRect, sendRect) : null,
+                reactAfterDec: reactRect ? reactRect.top >= decRect.bottom - 0.5 : null,
+                uploadWithSend: overlap(uploadRect, sendRect),
+                uploadAfterReact: reactRect ? uploadRect.top >= reactRect.bottom - 0.5 : null,
+                sendRightGap: barRect.right - sendRect.right
               });
             }, 100));
           `);
@@ -122,18 +136,38 @@ app.whenReady().then(async () => {
             assert.ok(c.centerHit, `${label}: chip#${i} 中心点被遮挡/裁剪`);
           });
           // 换行能力必须始终开启（放不下时自动换行，而非裁剪/溢出）。
-          assert.ok(result.wrapEnabled, `${label}: composer-bar/settings-row 未启用 flex-wrap`);
-          if (width <= 480 && staged) {
-            // 分阶段模式含 4 个控件，窄宽度（右侧停靠列）必须换行/堆叠。
-            assert.ok(result.rows >= 2, `${label}: 窄宽度未换行（rows=${result.rows}）`);
-          }
-          if (width <= 180 && !staged) {
-            // 非分阶段模式在极窄停靠列也应换行，避免模型名被压成省略号。
-            assert.ok(result.rows >= 2, `${label}: 极窄宽度未换行（rows=${result.rows}）`);
-          }
-          if (width >= 1280) {
-            // 正常宽度下所有控件保持单行，确认无回归。
-            assert.ok(result.allOneRow, `${label}: 正常宽度下意外换行`);
+          assert.ok(result.wrapEnabled, `${label}: composer-bar 未启用 flex-wrap`);
+          // 发送/暂停按钮始终锚定本行最右侧。
+          assert.ok(result.sendRightGap === null || result.sendRightGap <= 2,
+            `${label}: 发送按钮未锚定右侧（距右边 ${result.sendRightGap}px）`);
+          // 以容器（composer-bar）实际宽度判定布局，与 CSS 断点保持一致。
+          const bw = result.barWidth;
+          if (bw <= 640 && staged) {
+            // 分阶段窄宽度（打开文件停靠右侧）：核心两行顺序必须始终成立——
+            // 第一行 = 模式 + 任务分解模型组 + 发送/暂停按钮，第二行 = 执行模型组。
+            assert.ok(result.decWithSend, `${label}: 任务分解组未与发送按钮同行`);
+            assert.equal(result.reactWithSend, false, `${label}: 执行组不应与发送按钮同行`);
+            assert.equal(result.reactAfterDec, true, `${label}: 执行组未落到分解组之后的第二行`);
+            if (bw <= 300) {
+              // ≤300px：次要的上传按钮移到执行组之后（第三行），为模型名让出宽度。
+              assert.equal(result.uploadWithSend, false, `${label}: 窄宽度上传按钮未离开第一行`);
+              assert.equal(result.uploadAfterReact, true, `${label}: 上传按钮未落到执行组之后`);
+            } else {
+              // 中等窄宽度：上传按钮仍留在第一行。
+              assert.ok(result.uploadWithSend, `${label}: 上传按钮应与发送按钮同行`);
+            }
+          } else if (bw <= 640) {
+            // 非分阶段窄宽度：无执行组。≤300px 时上传按钮整宽换到下一行，
+            // 保证「模式 + 分解组 + 发送按钮」第一行完整、发送锚右；
+            // 更宽时上传按钮保留在第一行。
+            if (bw <= 300) {
+              assert.equal(result.uploadWithSend, false, `${label}: 非分阶段窄宽度上传按钮未离开第一行`);
+            } else {
+              assert.ok(result.uploadWithSend, `${label}: 上传按钮应与发送按钮同行`);
+            }
+          } else {
+            // 宽度足够：所有控件保持单行。
+            assert.ok(result.allOneRow, `${label}: 宽度 ${bw} 下意外换行`);
           }
           cases++;
         }

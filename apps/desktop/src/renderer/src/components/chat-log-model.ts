@@ -127,7 +127,7 @@ export function toolStatusLabel(
 export function buildLogBlocks(
   turns: ChatTurnDto[],
   sending: boolean,
-  liveEventCount: number,
+  _liveEventCount: number,
 ): LogBlock[] {
   const out: LogBlock[] = [];
 

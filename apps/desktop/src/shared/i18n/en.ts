@@ -172,6 +172,10 @@ export const en = {
   "正在切换项目，请稍候...": "Switching project, please wait…",
   "请输入消息": "Enter a message",
   "发送消息": "Send message",
+  "停止生成": "Stop generating",
+  "详情": "Details",
+  "依赖：": "Depends on:",
+  "历史：": "History:",
 
   // ── 危险命令确认条 ────────────────────────────────────────────────────────
   "需要确认后才会执行": "Requires confirmation before running",

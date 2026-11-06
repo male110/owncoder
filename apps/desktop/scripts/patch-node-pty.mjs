@@ -16,22 +16,29 @@ try {
   throw new Error(`[patch-node-pty] Could not resolve node-pty from ${packageDir}: ${error.message}`)
 }
 
+// Each entry is [file, required]. Generated vcxproj files are optional:
+// they only exist after gyp has run, and are regenerated from the patched
+// .gyp sources, so a fresh install without a prior build is fine.
 const patches = [
   // Main binding.gyp — controls conpty.vcxproj generation
-  join(nodePtyDir, 'binding.gyp'),
+  [join(nodePtyDir, 'binding.gyp'), true],
   // winpty sub-project gyp source — regenerates winpty.vcxproj /
   // winpty-agent.vcxproj on every rebuild; must be patched or gyp will
   // re-emit <SpectreMitigation>Spectre</SpectreMitigation> and MSBuild
   // fails with MSB8040 (missing Spectre-mitigated libraries).
-  join(nodePtyDir, 'deps', 'winpty', 'src', 'winpty.gyp'),
+  [join(nodePtyDir, 'deps', 'winpty', 'src', 'winpty.gyp'), true],
   // Pre-existing winpty sub-project vcxproj files (already generated)
-  join(nodePtyDir, 'build', 'deps', 'winpty', 'src', 'winpty.vcxproj'),
-  join(nodePtyDir, 'build', 'deps', 'winpty', 'src', 'winpty-agent.vcxproj'),
+  [join(nodePtyDir, 'build', 'deps', 'winpty', 'src', 'winpty.vcxproj'), false],
+  [join(nodePtyDir, 'build', 'deps', 'winpty', 'src', 'winpty-agent.vcxproj'), false],
 ]
 
-for (const file of patches) {
+for (const [file, required] of patches) {
   if (!existsSync(file)) {
-    throw new Error(`[patch-node-pty] Required file is missing: ${file}`)
+    if (required) {
+      throw new Error(`[patch-node-pty] Required file is missing: ${file}`)
+    }
+    console.log(`[patch-node-pty] Skipping (not generated yet): ${file}`)
+    continue
   }
   try {
     let content = readFileSync(file, 'utf8')

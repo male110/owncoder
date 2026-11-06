@@ -76,8 +76,9 @@ describe("搜索工具职责契约", () => {
       expect(symbols[0]!.function.description).toContain("Use search_semantic");
       expect(queryDescription(symbols[0]!)).toContain("symbol name");
       expect(queryDescription(symbols[0]!)).toContain("use search_semantic");
-      expect(queryDescription(symbols[0]!)).not.toMatch(/natural.language query|keyword/i);
-      expect(queryDescription(semantic[0]!)).toMatch(/natural.language/i);
+      expect(queryDescription(symbols[0]!)).not.toMatch(/natural.language/i);
+      expect(queryDescription(semantic[0]!)).toMatch(/keyword/i);
+      expect(queryDescription(semantic[0]!)).not.toMatch(/natural.language/i);
       expect(semantic[0]!.function.description).toContain("does not perform exact symbol search or grep fallback");
     }
   });

@@ -64,6 +64,22 @@ test("glob finds workspace files and filters generated, dot, and gitignored path
   });
 });
 
+test("glob searches an explicitly specified gitignored directory", async () => {
+  await withWorkspace(async root => {
+    await writeFile(join(root, ".gitignore"), "secrets/\n");
+    await mkdir(join(root, "secrets", "nested"), { recursive: true });
+    await writeFile(join(root, "secrets", "Hidden.java"), "class Hidden {}\n");
+    await writeFile(join(root, "secrets", "nested", "Deep.java"), "class Deep {}\n");
+  }, async root => {
+    const fromRoot = await toolGlob(ctxFor(root), "**/*.java", ".", 100);
+    assert.doesNotMatch(fromRoot.output, /secrets/);
+    const explicit = await toolGlob(ctxFor(root), "**/*.java", "secrets", 100);
+    assert.equal(explicit.ok, true);
+    assert.match(explicit.output, /secrets\/Hidden\.java/);
+    assert.match(explicit.output, /secrets\/nested\/Deep\.java/);
+  });
+});
+
 test("glob basename patterns match at any depth and respect extraIgnore", async () => {
   await withWorkspace(async root => {
     await mkdir(join(root, "a", "b"), { recursive: true });

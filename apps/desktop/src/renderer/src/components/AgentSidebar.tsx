@@ -328,9 +328,15 @@ export function AgentSidebar({
                         aria-expanded={open}
                         title={p.root}
                         draggable={!disabled}
-                        onClick={async () => {
-                          // onSelectProject：切换到该项目；点击当前项目时仅切换展开/折叠
-                          await onSelectProject(p.root);
+                        onClick={() => {
+                          // 点击当前项目：同步切换展开/折叠。
+                          // 不能走 onSelectProject（它进入导航队列，需等首次切换的
+                          // 多次 IPC/状态机结束后才执行折叠，表现为“再次点击不折叠”）。
+                          // 点击其他项目且原本已展开：只做折叠/展开，不切换当前项目
+                          // （参考 .tmp/ZCode：项目节点点击只负责展开/折叠）。
+                          // 点击其他项目且原本已折叠：onSelectProject 切换工作区与会话。
+                          if (isCurrent || open) onToggleExpand?.(p.root);
+                          else void onSelectProject(p.root);
                         }}
                         disabled={disabled}
                       >

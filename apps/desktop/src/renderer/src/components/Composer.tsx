@@ -159,78 +159,81 @@ function ComposerImpl({
 
         <ModePicker mode={mode} open={modeMenuOpen} onOpenChange={onModeMenuOpen} onMode={onMode} />
 
-        {/* 所有设置项在同一行；模型与思考等级成对贴近，共用圆弧边框像一个整体 */}
-        <div className="composer-settings-row">
-          {/* 任务分解：模型 + 思考等级（分阶段和非分阶段都显示） */}
-          <div className="model-group model-group-decomposer">
+        {/* 任务分解：模型 + 思考等级紧贴为一个整体，共用圆弧边框（分阶段和非分阶段都显示） */}
+        <div className="model-group model-group-decomposer">
+          <ModelPicker
+            open={modelMenuOpen}
+            onOpenChange={setModelMenuOpen}
+            groupedModels={groupedModels}
+            availableModels={availableModels}
+            label={modelLabel}
+            variant="decomposer"
+            stageIndicator={separateStageModels}
+            isSelected={(m) => m.providerId === availableModels[0]?.providerId && m.id === availableModels[0]?.id}
+            onSelect={(m) => onSelectModel(m.id, m.providerId)}
+            onOpenSettings={onOpenSettings}
+          />
+          <ThinkingPicker
+            open={thinkingMenuOpen}
+            onOpenChange={setThinkingMenuOpen}
+            effort={thinkingEffort}
+            onSelect={onSelectThinkingEffort}
+            variant="decomposer"
+            stageIndicator={separateStageModels}
+          />
+        </div>
+
+        {/* 循环执行：模型 + 思考等级紧贴为一个整体，共用圆弧边框（仅分阶段模式显示）。
+            窄宽度时通过容器查询落到第二行，发送/暂停按钮仍锚定第一行右侧 */}
+        {separateStageModels ? (
+          <div className="model-group model-group-react">
             <ModelPicker
-              open={modelMenuOpen}
-              onOpenChange={setModelMenuOpen}
+              open={reactMenuOpen}
+              onOpenChange={setReactMenuOpen}
               groupedModels={groupedModels}
               availableModels={availableModels}
-              label={modelLabel}
-              variant="decomposer"
-              stageIndicator={separateStageModels}
-              isSelected={(m) => m.providerId === availableModels[0]?.providerId && m.id === availableModels[0]?.id}
-              onSelect={(m) => onSelectModel(m.id, m.providerId)}
+              label={reactSelectedModel?.name || t("选择模型")}
+              variant="react"
+              initialProviderId={reactProviderId}
+              isSelected={(m) => m.providerId === reactProviderId && (m.name === reactModelId || m.id === reactModelId)}
+              onSelect={(m) => onSelectReactModel(m.name, m.providerId)}
               onOpenSettings={onOpenSettings}
             />
             <ThinkingPicker
-              open={thinkingMenuOpen}
-              onOpenChange={setThinkingMenuOpen}
-              effort={thinkingEffort}
-              onSelect={onSelectThinkingEffort}
-              variant="decomposer"
-              stageIndicator={separateStageModels}
+              open={reactThinkingMenuOpen}
+              onOpenChange={setReactThinkingMenuOpen}
+              effort={reactThinkingEffort}
+              onSelect={onSelectReactThinkingEffort}
+              variant="react"
             />
           </div>
+        ) : null}
 
-          {/* 循环执行：模型 + 思考等级（仅分阶段模式显示） */}
-          {separateStageModels ? (
-            <div className="model-group model-group-react">
-              <ModelPicker
-                open={reactMenuOpen}
-                onOpenChange={setReactMenuOpen}
-                groupedModels={groupedModels}
-                availableModels={availableModels}
-                label={reactSelectedModel?.name || t("选择模型")}
-                variant="react"
-                initialProviderId={reactProviderId}
-                isSelected={(m) => m.providerId === reactProviderId && (m.name === reactModelId || m.id === reactModelId)}
-                onSelect={(m) => onSelectReactModel(m.name, m.providerId)}
-                onOpenSettings={onOpenSettings}
-              />
-              <ThinkingPicker
-                open={reactThinkingMenuOpen}
-                onOpenChange={setReactThinkingMenuOpen}
-                effort={reactThinkingEffort}
-                onSelect={onSelectReactThinkingEffort}
-                variant="react"
-              />
-            </div>
-          ) : null}
-        </div>
-
+        {/* 单一状态按钮：运行中为停止，否则为发送 */}
         <div className="composer-actions">
-          {sending ? (
-            <button type="button" className="stop-btn" onClick={onCancel}>
-              {t("停止")}
-            </button>
-          ) : null}
           <button
-            type="submit"
-            className="send"
-            disabled={!draft.trim() || projectSwitching}
-            aria-label={t("发送")}
+            type={sending ? "button" : "submit"}
+            className={sending ? "send stop stop-btn" : "send"}
+            disabled={!sending && (!draft.trim() || projectSwitching)}
+            onClick={sending ? onCancel : undefined}
+            aria-label={sending ? t("停止") : t("发送")}
             title={
-              projectSwitching
-                ? t("正在切换项目，请稍候...")
-                : !draft.trim()
-                  ? t("请输入消息")
-                  : t("发送消息")
+              sending
+                ? t("停止生成")
+                : projectSwitching
+                  ? t("正在切换项目，请稍候...")
+                  : !draft.trim()
+                    ? t("请输入消息")
+                    : t("发送消息")
             }
           >
-            ↑
+            {sending ? (
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <rect x="4" y="4" width="16" height="16" rx="2.5" fill="currentColor" />
+              </svg>
+            ) : (
+              "↑"
+            )}
           </button>
         </div>
       </div>

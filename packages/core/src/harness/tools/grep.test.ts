@@ -125,6 +125,27 @@ test("grep skips gitignored files, lockfiles, binaries, and oversized files", as
   );
 });
 
+test("grep searches an explicitly specified gitignored directory", async () => {
+  await withWorkspace(
+    async (root) => {
+      await writeFile(join(root, ".gitignore"), "ignored/\n");
+      await writeFile(join(root, "keep.ts"), "findme in source\n");
+      await mkdir(join(root, "ignored", "nested"), { recursive: true });
+      await writeFile(join(root, "ignored", "skip.ts"), "findme in ignored\n");
+      await writeFile(join(root, "ignored", "nested", "deep.ts"), "findme in nested\n");
+    },
+    async (root) => {
+      const fromRoot = await toolGrep(ctxFor(root), "findme", ".", 40);
+      assert.equal(fromRoot.ok, true);
+      assert.doesNotMatch(fromRoot.output, /ignored/);
+      const explicit = await toolGrep(ctxFor(root), "findme", "ignored", 40);
+      assert.equal(explicit.ok, true);
+      assert.match(explicit.output, /ignored[/\\]skip\.ts:1:/);
+      assert.match(explicit.output, /ignored[/\\]nested[/\\]deep\.ts:1:/);
+    },
+  );
+});
+
 test("grep 能从工作区根目录检索超过六层目录中的 39KB 源码", async () => {
   const relativeDir = "src/features/domain/services/internal/handlers/nested";
   const method = "loadDeepWorkspaceData";

@@ -116,11 +116,11 @@ export const READ_TOOL_DEFS: ToolDef[] = [
     function: {
       name: "search_symbols",
       description:
-        "Search the code symbol index by exact or fuzzy symbol name. Returns symbol definitions with locations, signatures, and documentation. Use search_semantic for natural-language/vector search.",
+        "Search the code symbol index by exact or fuzzy symbol name. Returns symbol definitions with locations, signatures, and documentation. Use search_semantic for keyword-based vector search.",
       parameters: {
         type: "object",
         properties: {
-          query: { type: "string", description: "Exact or fuzzy symbol name (identifier); use search_semantic to describe code behavior or concepts" },
+          query: { type: "string", description: "Exact or fuzzy symbol name (identifier); use search_semantic to search by related keywords" },
           limit: { type: "integer", minimum: 1, maximum: 50, description: "Maximum results (default 20)" },
         },
         required: ["query"],
@@ -133,11 +133,11 @@ export const READ_TOOL_DEFS: ToolDef[] = [
     function: {
       name: "search_semantic",
       description:
-        "Semantic/vector search over embedded code chunks for natural-language queries. Returns ranked vector hits with paths, line ranges, symbols, scores, and excerpts; does not perform exact symbol search or grep fallback.",
+        "Keyword-driven vector search over embedded code chunks. Returns ranked vector hits with paths, line ranges, symbols, scores, and excerpts; does not perform exact symbol search or grep fallback. Prefer concise queries containing target keywords (identifiers, API names, domain terms) rather than long prose.",
       parameters: {
         type: "object",
         properties: {
-          query: { type: "string", description: "Natural-language description of the code behavior or concept" },
+          query: { type: "string", description: "Target keywords describing the code behavior or concept (identifiers, API names, domain terms); keep it concise and keyword-focused" },
           limit: { type: "integer", minimum: 1, maximum: 50, description: "Maximum vector results (default 20)" },
         },
         required: ["query"],

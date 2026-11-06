@@ -4731,16 +4731,14 @@ button.ghost.accent {
   row-gap: 6px;
   margin-top: 8px;
   flex-wrap: wrap;
+  /* 容器查询依据：执行模型组是否独占第二行取决于本行实际可用宽度 */
+  container: composer-bar / inline-size;
 }
 
+/* 历史类：模型组已直接作为 composer-bar 的 flex 子项，此包裹类不再出现在 JSX 中。
+   保留规则仅为兼容可能的外部/测试引用，退化为普通 flex 容器。 */
 .composer-settings-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  row-gap: 6px;
-  flex-wrap: wrap;
-  min-width: 0;
-  flex: 1 1 auto;
+  display: contents;
 }
 
 .composer-bar .mode-picker {
@@ -4851,15 +4849,7 @@ button.ghost.accent {
   gap: 8px;
 }
 
-.stop-btn {
-  border: 1px solid var(--danger-btn-border);
-  background: var(--danger-btn-bg);
-  color: var(--danger-text);
-  border-radius: 999px;
-  padding: 6px 12px;
-  font-size: 12px;
-  cursor: pointer;
-}
+/* .stop-btn 为历史遗留类：尺寸/配色已统一由 .composer-bar .send.stop 接管（36px 圆形、危险态配色、图标居中） */
 
 .composer-bar .send {
   width: 36px;
@@ -4875,6 +4865,25 @@ button.ghost.accent {
 .composer-bar .send:disabled {
   opacity: 0.45;
   cursor: default;
+}
+
+/* 运行中：同一个按钮切换为停止态 —— 保持与发送态一致的 36px 圆形尺寸，危险态配色 */
+.composer-bar .send.stop {
+  padding: 0;
+  background: var(--danger-btn-bg);
+  border: 1px solid var(--danger-btn-border);
+  color: var(--danger-text);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 停止态内的方块图标：放大到与发送态视觉重量相当（18px），居中、不随字号变化 */
+.composer-bar .send.stop svg {
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
+  flex-shrink: 0;
 }
 
 
@@ -8676,6 +8685,15 @@ button.ghost.tiny.danger:hover {
   background: #262626;
 }
 
+/* 停止态：上方浅色 .send 覆盖规则（含 hover）特异性高于基础 .send.stop，
+   会把背景强制为黑色 --accent；在此同层、靠后位置恢复危险态配色 */
+:root[data-theme="light"] .composer-bar .send.stop,
+:root[data-theme="light"] .composer-bar .send.stop:hover:not(:disabled) {
+  background: var(--danger-btn-bg);
+  border-color: var(--danger-btn-border);
+  color: var(--danger-text);
+}
+
 :root[data-theme="light"] .editor-pane {
   background: var(--editor-bg);
 }
@@ -8894,6 +8912,27 @@ button.ghost.tiny.danger:hover {
   background: var(--glass-bg-hover);
 }
 
+/* 组内 chip 内边距收紧：两 chip 相邻侧仅留 2px，文字与各自箭头 gap 收至 3px，
+   使「模型名 ▾」与「高 ▾」视觉上紧贴为同一整体（group gap 已为 0） */
+.composer .model-group :is(.model-chip, .thinking-chip) {
+  gap: 3px;
+  padding-left: 6px;
+  padding-right: 6px;
+}
+
+.composer .model-group .model-chip {
+  padding-right: 2px;
+}
+
+.composer .model-group .thinking-chip {
+  padding-left: 2px;
+}
+
+/* 防御：组内 chip 一律不渲染阶段/思考图标（JSX 已移除，避免其他变体漏网） */
+.composer .model-group :is(.model-stage-indicator, .thinking-icon) {
+  display: none;
+}
+
 /* 浅色主题下基础 chip 规则特异性更高，需在此同层覆盖（本块位于样式表末尾） */
 :root[data-theme="light"] .composer .model-group :is(.model-chip, .thinking-chip) {
   border-color: transparent;
@@ -8905,7 +8944,119 @@ button.ghost.tiny.danger:hover {
   background: var(--glass-bg-hover);
 }
 
-/* 换行时发送/暂停按钮锚定第一行右侧（与任务分解组同行），执行组落到第二行 */
+/* ===== 宽度受限时的换行策略 =====
+   默认（宽度足够）：DOM 顺序即视觉顺序，整行单行排列，
+   发送/暂停按钮 margin-left:auto 锚定最右。 */
+.composer .composer-bar .model-group {
+  flex: 0 1 auto;
+  min-width: 0;
+  /* 组内「模型 + 思考等级」必须始终横向紧贴为一个整体：宽度不足时让模型名省略，
+     绝不在组内换行（否则组高翻倍、圆弧边框内变成两行）。 */
+  flex-wrap: nowrap;
+}
+
 .composer .composer-actions {
+  margin-left: auto;
+  flex-shrink: 0;
   align-self: flex-start;
+}
+
+/* 窄宽度（如打开文件后对话框停靠右侧）：通过 order 把发送/暂停按钮提到执行组之前，
+   执行组 flex-basis:100% 强制独占第二行；换行按 order 后的顺序收集行，故：
+   第一行 = 上传 | 模式 | 任务分解模型组 | 发送/暂停按钮（auto margin 锚右），
+   第二行 = 执行模型组。断点 640px 略宽于两组控件的自然单行宽度，
+   保证自然换行发生前本策略一定先生效（含较长模型名余量）。 */
+@container composer-bar (max-width: 640px) {
+  /* 窄宽度下间距略收紧，为换行预留余量。 */
+  .composer .composer-bar {
+    gap: 4px;
+    row-gap: 4px;
+  }
+
+  /* 窄宽度下分解组 basis 收为 0：保证「上传 + 模式 + 分解组 + 发送按钮」都能被
+     收集进第一行，剩余空间再全部分配给分解组（模型名必要时省略）。 */
+  .composer .composer-bar .model-group-decomposer {
+    flex: 1 1 0%;
+  }
+
+  .composer-bar .composer-actions {
+    order: 1;
+  }
+
+  .composer .composer-bar .model-group-react {
+    order: 2;
+    flex: 0 0 100%;
+  }
+}
+
+/* 更窄停靠列（≤300px）：把次要的上传按钮移到行尾（分阶段时在执行组之后，非分阶段时
+   独占下一行），为模型名让出宽度，保持「第一行 = 模式 + 任务分解模型组 + 发送/暂停按钮」
+   的顺序，同时模型名在常见窄宽度下仍完整可读。 */
+@container composer-bar (max-width: 300px) {
+  .composer-bar .upload-trigger {
+    order: 3;
+    flex: 0 0 auto;
+  }
+
+  /* 非分阶段模式（无执行组）：上传按钮整宽独占下一行而非挤在第一行末尾，
+     保证「模式 + 分解组 + 发送按钮」第一行完整、发送按钮锚定右侧。 */
+  .composer-bar:not(:has(.model-group-react)) .upload-trigger {
+    flex: 0 0 100%;
+    margin-left: 0;
+    text-align: left;
+  }
+
+  .composer-bar:not(:has(.model-group-react)) .model-group-decomposer {
+    flex: 1 1 0%;
+  }
+
+  .composer-bar .mode-trigger {
+    padding-left: 6px;
+    padding-right: 6px;
+    gap: 2px;
+  }
+
+  .composer-bar .upload-trigger {
+    width: 30px;
+  }
+
+  .composer-bar .send {
+    width: 32px;
+    height: 32px;
+  }
+
+  /* 组内边距同步收紧，组内模型与思考等级仍紧贴为圆弧整体。 */
+  .composer .composer-bar .model-group {
+    padding: 1px;
+  }
+
+  .composer .composer-bar .model-group :is(.model-chip, .thinking-chip) {
+    padding-left: 4px;
+    padding-right: 4px;
+  }
+
+  .composer .composer-bar .model-group .model-chip {
+    padding-right: 1px;
+  }
+
+  .composer .composer-bar .model-group .thinking-chip {
+    padding-left: 1px;
+  }
+}
+
+/* 物理极限窄列（≤190px）：连「模式 + 分解组 + 发送按钮」的最小宽度都紧张时，
+   允许模型名进一步省略、间距再收紧，保证核心两行布局完整、不横向溢出。 */
+@container composer-bar (max-width: 190px) {
+  .composer .composer-bar {
+    gap: 2px;
+  }
+
+  .composer .composer-bar .model-chip-label {
+    min-width: 0;
+  }
+
+  .composer-bar .mode-trigger {
+    padding-left: 4px;
+    padding-right: 4px;
+  }
 }

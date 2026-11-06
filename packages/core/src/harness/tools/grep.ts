@@ -265,6 +265,11 @@ export async function toolGrep(
 
   const root = toAbs(ctx.workspaceRoot, path);
   assertInside(ctx.workspaceRoot, root);
+  // 用户显式指定的搜索起点：即使它本身（或其后代）命中 .gitignore/extraIgnore
+  // 也不跳过——显式路径优先于忽略规则。node_modules/.git 等硬过滤仍生效。
+  const explicitRootRel = normalizeRel(ctx.workspaceRoot, root);
+  const isExplicitRoot = (rel: string): boolean =>
+    rel === explicitRootRel || (explicitRootRel !== "" && rel.startsWith(`${explicitRootRel}/`));
   // limit bounds the returned entries; scans stop as soon as the cap is hit (0 = unlimited).
   const rawLimit = options?.headLimit ?? maxResults;
   const limit = rawLimit === 0 ? Number.POSITIVE_INFINITY : rawLimit > 0 ? Math.floor(rawLimit) : 40;
@@ -437,15 +442,16 @@ export async function toolGrep(
       return;
     }
     const rel = normalizeRel(ctx.workspaceRoot, dir);
+    const exempt = isExplicitRoot(rel);
     if (st.isFile()) {
-      if (pathIgnored(rel, false, ignoreRules)) return;
+      if (!exempt && pathIgnored(rel, false, ignoreRules)) return;
       const name = dir.split(/[/\\]/).pop() ?? "";
       if (!passesFileFilters(dir, name, name)) return;
       await scanFile(dir, rel);
       return;
     }
     if (!st.isDirectory()) return;
-    if (rel && pathIgnored(rel, true, ignoreRules)) return;
+    if (!exempt && rel && pathIgnored(rel, true, ignoreRules)) return;
 
     let items;
     try {
@@ -458,11 +464,12 @@ export async function toolGrep(
       if (isSkipDirName(it.name)) continue;
       const full = join(dir, it.name);
       const childRel = normalizeRel(ctx.workspaceRoot, full);
+      const childExempt = isExplicitRoot(childRel);
       if (it.isDirectory()) {
-        if (pathIgnored(childRel, true, ignoreRules)) continue;
+        if (!childExempt && pathIgnored(childRel, true, ignoreRules)) continue;
         await walk(full);
       } else if (it.isFile()) {
-        if (pathIgnored(childRel, false, ignoreRules)) continue;
+        if (!childExempt && pathIgnored(childRel, false, ignoreRules)) continue;
         if (!passesFileFilters(full, normalizeRel(root, full), it.name)) continue;
         await scanFile(full, childRel);
       }

@@ -259,9 +259,15 @@ export function applyChatEvent(
   // ── error ─────────────────────────────────────────────────────────────
   if (ev.type === "error") {
     chat.sealAllStreaming(sid);
-    // 验证门禁失败只在 LLM 正文区提示，不弹顶部错误条 / 弹窗。
+    // 验证门禁失败只在 LLM 正文区提示，不弹顶部错误条 / 弹窗，且门禁后
+    // 会话会继续跑（保持 running）。
     if (!isVerificationGateError(ev.message)) {
       chat.setErrorAlert(toAppError(ev.message), sid);
+      // 真正的错误意味着本轮已终止：把仍处于 running 的会话状态复位为
+      // idle，让侧边栏旋转图标立即消失（与「停止」场景的 markSessionCompleted
+      // 对称）。仅在当前确为 running 时复位，避免盖掉 completed/idle 终态；
+      // 只改该会话，不影响其他会话的图标行为。
+      chat.patchLiveState((rt) => (rt.status === "running" ? { status: "idle" } : {}), sid);
     }
     chat.setLiveStatus("", sid);
     return;
