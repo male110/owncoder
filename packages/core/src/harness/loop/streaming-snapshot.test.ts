@@ -26,6 +26,19 @@ describe("applyStreamSnapshot", () => {
     expect(applyStreamSnapshot("现有正文", "新的整段报告")).toBe("现有正文新的整段报告");
   });
 
+  it("完整保留跨快照的空行、列表与代码块换行", () => {
+    const report = "## 结论\n\n项目规范以 `@EnumValue` 为主。\n\n## 证据\n\n- value 同时使用 `@EnumValue`、`@JsonValue`。\n\n```java\n@EnumValue\n@JsonValue\n```";
+    let accumulated = "";
+    const chunks: string[] = [];
+    for (let end = 1; end <= report.length; end++) {
+      const snapshot = report.slice(0, end);
+      accumulated = applyStreamSnapshot(accumulated, snapshot);
+      pushStreamSnapshot(chunks, snapshot);
+    }
+    expect(accumulated).toBe(report);
+    expect(chunks).toEqual([report]);
+  });
+
   it("handles empty current value", () => {
     expect(applyStreamSnapshot("", "hello")).toBe("hello");
   });

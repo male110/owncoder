@@ -77,7 +77,11 @@ export function formatCurrentTaskContext(task: TaskItem): string {
     task.progressStatus ? `Progress status: ${task.progressStatus}` : "",
     formatTaskConstraints(task),
     formatPackedHistory(task),
-    "Use tools to execute this task. Report the result in one sentence when done; do not keep calling tools.",
+    "Use tools to execute this task. When done, stop calling tools and report the result concisely.",
+    "Final response format (unless the user explicitly requests a different format):",
+    "- For multi-point analysis or reports, use Markdown headings (## / ###), short paragraphs separated by blank lines, and bullet or numbered lists for distinct findings, evidence, changes, and verification results as applicable.",
+    "- Put code, SQL, configuration, or multi-line commands in fenced code blocks with a language tag when needed; keep identifiers and file paths in inline code.",
+    "- Preserve the business conclusions, supporting evidence, and uncertainty; brevity must not collapse them into one sentence, a semicolon-separated wall of text, or a single dense paragraph. Simple answers may stay brief without extra sections.",
   ].filter(Boolean).join("\n");
 }
 

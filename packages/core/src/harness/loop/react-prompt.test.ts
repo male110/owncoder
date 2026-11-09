@@ -29,6 +29,22 @@ describe("任务上下文：短硬执行纪律", () => {
     expect(text).toMatch(/stop exploring/i);
   });
 
+  it.each([
+    "分析 @EnumValue 与 @JsonValue 的项目使用规范并提供证据",
+    "修复格式缺陷并报告根因、修改与验证结果",
+  ])("多点报告不再被强制压成一句话：%s", (description) => {
+    const text = formatCurrentTaskContext(makeTask({ description }));
+    expect(text).not.toMatch(/report the result in one sentence/i);
+    expect(text).toContain("stop calling tools");
+    expect(text).toContain("Markdown headings (## / ###)");
+    expect(text).toContain("short paragraphs separated by blank lines");
+    expect(text).toContain("bullet or numbered lists");
+    expect(text).toContain("fenced code blocks with a language tag when needed");
+    expect(text).toContain("Preserve the business conclusions, supporting evidence, and uncertainty");
+    expect(text).toContain("unless the user explicitly requests a different format");
+    expect(text).toContain("Simple answers may stay brief without extra sections");
+  });
+
   it("先复用分解阶段历史，历史为空时不注入该引导", () => {
     const withHistory = formatCurrentTaskContext(makeTask({
       relevantHistory: "packages/core/src/example.ts 中的 updateTask 函数负责更新任务。",
