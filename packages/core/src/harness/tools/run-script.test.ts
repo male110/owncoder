@@ -859,3 +859,196 @@ test.skipIf(process.platform !== "win32")(
     );
   },
 );
+
+
+test("fs 自动替换：受限工具集内读取、别名、解构和动态导入经过 read_file", async () => {
+  await withWorkspace(async root => {
+    await writeFile(join(root, "a.txt"), "alpha\nbeta\n");
+  }, async root => {
+    for (const code of [
+      'const fs = require("node:fs"); console.log(fs.readFileSync("a.txt", "utf8").trim());',
+      'const disk = require("fs"); console.log(disk.readFileSync(require("node:path").join(".", "a.txt"), "utf8"));',
+      'const { readFileSync: read } = require("fs"); console.log(read("a.txt", "utf8"));',
+      'const { readFileSync } = require("fs"); console.log(readFileSync("a.txt"));',
+      'const disk = await import("node:fs"); console.log(disk.readFileSync("a.txt", "utf8"));',
+    ]) {
+      const ctx = ctxFor(root);
+      ctx.availableTools = new Set(["read_file"]);
+      const result = await toolRunScript(ctx, code);
+      assert.equal(result.ok, true, result.output);
+      assert.match(result.output, /alpha\nbeta/);
+      assert.match(result.output, /run_script: 1 次工具调用/);
+      assert.ok(ctx.readSet.size > 0);
+      assert.doesNotMatch(result.output, /\[lines |\d+\|/);
+    }
+  });
+});
+
+test("fs 自动替换：目录名字和 Dirent 保持目录语义", async () => {
+  await withWorkspace(async root => {
+    await mkdir(join(root, "sub"));
+    await writeFile(join(root, "a.txt"), "alpha");
+  }, async root => {
+    const ctx = ctxFor(root);
+    ctx.availableTools = new Set(["read_file"]);
+    const result = await toolRunScript(ctx, `
+      const fs = require("fs");
+      console.log(fs.readdirSync(".").sort().join(","));
+      console.log(fs.readdirSync(require("path").join("."), { withFileTypes: true })
+        .map(d => d.name + ":" + d.isDirectory() + ":" + d.isFile()).sort().join(","));
+    `);
+    assert.equal(result.ok, true, result.output);
+    assert.match(result.output, /a.txt,sub/);
+    assert.match(result.output, /a.txt:false:true,sub:true:false/);
+    assert.match(result.output, /run_script: 2 次工具调用/);
+  });
+});
+
+test("fs 自动替换：同步声明、箭头、表达式和递归调用向上传播 async", async () => {
+  await withWorkspace(async root => {
+    await writeFile(join(root, "a.txt"), "alpha\n");
+  }, async root => {
+    for (const declarations of [
+      'function read(p) { return fs.readFileSync(p, "utf8"); } function outer(p) { return read(p).trim(); }',
+      'const read = p => fs.readFileSync(p, "utf8"); const outer = (p) => read(p).trim();',
+      'const read = function(p) { return fs.readFileSync(p, "utf8"); }; const outer = p => read(p).trim();',
+      'function read(p, n) { if (n) return read(p, n - 1); return fs.readFileSync(p, "utf8"); } function outer(p) { return read(p, 2).trim(); }',
+      'async function read(p) { return fs.readFileSync(p, "utf8"); } async function outer(p) { return (await read(p)).trim(); }',
+    ]) {
+      const result = await toolRunScript(ctxFor(root), `const fs = require("fs"); ${declarations} console.log(await outer("a.txt"));`);
+      assert.equal(result.ok, true, result.output);
+      assert.match(result.output, /alpha/);
+      assert.match(result.output, /run_script: 1 次工具调用/);
+    }
+  });
+});
+
+test("fs 自动替换：原始文本中的 fs 代码、注释和模板不被改写", async () => {
+  await withWorkspace(async () => {}, async root => {
+    const result = await toolRunScript(ctxFor(root), `
+      const fs = require("fs");
+      console.log('fs.readFileSync("missing", "utf8")');
+      console.log(\`fs.readdirSync("missing")\`);
+      // fs.readFileSync("missing")
+    `);
+    assert.equal(result.ok, true, result.output);
+    assert.match(result.output, /fs.readFileSync/);
+    assert.match(result.output, /fs.readdirSync/);
+    assert.match(result.output, /run_script: 0 次工具调用/);
+  });
+});
+
+test("fs 自动替换：不支持和动态访问不会落到原生 fs，写入不会发生", async () => {
+  await withWorkspace(async root => {
+    await writeFile(join(root, "a.txt"), "alpha\n");
+  }, async root => {
+    for (const access of [
+      'fs["read" + "FileSync"]("a.txt", "utf8")',
+      'fs.readFileSync("a.txt", "hex")',
+      'fs.readdirSync(".", { recursive: true })',
+      'fs.writeFileSync("a.txt", "changed")',
+      'fs.promises.readFile("a.txt", "utf8")',
+      'fs.readFile("a.txt", () => {})',
+      'fs.statSync("a.txt")',
+      '(() => fs.readFileSync("a.txt", "utf8"))()',
+      '({ read() { return fs.readFileSync("a.txt", "utf8"); } }).read()',
+    ]) {
+      for (const scoped of [false, true]) {
+        const ctx = ctxFor(root);
+        if (scoped) ctx.availableTools = new Set(["read_file"]);
+        const result = await toolRunScript(ctx, `const fs = require("node:" + "fs"); console.log(${access});`);
+        assert.equal(result.ok, false, result.output);
+        assert.doesNotMatch(result.output, /alpha|changed/);
+        assert.match(result.output, /run_script: 0 次工具调用/);
+      }
+    }
+    const result = await toolRunScript(ctxFor(root), 'const r = await tools.call("read_file", { file_path: "a.txt" }); console.log(r.output);');
+    assert.equal(result.ok, true, result.output);
+    assert.match(result.output, /alpha/);
+    assert.doesNotMatch(result.output, /changed/);
+  });
+});
+
+test("fs 自动替换：缺失文件、越界和无读取权限沿用工具门禁", async () => {
+  await withWorkspace(async root => {
+    await writeFile(join(root, "a.txt"), "alpha");
+  }, async root => {
+    for (const path of ["missing.txt", "../outside.txt"]) {
+      const result = await toolRunScript(ctxFor(root), `const fs = require("fs"); console.log(fs.readFileSync(${JSON.stringify(path)}, "utf8"));`);
+      assert.equal(result.ok, false, result.output);
+      assert.match(result.output, /fs 兼容读失败/);
+      assert.match(result.output, /run_script: 1 次工具调用/);
+    }
+    const ctx = ctxFor(root);
+    ctx.availableTools = new Set(["glob"]);
+    const result = await toolRunScript(ctx, 'const fs = require("fs"); console.log(fs.readFileSync("a.txt", "utf8"));');
+    assert.equal(result.ok, false, result.output);
+    assert.doesNotMatch(result.output, /alpha/);
+    assert.match(result.output, /run_script: 1 次工具调用/);
+  });
+});
+
+
+test("fs 自动替换：递归目录遍历传播 async 并保持同步遍历顺序", async () => {
+  await withWorkspace(async root => {
+    await mkdir(join(root, "src", "nested"), { recursive: true });
+    await writeFile(join(root, "src", "a.txt"), "alpha");
+    await writeFile(join(root, "src", "nested", "b.txt"), "beta");
+  }, async root => {
+    const ctx = ctxFor(root);
+    ctx.availableTools = new Set(["read_file"]);
+    const result = await toolRunScript(ctx, `
+      const fs = require("fs");
+      const path = require("path");
+      function walk(dir) {
+        let out = [];
+        for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+          const p = path.join(dir, entry.name);
+          if (entry.isDirectory()) out.push(...walk(p));
+          else out.push(fs.readFileSync(p, "utf8"));
+        }
+        return out;
+      }
+      console.log(walk("src").join(","));
+    `);
+    assert.equal(result.ok, true, result.output);
+    assert.match(result.output, /alpha,beta/);
+    assert.match(result.output, /run_script: 4 次工具调用/);
+  });
+});
+
+test("fs 自动替换：静态绑定的不支持选项与混合写操作不会绕过工具", async () => {
+  await withWorkspace(async root => {
+    await writeFile(join(root, "a.txt"), "alpha");
+  }, async root => {
+    for (const access of [
+      'fs.readFileSync("a.txt", "hex")',
+      'fs.readdirSync(".", { recursive: true })',
+      'fs["readFileSync"]("a.txt", "utf8")',
+      'fs.writeFileSync("a.txt", "changed")',
+      '({ read() { return fs.readFileSync("a.txt", "utf8"); } }).read()',
+    ]) {
+      const result = await toolRunScript(ctxFor(root), `const fs = require("fs"); console.log(${access});`);
+      assert.equal(result.ok, false, result.output);
+      assert.match(result.output, /run_script: 0 次工具调用|脚本语法错误/);
+      assert.doesNotMatch(result.output, /alpha/);
+    }
+    const result = await toolRunScript(ctxFor(root), 'const fs = require("fs"); fs.readFileSync("a.txt", "utf8"); fs.writeFileSync("a.txt", "changed");');
+    assert.equal(result.ok, false, result.output);
+    assert.match(result.output, /run_script: 1 次工具调用/);
+    const read = await toolRunScript(ctxFor(root), 'const fs = require("fs"); console.log(fs.readFileSync("a.txt", "utf8"));');
+    assert.equal(read.ok, true, read.output);
+    assert.match(read.output, /alpha/);
+  });
+});
+
+test("fs 自动替换：工具调用预算同样适用于兼容读取", async () => {
+  await withWorkspace(async root => {
+    await writeFile(join(root, "a.txt"), "alpha");
+  }, async root => {
+    const result = await toolRunScript(ctxFor(root), 'const fs = require("fs"); for (let i = 0; i < 61; i++) fs.readFileSync("a.txt", "utf8");');
+    assert.equal(result.ok, false, result.output);
+    assert.match(result.output, /预算耗尽/);
+    assert.match(result.output, /run_script: 60 次工具调用/);
+  });
+});

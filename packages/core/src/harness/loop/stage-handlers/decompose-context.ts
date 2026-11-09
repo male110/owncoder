@@ -133,7 +133,7 @@ export async function buildDecomposeContext(
     // Fallback: heuristic extraction (no decompose JSON, no evidence).
     const structuredHistory = extractStructuredHistory(storedHistory.length ? storedHistory : opts.history, recentWindowSize, !storedHistory.length);
     roundLines = structuredHistory.slice().reverse().map((round, idx) => {
-      const parts: string[] = [`## Round ${idx + 1}`, `[user] ${stripConversationHistoryTags(round.userInput)}`];
+      const parts: string[] = [`## Round ${structuredHistory.length - idx}`, `[user] ${stripConversationHistoryTags(round.userInput)}`];
       if (round.taskDecompose) parts.push(`[decompose] ${round.taskDecompose}`);
       if (round.assistantReport) parts.push(`[assistant] ${round.assistantReport}`);
       if (round.transcript) parts.push(`[transcript]\n${round.transcript}`);
@@ -150,7 +150,7 @@ export async function buildDecomposeContext(
 
   // Quoted conversation text is data, not another history-section heading.
   const historySections = (lines = roundLines, summary = olderSummary) => [
-    ...(lines.length ? [tagConversationHistory(`### Recent conversation rounds (background)\n${lines.join("\n\n").replace(/^### Earlier History Summary \(compressed\)$/gm, "[quoted earlier-summary heading]")}`)] : []),
+    ...(lines.length ? [tagConversationHistory(`### Recent conversation rounds (background; newest to oldest, highest Round number to lowest; the earliest session starts at Round 1 and later sessions have larger numbers)\n${lines.join("\n\n").replace(/^### Earlier History Summary \(compressed\)$/gm, "[quoted earlier-summary heading]")}`)] : []),
     ...(summary ? [tagConversationHistory(`### Earlier History Summary (compressed)\n\n${summary}`)] : []),
   ];
 

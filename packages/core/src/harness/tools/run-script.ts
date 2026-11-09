@@ -12,6 +12,7 @@ import { createRequire } from "node:module";
 import { join } from "node:path";
 import * as vm from "node:vm";
 import { wrapChildProcessModule } from "./child-process-shim.ts";
+import { rewriteFsReads } from "./run-script-fs.ts";
 import { scanUnterminatedString } from "../parser.ts";
 import type { ParsedToolCall } from "../parser.ts";
 import type { ToolContext, ToolResult } from "./types.ts";
@@ -276,11 +277,15 @@ export async function toolRunScript(
       if (normalized === "child_process" || normalized === "fs" || normalized === "fs/promises") {
         // Legacy direct tool callers do not provide an effective tool set; keep
         // compatibility there while role-scoped loops remain fail-closed.
-        if (!ctx.availableTools) {
-          if (normalized === "child_process") return sandboxChildProcess;
-          return workspaceRequire(spec);
+        if (normalized === "fs" || normalized === "fs/promises") {
+          return new Proxy(Object.create(null) as Record<string, unknown>, {
+            get: (_target, key) => {
+              if (key === "then" || key === "readFileSync" || key === "readdirSync") return undefined;
+              throw new Error(`run_script 禁止直接加载 ${spec}；请通过 tools.call 使用受控工具`);
+            },
+          });
         }
-        if (normalized === "child_process" && ctx.availableTools.has("bash")) return sandboxChildProcess;
+        if (!ctx.availableTools || ctx.availableTools.has("bash")) return sandboxChildProcess;
         throw new Error(`run_script 禁止直接加载 ${spec}；请通过 tools.call 使用受控工具`);
       }
       const builtin = new Set(["path", "url", "util", "os", "crypto", "querystring"]);
@@ -391,7 +396,8 @@ export async function toolRunScript(
   }
 
   // 顶层 await 与 return 都可用：代码整体包在一个 async IIFE 里。
-  const wrapped = `"use strict";\n(async () => {\n${code}\n})()`;
+  const effectiveCode = rewriteFsReads(code);
+  const wrapped = `"use strict";\n(async () => {\n${effectiveCode}\n})()`;
 
   let script: vm.Script;
   try {
@@ -404,7 +410,7 @@ export async function toolRunScript(
       importModuleDynamically: async (specifier: string) => {
         const normalized = specifier.replace(/^node:/, "");
         if (normalized === "child_process" || normalized === "fs" || normalized === "fs/promises") {
-          if (!ctx.availableTools) return import(specifier);
+          if (!ctx.availableTools && normalized === "child_process") return import(specifier);
           throw new Error(`run_script 禁止动态加载 ${specifier}；请通过 tools.call 使用受控工具`);
         }
         const builtin = new Set(["path", "url", "util", "os", "crypto", "querystring"]);

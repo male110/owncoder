@@ -37,6 +37,7 @@ const EMPTY_RUNTIME: ChatSessionRuntime = {
   askRequests: [],
   status: "idle",
   currentStage: null,
+  decomposeFailureNotified: false,
   stopping: false,
   pendingDelete: false,
 };

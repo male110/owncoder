@@ -30,6 +30,9 @@
   --surface-6: #11151b;
   --scrollbar-thumb: #2e3340;
   --scrollbar-thumb-hover: #3d4352;
+  --chat-scrollbar-track: #20242c;
+  --chat-scrollbar-thumb: #737d8e;
+  --chat-scrollbar-thumb-hover: #a0aaba;
   --title-mark-from: #3d5a73;
   --title-mark-to: #243848;
   --primary-border: #3a5570;
@@ -117,6 +120,9 @@
   --surface-6: #f0f0f0;
   --scrollbar-thumb: #d4d4d4;
   --scrollbar-thumb-hover: #a3a3a3;
+  --chat-scrollbar-track: #e5e5e5;
+  --chat-scrollbar-thumb: #737373;
+  --chat-scrollbar-thumb-hover: #525252;
   --title-mark-from: #262626;
   --title-mark-to: #0a0a0a;
   --primary-border: rgba(13, 13, 13, 0.2);
@@ -2155,6 +2161,43 @@ button.ghost.accent {
   flex-direction: column;
   gap: 10px;
   padding-bottom: 12px;
+  scrollbar-width: auto;
+  scrollbar-color: var(--chat-scrollbar-thumb) var(--chat-scrollbar-track);
+}
+
+.chat-log-scroller:hover {
+  scrollbar-color: var(--chat-scrollbar-thumb-hover) var(--chat-scrollbar-track);
+}
+
+/* Chromium 使用定宽样式，避免标准 scrollbar-color 覆盖伪元素样式。 */
+@supports selector(::-webkit-scrollbar) {
+  .chat-log-scroller,
+  .chat-log-scroller:hover {
+    scrollbar-color: auto;
+  }
+
+  .chat-log-scroller::-webkit-scrollbar {
+    width: 12px;
+  }
+
+  .chat-log-scroller::-webkit-scrollbar-track {
+    background: var(--chat-scrollbar-track);
+    border-radius: 8px;
+  }
+
+  .chat-log-scroller::-webkit-scrollbar-thumb {
+    background: var(--chat-scrollbar-thumb);
+    border: 2px solid var(--chat-scrollbar-track);
+    border-radius: 8px;
+    background-clip: padding-box;
+    min-height: 32px;
+  }
+
+  .chat-log-scroller::-webkit-scrollbar-thumb:hover,
+  .chat-log-scroller::-webkit-scrollbar-thumb:active {
+    background: var(--chat-scrollbar-thumb-hover);
+    background-clip: padding-box;
+  }
 }
 
 .chat-log-virtuoso {

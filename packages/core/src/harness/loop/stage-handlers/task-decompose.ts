@@ -110,7 +110,6 @@ export async function runTaskDecompose(
   };
   fallback?: boolean;
 }> {
-  assertLlmAuth(model, opts.llmApiKey);
   // Track how many tokens the decomposition pushes into messages so the
   // downstream ReAct loop can deduct them from the dynamic-segment budget.
   let decomposeTokens = 0;
@@ -120,6 +119,7 @@ export async function runTaskDecompose(
   // explicitly supplies `prompt`, that override wins.
   const systemPrompt = prompt?.trim() || BUILTIN_TASK_DECOMPOSE_PROMPT;
   try {
+    assertLlmAuth(model, opts.llmApiKey);
     const { tagUserInput } = await import("../../message-tags.js");
     const currentAttachments = (opts.attachments ?? [])
       .filter((attachment, index, all) => all.findIndex((item) => item.url === attachment.url) === index);
@@ -153,10 +153,8 @@ export async function runTaskDecompose(
         purpose: "task_decompose",
         taskId: opts.sessionId,
         thinking: { effort: "low" },
-        // 分解上下文可能很大，网关侧计算慢（实测可达 118s）。流式不活跃
-        // 超时默认 120s，这里放宽到与非流式一致的总预算，避免大上下文分解
-        // 被不活跃计时器误杀。
-        timeout: 300_000,
+        // 与普通流式调用保持一致，使用 120 秒不活跃超时。
+        timeout: 120_000,
         onThinkingDelta: (text: string) => {
           // 仅当思考内容有增量时才发射事件，避免空更新触发不必要的渲染。
           if (text !== lastThinkingDelta) {
@@ -212,8 +210,8 @@ export async function runTaskDecompose(
           planTextPreview: planText.trim().slice(0, 240),
         },
       });
-      // Fallback：intent 用用户原话；模型纯文本（planText）收成单一 task，不丢弃。
-      const rawDecompose = buildFallbackRawDecompose(opts.userMessage, planText);
+      // 不把无法验证的模型输出（可能含内部错误）下发给用户或当作执行指令。
+      const rawDecompose = buildFallbackRawDecompose(opts.userMessage);
       // 简化分解不再产出 plan steps：trace/memory 只承载 goal（=intent）。
       const fallbackAgentPlan: AgentPlan = {
         goal: rawDecompose.intent || opts.userMessage,
@@ -379,6 +377,11 @@ export const taskDecomposeHandler: StageHandler = {
       opts, model, tracer, memory, reasoningTrace, ctx.budgets, node.prompt, ctx.messages,
     );
     
+    if (opts.signal?.aborted) {
+      emitStage(opts.onEvent, "done", node);
+      return;
+    }
+
     // 递增任务分解计数器
     ctx.state.decomposeCount++;
     

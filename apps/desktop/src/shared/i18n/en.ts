@@ -435,6 +435,7 @@ export const en = {
   "已跳过：{{name}}": "Skipped: {{name}}",
   "失败：{{name}}": "Failed: {{name}}",
   "正在分解任务…": "Breaking down the task…",
+  "任务分解失败，未能生成可靠计划。可检查模型配置或网络后重新发送请求。": "Task decomposition failed to produce a reliable plan. Check your model settings or network, then resend the request.",
   "阶段：{{label}}": "Stage: {{label}}",
 
   // ── 聊天动作 / 会话同步 ───────────────────────────────────────────────────

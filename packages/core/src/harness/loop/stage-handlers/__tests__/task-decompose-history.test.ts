@@ -38,7 +38,7 @@ import {
   estimateTextRelevance,
   RELEVANT_HISTORY_SCORE_THRESHOLD,
 } from "../task-decompose.ts";
-import { BUILTIN_WORKFLOW } from "@owncoder/settings";
+import { BUILTIN_WORKFLOW, BUILTIN_TASK_DECOMPOSE_PROMPT } from "@owncoder/settings";
 import { contextBudgets } from "../../../budget.ts";
 
 // ── 临时目录 ──
@@ -491,7 +491,7 @@ describe("decompose→report/evidence 同轮持久化", () => {
   });
 
   it("仅最近一轮与连续无报告中断后缀保留读写过程；有报告后更早轮不带", async () => {
-    // 历史 newest-first 显示为 Round 1..4 = 第4..第1轮：
+    // 历史 newest-first 显示为 Round 4..1 = 第4..第1轮：
     // 第4、第3 无报告 → 保留 evidence/fileChanges；
     // 第2 有报告 → 不保留；第1 无报告但已越过有报告轮 → 也不保留。
     const evidence = (summary: string, path: string): PersistedEvidence[] => [
@@ -535,19 +535,20 @@ describe("decompose→report/evidence 同轮持久化", () => {
     const blocks = formatRoundsForDecomposeHistory(rounds);
     expect(blocks).toHaveLength(4);
 
-    expect(blocks[0]).toContain("## Round 1");
+    expect(blocks.map((block) => block.match(/^## Round (\d+)/)?.[1])).toEqual(["4", "3", "2", "1"]);
+    expect(blocks[0]).toContain("## Round 4");
     expect(blocks[0]).toContain("[user] 第4轮");
     expect(blocks[0]).toContain("读了第4轮文件");
     expect(blocks[0]).toContain("write_file src/d.ts");
     expect(blocks[0]).not.toContain("[assistant]");
 
-    expect(blocks[1]).toContain("## Round 2");
+    expect(blocks[1]).toContain("## Round 3");
     expect(blocks[1]).toContain("[user] 第3轮");
     expect(blocks[1]).toContain("读了第3轮文件");
     expect(blocks[1]).toContain("write_file src/c.ts");
     expect(blocks[1]).not.toContain("[assistant]");
 
-    expect(blocks[2]).toContain("## Round 3");
+    expect(blocks[2]).toContain("## Round 2");
     expect(blocks[2]).toContain("[user] 第2轮");
     expect(blocks[2]).toContain("[assistant] 第2轮报告");
     expect(blocks[2]).not.toContain("读了第2轮文件");
@@ -555,7 +556,7 @@ describe("decompose→report/evidence 同轮持久化", () => {
     expect(blocks[2]).not.toContain("[evidence]");
     expect(blocks[2]).not.toContain("[file changes]");
 
-    expect(blocks[3]).toContain("## Round 4");
+    expect(blocks[3]).toContain("## Round 1");
     expect(blocks[3]).toContain("[user] 第1轮");
     expect(blocks[3]).not.toContain("读了第1轮文件");
     expect(blocks[3]).not.toContain("src/a.ts");
@@ -1155,6 +1156,43 @@ describe("删除对话后分解历史同步", () => {
   });
 });
 
+
+describe("分解历史轮次编号与排序", () => {
+  const budgets = contextBudgets(BUILTIN_WORKFLOW);
+  const opts = (history: ChatTurn[] = [], sessionId = "history-fallback"): AgentLoopOpts => ({
+    mode: "agent", workspaceRoot: tmpDir, sessionId, workflow: BUILTIN_WORKFLOW,
+    index: {} as AgentLoopOpts["index"], history, userMessage: "当前请求",
+  });
+
+  it("持久化历史使用原始递增编号，删除中间轮后仍按最新到最早展示", async () => {
+    const sessionId = "history-round-order";
+    for (const n of [1, 2, 3]) {
+      const round = await persistDecomposeRound(tmpDir, sessionId, `请求-${n}`, {
+        intent: `分解-${n}`, userConstraints: [], tasks: [],
+      }, [], [], `turn-${n}`);
+      await persistRoundReport(tmpDir, sessionId, `请求-${n}`, `回复-${n}`, round!.index);
+    }
+    await deleteDecomposeRound(tmpDir, sessionId, "turn-2");
+    const context = await buildDecomposeContext(opts([], sessionId), budgets);
+    expect([...context.matchAll(/^## Round (\d+)\n\[user\] (请求-\d+)/gm)].map((match) => [match[1], match[2]])).toEqual([
+      ["3", "请求-3"], ["1", "请求-1"],
+    ]);
+    expect(context).toContain("newest to oldest, highest Round number to lowest");
+  });
+
+  it("回退历史按最早 round 1、最新最大编号倒序展示", async () => {
+    const history: ChatTurn[] = [1, 2, 3].flatMap((n) => [
+      { role: "user", content: `回退请求-${n}` },
+      { role: "assistant", content: `回退回复-${n}` },
+    ]);
+    const context = await buildDecomposeContext(opts(history), budgets);
+    expect([...context.matchAll(/^## Round (\d+)\n\[user\] (回退请求-\d+)/gm)].map((match) => [match[1], match[2]])).toEqual([
+      ["3", "回退请求-3"], ["2", "回退请求-2"], ["1", "回退请求-1"],
+    ]);
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain("Conversation history is presented from newest to oldest (nearest to farthest)");
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain("Round 1 is the earliest session");
+  });
+});
 
 describe("分解历史：使用滚动摘要和最近轮次，不检索向量历史", () => {
   const SESSION_ID = "sess-vector-recall";

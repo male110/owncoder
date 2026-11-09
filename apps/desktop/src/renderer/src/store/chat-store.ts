@@ -147,6 +147,8 @@ export interface ChatSessionRuntime {
   status: SessionStatus;
   /** Current stage (task_decompose or react loop) for coloring thinking blocks. */
   currentStage: "decompose" | "react" | null;
+  /** 本次分解是否已提示失败，防止多条失败事件或关闭提示后重复弹出。 */
+  decomposeFailureNotified: boolean;
   /**
    * True 表示用户已点击「停止」、主进程正在 abort 当前轮。此窗口内乐观
    * 用户行还没有 turnId，需要单独给出删除入口（正常发送中不显示删除）。
@@ -189,6 +191,7 @@ function emptyRuntime(): ChatSessionRuntime {
     askRequests: [],
     status: "idle",
     currentStage: null,
+    decomposeFailureNotified: false,
     stopping: false,
     pendingDelete: false,
   };
@@ -416,6 +419,8 @@ export interface ChatState {
   dangerousConfirmations: DangerousCommandRequestDto[];
   askRequests: AskUserRequestDto[];
   currentStage: "decompose" | "react" | null;
+  /** 本次分解是否已提示失败，防止多条失败事件或关闭提示后重复弹出。 */
+  decomposeFailureNotified: boolean;
   /** 与 bySession[focus].stopping/pendingDelete 同步的焦点镜像。 */
   stopping: boolean;
   pendingDelete: boolean;
@@ -459,7 +464,7 @@ export interface ChatActions {
 
   setLiveEvents: (events: LiveEvent[] | ((prev: LiveEvent[]) => LiveEvent[]), sessionId?: string) => void;
   /** Apply multiple live-turn fields in one Zustand transaction. */
-  patchLiveState: (patch: Partial<Pick<ChatSessionRuntime, "liveEvents" | "liveStatus" | "terminal" | "currentStage">> | ((prev: ChatSessionRuntime) => Partial<Pick<ChatSessionRuntime, "liveEvents" | "liveStatus" | "terminal" | "currentStage">>), sessionId?: string) => void;
+  patchLiveState: (patch: Partial<Pick<ChatSessionRuntime, "liveEvents" | "liveStatus" | "terminal" | "currentStage" | "decomposeFailureNotified" | "errorAlert" | "status">> | ((prev: ChatSessionRuntime) => Partial<Pick<ChatSessionRuntime, "liveEvents" | "liveStatus" | "terminal" | "currentStage" | "decomposeFailureNotified" | "errorAlert" | "status">>), sessionId?: string) => void;
 
   /** Append structured message from turn_complete event (阶段三). */
   pushStructuredMessage: (parts: MessagePart[], metadata: MessageMetadata, sessionId?: string) => void;
@@ -536,6 +541,7 @@ function readRuntime(s: ChatState & ChatActions, sid?: string): ChatSessionRunti
       dangerousConfirmations: s.dangerousConfirmations,
       askRequests: s.askRequests,
       currentStage: s.currentStage,
+      decomposeFailureNotified: s.decomposeFailureNotified,
       status: s.status,
       stopping: s.stopping,
       pendingDelete: s.pendingDelete,
@@ -574,6 +580,7 @@ export const useChatStore = create<ChatState & ChatActions>()((set, get) => ({
   dangerousConfirmations: [],
   askRequests: [],
   currentStage: null,
+  decomposeFailureNotified: false,
   stopping: false,
   pendingDelete: false,
   status: "idle",
@@ -606,6 +613,7 @@ export const useChatStore = create<ChatState & ChatActions>()((set, get) => ({
         dangerousConfirmations: rt.dangerousConfirmations,
         askRequests: rt.askRequests,
         currentStage: rt.currentStage,
+        decomposeFailureNotified: rt.decomposeFailureNotified,
         stopping: rt.stopping,
         pendingDelete: rt.pendingDelete,
         status: rt.status,

@@ -529,7 +529,7 @@ export function formatRoundsForDecomposeHistory(roundsOldestFirst: TurnRoundReco
     }
     // 只有最近一次有分解结果的轮次才保留分解信息
     const includeDecompose = idx < fullRecentCount || (lastDecomposeIndex !== -1 && idx === lastDecomposeIndex);
-    return formatRoundBlock(round, idx + 1, { includeProcessInfo, includeDecompose });
+    return formatRoundBlock(round, round.index, { includeProcessInfo, includeDecompose });
   });
 }
 

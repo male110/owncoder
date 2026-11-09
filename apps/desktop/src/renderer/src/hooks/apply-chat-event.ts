@@ -50,10 +50,18 @@ export function toolStatusLabel(
 
 function isDecomposing(chat: ChatStore, sid: string | undefined): boolean {
   // Prefer the target session runtime so multi-session apply stays correct.
-  if (sid && sid !== chat.activeSessionId) {
-    return chat.bySession[sid]?.liveStatus === t("正在分解任务…");
-  }
-  return chat.liveStatus === t("正在分解任务…");
+  const runtime = sid && sid !== chat.activeSessionId ? chat.bySession[sid] : chat;
+  return runtime?.currentStage === "decompose" || runtime?.liveStatus === t("正在分解任务…");
+}
+
+function notifyDecomposeFailure(chat: ChatStore, sid: string | undefined): void {
+  chat.patchLiveState((rt) => {
+    if (rt.stopping || rt.decomposeFailureNotified) return {};
+    return {
+      decomposeFailureNotified: true,
+      errorAlert: toAppError(t("任务分解失败，未能生成可靠计划。可检查模型配置或网络后重新发送请求。")),
+    };
+  }, sid);
 }
 
 /** Apply one ChatEventDto to the chat (and optionally session) store. */
@@ -142,22 +150,20 @@ export function applyChatEvent(
   }
 
   // ── task_decomposition ────────────────────────────────────────────────
-  // 仅 pnpm dev（Vite DEV）推入 liveEvents 供调试卡片展示；生产包不展示。
   if (ev.type === "task_decomposition") {
+    if (ev.fallback === true) notifyDecomposeFailure(chat, sid);
     chat.sealThinking(sid ?? undefined);
     chat.setLiveStatus("", sid ?? undefined);
-    if (import.meta.env.DEV) {
-      chat.pushDecompose(
-        {
-          intent: ev.intent,
-          userConstraints: ev.userConstraints,
-          tasks: ev.tasks,
-          relevantHistory: ev.relevantHistory,
-          fallback: ev.fallback,
-        },
-        sid,
-      );
-    }
+    chat.pushDecompose(
+      {
+        intent: ev.intent,
+        userConstraints: ev.userConstraints,
+        tasks: ev.tasks,
+        relevantHistory: ev.relevantHistory,
+        fallback: ev.fallback,
+      },
+      sid,
+    );
     return;
   }
 
@@ -165,6 +171,7 @@ export function applyChatEvent(
   if (ev.type === "stage_start") {
     const stage = ev.nodeType === "task_decompose" ? "decompose" : "react";
     if (ev.nodeType === "task_decompose") {
+      chat.patchLiveState(() => ({ decomposeFailureNotified: false }), sid);
       chat.setLiveStatus(t("正在分解任务…"), sid);
     } else {
       chat.setLiveStatus(t("阶段：{{label}}", { label: ev.label }), sid);
@@ -173,6 +180,7 @@ export function applyChatEvent(
     return;
   }
   if (ev.type === "stage_done") {
+    if (ev.nodeType === "task_decompose" && ev.ok === false) notifyDecomposeFailure(chat, sid);
     chat.setLiveStatus("", sid);
     chat.patchLiveState(() => ({ currentStage: null }), sid);
     // 子智能体阶段结束：终态由节点成败（stage_done.ok）决定并附带文字报告；
@@ -262,7 +270,11 @@ export function applyChatEvent(
     // 验证门禁失败只在 LLM 正文区提示，不弹顶部错误条 / 弹窗，且门禁后
     // 会话会继续跑（保持 running）。
     if (!isVerificationGateError(ev.message)) {
-      chat.setErrorAlert(toAppError(ev.message), sid);
+      if (isDecomposing(chat, sid)) {
+        notifyDecomposeFailure(chat, sid);
+      } else {
+        chat.setErrorAlert(toAppError(ev.message), sid);
+      }
       // 真正的错误意味着本轮已终止：把仍处于 running 的会话状态复位为
       // idle，让侧边栏旋转图标立即消失（与「停止」场景的 markSessionCompleted
       // 对称）。仅在当前确为 running 时复位，避免盖掉 completed/idle 终态；

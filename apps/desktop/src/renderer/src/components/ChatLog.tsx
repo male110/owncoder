@@ -138,14 +138,11 @@ export function ChatLog({
     [sending, liveStatus, liveEvents],
   );
 
-  // Decomposition cards belong to the current turn and only show in pnpm dev.
+  // Decomposition cards belong to the current turn.
   // They must render BEFORE the in-progress assistant reply so the plan is
   // visible ahead of the LLM response.
   const decompositionCards = useMemo(
-    () =>
-      import.meta.env.DEV
-        ? liveEvents.filter((e): e is Extract<LiveEvent, { kind: "decompose" }> => e.kind === "decompose")
-        : [],
+    () => liveEvents.filter((e): e is Extract<LiveEvent, { kind: "decompose" }> => e.kind === "decompose"),
     [liveEvents],
   );
   const nonDecomposeLiveEvents = useMemo(
@@ -274,6 +271,13 @@ export function ChatLog({
     let lastHeight = 0;
     let frame = 0;
     let framePending = false;
+    // Virtuoso + customScrollParent 对长列表的尾部量高常常远超固定帧预算
+    // （首屏只量到第一批次，尾部行要等异步 resize 才落定）。改用墙钟截止：
+    // 在截止时间前持续钉底，而不是在短帧数后就停止、只剩 ResizeObserver。
+    const DEADLINE_MS = 5000;
+    let startedAt = Date.now();
+    let pinSuspended = false;
+
     const schedulePin = () => {
       if (cancelled || userTookOver || initialBottomAppliedRef.current || framePending) return;
       framePending = true;
@@ -283,13 +287,14 @@ export function ChatLog({
       });
     };
     retryInitialPinRef.current = () => {
-      // 帧预算耗尽后，新量高或新虚拟行范围仍需重新尝试，不能只补一帧。
-      if (attempts >= MAX_FRAMES) attempts = 0;
+      // 新量高或新虚拟行范围：若仍在截止时间内，继续钉底；
+      // 已停止（超时）的循环也会被重新唤醒，覆盖超慢的异步量高。
+      if (pinSuspended) {
+        pinSuspended = false;
+        startedAt = Date.now();
+      }
       schedulePin();
     };
-    // Virtuoso + customScrollParent 首屏量高常超过 800ms；超时后若仍未贴底，
-    // 不能把 flag 置 true，否则 ResizeObserver 无法继续纠正，切换会话会停在顶部。
-    const MAX_FRAMES = 90;
 
     const readBottomState = (el: HTMLElement) => {
       const overflow = el.scrollHeight > el.clientHeight + AT_BOTTOM_THRESHOLD;
@@ -297,6 +302,8 @@ export function ChatLog({
         el.scrollHeight - el.scrollTop - el.clientHeight <= AT_BOTTOM_THRESHOLD;
       return { overflow, atBottom };
     };
+
+    const lastItemIndex = firstItemIndex + items.length - 1;
 
     const markSettledIfReady = (el: HTMLElement, heightStable: boolean) => {
       const { overflow, atBottom } = readBottomState(el);
@@ -312,7 +319,7 @@ export function ChatLog({
         items.length > 0 &&
         isInitialScrollReady(
           lastRenderedIndexRef.current,
-          firstItemIndex + items.length - 1,
+          lastItemIndex,
           atBottom, heightStable, overflow, attempts,
         );
       settledFrames = readyToSettle ? settledFrames + 1 : 0;
@@ -324,31 +331,24 @@ export function ChatLog({
     };
 
     const pin = () => {
-      if (cancelled || userTookOver) return;
+      if (cancelled || userTookOver || initialBottomAppliedRef.current) return;
       // A DOM scroll alone cannot reach virtual rows not laid out yet.
-      if (items.length > 0 && lastRenderedIndexRef.current !== firstItemIndex + items.length - 1) {
+      if (items.length > 0 && lastRenderedIndexRef.current !== lastItemIndex) {
         virtuosoRef?.current?.scrollToIndex({ index: "LAST", align: "end", behavior: "auto" });
       }
       scrollToTrueBottom();
       atBottomRef.current = true;
       attempts += 1;
       const el = scrollerElRef.current;
-      if (!el) {
-        schedulePin();
+      if (el && markSettledIfReady(el, el.scrollHeight === lastHeight)) {
+        lastHeight = el.scrollHeight;
         return;
       }
-      const heightStable = el.scrollHeight === lastHeight;
-      lastHeight = el.scrollHeight;
-      if (markSettledIfReady(el, heightStable)) return;
-      if (attempts >= MAX_FRAMES) {
-        // 停止 rAF 空转；只有确实贴底才锁定，否则留给 ResizeObserver 继续钉。
-        // 与 markSettledIfReady 同理：空时间线不锁定，历史到达后 effect
-        // 会因 items.length 变化重跑并重新钉底。
-        const { atBottom } = readBottomState(el);
-        if (atBottom && heightStable && items.length > 0 &&
-          lastRenderedIndexRef.current === firstItemIndex + items.length - 1) {
-          initialBottomAppliedRef.current = true;
-        }
+      if (el) lastHeight = el.scrollHeight;
+      // 墙钟截止：超时后停止 rAF 空转并挂起，留给 ResizeObserver/唤醒重试；
+      // 截止时间内（含尚未量完尾部的长列表）持续钉底，避免停在顶部。
+      if (Date.now() - startedAt >= DEADLINE_MS) {
+        pinSuspended = true;
         return;
       }
       schedulePin();

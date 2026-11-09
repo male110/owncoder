@@ -259,6 +259,11 @@ export function parseDecomposeAnswer(text: string): DecomposeAnswer | null {
   }
 
   const obj = (Array.isArray(raw) ? {} : raw ?? {}) as Record<string, unknown>;
+  // 明确失败不能被宽松解析器归一化成成功，也不把内部错误内容当作任务执行。
+  if (obj.ok === false || obj.success === false || obj.status === "failed" || obj.status === "error" || obj.error) {
+    return null;
+  }
+  if (![obj.tasks, obj.nodes, obj.steps, raw].some(Array.isArray)) return null;
 
   // 当前格式 tasks[] 优先（字段为 prompt/kind/dependsOn）；旧格式 nodes[]
   // （同字段）次之；更旧的 tasks[]（字段为 guidance）由下方字段折叠兼容；
@@ -312,6 +317,7 @@ export function parseDecomposeAnswer(text: string): DecomposeAnswer | null {
     const cognitiveOnly = typeof taskObj.cognitiveOnly === "boolean"
       ? taskObj.cognitiveOnly
       : undefined;
+    if (!description && !title && !prompt) return [];
     return [{
       id: uniqueId(id || `task_${usedTaskIds.size + 1}`, usedTaskIds),
       title,
@@ -327,6 +333,10 @@ export function parseDecomposeAnswer(text: string): DecomposeAnswer | null {
   const intent = typeof obj.intent === "string" && obj.intent.trim()
     ? obj.intent.trim()
     : typeof obj.understanding === "string" ? obj.understanding.trim() : "";
+
+  // 有意的「无需计划」必须带有效意图；非空但完全不可用的任务列表仍属失败。
+  const explicitTasks = Array.isArray(obj.tasks) ? obj.tasks : Array.isArray(obj.nodes) ? obj.nodes : undefined;
+  if (tasks.length === 0 && (!intent || (explicitTasks && explicitTasks.length > 0))) return null;
 
   const topLevelConstraints = Array.isArray(obj.userConstraints)
     ? obj.userConstraints.map((c) => (typeof c === "string" ? c.trim() : "")).filter(Boolean)

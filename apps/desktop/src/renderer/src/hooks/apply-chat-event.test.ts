@@ -22,6 +22,10 @@ function resetChat(sessionId = "s1") {
     dangerousConfirmations: [],
     askRequests: [],
     status: "idle",
+    currentStage: null,
+    decomposeFailureNotified: false,
+    stopping: false,
+    pendingDelete: false,
   });
 }
 
@@ -125,7 +129,7 @@ describe("applyChatEvent streaming / turn_complete", () => {
     expect(events[1]).toMatchObject({ kind: "text", text: "你好", streaming: true });
   });
 
-  it("suppresses deltas while decomposing", () => {
+  it("分解思考可见但结构化正文不混入聊天流", () => {
     apply({
       type: "stage_start",
       sessionId: "s1",
@@ -137,13 +141,13 @@ describe("applyChatEvent streaming / turn_complete", () => {
     apply({ type: "assistant_delta", sessionId: "s1", text: "leak" });
 
     const next = useChatStore.getState();
-    expect(next.liveStatus).toBe("正在分解任务…");
-    expect(next.liveEvents).toEqual([]);
+    expect(next.liveStatus).toBe("");
+    expect(next.liveEvents).toEqual([
+      expect.objectContaining({ kind: "thinking", text: "secret", stage: "decompose" }),
+    ]);
   });
 
-  it("pushes decompose snapshot in DEV after task_decomposition", () => {
-    // vitest/vite 默认 MODE=test -> import.meta.env.DEV 为 true
-    expect(import.meta.env.DEV).toBe(true);
+  it("任务分解快照在生产环境同样可见", () => {
     apply({
       type: "task_decomposition",
       sessionId: "s1",
@@ -531,5 +535,96 @@ describe("最终报告历史回填去重", () => {
     const history = useChatStore.getState().history;
     expect(history.filter((turn) => turn.id === "final-report-2")).toHaveLength(1);
     expect(history[0]).toEqual(report);
+  });
+});
+
+
+describe("任务分解失败提示", () => {
+  beforeEach(() => resetChat());
+  const failureMessage = "任务分解失败，未能生成可靠计划。可检查模型配置或网络后重新发送请求。";
+  const start: ChatEventDto = { type: "stage_start", id: "d1", nodeType: "task_decompose", label: "分解" };
+  const failed: ChatEventDto = { type: "stage_done", id: "d1", nodeType: "task_decompose", label: "分解", ok: false };
+  const result = (fallback: boolean): ChatEventDto => ({
+    type: "task_decomposition", intent: "任务意图", userConstraints: [], relevantHistory: "", tasks: [], fallback,
+  });
+
+  it.each([false, true])("生产模式=%s 时回退均显示可操作提示且不中断执行", (production) => {
+    const oldDev = import.meta.env.DEV;
+    import.meta.env.DEV = !production;
+    try {
+      useChatStore.getState().setSending(true, "s1");
+      apply(start);
+      apply(result(true));
+      const state = useChatStore.getState();
+      expect(state.errorAlert?.message).toBe(failureMessage);
+      expect(state.errorAlert?.detail).toBeUndefined();
+      expect(state.sending).toBe(true);
+      expect(state.liveEvents.filter((e) => e.kind === "decompose")).toHaveLength(1);
+    } finally {
+      import.meta.env.DEV = oldDev;
+    }
+  });
+
+  it("明确阶段失败会提示，重复事件及关闭后的重复处理不重弹", () => {
+    apply(start);
+    apply(result(true));
+    const first = useChatStore.getState().errorAlert;
+    apply(failed);
+    expect(useChatStore.getState().errorAlert).toBe(first);
+    useChatStore.getState().setErrorAlert(null, "s1");
+    apply(result(true));
+    apply(failed);
+    expect(useChatStore.getState().errorAlert).toBeNull();
+    apply(start);
+    apply(failed);
+    expect(useChatStore.getState().errorAlert?.message).toBe(failureMessage);
+  });
+
+  it("分解异常使用安全文案，即使思考清空状态文字也能识别分解阶段", () => {
+    apply(start);
+    apply({ type: "thinking_delta", text: "分析" });
+    apply({ type: "error", message: "private-stack: secret token" });
+    expect(useChatStore.getState().errorAlert?.message).toBe(failureMessage);
+    expect(useChatStore.getState().errorAlert?.detail).toBeUndefined();
+    useChatStore.getState().setErrorAlert(null, "s1");
+    apply(failed);
+    expect(useChatStore.getState().errorAlert).toBeNull();
+  });
+
+  it("成功和合法无需任务不提示，也不覆盖其它错误", () => {
+    apply(start);
+    apply(result(false));
+    apply({ ...failed, ok: true });
+    expect(useChatStore.getState().errorAlert).toBeNull();
+    useChatStore.getState().setErrorAlert({ code: "UNKNOWN", message: "其它错误" } as never, "s1");
+    apply(result(false));
+    expect(useChatStore.getState().errorAlert?.message).toBe("其它错误");
+  });
+
+  it("后台会话失败只通知对应会话，切换后仍不重复弹出", () => {
+    apply(start, "s2");
+    apply(failed, "s2");
+    expect(useChatStore.getState().errorAlert).toBeNull();
+    expect(useChatStore.getState().bySession.s2?.errorAlert?.message).toBe(failureMessage);
+    useChatStore.getState().setActiveSession("s2");
+    useChatStore.getState().setErrorAlert(null, "s2");
+    apply(failed, "s2");
+    expect(useChatStore.getState().errorAlert).toBeNull();
+  });
+
+  it("停止和删除中的请求不提示分解失败", () => {
+    apply(start);
+    useChatStore.getState().patchLiveState(() => ({ stopping: true }), "s1");
+    apply(result(true));
+    apply(failed);
+    expect(useChatStore.getState().errorAlert).toBeNull();
+    useChatStore.getState().patchLiveState(() => ({ stopping: false, pendingDelete: true }), "s1");
+    apply(failed);
+    expect(useChatStore.getState().errorAlert).toBeNull();
+  });
+
+  it("非分解错误保持原有行为", () => {
+    apply({ type: "error", message: "其它异常" });
+    expect(useChatStore.getState().errorAlert?.message).toBe("其它异常");
   });
 });
