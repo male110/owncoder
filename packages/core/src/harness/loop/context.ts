@@ -160,7 +160,13 @@ export async function buildInitialContext(args: BuildContextArgs): Promise<Build
   };
 
   pushSystem(buildPlatformInfo(), "platform");
-  const runScriptInfo = "## run_script\n`run_script` is a tool for executing JavaScript, and it is independent of the current project.";
+  const runScriptInfo = [
+    "## Tool selection",
+    "- Call a single `grep`, `glob`, or `read_file` directly as a top-level tool call when its result can be used as returned.",
+    "- Use `run_script` when JavaScript will materially filter, aggregate, parse, or cross-match tool results, or when one script coordinates multiple tool calls.",
+    "- Each `tools.call` inside `run_script` consumes a nested-call budget in addition to the outer call, so wrapping one simple call is more expensive.",
+    "- `run_script` executes JavaScript and is independent of the current project.",
+  ].join("\n");
   budgetUsed += estimateTokens(runScriptInfo);
   contextCharsUsed += runScriptInfo.length;
 

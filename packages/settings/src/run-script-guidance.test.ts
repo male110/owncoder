@@ -40,8 +40,8 @@ describe("task-decompose run_script guidance", () => {
   });
 
   it("keeps code exploration guidance tool-oriented and command-agnostic", () => {
-    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain("use tools to search for or locate");
-    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain("Do not prescribe a search command, search method, search scope or starting directory");
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain("read the relevant implementation in one pass");
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain("Do not prescribe a search command");
     expect(BUILTIN_TASK_DECOMPOSE_PROMPT).not.toContain("rg --files");
     expect(BUILTIN_TASK_DECOMPOSE_PROMPT).not.toContain("先在仓库根目录");
   });

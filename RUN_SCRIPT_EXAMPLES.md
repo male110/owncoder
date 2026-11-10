@@ -1,11 +1,11 @@
 # run_script：精准定位与探索示例
 
-本文件是按需查阅的示例库，不自动注入模型上下文。工具描述不再内嵌操作链示例（避免诱导模型把 bash 组合包进 run_script）；系统提示词保留路由散文与操作链短说明。以后需要增加引导时，从这里选取。
+本文件是按需查阅的示例库，不自动注入模型上下文。内置系统提示词不包含本文件的操作链；工具描述只保留适用边界和调用约束，完整范例集中在这里维护。
 
-用法：将任一 `javascript` 代码块完整作为 `run_script` 的 `code` 参数，修改已确认的搜索范围与符号名。只调用现有工具，不另调 LLM。
+用法：先判断是否需要脚本。若只需一次 `grep`、`glob` 或 `read_file` 且可直接使用其返回值，应调用对应的顶层工具，不要套 `run_script`。只有需要在 JavaScript 中实质过滤、聚合、解析或交叉匹配结果，或需要协调多次工具调用时，才将合适的 `javascript` 代码块作为 `run_script` 的 `code` 参数。每个脚本内的 `tools.call` 除外层 `run_script` 调用外还消耗嵌套调用预算。
 
 约定：
-- `tools.call(name, args)` 返回 `{ ok, output }`。工具失败需检查 `ok`。工具只能这样调用——`tools` 上没有具名顶层函数，`const { grep, read_file } = tools` 后直接 `grep({...})` 会抛 TypeError。**文件搜索一律走受控的 `grep`/`glob` 工具，不要在脚本里用 bash/child_process 拼 `grep`/`find`/`ls` 命令**：`await tools.call("grep", { pattern: "getUser\\(", file_path: "src/main/java", glob: "**/*.java", output_mode: "files_with_matches" })`。这两个工具的路径都是 workspace-relative，自动遵守 `.gitignore`，并跳过点目录、生成目录（node_modules/dist/build/out/target/vendor 等）、锁文件、二进制和超过 2MB 的文件——不需要再手动加 `--include`/`--exclude-dir`。`glob` 按文件名模式定位文件（`**/*.java`、`*.json`），`grep` 按内容定位；两者输出都是 workspace-relative 路径，`grep` content 模式每行形如 `path:line:text`，`files_with_matches` 每行一个路径，`count` 每行形如 `path:N`。
+- 以下 `tools.call(name, args)` 形式只适用于 `run_script` 脚本内部；顶层直接调用使用平台提供的工具接口。脚本内调用返回 `{ ok, output }`，失败需检查 `ok`。工具只能这样调用——`tools` 上没有具名函数，`const { grep, read_file } = tools` 后直接 `grep({...})` 会抛 TypeError。**文件搜索一律走受控的 `grep`/`glob` 工具，不要在脚本里用 bash/child_process 拼 `grep`/`find`/`ls` 命令**：`await tools.call("grep", { pattern: "getUser\\(", file_path: "src/main/java", glob: "**/*.java", output_mode: "files_with_matches" })`。这两个工具的路径都是 workspace-relative，自动遵守 `.gitignore`，并跳过点目录、生成目录（node_modules/dist/build/out/target/vendor 等）、锁文件、二进制和超过 2MB 的文件——不需要再手动加 `--include`/`--exclude-dir`。`glob` 按文件名模式定位文件（`**/*.java`、`*.json`），`grep` 按内容定位；两者输出都是 workspace-relative 路径，`grep` content 模式每行形如 `path:line:text`，`files_with_matches` 每行一个路径，`count` 每行形如 `path:N`。
 - `read_file` 返回 `[lines 1-N of T]` 头和 `N|` 行号前缀，不是裸文件。保留行号方便引用证据；当前范围读取的 `T` 仅是已扫描行数估计，不能用于准确总行数统计。
 - 最多60次工具调用，默认120秒（最高300秒），返回输出上限24KB（超过8KB时，若 run_script 传了 intent 参数则按意图关键词开窗提取相关片段，而不是只留前缀）。下面的循环均有边界，不应盲目遍历整仓库。
 - 搜索或打印上限不是完整性保证。遇到截断，缩小范围或分页（`grep` 支持 `head_limit`/`offset`，`glob`/`grep` 支持 `max_results`）；保留未确认项，不用“没看到”代替“不存在”。
