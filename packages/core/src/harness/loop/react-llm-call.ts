@@ -45,10 +45,15 @@ export async function callModelForIteration(
   const currentTaskMsg: ChatMessage | null = ctx.currentTask
     ? { role: "system", content: tagCurrentTask(formatCurrentTaskContext(ctx.currentTask)) }
     : null;
-  // Keep the stable system prefix and current task message; navigation is
-  // assembled once by context_gather and is never re-injected per iteration.
+  // Keep the initial system/context block contiguous for prefix caching. The
+  // current task stays a system message before the user and tool conversation;
+  // never move it past a non-system message or retain a previous task's turns.
+  const systemPrefixLen = currentTaskMsg
+    ? ctx.messages.findIndex((message) => message.role !== "system")
+    : 0;
+  const insertionIndex = systemPrefixLen === -1 ? ctx.messages.length : systemPrefixLen;
   const messagesForCall = currentTaskMsg
-    ? [ctx.messages[0], currentTaskMsg, ...ctx.messages.slice(1)]
+    ? [...ctx.messages.slice(0, insertionIndex), currentTaskMsg, ...ctx.messages.slice(insertionIndex)]
     : ctx.messages;
 
   if (ctx.opts.budget) {
