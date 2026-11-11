@@ -15,9 +15,9 @@ function assertTerminated(result: { shouldTerminate: boolean }): asserts result 
   expect(result.shouldTerminate).toBe(true);
 }
 describe("Termination Logic", () => {
-  // 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
+  // ══════════════════════════════════════════════════════════════════════════�?
   // Hard Limits Tests
-  // 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
+  // ══════════════════════════════════════════════════════════════════════════�?
   describe("Hard Limits", () => {
     it("should terminate on max iterations", () => {
       const state = createLoopState();
@@ -44,9 +44,9 @@ describe("Termination Logic", () => {
       assertTerminated(result); expect(result.reason).toContain("Cost budget exceeded");
     });
   });
-  // 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
+  // ══════════════════════════════════════════════════════════════════════════�?
   // Natural Completion Tests
-  // 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
+  // ══════════════════════════════════════════════════════════════════════════�?
   describe("Natural Completion", () => {
     it("should terminate on finish_reason=stop with text and no tools", () => {
       const state = createLoopState();
@@ -57,11 +57,11 @@ describe("Termination Logic", () => {
       assertTerminated(result); expect(result.reason).toContain("Natural completion");
     });
     it("should terminate on finish_reason=stop when there is no current task", () => {
-      // �?tasks / �?turn information plan锛歝urrentTask 涓虹┖锛岀函鏂囨湰 stop 蹇呴』鑳借嚜鐒剁粨鏉熴€?
+      // ??tasks / ??turn information plan：currentTask 为空，纯文本 stop 必须能自然结束�?
       const state = createLoopState();
       expect(state.currentTask).toBeUndefined();
       state.lastFinishReason = "stop";
-      state.lastContent = "宸插鐞嗗畬姣曪紝娌℃湁鏇村宸ヤ綔�?";
+      state.lastContent = "已处理完毕，没有更多工作??";
       state.lastToolCalls = [];
       const result = checkTermination(state, DEFAULT_TERMINATION_CONFIG);
       assertTerminated(result);
@@ -104,7 +104,7 @@ describe("Termination Logic", () => {
     it("treats finish_reason=stop as completion even while information needs are unmet", () => {
       const state = createLoopState({
         id: "step_1",
-        description: "Inspect login",
+        executionGuidance: "Inspect login",
         status: "in_progress",
         dependsOn: [],
         retryCount: 0,
@@ -122,7 +122,7 @@ describe("Termination Logic", () => {
     it("terminates on similar outputs even while information needs are unmet", () => {
       const state = createLoopState({
         id: "step_1",
-        description: "Inspect login",
+        executionGuidance: "Inspect login",
         status: "in_progress",
         dependsOn: [],
         retryCount: 0,
@@ -137,7 +137,7 @@ describe("Termination Logic", () => {
     it("should terminate repeated tools without progress even while information needs are unmet", () => {
       const state = createLoopState({
         id: "step_1",
-        description: "Inspect login",
+        executionGuidance: "Inspect login",
         status: "in_progress",
         dependsOn: [],retryCount: 0,
         maxRetries: 0,
@@ -154,7 +154,7 @@ describe("Termination Logic", () => {
     it("should allow repeated reads when their ranges or results show progress", () => {
       const state = createLoopState({
         id: "step_1",
-        description: "Inspect login",
+        executionGuidance: "Inspect login",
         status: "in_progress",
         dependsOn: [],retryCount: 0,
         maxRetries: 0,
@@ -168,9 +168,9 @@ describe("Termination Logic", () => {
       expect(result.shouldTerminate).toBe(false);
     });
   });
-  // 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
+  // ══════════════════════════════════════════════════════════════════════════�?
   // Tool Loop Detection Tests
-  // 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
+  // ══════════════════════════════════════════════════════════════════════════�?
   describe("Tool Loop Detection", () => {
     it("should detect tool loop after 2 repetitions (same tool + args)", () => {
       const state = createLoopState();
@@ -231,9 +231,9 @@ describe("Termination Logic", () => {
       assertTerminated(result); expect(result.reason).toContain("grep");
     });
   });
-  // 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
+  // ══════════════════════════════════════════════════════════════════════════�?
   // Output Similarity Detection Tests (NEW)
-  // 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
+  // ══════════════════════════════════════════════════════════════════════════�?
   describe("Output Similarity Detection", () => {
     it("should detect when model repeats same output twice", () => {
       const state = createLoopState();
@@ -346,9 +346,9 @@ describe("Termination Logic", () => {
       assertTerminated(result); expect(result.reason).toContain("text-only");
     });
   });
-  // 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
+  // ══════════════════════════════════════════════════════════════════════════�?
   // State Update Tests
-  // 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
+  // ══════════════════════════════════════════════════════════════════════════�?
   describe("State Updates", () => {
     it("should track consecutive text-only turns", () => {
       const state = createLoopState();
@@ -433,9 +433,9 @@ describe("Termination Logic", () => {
       expect(state.toolCallHistory[1]?.name).toBe("grep");
     });
   });
-  // 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
+  // ══════════════════════════════════════════════════════════════════════════�?
   // Edge Cases Tests
-  // 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
+  // ══════════════════════════════════════════════════════════════════════════�?
   describe("Edge Cases", () => {
     describe("calculateSimilarity edge cases", () => {
       it("should handle both empty strings (100% similar)", () => {
@@ -454,7 +454,7 @@ describe("Termination Logic", () => {
           tokens: 0,
           cost: 0,
         });
-        // Both empty �?should not increment similarity counter
+        // Both empty ??should not increment similarity counter
         // (because hasCurrentContent and hasPreviousContent are both false)
         expect(state.consecutiveSimilarOutputs).toBe(0);
       });
@@ -492,7 +492,7 @@ describe("Termination Logic", () => {
           tokens: 0,
           cost: 0,
         });
-        // Both trim to empty �?should not increment
+        // Both trim to empty ??should not increment
         expect(state.consecutiveSimilarOutputs).toBe(0);
       });
       it("should handle very long texts efficiently", () => {
@@ -538,7 +538,7 @@ describe("Termination Logic", () => {
           cost: 0.001,
         });
         // Special chars are treated as separate words
-        // Some overlap �?should calculate similarity
+        // Some overlap ??should calculate similarity
         expect(state.consecutiveSimilarOutputs).toBeGreaterThanOrEqual(0);
       });
       it("should handle text with length difference > 50%", () => {
@@ -557,7 +557,7 @@ describe("Termination Logic", () => {
           tokens: 20,
           cost: 0.002,
         });
-        // Fast path should kick in �?similarity = 0 �?reset counter
+        // Fast path should kick in ??similarity = 0 ??reset counter
         expect(state.consecutiveSimilarOutputs).toBe(0);
       });
       it("should handle medium similarity (50-80% range)", () => {
@@ -579,14 +579,14 @@ describe("Termination Logic", () => {
           tokens: 50,
           cost: 0.005,
         });
-        // Medium similarity �?counter should stay at 0 (not increment, not reset)
+        // Medium similarity ??counter should stay at 0 (not increment, not reset)
         // But since we start from 0, it stays 0
         expect(state.consecutiveSimilarOutputs).toBe(0);
       });
       it("should detect near-duplicate Chinese reports as similar", () => {
         const state = createLoopState();
         updateStateAfterResponse(state, {
-          content: "宸插畬鎴愬寰幆缁堟閫昏緫鐨勪慨澶嶏紝涓枃杩戦噸澶嶈緭鍑轰細琚浜屽眰鎶撲綇�?",
+          content: "已完成对循环终止逻辑的修复，中文近重复输出会被第二层抓住??",
           toolCalls: [],
           finishReason: null,
           tokens: 40,
@@ -594,7 +594,7 @@ describe("Termination Logic", () => {
         });
         expect(state.consecutiveSimilarOutputs).toBe(0);
         updateStateAfterResponse(state, {
-          content: "宸插畬鎴愬寰幆缁堟閫昏緫鐨勪慨澶嶏紝涓枃杩戦噸澶嶈緭鍑轰細琚浜屽眰鎶撲綇�?",
+          content: "已完成对循环终止逻辑的修复，中文近重复输出会被第二层抓住??",
           toolCalls: [],
           finishReason: null,
           tokens: 40,
@@ -604,7 +604,7 @@ describe("Termination Logic", () => {
         const result = checkTermination(state, DEFAULT_TERMINATION_CONFIG);
         assertTerminated(result);
         expect(result.reason).toMatch(/consecutive similar outputs/);
-        // Similar outputs = model converged on a final answer �?normal completion,
+        // Similar outputs = model converged on a final answer ??normal completion,
         // must not surface as aborted / "Task may be incomplete".
         expect(result.aborted).toBe(false);
         expect(result.metadata?.normalCompletion).toBe(true);
@@ -613,7 +613,7 @@ describe("Termination Logic", () => {
       it("should detect paraphrased Chinese reports as similar", () => {
         const state = createLoopState();
         updateStateAfterResponse(state, {
-          content: "鏈€缁堟姤鍛婂彧灞曠ず涓€娆★紝涓嶈鎶婂惊鐜唴鍐欏叆鐨勫唴瀹瑰啀灞曠ず涓€閬嶃€?",
+          content: "最终报告只展示一次，不要把循环内写入的内容再展示一遍�?",
           toolCalls: [],
           finishReason: null,
           tokens: 40,
@@ -621,7 +621,7 @@ describe("Termination Logic", () => {
         });
         expect(state.consecutiveSimilarOutputs).toBe(0);
         updateStateAfterResponse(state, {
-          content: "鏈€缁堟姤鍛婂彧灞曠ず涓€娆★紝涓嶈鎶婂惊鐜唴鍐欏叆鐨勫唴瀹瑰啀娆″睍绀轰竴閬嶃�?",
+          content: "最终报告只展示一次，不要把循环内写入的内容再次展示一遍�??",
           toolCalls: [],
           finishReason: null,
           tokens: 40,
@@ -632,7 +632,7 @@ describe("Termination Logic", () => {
       it("should not treat unrelated Chinese reports as similar", () => {
         const state = createLoopState();
         updateStateAfterResponse(state, {
-          content: "宸插畾浣嶅埌鐩镐技搴﹁绠楀涓枃绌虹櫧鍒嗚瘝澶辨晥鐨勯棶棰樸�?",
+          content: "已定位到相似度计算对中文空白分词失效的问题�??",
           toolCalls: [],
           finishReason: null,
           tokens: 30,
@@ -640,7 +640,7 @@ describe("Termination Logic", () => {
         });
         expect(state.consecutiveSimilarOutputs).toBe(0);
         updateStateAfterResponse(state, {
-          content: "鎺ヤ笅鏉ヤ細鍦ㄥ伐鍏锋墽琛屽悗鐨勭户缁矾寰勯噷琛ヤ笂鐘舵€佹洿鏂般�?",
+          content: "接下来会在工具执行后的继续路径里补上状态更新�??",
           toolCalls: [],
           finishReason: null,
           tokens: 30,
@@ -653,20 +653,20 @@ describe("Termination Logic", () => {
       it("clears similarity and stop signals so the next task is not treated as finished", () => {
         const state = createLoopState({
           id: "task_a",
-          description: "First task",
+          executionGuidance: "First task",
           status: "completed",
           dependsOn: [],retryCount: 0,
           maxRetries: 0,
         });
         updateStateAfterResponse(state, {
-          content: "宸插畬鎴愬寰幆缁堟閫昏緫鐨勪慨澶嶏紝涓枃杩戦噸澶嶈緭鍑轰細琚浜屽眰鎶撲綇�?",
+          content: "已完成对循环终止逻辑的修复，中文近重复输出会被第二层抓住??",
           toolCalls: [],
           finishReason: "stop",
           tokens: 40,
           cost: 0.004,
         });
         updateStateAfterResponse(state, {
-          content: "宸插畬鎴愬寰幆缁堟閫昏緫鐨勪慨澶嶏紝涓枃杩戦噸澶嶈緭鍑轰細琚浜屽眰鎶撲綇�?",
+          content: "已完成对循环终止逻辑的修复，中文近重复输出会被第二层抓住??",
           toolCalls: [],
           finishReason: "stop",
           tokens: 40,
@@ -676,7 +676,7 @@ describe("Termination Logic", () => {
         expect(checkTermination(state, DEFAULT_TERMINATION_CONFIG).shouldTerminate).toBe(true);
         state.currentTask = {
           id: "task_b",
-          description: "Second task that should continue",
+          executionGuidance: "Second task that should continue",
           status: "in_progress",
           dependsOn: [],retryCount: 0,
           maxRetries: 0,
@@ -794,7 +794,7 @@ describe("Termination Logic", () => {
           { id: "x", type: "function", function: { name: "read_file", arguments: "{}" } }
         ];
         const result = checkTermination(state, config);
-        // All different files �?no loop
+        // All different files ??no loop
         expect(result.shouldTerminate).toBe(false);
       });
     });
@@ -937,9 +937,9 @@ describe("Termination Logic", () => {
       });
     });
   });
-  // 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
+  // ══════════════════════════════════════════════════════════════════════════�?
   // Integration Tests (Realistic Scenarios)
-  // 鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺愨晲鈺?
+  // ══════════════════════════════════════════════════════════════════════════�?
   describe("Realistic Scenarios", () => {
     it("scenario: model completes task in 5 iterations", () => {
       const state = createLoopState();
@@ -1030,13 +1030,13 @@ describe("Termination Logic", () => {
     });
   });
 });
-  // 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+  // ─────────────────────────────────────────────────────────────────────────────
   // Exploration Skip Detection Tests (NEW)
-  // 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+  // ─────────────────────────────────────────────────────────────────────────────
   describe("Exploration skip detection", () => {
     it("should converge normally when exploration is skipped N times", () => {
       const state = createLoopState();
-      state.explorationSkipCount = 2; // 杈惧埌闃堝€?
+      state.explorationSkipCount = 2; // 达到阈�?
       state.lastContent = "Let me read the file...";
       const result = checkTermination(state, DEFAULT_TERMINATION_CONFIG);
       expect(result.shouldTerminate).toBe(true);
@@ -1053,7 +1053,7 @@ describe("Termination Logic", () => {
     it("converges on exploration-skip even while information needs are unmet", () => {
       const state = createLoopState({
         id: "step_1",
-        description: "Inspect login",
+        executionGuidance: "Inspect login",
         status: "in_progress",
         dependsOn: [],retryCount: 0,
         maxRetries: 0,
@@ -1068,7 +1068,7 @@ describe("Termination Logic", () => {
     });
     it("should not terminate before threshold", () => {
       const state = createLoopState();
-      state.explorationSkipCount = 1; // 鏈揪鍒伴槇�?
+      state.explorationSkipCount = 1; // 未达到阈??
       state.lastContent = "I need to read...";
       const result = checkTermination(state, DEFAULT_TERMINATION_CONFIG);
       expect(result.shouldTerminate).toBe(false);
@@ -1077,11 +1077,11 @@ describe("Termination Logic", () => {
       const state = createLoopState();
       state.explorationSkipCount = 2;
       state.lastIterationHadExplorationSkip = true;
-      // 妯℃�?react.ts 涓殑閲嶇疆閫昏�?
-      // 鏈疆娌℃湁璺宠�?�?閲嶇疆鏍囪鍜岃鏁?
+      // 模�??react.ts 中的重置逻�??
+      // 本轮没有跳�????重置标记和计�?
       state.lastIterationHadExplorationSkip = false;
-      state.explorationSkipCount = 0;  // 馃敟 閲嶇疆璁℃暟
-      // 涓嬩竴杞鏌ュ簲璇ヤ笉缁堟�?
+      state.explorationSkipCount = 0;  // 🔥 重置计数
+      // 下一轮检查应该不终�??
       const result = checkTermination(state, DEFAULT_TERMINATION_CONFIG);
       expect(result.shouldTerminate).toBe(false);
     });
@@ -1106,13 +1106,13 @@ describe("Termination Logic", () => {
         explorationTermination: { baseSkipThreshold: 0 },
       });
       const result = checkTermination(state, config);
-      // baseSkipThreshold=0 琛ㄧず绂佺敤妫€�?
+      // baseSkipThreshold=0 表示禁用检??
       expect(result.shouldTerminate).toBe(false);
     });
     it("should scale skip threshold with task complexity", () => {
       const state = createLoopState({
         id: "t1",
-        description: "complex task",
+        executionGuidance: "complex task",
         status: "in_progress",
         dependsOn: [],retryCount: 0,
         maxRetries: 1,
@@ -1133,7 +1133,7 @@ describe("Termination Logic", () => {
     it("terminates on exploration-skip even while information needs remain unmet", () => {
       const state = createLoopState({
         id: "t1",
-        description: "needs more evidence",
+        executionGuidance: "needs more evidence",
         status: "in_progress",
         dependsOn: [],retryCount: 0,
         maxRetries: 1,
@@ -1149,7 +1149,7 @@ describe("Termination Logic", () => {
     it("should NOT terminate when semantic similarity is below threshold (negative)", () => {
       const state = createLoopState({
         id: "t1",
-        description: "task with low similarity",
+        executionGuidance: "task with low similarity",
         status: "in_progress",
         dependsOn: [],retryCount: 0,
         maxRetries: 1,
@@ -1166,13 +1166,13 @@ describe("Termination Logic", () => {
         },
       });
       const result = checkTermination(state, config);
-      // Different content (low similarity) + semantic check enabled �?NOT stuck �?no terminate
+      // Different content (low similarity) + semantic check enabled ??NOT stuck ??no terminate
       expect(result.shouldTerminate).toBe(false);
     });
     it("should NOT block termination when previous content is empty (defaults to stuck)", () => {
       const state = createLoopState({
         id: "t1",
-        description: "task with empty previous",
+        executionGuidance: "task with empty previous",
         status: "in_progress",
         dependsOn: [],retryCount: 0,
         maxRetries: 1,
@@ -1189,7 +1189,7 @@ describe("Termination Logic", () => {
         },
       });
       const result = checkTermination(state, config);
-      // Empty previous �?can't compare �?defaults to "stuck" �?terminates
+      // Empty previous ??can't compare ??defaults to "stuck" ??terminates
       expect(result.shouldTerminate).toBe(true);
       if (result.shouldTerminate) {
         expect(result.metadata?.normalCompletion).toBe(true);
@@ -1198,7 +1198,7 @@ describe("Termination Logic", () => {
     it("should skip semantic check when enableSemanticCheck is false", () => {
       const state = createLoopState({
         id: "t1",
-        description: "task with semantic check disabled",
+        executionGuidance: "task with semantic check disabled",
         status: "in_progress",
         dependsOn: [],retryCount: 0,
         maxRetries: 1,
@@ -1214,7 +1214,7 @@ describe("Termination Logic", () => {
         },
       });
       const result = checkTermination(state, config);
-      // Semantic check disabled �?always semanticallyStuck �?terminates
+      // Semantic check disabled ??always semanticallyStuck ??terminates
       expect(result.shouldTerminate).toBe(true);
       if (result.shouldTerminate) {
         expect(result.metadata?.normalCompletion).toBe(true);
@@ -1223,7 +1223,7 @@ describe("Termination Logic", () => {
     it("should use threshold=3 for medium complexity (base=2 * medium=1.5)", () => {
       const state = createLoopState({
         id: "t1",
-        description: "medium complexity task",
+        executionGuidance: "medium complexity task",
         status: "in_progress",
         dependsOn: [],retryCount: 0,
         maxRetries: 1,
@@ -1231,7 +1231,7 @@ describe("Termination Logic", () => {
       });
       state.explorationSkipCount = 2;
       state.lastContent = "Still exploring...";
-      // base=2, medium=1.5 �?threshold=round(2*1.5)=3 �?skipCount=2 < 3 �?no terminate
+      // base=2, medium=1.5 ??threshold=round(2*1.5)=3 ??skipCount=2 < 3 ??no terminate
       const result1 = checkTermination(state, DEFAULT_TERMINATION_CONFIG);
       expect(result1.shouldTerminate).toBe(false);
       state.explorationSkipCount = 3;
@@ -1263,7 +1263,7 @@ describe("Termination Logic", () => {
     it("should skip needs guard when requireProgressEvidence is false", () => {
       const state = createLoopState({
         id: "t1",
-        description: "needs more evidence",
+        executionGuidance: "needs more evidence",
         status: "in_progress",
         dependsOn: [],retryCount: 0,
         maxRetries: 1,
@@ -1278,7 +1278,7 @@ describe("Termination Logic", () => {
         },
       });
       const result = checkTermination(state, config);
-      // requireProgressEvidence=false �?skip needs guard �?terminate despite unmet needs
+      // requireProgressEvidence=false ??skip needs guard ??terminate despite unmet needs
       expect(result.shouldTerminate).toBe(true);
       if (result.shouldTerminate) {
         expect(result.metadata?.normalCompletion).toBe(true);
@@ -1289,7 +1289,7 @@ describe("Termination Logic", () => {
     it("does not terminate on a continuation-intent text-only response", () => {
       const state = createLoopState();
       updateStateAfterResponse(state, {
-        content: "娈嬬暀鍧囦负鏈夋剰淇濈暀椤广€傜幇鍦ㄨ窇娴嬭瘯濂椾欢楠岃瘉琛屼负鏈牬鍧忋€?",
+        content: "残留均为有意保留项。现在跑测试套件验证行为未破坏�?",
         toolCalls: [],
         finishReason: "stop",
         tokens: 10,
@@ -1313,7 +1313,7 @@ describe("Termination Logic", () => {
     it("still terminates on a report-style final response", () => {
       const state = createLoopState();
       updateStateAfterResponse(state, {
-        content: "浠ヤ笂鏄湰娆′慨鏀圭殑鎬荤粨锛氬叡鏀瑰姩 3 涓枃浠讹紝娴嬭瘯鍏ㄩ儴閫氳繃銆?",
+        content: "以上是本次修改的总结：共改动 3 个文件，测试全部通过�?",
         toolCalls: [],
         finishReason: "stop",
         tokens: 10,
@@ -1324,11 +1324,11 @@ describe("Termination Logic", () => {
     });
     it("does not terminate via consecutive-text-only while announcing actions", () => {
       const state = createLoopState();
-      // 鎺緸浜掍笉鐩镐技锛岄伩鍏嶈Е鍙戔€滆緭鍑虹浉浼煎害鈥濆崱姝绘娴嬶紙閭ｆ槸鍙︿竴鏉″厹搴曡矾寰勶級�?
+      // 措辞互不相似，避免触发“输出相似度”卡死检测（那是另一条兜底路径）??
       const announcements = [
-        "缂栬緫宸茬粡钀界洏銆傜幇鍦ㄨ窇涓€閬嶇被鍨嬫鏌ョ‘璁ゆ病鏈夊紩鍏ラ敊璇�?",
-        "鎺ヤ笅鏉ユ妸 packages 涓嬬殑娴嬭瘯濂椾欢鍏ㄩ儴璺戜竴閬嶏紝鐪嬬湅鏄惁鏈夊洖褰掋€?",
-        "鏈€鍚庡啀鏍稿涓€娆?lint 涓庢牸寮忚緭鍑猴紝椹笂寮€濮嬭窇鍐掔儫娴嬭瘯銆?",
+        "编辑已经落盘。现在跑一遍类型检查确认没有引入错误�??",
+        "接下来把 packages 下的测试套件全部跑一遍，看看是否有回归�?",
+        "最后再核对一�?lint 与格式输出，马上开始跑冒烟测试�?",
       ];
       for (const content of announcements) {
         updateStateAfterResponse(state, {
@@ -1346,7 +1346,7 @@ describe("Termination Logic", () => {
   describe("Unmet information needs no longer veto completion", () => {
     const unmetTask = {
       id: "step_1",
-      description: "Fix loop termination",
+      executionGuidance: "Fix loop termination",
       status: "in_progress" as const,
       dependsOn: [],
       retryCount: 0,
@@ -1355,7 +1355,7 @@ describe("Termination Logic", () => {
     it("terminates on a report-style response even when information needs are unmet", () => {
       const state = createLoopState(unmetTask);
       updateStateAfterResponse(state, {
-        content: "浠ヤ笂鏄湰娆′慨鏀圭殑鎬荤粨锛氬凡�?react.ts 涓烘湭婊¤冻鍒嗘敮澧炲姞鎶ュ憡鍑哄彛涓庣画璺戦绠椼€?",
+        content: "以上是本次修改的总结：已??react.ts 为未满足分支增加报告出口与续跑预算�?",
         toolCalls: [],
         finishReason: "stop",
         tokens: 10,
@@ -1385,14 +1385,14 @@ describe("Termination Logic", () => {
     it("terminates similar report-style outputs even when information needs are unmet", () => {
       const state = createLoopState(unmetTask);
       updateStateAfterResponse(state, {
-        content: "鏈€缁堟姤鍛婏細寰幆缁堟鏉′欢宸蹭慨澶嶏紝鎶ュ憡浜у嚭鍚庝笉鍐嶇┖杞€?",
+        content: "最终报告：循环终止条件已修复，报告产出后不再空转�?",
         toolCalls: [],
         finishReason: "stop",
         tokens: 10,
         cost: 0,
       });
       updateStateAfterResponse(state, {
-        content: "鏈€缁堟姤鍛婏細寰幆缁堟鏉′欢宸蹭慨澶嶏紝鎶ュ憡浜у嚭鍚庝笉鍐嶇┖杞€?",
+        content: "最终报告：循环终止条件已修复，报告产出后不再空转�?",
         toolCalls: [],
         finishReason: "stop",
         tokens: 10,

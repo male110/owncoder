@@ -95,7 +95,14 @@ export function normalizeRelevantHistory(value: unknown): TaskRelevantHistory | 
 
 export interface TaskItem {
   id: string;
-  description: string;
+  /** 执行指引：指导下属如何完成该任务（关键入口、注意点、建议验证方式）。 */
+  executionGuidance: string;
+  /** @deprecated 旧字段，读时折叠进 executionGuidance；写入只写 executionGuidance。 */
+  description?: string;
+  /** @deprecated 旧字段，读时折叠进 executionGuidance；写入只写 executionGuidance。 */
+  prompt?: string;
+  /** @deprecated 旧字段，读时折叠进 executionGuidance；写入只写 executionGuidance。 */
+  guidance?: string;
   status: TaskStatus;
   acceptance?: string;
   dependsOn: string[];
@@ -104,8 +111,6 @@ export interface TaskItem {
   result?: string;
   retryCount: number;
   maxRetries: number;
-  /** 建议性的完成指导（由任务分解写入；不是强制步骤）。 */
-  guidance?: string;
   /** Verification criteria for this task (optional). */
   verificationCriteria?: {
     command: string;
@@ -442,6 +447,31 @@ export function normalizeActiveMeta(meta: Partial<ActivePlanMeta>): ActivePlanMe
 }
 
 
+/**
+ * 把任务上的执行指引归一化为单一字符串。
+ *
+ * 读取时以 `executionGuidance` 为首选；缺失的旧字段按
+ * description → prompt → guidance 顺序折叠追加（与首选去重），
+ * 避免旧轮次里的「怎么做」在升级后丢失。
+ */
+function foldExecutionGuidance(t: {
+  executionGuidance?: unknown;
+  description?: unknown;
+  prompt?: unknown;
+  guidance?: unknown;
+}): string {
+  const pick = (value: unknown): string =>
+    typeof value === "string" ? value.trim() : "";
+  const primary = pick(t.executionGuidance);
+  const parts = [primary];
+  for (const legacy of [pick(t.description), pick(t.prompt), pick(t.guidance)]) {
+    if (!legacy) continue;
+    if (parts.some((part) => part.includes(legacy))) continue;
+    parts.push(legacy);
+  }
+  return parts.filter(Boolean).join("\n");
+}
+
 function normalizeTask(t: Partial<TaskItem>): TaskItem {
   // Parse verification criteria
   let verificationCriteria: TaskItem["verificationCriteria"] = undefined;
@@ -475,15 +505,12 @@ function normalizeTask(t: Partial<TaskItem>): TaskItem {
   const progressStatus = typeof t.progressStatus === "string" && t.progressStatus.trim()
     ? t.progressStatus.trim()
     : undefined;
-  const guidance = typeof t.guidance === "string" && t.guidance.trim()
-    ? t.guidance.trim()
-    : undefined;
   // 保留子任务可复用的相关历史（字符串；兼容旧 files 对象）
   const relevantHistory = normalizeRelevantHistory(t.relevantHistory);
 
   return {
     id: typeof t.id === "string" ? t.id : `task_${Math.random().toString(36).slice(2, 8)}`,
-    description: typeof t.description === "string" ? t.description : "",
+    executionGuidance: foldExecutionGuidance(t),
     status: t.status === "in_progress" || t.status === "completed" || t.status === "failed" || t.status === "skipped"
       ? t.status
       : "pending",
@@ -497,7 +524,6 @@ function normalizeTask(t: Partial<TaskItem>): TaskItem {
     estimatedComplexity,
     userConstraints,
     progressStatus,
-    guidance,
     relevantHistory,
   };
 }
@@ -611,15 +637,15 @@ export function parseTasksFromMarkdown(content: string): TaskItem[] {
   const tasks: TaskItem[] = [];
   let idx = 0;
   const push = (
-    description: string,
+    executionGuidance: string,
     acceptance?: string,
   ) => {
-    const d = description.trim();
+    const d = executionGuidance.trim();
     if (!d) return;
     idx += 1;
     tasks.push({
       id: `task_${idx}`,
-      description: d,
+      executionGuidance: d,
       status: "pending",
       acceptance: acceptance?.trim() || undefined,
       dependsOn: idx > 1 ? [`task_${idx - 1}`] : [],
@@ -651,7 +677,7 @@ export function parseTasksFromMarkdown(content: string): TaskItem[] {
     if (compact) {
       tasks.push({
         id: "task_1",
-        description: compact,
+        executionGuidance: compact,
         status: "pending",
         dependsOn: [],
         retryCount: 0,
@@ -695,9 +721,14 @@ export interface TaskListAddOp {
   /** 显式 id 可选；省略时自动分配 t{n}（不与现有 id 冲突）。 */
   id?: string;
   title?: string;
-  description: string;
-  /** 给执行者的建议性指导（同 TaskItem.guidance）。 */
+  /** 执行指引：指导下属如何完成该任务。 */
+  executionGuidance?: string;
+  /** @deprecated 旧字段，读时折叠进 executionGuidance。 */
+  description?: string;
+  /** @deprecated 旧字段，读时折叠进 executionGuidance。 */
   prompt?: string;
+  /** @deprecated 旧字段，读时折叠进 executionGuidance。 */
+  guidance?: string;
   kind?: "implementation" | "verification";
   dependsOn?: string[];
 }
@@ -705,9 +736,13 @@ export interface TaskListAddOp {
 export interface TaskListUpdateOp {
   id: string;
   title?: string;
+  executionGuidance?: string;
+  /** @deprecated 旧字段，读时折叠进 executionGuidance。 */
   description?: string;
-  /** 建议性执行指导（映射 TaskItem.guidance，与 add 的 prompt 同源）。 */
+  /** @deprecated 旧字段，读时折叠进 executionGuidance。 */
   prompt?: string;
+  /** @deprecated 旧字段，读时折叠进 executionGuidance。 */
+  guidance?: string;
   kind?: "implementation" | "verification";
   dependsOn?: string[];
   status?: TaskStatus;
@@ -777,7 +812,7 @@ function nextAutoTaskId(byId: Map<string, TaskItem>): string {
 export function formatTaskList(tasks: TaskItem[]): string {
   const shown = tasks.slice(0, 40);
   const lines = shown.map((t) =>
-    `- [${t.status}] ${t.id}: ${t.description}${t.dependsOn.length ? ` (dependsOn: ${t.dependsOn.join(", ")})` : ""}`,
+    `- [${t.status}] ${t.id}: ${t.executionGuidance}${t.dependsOn.length ? ` (dependsOn: ${t.dependsOn.join(", ")})` : ""}`,
   );
   if (tasks.length > shown.length) lines.push(`… 共 ${tasks.length} 个任务，仅显示前 ${shown.length} 个`);
   return lines.join("\n");
@@ -791,8 +826,10 @@ function addTaskListItems(
   addedIds: string[],
 ): TaskListApplyOutcome | null {
   for (const op of adds) {
-    if (!op.description?.trim()) {
-      return { ok: false, error: `add 任务失败：description 必填（${op.id ? `id ${op.id}` : "无 id"}）。` };
+    // 归一化入口：新旧字段在这里折叠成 executionGuidance，下游只见新字段。
+    const executionGuidance = foldExecutionGuidance(op);
+    if (!executionGuidance) {
+      return { ok: false, error: `add 任务失败：executionGuidance 必填（${op.id ? `id ${op.id}` : "无 id"}）。` };
     }
     const id = op.id?.trim() || nextAutoTaskId(byId);
     if (byId.has(id)) {
@@ -800,13 +837,12 @@ function addTaskListItems(
     }
     const task: TaskItem = {
       id,
-      description: op.description.trim(),
+      executionGuidance,
       status: "pending",
       dependsOn: op.dependsOn ? [...op.dependsOn] : [],
       retryCount: 0,
       maxRetries: 2,
       ...(op.title?.trim() ? { progressStatus: op.title.trim() } : {}),
-      ...(op.prompt?.trim() ? { guidance: op.prompt.trim() } : {}),
       ...(op.kind ? { kind: op.kind } : {}),
     };
     draft.push(task);
@@ -833,15 +869,20 @@ function updateTaskListItems(
       return { ok: false, error: `update 任务失败：status "${op.status}" 不合法（pending/in_progress/completed/failed/skipped）。` };
     }
     if (op.status !== undefined) task.status = op.status;
-    if (op.description !== undefined) {
-      const description = op.description.trim();
-      if (!description) {
-        return { ok: false, error: `update 任务失败：任务 "${op.id}" 的 description 不能为空。` };
+    // 归一化入口：只要任一字段（新或旧）被显式传入，就重算执行指引。
+    if (
+      op.executionGuidance !== undefined ||
+      op.description !== undefined ||
+      op.prompt !== undefined ||
+      op.guidance !== undefined
+    ) {
+      const executionGuidance = foldExecutionGuidance(op);
+      if (!executionGuidance) {
+        return { ok: false, error: `update 任务失败：任务 "${op.id}" 的 executionGuidance 不能为空。` };
       }
-      task.description = description;
+      task.executionGuidance = executionGuidance;
     }
     if (op.title !== undefined) task.progressStatus = op.title;
-    if (op.prompt !== undefined) task.guidance = op.prompt;
     if (op.kind !== undefined) task.kind = op.kind;
     if (op.acceptance !== undefined) task.acceptance = op.acceptance;
   }
@@ -852,7 +893,7 @@ function updateTaskListItems(
  * 把一批增删改应用到任务清单（原地）。
  *
  * 校验（任一失败整体不应用）：
- * - add：id 不得与现有或同批新增冲突；description 必填
+ * - add：id 不得与现有或同批新增冲突；executionGuidance 必填
  * - update/remove：id 必须存在；status 必须是合法 TaskStatus
  * - dependsOn：必须指向最终 id 集合（现有 + 同批新增），禁止自环
  * - remove：禁止删除 in_progress（可能有兄弟节点正在执行它）

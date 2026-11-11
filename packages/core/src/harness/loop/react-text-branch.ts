@@ -145,7 +145,7 @@ export async function handleTextResponse(
     ctx.currentTask.result = content;
     ctx.taskReports.push({
       taskId: ctx.currentTask.id,
-      description: ctx.currentTask.description,
+      executionGuidance: ctx.currentTask.executionGuidance,
       status: ctx.currentTask.status,
       report: content,
     });

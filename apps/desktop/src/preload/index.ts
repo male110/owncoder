@@ -216,7 +216,8 @@ export type PlanStatusDto = "pending_approval" | "approved" | "executing" | "com
 
 export interface TaskItemDto {
   id: string;
-  description: string;
+  /** 执行指引：指导下属如何完成该任务。 */
+  executionGuidance: string;
   status: TaskStatusDto;
   acceptance?: string;
   dependsOn: string[];

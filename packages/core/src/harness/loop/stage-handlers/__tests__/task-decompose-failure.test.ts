@@ -78,7 +78,7 @@ describe("任务分解失败事件", () => {
   });
 
   it.each([
-    ["正常任务", { intent: "完成任务", tasks: [{ id: "t1", description: "实现功能" }] }],
+    ["正常任务", { intent: "完成任务", tasks: [{ id: "t1", executionGuidance: "实现功能" }] }],
     ["正常无需计划", { intent: "问候用户", tasks: [] }],
     ["旧格式", { understanding: "完成任务", steps: [{ description: "实现功能" }] }],
   ])("%s 不标记失败", async (_, answer) => {
@@ -89,8 +89,17 @@ describe("任务分解失败事件", () => {
     expect(events.some((e) => e.type === "warning" || e.type === "error")).toBe(false);
   });
 
+  it("纯散文（无可解析 JSON）保留为兜底任务内容而非丢弃", async () => {
+    const prose = "先定位登录校验入口，再补充失败分支的单元测试。";
+    const { events, ctx } = await run(prose);
+    expect(events.filter((e) => e.type === "task_decomposition")).toEqual([
+      expect.objectContaining({ fallback: true, tasks: [expect.objectContaining({ executionGuidance: expect.stringContaining(prose) })] }),
+    ]);
+    expect(ctx.state.rawDecompose?.tasks[0].executionGuidance).toContain(prose);
+  });
+
   it.each([
-    ["空文本", ""], ["无效文本", "private-stack: secret"],
+    ["空文本", ""],
     ["空对象", "{}"], ["空数组", "[]"], ["无意图空任务", '{"tasks":[]}'],
     ["无效结构", '{"intent":"任务","tasks":{}}'],
     ["无效任务", '{"intent":"任务","tasks":[null,{},42]}'],
@@ -102,7 +111,7 @@ describe("任务分解失败事件", () => {
   ])("%s 使用安全回退且只发出一次结果", async (_, content) => {
     const { events, ctx } = await run(content);
     expect(events.filter((e) => e.type === "task_decomposition")).toEqual([
-      expect.objectContaining({ fallback: true, tasks: [expect.objectContaining({ description: "你好" })] }),
+      expect.objectContaining({ fallback: true, tasks: [expect.objectContaining({ executionGuidance: expect.stringContaining("你好") })] }),
     ]);
     expect(JSON.stringify(events)).not.toContain("private-stack");
     expect(ctx.state.rawDecompose?.tasks).toHaveLength(1);

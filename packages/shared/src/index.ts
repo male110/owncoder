@@ -134,16 +134,19 @@ export interface TaskDecompositionTaskDto {
   id: string;
   /** 短标题（节点式分解产出；旧数据可能缺失）。 */
   title?: string;
-  description: string;
   /**
-   * 节点执行指令（原 guidance）：关键入口、注意点、建议验证方式
-   * （不是强制步骤）。旧数据仍可能以 guidance 字段持久化，读时映射到此处。
+   * 执行指引：指导下属如何完成该任务（关键入口、注意点、建议验证方式）。
+   * 旧数据的 description / prompt / guidance 读时折叠进此字段。
    */
-  prompt: string;
+  executionGuidance: string;
   /** 本节点依赖的其他节点 id（真实依赖，不是线性顺序）。 */
   dependsOn?: string[];
-  /** @deprecated 旧字段，读时映射到 prompt。 */
+  /** @deprecated 旧字段，读时折叠进 executionGuidance。 */
+  description?: string;
+  /** @deprecated 旧字段，读时折叠进 executionGuidance。 */
   guidance?: string;
+  /** @deprecated 旧字段，读时折叠进 executionGuidance。 */
+  prompt?: string;
 }
 
 /** Structured metadata attached to a completed tool event. */

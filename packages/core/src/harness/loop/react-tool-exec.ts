@@ -133,7 +133,7 @@ async function runOne(
     });
     recordDecision(ctx, {
       iteration: i,
-      goal: ctx.currentTask?.description ?? ctx.currentStep?.description ?? ctx.opts.userMessage.slice(0, 200),
+      goal: ctx.currentTask?.executionGuidance ?? ctx.currentStep?.description ?? ctx.opts.userMessage.slice(0, 200),
       action: recovery.action,
       reasonSummary: recovery.summary,
       expectedObservation: "修复后获得成功结果或模型改换策略",

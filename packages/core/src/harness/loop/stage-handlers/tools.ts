@@ -21,9 +21,6 @@ function withDecomposeHistory(opts: AgentLoopOpts, state: SchedulerState): Agent
     const source = taskById.get(task.id);
     return {
       ...task,
-      guidance: task.guidance?.trim()
-        ? task.guidance
-        : source?.prompt?.trim() || undefined,
       // 依赖图带入：selectNextPendingTask 按依赖调度。
       dependsOn: source?.dependsOn?.length ? source.dependsOn : task.dependsOn,
       userConstraints: task.userConstraints?.length
@@ -67,8 +64,7 @@ async function runToolLoop(ctx: StageHandlerContext): Promise<void> {
       ...enrichedOpts,
       activeTasks: state.rawDecompose.tasks.map((task) => ({
         id: task.id,
-        description: task.description,
-        guidance: task.prompt,
+        executionGuidance: task.executionGuidance,
         dependsOn: task.dependsOn ?? [],
         status: "pending" as const,
         retryCount: 0,

@@ -40,7 +40,7 @@ export function agentIntentContext(
     `Active plan: ${activePlan.path}`,
     `Progress: ${completed}/${tasks.length} tasks completed.`,
     current
-      ? `Current task: ${current.id} — ${current.description}` +
+      ? `Current task: ${current.id} — ${current.executionGuidance}` +
         (current.acceptance ? `\nAcceptance: ${current.acceptance}` : "")
       : "No runnable task remains in the plan.",
   ].join("\n");

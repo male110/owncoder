@@ -219,18 +219,31 @@ export async function queryIndexNavigation(
 }
 
 /**
+ * 召回查询读取的任务形状：`executionGuidance` 为当前字段，
+ * 其余为旧数据只读兼容字段（读时按优先级回退）。
+ */
+export interface TaskRecallShaped {
+  executionGuidance?: string;
+  /** @deprecated 旧字段，读时回退。 */
+  description?: string;
+  /** @deprecated 旧字段，读时回退。 */
+  prompt?: string;
+  title?: string;
+}
+
+/**
  * 从任务分解结果构造召回查询（Cursor 式 auto-context 的查询面）。
  *
  * 分解结果本身就是 LLM 对用户意图的一次结构化理解（intent + 各任务
- * description/prompt），语义路直接吃这层自然语言；同时保留用户原文，
+ * executionGuidance），语义路直接吃这层自然语言；同时保留用户原文，
  * 兜住分解丢掉的措辞细节。纯提取、无额外 LLM 调用——分解已经付过
  * "理解"这一次成本，二次调用只加延迟不加信息。
  */
 export function buildTaskRecallQuery(
-  task: { description?: string; prompt?: string; title?: string },
+  task: TaskRecallShaped,
   userMessage = "",
 ): string {
-  const taskText = (task.prompt ?? task.description ?? task.title ?? "").trim();
+  const taskText = (task.executionGuidance ?? task.description ?? task.prompt ?? task.title ?? "").trim();
   if (!taskText) return "";
   // Keep the task as the dominant signal. Only carry identifiers that occur in
   // both the task and the original request; never import sibling-task terms.
@@ -244,7 +257,7 @@ export function buildTaskRecallQuery(
 export function buildDecompositionRecallQuery(
   rawDecompose: {
     intent: string;
-    tasks?: Array<{ id?: string; description?: string; prompt?: string; title?: string }>;
+    tasks?: Array<TaskRecallShaped & { id?: string }>;
   } | undefined,
   userMessage: string,
 ): string {
@@ -252,11 +265,12 @@ export function buildDecompositionRecallQuery(
   const intent = rawDecompose?.intent?.trim();
   if (intent) parts.push(intent);
   for (const t of rawDecompose?.tasks ?? []) {
+    const guidance = (t.executionGuidance ?? "").trim();
     const desc = (t.description ?? "").trim();
     const prompt = (t.prompt ?? "").trim();
     const title = (t.title ?? "").trim();
-    // prompt 是分解器给任务的完整执行指令，信息密度最高；description 次之。
-    const text = prompt || desc || title;
+    // executionGuidance 是分解器给任务的完整执行指引，信息密度最高；旧字段次之。
+    const text = guidance || prompt || desc || title;
     if (text) parts.push(text);
   }
   const raw = userMessage.trim();
@@ -275,7 +289,7 @@ export function buildDecompositionRecallQuery(
  */
 export async function buildTaskRecallBlock(
   index: IndexClient | undefined,
-  task: { description?: string; prompt?: string; title?: string },
+  task: TaskRecallShaped,
   userMessage: string,
 ): Promise<string | undefined> {
   if (!index) return undefined;
@@ -290,7 +304,7 @@ export async function buildRecallBlock(
   index: IndexClient | undefined,
   rawDecompose: {
     intent: string;
-    tasks?: Array<{ id?: string; description?: string; prompt?: string; title?: string }>;
+    tasks?: Array<TaskRecallShaped & { id?: string }>;
   } | undefined,
   userMessage: string,
 ): Promise<string | undefined> {

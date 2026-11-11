@@ -46,6 +46,7 @@ import {
   recoverEmptyDecomposeTasks,
   parseDecomposeAnswer,
   collapsePseudoLinearTasks,
+  containsParsableJson,
 } from "./decompose-answer.ts";
 import { boundRelevantHistory, packFallbackRelevantHistory } from "./decompose-relevance.ts";
 
@@ -101,9 +102,8 @@ export async function runTaskDecompose(
     tasks: Array<{
       id: string;
       title?: string;
-      description: string;
-      /** 任务执行指令（原 guidance）：给执行者的建议性指导。 */
-      prompt: string;
+      /** 执行指引：指导下属如何完成该任务。 */
+      executionGuidance: string;
       dependsOn?: string[];
       kind?: "implementation" | "verification";
     }>;
@@ -210,8 +210,13 @@ export async function runTaskDecompose(
           planTextPreview: planText.trim().slice(0, 240),
         },
       });
-      // 不把无法验证的模型输出（可能含内部错误）下发给用户或当作执行指令。
-      const rawDecompose = buildFallbackRawDecompose(opts.userMessage);
+      // 纯散文（不含可解析 JSON）是有效的模型输出：传入兜底收成单个
+      // 任务保留内容（buildFallbackRawDecompose 内部截断保护）。含 JSON 但
+      // 被判为明确失败的文本（可能含内部错误）仍不下发当作执行指令。
+      const rawDecompose = buildFallbackRawDecompose(
+        opts.userMessage,
+        containsParsableJson(planText) ? undefined : planText,
+      );
       // 简化分解不再产出 plan steps：trace/memory 只承载 goal（=intent）。
       const fallbackAgentPlan: AgentPlan = {
         goal: rawDecompose.intent || opts.userMessage,
@@ -239,7 +244,7 @@ export async function runTaskDecompose(
     
     const task = buildTurnInformationTask();
 
-    // 构建原始任务分解结果（任务项含 title/description/prompt/kind/dependsOn）
+    // 构建原始任务分解结果（任务项含 title/executionGuidance/kind/dependsOn）
     const rawDecompose = {
       intent: answer.intent,
       userConstraints: answer.userConstraints,
@@ -247,8 +252,7 @@ export async function runTaskDecompose(
       tasks: answer.tasks.map((t) => ({
         id: t.id,
         ...(t.title ? { title: t.title } : {}),
-        description: t.description,
-        prompt: t.prompt,
+        executionGuidance: t.executionGuidance,
         ...(t.dependsOn ? { dependsOn: t.dependsOn } : {}),
         ...(t.kind ? { kind: t.kind } : {}),
       })),
@@ -283,10 +287,9 @@ export async function runTaskDecompose(
         const deps = task.dependsOn && task.dependsOn.length > 0
           ? `, dependsOn: ${task.dependsOn.join(", ")}`
           : "";
-        const heading = `Task ${taskIndex + 1} (${task.id}${deps}): ${task.title || task.description || "(no description)"}`;
+        const heading = `Task ${taskIndex + 1} (${task.id}${deps}): ${task.title || task.executionGuidance || "(no execution guidance)"}`;
         const taskContext = [
-          task.description ? `  Deliverable: ${task.description}` : "",
-          task.prompt ? `  Prompt (suggestive execution instruction, not mandatory steps): ${task.prompt}` : "",
+          task.executionGuidance ? `  Execution guidance (how to carry out this task): ${task.executionGuidance}` : "",
         ].filter(Boolean).join("\n");
         return [heading, taskContext].filter(Boolean).join("\n");
       }).join("\n\n");
@@ -396,8 +399,7 @@ export const taskDecomposeHandler: StageHandler = {
         tasks: result.rawDecompose.tasks.map((task) => ({
           id: task.id,
           ...(task.title ? { title: task.title } : {}),
-          description: task.description,
-          prompt: task.prompt,
+          executionGuidance: task.executionGuidance,
           ...(task.dependsOn ? { dependsOn: task.dependsOn } : {}),
           ...(task.kind ? { kind: task.kind } : {}),
         })),
@@ -419,8 +421,7 @@ export const taskDecomposeHandler: StageHandler = {
         tasks: result.rawDecompose.tasks.map((task) => ({
           id: task.id,
           ...(task.title ? { title: task.title } : {}),
-          description: task.description,
-          prompt: task.prompt,
+          executionGuidance: task.executionGuidance,
           ...(task.dependsOn ? { dependsOn: task.dependsOn } : {}),
           ...(task.kind ? { kind: task.kind } : {}),
         })),

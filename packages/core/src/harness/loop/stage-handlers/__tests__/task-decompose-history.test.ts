@@ -264,16 +264,7 @@ describe("decompose→report/evidence 同轮持久化", () => {
     tasks: [
       {
         id: "task_1",
-        description: "分析代码库结构",
-        steps: [
-          {
-            id: "s1",
-            description: "扫描目录结构",
-            dependsOn: [],
-
-
-          },
-        ],
+        executionGuidance: "分析代码库结构",
       },
     ],
   };
@@ -685,7 +676,7 @@ describe("parseDecomposeAnswer / fallback：intent 用原话，纯文本收成 t
 
     expect(answer).not.toBeNull();
     expect(answer!.intent).toBe("定位登录实现");
-    expect(answer!.tasks[0].prompt).toContain("AuthService.login");
+    expect(answer!.tasks[0].executionGuidance).toContain("AuthService.login");
     expect(answer!.relevantHistory).toBe("登录由 AuthService 负责");
   });
 
@@ -700,30 +691,29 @@ describe("parseDecomposeAnswer / fallback：intent 用原话，纯文本收成 t
     expect(fallback.intent).toBe(userMessage);
     expect(fallback.intent).not.toContain("当然可以");
     expect(fallback.tasks).toHaveLength(1);
-    expect(fallback.tasks[0].description).toBe(modelProse);
-    expect(fallback.tasks[0].prompt).toMatch(/Execute the model reply above directly/);
+    expect(fallback.tasks[0].executionGuidance).toContain(modelProse);
+    expect(fallback.tasks[0].executionGuidance).toMatch(/Execute the model reply above directly/);
   });
 
-  it("fallback 无模型纯文本时仍用用户原话与启发式 prompt 生成单一节点", () => {
+  it("fallback 无模型纯文本时仍用用户原话与启发式指引生成单一节点", () => {
     const userMessage = "现在任务分解这一步，历史信息是如何处理的？";
     const fallback = buildFallbackRawDecompose(userMessage);
     expect(fallback.intent).toBe(userMessage);
-    expect(fallback.tasks[0].description).toBe(userMessage);
-    expect(fallback.tasks[0].prompt).toMatch(/Local heuristic plan/);
+    expect(fallback.tasks[0].executionGuidance).toContain(userMessage);
+    expect(fallback.tasks[0].executionGuidance).toMatch(/Local heuristic plan/);
   });
 });
 
-describe("parseDecomposeAnswer 保留 prompt 约定字段", () => {
-  it("解析任务内容、完成指导与相关历史；忽略旧 step 级字段", () => {
+describe("parseDecomposeAnswer 保留 executionGuidance 约定字段", () => {
+  it("解析执行指引与相关历史；忽略旧 step 级字段", () => {
     const answer = parseDecomposeAnswer(JSON.stringify({
       intent: "用户希望给登录加 Redis 缓存。",
       userConstraints: ["必须使用 Redis"],
       tasks: [{
         id: "task_1",
-        description: "接入 Redis 缓存",
-        prompt: "先确认 AuthService.login 现状，再加缓存并自测",
+        executionGuidance: "先确认 AuthService.login 现状，再加缓存并自测",
         relevantHistory: "上次讨论：缓存 key 用 sessionId",
-        // 旧 step 形状：描述应折叠进 prompt，其余字段忽略。
+        // 旧 step 形状：描述应折叠进 executionGuidance，其余字段忽略。
         steps: [{
           id: "step_1",
           description: "确认 AuthService.login 并加缓存",
@@ -738,9 +728,8 @@ describe("parseDecomposeAnswer 保留 prompt 约定字段", () => {
     expect(answer).not.toBeNull();
     expect(answer!.userConstraints).toEqual(["必须使用 Redis"]);
     const task = answer!.tasks[0]!;
-    expect(task.description).toBe("接入 Redis 缓存");
-    expect(task.prompt).toContain("先确认 AuthService.login");
-    expect(task.prompt).toContain("确认 AuthService.login");
+    expect(task.executionGuidance).toContain("先确认 AuthService.login");
+    expect(task.executionGuidance).toContain("确认 AuthService.login");
     expect(task).not.toHaveProperty("relevantHistory");
     // 历史与 tasks 同级：任务级旧字段 relevantHistory 折叠到顶层。
     expect(answer!.relevantHistory).toBe("上次讨论：缓存 key 用 sessionId");
@@ -748,13 +737,13 @@ describe("parseDecomposeAnswer 保留 prompt 约定字段", () => {
     expect(task).not.toHaveProperty("steps");
   });
 
-  it("prompt 缺失但有旧 steps 时，把步骤描述折叠进 prompt；非法字段降级", () => {
+  it("旧 steps 折叠进 executionGuidance；非法依赖字段降级", () => {
     const answer = parseDecomposeAnswer(JSON.stringify({
       intent: "继续。",
       userConstraints: [],
       tasks: [{
         id: "task_1",
-        description: "检查当前登录路径",
+        executionGuidance: "检查当前登录路径",
         steps: [
           { id: "step_1", description: "检查当前登录路径", dependsOn: [] },
           { id: "step_2", description: "补一次类型检查", dependsOn: ["missing"] },
@@ -763,59 +752,56 @@ describe("parseDecomposeAnswer 保留 prompt 约定字段", () => {
     }));
 
     expect(answer).not.toBeNull();
-    expect(answer!.tasks[0].prompt).toBe(
-      "1. 检查当前登录路径\n2. 补一次类型检查",
+    expect(answer!.tasks[0].executionGuidance).toBe(
+      "检查当前登录路径\n1. 检查当前登录路径\n2. 补一次类型检查",
     );
   });
 
-  it("sanitize 持久化后仍保留任务内容/指导/顶层历史", async () => {
+  it("sanitize 持久化后仍保留执行指引/顶层历史", async () => {
     const record = await persistDecomposeRound(tmpDir, "parse-fields-session", "加 Redis 缓存", {
       intent: "用户希望登录页更快",
       userConstraints: ["必须使用 Redis"],
       relevantHistory: "相关历史：登录现状",
       tasks: [{
         id: "task_1",
-        description: "接入 Redis 缓存",
-        prompt: "确认登录实现后加缓存并运行测试",
+        executionGuidance: "确认登录实现后加缓存并运行测试",
       }],
     });
 
     expect(record).not.toBeNull();
     const task = record!.taskDecompose?.tasks[0]!;
-    expect(task.description).toBe("接入 Redis 缓存");
-    expect(task.prompt).toBe("确认登录实现后加缓存并运行测试");
+    expect(task.executionGuidance).toBe("确认登录实现后加缓存并运行测试");
     expect(record!.taskDecompose?.relevantHistory).toBe("相关历史：登录现状");
   });
 
-  it("新结构解析：nodes[] 携带 title/prompt/dependsOn，旧 tasks[] 仍可读", () => {
+  it("新结构解析：nodes[] 携带 title/executionGuidance/dependsOn，旧 tasks[] 仍可读", () => {
     const answer = parseDecomposeAnswer(JSON.stringify({
       intent: "新意图",
       userConstraints: ["约束一"],
       relevantHistory: "共享历史",
       nodes: [
-        { id: "n1", title: "节点一", description: "任务一描述", prompt: "指导一", dependsOn: [] },
-        { id: "n2", title: "节点二", description: "任务二描述", prompt: "指导二", dependsOn: ["n1"] },
+        { id: "n1", title: "节点一", executionGuidance: "任务一指引", dependsOn: [] },
+        { id: "n2", title: "节点二", executionGuidance: "任务二指引", dependsOn: ["n1"] },
       ],
     }));
 
     expect(answer).not.toBeNull();
     expect(answer!.intent).toBe("新意图");
     expect(answer!.userConstraints).toEqual(["约束一"]);
-    expect(answer!.tasks.map((t) => t.description)).toEqual(["任务一描述", "任务二描述"]);
-    expect(answer!.tasks.map((t) => t.prompt)).toEqual(["指导一", "指导二"]);
+    expect(answer!.tasks.map((t) => t.executionGuidance)).toEqual(["任务一指引", "任务二指引"]);
     expect(answer!.tasks[0].title).toBe("节点一");
     expect(answer!.tasks[1].dependsOn).toEqual(["n1"]);
     expect(answer!.relevantHistory).toBe("共享历史");
 
-    // 旧 tasks[] + guidance 字段仍能解析（读兼容）。
+    // 旧 tasks[] 的 description/prompt/guidance 全部折叠进 executionGuidance（读兼容）。
     const legacy = parseDecomposeAnswer(JSON.stringify({
       intent: "旧意图",
-      tasks: [{ id: "task_1", description: "任务", guidance: "旧指导" }],
+      tasks: [{ id: "task_1", description: "任务", prompt: "指导", guidance: "旧指导" }],
     }));
-    expect(legacy!.tasks[0].prompt).toBe("旧指导");
+    expect(legacy!.tasks[0].executionGuidance).toBe("任务\n指导\n旧指导");
   });
 
-  it("旧格式兼容：顶层 steps + understanding + 被删字段 → 单 task_1（steps 折叠进 prompt）+ intent", () => {
+  it("旧格式兼容：顶层 steps + understanding + 被删字段 → 单 task_1（steps 折叠进 executionGuidance）+ intent", () => {
     const answer = parseDecomposeAnswer(JSON.stringify({
       understanding: "旧格式理解段",
       userConstraints: ["旧约束"],
@@ -834,7 +820,7 @@ describe("parseDecomposeAnswer 保留 prompt 约定字段", () => {
     expect(answer!.userConstraints).toEqual(["旧约束"]);
     expect(answer!.tasks).toHaveLength(1);
     expect(answer!.tasks[0].id).toBe("task_1");
-    expect(answer!.tasks[0].prompt).toBe("1. 旧步骤");
+    expect(answer!.tasks[0].executionGuidance).toBe("1. 旧步骤");
     // 被删的旧字段直接忽略，不进入新结构。
     expect(answer).not.toHaveProperty("understanding");
     expect(answer).not.toHaveProperty("goal");
@@ -846,7 +832,7 @@ describe("parseDecomposeAnswer 保留 prompt 约定字段", () => {
     expect(answer).not.toHaveProperty("checkpoints");
   });
 
-  it("旧格式持久化兼容：顶层 steps + understanding → 单 task_1，steps 折叠进 prompt", async () => {
+  it("旧格式持久化兼容：顶层 steps + understanding → 单 task_1，steps 折叠进 executionGuidance", async () => {
     const legacy = {
       understanding: "旧理解",
       userConstraints: ["旧约束"],
@@ -860,14 +846,14 @@ describe("parseDecomposeAnswer 保留 prompt 约定字段", () => {
     expect(record!.taskDecompose?.intent).toBe("旧理解");
     expect(record!.taskDecompose?.tasks).toHaveLength(1);
     expect(record!.taskDecompose?.tasks[0].id).toBe("task_1");
-    expect(record!.taskDecompose?.tasks[0].prompt).toBe("1. 旧步骤");
+    expect(record!.taskDecompose?.tasks[0].executionGuidance).toBe("1. 旧步骤");
     expect(record!.taskDecompose).not.toHaveProperty("goal");
     expect(record!.taskDecompose).not.toHaveProperty("relation");
   });
 });
 
 describe("relevantHistory 与 ID 归一化", () => {
-  it("解析重复 task id，prompt 保留到归一化后的节点", () => {
+  it("解析重复 task id，执行指引保留到归一化后的节点", () => {
     const answer = parseDecomposeAnswer(JSON.stringify({
       intent: "测试",
       relevantHistory: "共享历史",
@@ -878,7 +864,10 @@ describe("relevantHistory 与 ID 归一化", () => {
     }));
     expect(answer).not.toBeNull();
     expect(answer!.tasks.map((task) => task.id)).toEqual(["task", "task_2"]);
-    expect(answer!.tasks.map((task) => task.prompt)).toEqual(["指导A", "指导B"]);
+    expect(answer!.tasks.map((task) => task.executionGuidance)).toEqual([
+      "一\n指导A",
+      "二\n指导B",
+    ]);
     expect(answer!.relevantHistory).toBe("共享历史");
   });
 
@@ -909,7 +898,7 @@ describe("relevantHistory 与 ID 归一化", () => {
     expect(answer!.relevantHistory).toBe("相关历史：上次讨论的结论");
   });
 
-  it("持久化往返保留顶层 relevantHistory 与节点 prompt/dependsOn", async () => {
+  it("持久化往返保留顶层 relevantHistory 与节点 executionGuidance/dependsOn", async () => {
     const record = await persistDecomposeRound(tmpDir, "history-session", "请求", {
       intent: "测试",
       userConstraints: [],
@@ -917,13 +906,12 @@ describe("relevantHistory 与 ID 归一化", () => {
       tasks: [{
         id: "n1",
         title: "任务标题",
-        description: "任务",
-        prompt: "指导",
+        executionGuidance: "指导",
         dependsOn: [],
       }],
     });
     const task = record!.taskDecompose?.tasks[0]!;
-    expect(task.prompt).toBe("指导");
+    expect(task.executionGuidance).toBe("指导");
     expect(task.title).toBe("任务标题");
     expect(record!.taskDecompose?.relevantHistory).toBe("task history");
     const rounds = await loadRecentRounds(tmpDir, "history-session", 1);
@@ -974,9 +962,8 @@ describe("当前代码/当前步骤行为询问不得空 tasks", () => {
     expect(misclassified).not.toBeNull();
     const recovered = recoverEmptyDecomposeTasks(misclassified!, originalQuestion);
     expect(recovered.tasks).toHaveLength(1);
-    // 任务只声明“做什么”（用户原话），不教“怎么读/怎么找”。
-    expect(recovered.tasks[0].description).toContain(originalQuestion);
-    expect(recovered.tasks[0].prompt).toBe("");
+    // 任务只携带用户原话，不追加“怎么读/怎么找”。
+    expect(recovered.tasks[0].executionGuidance).toContain(originalQuestion);
   });
 
   it("真正的进度询问仍保持空 tasks", () => {
@@ -998,9 +985,9 @@ describe("collapsePseudoLinearTasks：伪线性认知链折叠", () => {
       userConstraints: ["仅审查，不修改代码"],
       relevantHistory: "",
       tasks: [
-        { id: "t1", title: "定位方法源码", description: "在 DefaultCorrectServiceImpl 中找到方法实现", prompt: "按四个参数签名精确匹配", dependsOn: [], cognitiveOnly: true },
-        { id: "t2", title: "分析分支逻辑", description: "梳理 existing 查询与写入流程", prompt: "关注 null 与各 isManual 值的组合", dependsOn: ["t1"], cognitiveOnly: true },
-        { id: "t3", title: "输出审查结论", description: "给出逻辑是否正确的结论", prompt: "结论需逐条对应分支", dependsOn: ["t2"], cognitiveOnly: true },
+        { id: "t1", title: "定位方法源码", executionGuidance: "在 DefaultCorrectServiceImpl 中找到方法实现", dependsOn: [], cognitiveOnly: true },
+        { id: "t2", title: "分析分支逻辑", executionGuidance: "梳理 existing 查询与写入流程", dependsOn: ["t1"], cognitiveOnly: true },
+        { id: "t3", title: "输出审查结论", executionGuidance: "给出逻辑是否正确的结论", dependsOn: ["t2"], cognitiveOnly: true },
       ],
     }))!;
 
@@ -1009,14 +996,14 @@ describe("collapsePseudoLinearTasks：伪线性认知链折叠", () => {
     const task = collapsed.tasks[0]!;
     expect(task.id).toBe("t1");
     expect(task.dependsOn).toEqual([]);
-    // description 携带 intent 与全部子任务要点
-    expect(task.description).toContain("审查 syncProcessRecordsToMarket");
-    expect(task.description).toContain("定位方法源码");
-    expect(task.description).toContain("输出审查结论");
-    expect(task.description).toContain("merged from 3 linear sub-tasks");
-    // prompt 保留每个子任务的指导
-    expect(task.prompt).toContain("按四个参数签名精确匹配");
-    expect(task.prompt).toContain("结论需逐条对应分支");
+    // executionGuidance 携带 intent 与全部子任务要点
+    expect(task.executionGuidance).toContain("审查 syncProcessRecordsToMarket");
+    expect(task.executionGuidance).toContain("定位方法源码");
+    expect(task.executionGuidance).toContain("输出审查结论");
+    expect(task.executionGuidance).toContain("merged from 3 linear sub-tasks");
+    // 每个子任务的执行指引都并入合并后的指引
+    expect(task.executionGuidance).toContain("在 DefaultCorrectServiceImpl 中找到方法实现");
+    expect(task.executionGuidance).toContain("给出逻辑是否正确的结论");
     // 其余字段不动
     expect(collapsed.userConstraints).toEqual(["仅审查，不修改代码"]);
   });
@@ -1217,7 +1204,7 @@ describe("分解历史：使用滚动摘要和最近轮次，不检索向量历�
     await persistDecomposeRound(tmpDir, SESSION_ID, userInput, {
       intent: "最近一轮理解",
       userConstraints: [],
-      tasks: [{ id: "task_1", description: "最近一轮任务", guidance: "做点事" }],
+      tasks: [{ id: "task_1", executionGuidance: "最近一轮任务" }],
     });
     await persistRoundReport(tmpDir, SESSION_ID, userInput, "最近一轮报告");
 
@@ -1232,7 +1219,7 @@ describe("分解历史：使用滚动摘要和最近轮次，不检索向量历�
     await persistDecomposeRound(tmpDir, SESSION_ID, userInput, {
       intent: "最近一轮理解-完整保留",
       userConstraints: [],
-      tasks: [{ id: "task_1", description: "接线召回任务", guidance: "接线召回" }],
+      tasks: [{ id: "task_1", executionGuidance: "接线召回任务" }],
     });
     await persistRoundReport(tmpDir, SESSION_ID, userInput, "最近一轮完整报告");
 

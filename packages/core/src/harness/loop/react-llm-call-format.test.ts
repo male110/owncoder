@@ -35,7 +35,7 @@ describe("分析报告的请求与响应格式链路", () => {
     const ctx = {
       model: { model: "test-model" }, stageId: "react", llmMaxRetries: 0,
       messages: [{ role: "system", content: "使用 Markdown 回答" }, { role: "user", content: "分析枚举注解规范并提供证据与示例" }],
-      currentTask: { id: "format", description: "分析 @EnumValue 与 @JsonValue 的项目使用规范", status: "in_progress", dependsOn: [], retryCount: 0, maxRetries: 2 },
+      currentTask: { id: "format", executionGuidance: "分析 @EnumValue 与 @JsonValue 的项目使用规范", status: "in_progress", dependsOn: [], retryCount: 0, maxRetries: 2 },
       opts: { sessionId: "format-test", onEvent },
       tracer: { startSpan: vi.fn(), endSpan: vi.fn(), recordTokenUsage: vi.fn() },
       history: [], lastAssistant: "",
@@ -60,7 +60,7 @@ describe("分析报告的请求与响应格式链路", () => {
     ] as ReActLoopContext["messages"];
     const ctx = {
       model: { model: "test-model" }, stageId: "react", llmMaxRetries: 0,
-      messages, currentTask: { id: "t1", description: "处理任务一", status: "in_progress", dependsOn: [], retryCount: 0, maxRetries: 2 },
+      messages, currentTask: { id: "t1", executionGuidance: "处理任务一", status: "in_progress", dependsOn: [], retryCount: 0, maxRetries: 2 },
       toolsFinal: [{ type: "function", function: { name: "read_file", description: "读取文件", parameters: {} } }],
       opts: { sessionId: "cache-test" },
       tracer: { startSpan: vi.fn(), endSpan: vi.fn(), recordTokenUsage: vi.fn() },
@@ -75,7 +75,7 @@ describe("分析报告的请求与响应格式链路", () => {
     const first = vi.mocked(chatCompletionStream).mock.calls[0]!;
     expect(first[1].map((message) => message.role)).toEqual(["system", "system", "system", "user"]);
     expect(first[1].slice(0, 2)).toEqual(messages.slice(0, 2));
-    expect(first[1][2]?.content).toContain("Description: 处理任务一");
+    expect(first[1][2]?.content).toContain("Execution guidance (how to carry out this task): 处理任务一");
     expect(first[1][3]).toEqual(messages[2]);
     expect(first[2]?.tools).toBe(ctx.toolsFinal);
     expect(messages).toHaveLength(3);
@@ -90,12 +90,12 @@ describe("分析报告的请求与响应格式链路", () => {
     expect(messages).toHaveLength(5);
 
     isolateMessagesForNextTask(messages, 3);
-    ctx.currentTask = { ...ctx.currentTask!, id: "t2", description: "处理任务二" };
+    ctx.currentTask = { ...ctx.currentTask!, id: "t2", executionGuidance: "处理任务二" };
     expect((await callModelForIteration(ctx, 2)).kind).toBe("ok");
     const third = vi.mocked(chatCompletionStream).mock.calls[2]!;
     expect(third[1].slice(0, 2)).toEqual(first[1].slice(0, 2));
     expect(third[1].map((message) => message.role)).toEqual(["system", "system", "system", "user"]);
-    expect(third[1][2]?.content).toContain("Description: 处理任务二");
+    expect(third[1][2]?.content).toContain("Execution guidance (how to carry out this task): 处理任务二");
     expect(JSON.stringify(third[1])).not.toContain("处理任务一");
     expect(JSON.stringify(third[1])).not.toContain("文件内容");
     expect(third[2]?.tools).toBe(ctx.toolsFinal);
@@ -109,7 +109,7 @@ describe("分析报告的请求与响应格式链路", () => {
     ] as ReActLoopContext["messages"];
     const ctx = {
       model: { model: "test-model" }, stageId: "react", llmMaxRetries: 0,
-      messages, currentTask: { id: "t1", description: "执行任务", status: "in_progress", dependsOn: [], retryCount: 0, maxRetries: 2 },
+      messages, currentTask: { id: "t1", executionGuidance: "执行任务", status: "in_progress", dependsOn: [], retryCount: 0, maxRetries: 2 },
       opts: { sessionId: "cache-test" },
       tracer: { startSpan: vi.fn(), endSpan: vi.fn(), recordTokenUsage: vi.fn() },
       history: [], lastAssistant: "",
@@ -120,7 +120,7 @@ describe("分析报告的请求与响应格式链路", () => {
     vi.mocked(chatCompletionStream).mockClear();
     await callModelForIteration(ctx, 0);
     expect(vi.mocked(chatCompletionStream).mock.calls[0]![1].map((message) => message.content)).toEqual([
-      "基础指令", expect.stringContaining("Description: 执行任务"), "用户请求", "后续系统消息",
+      "基础指令", expect.stringContaining("Execution guidance (how to carry out this task): 执行任务"), "用户请求", "后续系统消息",
     ]);
     ctx.currentTask = null;
     await callModelForIteration(ctx, 1);

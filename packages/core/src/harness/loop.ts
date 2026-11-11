@@ -426,8 +426,7 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
                 tasks: state.rawDecompose.tasks.map((task) => ({
                   id: task.id,
                   ...(task.title ? { title: task.title } : {}),
-                  description: task.description,
-                  prompt: task.prompt,
+                  executionGuidance: task.executionGuidance,
                   ...(task.kind ? { kind: task.kind } : {}),
                   ...(task.dependsOn ? { dependsOn: task.dependsOn } : {}),
                 })),

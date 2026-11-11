@@ -3,7 +3,8 @@ import type { ChatMessage } from "@owncoder/llm";
 /** One completed/failed task's report, kept across task switches. */
 export interface TaskReport {
   taskId: string;
-  description: string;
+  /** 该任务的执行指引（仅用于标识，报告合成不依赖它）。 */
+  executionGuidance: string;
   status: "completed" | "failed";
   /** Full assistant report text for this task (not truncated). */
   report: string;

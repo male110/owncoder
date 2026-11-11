@@ -64,7 +64,7 @@ export function TaskListBar({ meta, busy, onUpdateTask }: Props) {
                 <div className="task-body">
                   <div className="task-desc">
                     <span className="task-id">{t.id}</span>
-                    {t.description}
+                    {t.executionGuidance}
                   </div>
                   {t.acceptance ? <div className="task-acceptance">{tr("验收：")}{t.acceptance}</div> : null}
                   {t.result ? <div className="task-result">{t.result}</div> : null}

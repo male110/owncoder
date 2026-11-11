@@ -77,9 +77,8 @@ export interface SchedulerState {
     tasks: Array<{
       id: string;
       title?: string;
-      description: string;
-      /** 任务执行指令（原 guidance）：给执行者的建议性指导。 */
-      prompt: string;
+      /** 执行指引：指导下属如何完成该任务。 */
+      executionGuidance: string;
       kind?: "implementation" | "verification";
       dependsOn?: string[];
     }>;

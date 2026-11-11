@@ -220,7 +220,7 @@ describe("buildDecompositionRecallQuery", () => {
 
 describe("task-scoped recall", () => {
   it("does not merge sibling task text into the query", () => {
-    const query = buildTaskRecallQuery({ description: "校验 token", prompt: "定位 validateToken" }, "实现登录并修改返回码");
+    const query = buildTaskRecallQuery({ executionGuidance: "定位 validateToken", description: "校验 token" }, "实现登录并修改返回码");
     expect(query).toContain("定位 validateToken");
     expect(query).not.toContain("返回码");
   });

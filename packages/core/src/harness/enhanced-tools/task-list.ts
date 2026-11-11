@@ -5,12 +5,15 @@ const ADD_TASK_ITEM = {
   properties: {
     id: { type: "string", description: "Optional unique id, e.g. t5. Auto-assigned when omitted." },
     title: { type: "string", description: "Short display title." },
-    description: { type: "string", description: "The deliverable — what completing this task means." },
-    prompt: { type: "string", description: "Constraint or acceptance note only; do not include search, reading, navigation, or verification steps." },
+    executionGuidance: {
+      type: "string",
+      description:
+        "Execution guidance — instruct the assignee how to carry out this task (key entry points, pitfalls, how to verify). Required.",
+    },
     kind: { type: "string", enum: ["implementation", "verification"] },
     dependsOn: { type: "array", items: { type: "string" }, description: "Task ids that must reach a terminal state first." },
   },
-  required: ["description"],
+  required: ["executionGuidance"],
 } as const;
 
 const UPDATE_TASK_ITEM = {
@@ -18,8 +21,10 @@ const UPDATE_TASK_ITEM = {
   properties: {
     id: { type: "string", description: "Task id to update." },
     title: { type: "string" },
-    description: { type: "string" },
-    prompt: { type: "string", description: "Constraint or acceptance note only; do not include search, reading, navigation, or verification steps." },
+    executionGuidance: {
+      type: "string",
+      description: "Execution guidance — instruct the assignee how to carry out this task.",
+    },
     kind: { type: "string", enum: ["implementation", "verification"] },
     dependsOn: { type: "array", items: { type: "string" } },
     status: { type: "string", enum: ["pending", "in_progress", "completed", "failed", "skipped"] },
@@ -55,7 +60,7 @@ export const UPDATE_TASKS_TOOL_DEF: ToolDef = {
   function: {
     name: "update_tasks",
     description:
-      "Modify existing tasks in the active task list by id. Only the provided fields change. Use it when task descriptions, constraints, dependencies, status, or acceptance criteria change.",
+      "Modify existing tasks in the active task list by id. Only the provided fields change. Use it when task execution guidance, constraints, dependencies, status, or acceptance criteria change.",
     parameters: {
       type: "object",
       properties: {

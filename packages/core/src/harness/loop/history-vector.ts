@@ -120,12 +120,15 @@ export interface HistoryRoundInput {
     tasks: ReadonlyArray<{
       id: string;
       title?: string;
-      description: string;
-      /** 任务执行指令（原 guidance）：给执行者的建议性指导。 */
-      prompt?: string;
+      /** 执行指引：指导下属如何完成该任务。 */
+      executionGuidance: string;
       dependsOn?: ReadonlyArray<string>;
-      /** @deprecated 旧字段，读时映射到 prompt。 */
+      /** @deprecated 旧字段，读时折叠进 executionGuidance。 */
+      description?: string;
+      /** @deprecated 旧字段，读时折叠进 executionGuidance。 */
       guidance?: string;
+      /** @deprecated 旧字段，读时折叠进 executionGuidance。 */
+      prompt?: string;
     }>;
   };
   assistantReport?: string;

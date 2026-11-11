@@ -310,7 +310,7 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
     // ── Public decision summary (bounded; no private chain-of-thought) ──
     recordDecision(ctx, {
       iteration: i,
-      goal: ctx.currentTask?.description ?? ctx.currentStep?.description ?? opts.userMessage.slice(0, 200),
+      goal: ctx.currentTask?.executionGuidance ?? ctx.currentStep?.description ?? opts.userMessage.slice(0, 200),
       action: "llm_decide",
       reasonSummary: ctx.currentTask ? "依据当前任务和已收集证据决定下一步" : "依据当前上下文决定下一步",
       expectedObservation: "获得工具结果或可验证的下一步响应",

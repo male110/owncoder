@@ -2,13 +2,13 @@
  * Parsing and normalization of the decomposition LLM answer.
  *
  * Tolerant JSON extraction and task schema normalization. The decomposition
- * produces a set of execution tasks: a task is {id, title, description,
- * prompt, dependsOn} and reusable history sits at the top level
- * (relevantHistory), so even undecomposed turns keep their history. Legacy
- * outputs are tolerated on read — an older `nodes` array (same fields) and a
- * legacy `tasks` array are accepted, and their per-task `guidance`/`steps`
- * fold into `prompt`; legacy task-level relevantHistory folds up to the top
- * level.
+ * produces a set of execution tasks: a task is {id, title, executionGuidance,
+ * dependsOn} and reusable history sits at the top level (relevantHistory), so
+ * even undecomposed turns keep their history. `executionGuidance` tells the
+ * assignee how to carry the task out. Legacy outputs are tolerated on read — an
+ * older `nodes` array (same fields) and a legacy `tasks` array are accepted, and
+ * their per-task `description`/`prompt`/`guidance`/`steps` fold into
+ * `executionGuidance`; legacy task-level relevantHistory folds up to the top level.
  */
 
 import { jsonrepair } from "jsonrepair";
@@ -20,14 +20,14 @@ import { isExplicitCodeChangeRequest, isCurrentCodeBehaviorInquiry, isPreciseLoc
 /**
  * Parsed shape of the decomposition answer: the user's intent, the limits the
  * user has set, and the execution tasks that follow from both. Each task
- * carries what to do (description), how to execute it (prompt), its kind, and
- * the other tasks it depends on — no detailed steps.
+ * carries the execution guidance, its kind, and the other tasks
+ * it depends on — no detailed steps.
  */
 interface DecomposeTask {
   id: string;
   title?: string;
-  description: string;
-  prompt: string;
+  /** 执行指引：指导下属如何完成该任务。 */
+  executionGuidance: string;
   dependsOn?: string[];
   kind?: "implementation" | "verification";
   /** 仅供分解归一化判定：true 表示没有独立交付物的认知子步骤。 */
@@ -48,7 +48,7 @@ interface DecomposeAnswer {
  * - intent：只用用户原话（截断保护），禁止把模型散文整段写入 intent
  * - 若有模型纯文本（解析失败时的 planText）：收成单个任务，避免丢弃有用内容
  * - 无模型纯文本（网络/中止等）：用本地 generatePlan 的启发式步骤描述
- *   拼成 prompt，保证兜底任务仍可执行
+ *   拼进 executionGuidance，保证兜底任务仍可执行
  * Exported for testing.
  */
 export function buildFallbackRawDecompose(userMessage: string, modelPlainText?: string) {
@@ -65,8 +65,7 @@ export function buildFallbackRawDecompose(userMessage: string, modelPlainText?: 
       userConstraints: [] as string[],
       tasks: [{
         id: "task_1",
-        description: taskBody,
-        prompt: "Execute the model reply above directly.",
+        executionGuidance: `${taskBody}\nExecute the model reply above directly.`,
       }],
       relevantHistory: "",
     };
@@ -79,8 +78,7 @@ export function buildFallbackRawDecompose(userMessage: string, modelPlainText?: 
     userConstraints: [] as string[],
     tasks: [{
       id: "task_1",
-      description: intent,
-      prompt: `Local heuristic plan (an approximation used when the decomposition call is unavailable):\n${heuristic}`,
+      executionGuidance: `${intent}\nLocal heuristic plan (an approximation used when the decomposition call is unavailable):\n${heuristic}`,
     }],
     relevantHistory: "",
   };
@@ -105,8 +103,7 @@ export function recoverEmptyDecomposeTasks(
       intent: answer.intent || `The user asked to modify code directly: ${userMessage}`,
       tasks: [{
         id: "task_1",
-        description: userMessage.trim() || "Apply the user's requested code change",
-        prompt: "",
+        executionGuidance: userMessage.trim() || "Apply the user's requested code change",
       }],
     };
   }
@@ -116,8 +113,7 @@ export function recoverEmptyDecomposeTasks(
       intent: answer.intent || `The user asked how the current code or current step should be handled: ${userMessage}`,
       tasks: [{
         id: "task_1",
-        description: userMessage.trim() || "Answer the user's question about the current implementation",
-        prompt: "",
+        executionGuidance: userMessage.trim() || "Answer the user's question about the current implementation",
       }],
     };
   }
@@ -128,7 +124,7 @@ export function recoverEmptyDecomposeTasks(
  * 折叠「伪线性分解」：模型把一个单目标需求拆成认知阶段链
  * （定位 → 分析 → 输出结论），每个任务只是为下一个积累同一份理解，
  * 没有独立产物。整链无分叉、无 verification 任务时合成单个任务，
- * 原任务内容保留进 description/prompt，不丢信息。
+ * 原任务内容保留进 executionGuidance，不丢信息。
  *
  * 触发条件（全部满足才折叠）：
  * 1. 任务数 ≥ 2；
@@ -171,38 +167,26 @@ export function collapsePseudoLinearTasks(answer: DecomposeAnswer): DecomposeAns
   }
 
   const first = tasks[0]!;
-  const mergedDescription = [
-    answer.intent || first.title || first.description,
+  const mergedGuidance = [
+    answer.intent || first.title || first.executionGuidance,
     `(merged from ${tasks.length} linear sub-tasks)`,
     ...tasks.map((task, index) => {
       const label = task.title?.trim() || `Part ${index + 1}`;
-      return `- ${label}: ${task.description.trim()}`;
+      return `- ${label}: ${task.executionGuidance.trim()}`;
     }),
   ].join("\n");
-  const mergedPrompt = tasks
-    .map((task, index) => {
-      const label = task.title?.trim() || `Part ${index + 1}`;
-      const parts = [
-        `- ${label}: ${task.description.trim()}`,
-        task.prompt?.trim() ? `  note: ${task.prompt.trim()}` : "",
-      ].filter(Boolean);
-      return parts.join("\n");
-    })
-    .join("\n");
-
   return {
     ...answer,
     tasks: [{
       id: first.id,
       ...(first.title ? { title: first.title } : {}),
-      description: mergedDescription,
-      prompt: mergedPrompt,
+      executionGuidance: mergedGuidance,
       dependsOn: [],
     }],
   };
 }
 
-/** 把旧形状 steps[].description 折叠成 prompt 文本（读兼容）。 */
+/** 把旧形状 steps[].description 折叠成执行指引文本（读兼容）。 */
 function promptFromSteps(rawSteps: unknown): string {
   if (!Array.isArray(rawSteps)) return "";
   return rawSteps.slice(0, 20)
@@ -219,15 +203,42 @@ function promptFromSteps(rawSteps: unknown): string {
 }
 
 /**
+ * 判定文本中是否含可解析的 JSON 结构（与 parseDecomposeAnswer 相同的
+ * 围栏剥离与提取逻辑）。解析失败兜底时用于区分「纯散文」（可保留为
+ * 兜底任务内容）与「结构化但校验失败的输出」（可能含内部错误，须丢弃）。
+ * 含方括号/花括号的散文（markdown 链接、array[0] 等）若无法解析成
+ * JSON 仍视为散文。
+ * Exported for testing.
+ */
+export function containsParsableJson(text: string): boolean {
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1]?.trim();
+  const normalized = fenced || text;
+  const objectMatch = normalized.match(/\{[\s\S]*\}/);
+  const arrayMatch = normalized.match(/\[[\s\S]*\]/);
+  const source =
+    objectMatch && (!arrayMatch || objectMatch.index! < arrayMatch.index!)
+      ? objectMatch[0]
+      : arrayMatch?.[0];
+  if (!source) return false;
+  try {
+    JSON.parse(jsonrepair(source));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Parse the answer. Tolerant by design — a malformed field degrades to a safe
  * default rather than failing the turn.
  *
  * Current shape: top-level `intent`, `userConstraints`, `tasks[{id, title,
- * description, prompt, dependsOn}]` and top-level `relevantHistory`.
+ * executionGuidance, dependsOn}]` and top-level `relevantHistory`.
  * Legacy shapes are normalized on read: an older `nodes` array (same fields)
- * and a legacy `tasks` array (whose items carry `guidance` instead of
- * `prompt`) are accepted; a top-level `steps` array (or bare JSON array) is
- * wrapped into a single task with the step descriptions folded into `prompt`;
+ * and a legacy `tasks` array (whose items carry `prompt`/`guidance` beside
+ * `description`) are accepted and folded into `executionGuidance`; a top-level
+ * `steps` array (or bare JSON array) is wrapped into a single task whose
+ * `executionGuidance` holds the folded step descriptions;
  * a legacy `understanding` fills `intent`.
    * Removed legacy execution-state keys are ignored without migration.
  *
@@ -265,17 +276,16 @@ export function parseDecomposeAnswer(text: string): DecomposeAnswer | null {
   }
   if (![obj.tasks, obj.nodes, obj.steps, raw].some(Array.isArray)) return null;
 
-  // 当前格式 tasks[] 优先（字段为 prompt/kind/dependsOn）；旧格式 nodes[]
-  // （同字段）次之；更旧的 tasks[]（字段为 guidance）由下方字段折叠兼容；
-  // 最旧的格式（顶层 steps / 裸数组）包成单个 task_1，步骤描述折叠进 prompt。
+  // 当前格式 tasks[] 优先（字段为 executionGuidance/kind/dependsOn）；旧格式 nodes[]
+  // （同字段）次之；更旧的 tasks[]（字段为 prompt/guidance）由下方字段折叠兼容；
+  // 最旧的格式（顶层 steps / 裸数组）包成单个 task_1，步骤描述折叠进 executionGuidance。
   const rawTasks: unknown[] = Array.isArray(obj.tasks)
     ? obj.tasks.slice(0, MAX_TASKS)
     : Array.isArray(obj.nodes)
       ? obj.nodes.slice(0, MAX_TASKS)
       : [{
           id: "task_1",
-          description: "",
-          prompt: promptFromSteps(Array.isArray(raw) ? raw : Array.isArray(obj.steps) ? obj.steps : []),
+          executionGuidance: promptFromSteps(Array.isArray(raw) ? raw : Array.isArray(obj.steps) ? obj.steps : []),
         }];
 
   const usedTaskIds = new Set<string>();
@@ -298,14 +308,19 @@ export function parseDecomposeAnswer(text: string): DecomposeAnswer | null {
     const title = typeof taskObj.title === "string" && taskObj.title.trim()
       ? taskObj.title.trim()
       : undefined;
-    const description = typeof taskObj.description === "string" ? taskObj.description.trim() : "";
-    // prompt 优先；旧字段 guidance 读兼容；更旧的 steps 描述折叠进 prompt。
-    let prompt = typeof taskObj.prompt === "string" ? taskObj.prompt.trim() : "";
-    if (!prompt) {
-      prompt = typeof taskObj.guidance === "string" ? taskObj.guidance.trim() : "";
-    }
-    if (!prompt) {
-      prompt = promptFromSteps(Array.isArray(taskObj.steps) ? taskObj.steps : []);
+    let executionGuidance = typeof taskObj.executionGuidance === "string"
+      ? taskObj.executionGuidance.trim()
+      : "";
+    // 旧字段读兼容：description / prompt / guidance / steps 的执行指引折叠进
+    // executionGuidance，避免旧模型输出或旧历史里的「怎么做」被丢弃。
+    const legacyGuidance = [
+      typeof taskObj.description === "string" ? taskObj.description.trim() : "",
+      typeof taskObj.prompt === "string" ? taskObj.prompt.trim() : "",
+      typeof taskObj.guidance === "string" ? taskObj.guidance.trim() : "",
+      promptFromSteps(Array.isArray(taskObj.steps) ? taskObj.steps : []),
+    ].filter(Boolean).join("\n");
+    if (legacyGuidance && !executionGuidance.includes(legacyGuidance)) {
+      executionGuidance = executionGuidance ? `${executionGuidance}\n${legacyGuidance}` : legacyGuidance;
     }
     const dependsOn = Array.isArray(taskObj.dependsOn)
       ? taskObj.dependsOn.filter((dep): dep is string => typeof dep === "string" && dep.trim() !== "")
@@ -317,12 +332,11 @@ export function parseDecomposeAnswer(text: string): DecomposeAnswer | null {
     const cognitiveOnly = typeof taskObj.cognitiveOnly === "boolean"
       ? taskObj.cognitiveOnly
       : undefined;
-    if (!description && !title && !prompt) return [];
+    if (!executionGuidance && !title) return [];
     return [{
       id: uniqueId(id || `task_${usedTaskIds.size + 1}`, usedTaskIds),
       title,
-      description,
-      prompt,
+      executionGuidance,
       ...(dependsOn !== undefined ? { dependsOn } : {}),
       ...(kind !== undefined ? { kind } : {}),
       ...(cognitiveOnly !== undefined ? { cognitiveOnly } : {}),

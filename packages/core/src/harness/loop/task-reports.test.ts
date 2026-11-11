@@ -33,13 +33,13 @@ test("formatFinalTaskReports composes every retained task report", () => {
   const reports: TaskReport[] = [
     {
       taskId: "task_1",
-      description: "Fix A",
+      executionGuidance: "Fix A",
       status: "completed",
       report: "Changed file A.",
     },
     {
       taskId: "task_2",
-      description: "Fix B",
+      executionGuidance: "Fix B",
       status: "failed",
       report: "Blocked on missing credential.",
     },
@@ -48,31 +48,31 @@ test("formatFinalTaskReports composes every retained task report", () => {
   const text = formatFinalTaskReports(reports);
 
   assert.equal(text, "Changed file A.\n\nBlocked on missing credential.");
-  assert.doesNotMatch(text, /æœ¬æ¬¡å¯¹è¯æœ€ç»ˆæŠ¥å‘Š/);
-  assert.doesNotMatch(text, /è¿›åº¦/);
-  assert.doesNotMatch(text, /ä»»åŠ¡/);
+  assert.doesNotMatch(text, /±¾´Î¶Ô»°×îÖÕ±¨¸æ/);
+  assert.doesNotMatch(text, /½ø¶È/);
+  assert.doesNotMatch(text, /ÈÎÎñ/);
 });
 
 test("formatFinalTaskReports keeps one final report for a single task and removes repeated paragraphs", () => {
-  const report = "è°ƒæŸ¥ç»“è®ºå’Œä»£ç è¯æ®ã€‚\n\nä¿®å¤å»ºè®®ã€‚";
+  const report = "µ÷²é½áÂÛºÍ´úÂëÖ¤¾Ý¡£\n\nÐÞ¸´½¨Òé¡£";
   assert.equal(formatFinalTaskReports([
-    { taskId: "task_1", description: "Investigate", status: "completed", report: `${report}\n\n${report}` },
+    { taskId: "task_1", executionGuidance: "Investigate", status: "completed", report: `${report}\n\n${report}` },
   ]), report);
 });
 
 test("formatFinalTaskReports keeps the latest retry result for a task", () => {
   assert.equal(formatFinalTaskReports([
-    { taskId: "task_1", description: "Investigate", status: "failed", report: "ä¸­é—´å¤±è´¥çŠ¶æ€" },
-    { taskId: "task_1", description: "Investigate", status: "completed", report: "æœ€ç»ˆè°ƒæŸ¥ç»“è®ºåŠè¯æ®" },
-  ]), "æœ€ç»ˆè°ƒæŸ¥ç»“è®ºåŠè¯æ®");
+    { taskId: "task_1", executionGuidance: "Investigate", status: "failed", report: "ÖÐ¼äÊ§°Ü×´Ì¬" },
+    { taskId: "task_1", executionGuidance: "Investigate", status: "completed", report: "×îÖÕµ÷²é½áÂÛ¼°Ö¤¾Ý" },
+  ]), "×îÖÕµ÷²é½áÂÛ¼°Ö¤¾Ý");
 });
 
 test("formatFinalTaskReports removes identical report text but preserves distinct task reports", () => {
   assert.equal(formatFinalTaskReports([
-    { taskId: "task_1", description: "A", status: "completed", report: "ç›¸åŒç»“è®º" },
-    { taskId: "task_2", description: "B", status: "completed", report: " ç›¸åŒç»“è®º " },
-    { taskId: "task_3", description: "C", status: "failed", report: "ä¸åŒçš„å¤±è´¥æŠ¥å‘Š" },
-  ]), "ç›¸åŒç»“è®º\n\nä¸åŒçš„å¤±è´¥æŠ¥å‘Š");
+    { taskId: "task_1", executionGuidance: "A", status: "completed", report: "ÏàÍ¬½áÂÛ" },
+    { taskId: "task_2", executionGuidance: "B", status: "completed", report: " ÏàÍ¬½áÂÛ " },
+    { taskId: "task_3", executionGuidance: "C", status: "failed", report: "²»Í¬µÄÊ§°Ü±¨¸æ" },
+  ]), "ÏàÍ¬½áÂÛ\n\n²»Í¬µÄÊ§°Ü±¨¸æ");
 });
 
 test("formatFinalTaskReports returns an empty body when no reports were retained", () => {

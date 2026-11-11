@@ -57,20 +57,23 @@ export interface PersistedDecomposeTask {
   id: string;
   /** 短标题（任务式分解产出；旧数据可能缺失）。 */
   title?: string;
-  description: string;
   /**
-   * 任务执行指令（原 guidance；旧轮次持久化的 guidance / steps 描述
-   * 读时折叠进此字段）。
+   * 执行指引：指导下属如何完成该任务。旧轮次持久化的 description / prompt /
+   * guidance / steps 描述读时折叠进此字段。
    */
-  prompt?: string;
+  executionGuidance: string;
   /** 本任务依赖的其他任务 id（真实依赖，不是线性顺序）。 */
   dependsOn?: string[];
   /** 任务类型：implementation 产出变更，verification 验证正确性。 */
   kind?: "implementation" | "verification";
   /** 任务执行结果报告（turn 结束归档时带入，供下轮分解历史召回）。 */
   result?: string;
-  /** @deprecated 旧字段，读时映射到 prompt。 */
+  /** @deprecated 旧字段，读时折叠进 executionGuidance。 */
+  description?: string;
+  /** @deprecated 旧字段，读时折叠进 executionGuidance。 */
   guidance?: string;
+  /** @deprecated 旧字段，读时折叠进 executionGuidance。 */
+  prompt?: string;
 }
 
 export interface PersistedDecompose {
@@ -185,7 +188,7 @@ function sanitizeDecompose(raw: unknown): PersistedDecompose | undefined {
         .slice(0, 20)
     : [];
 
-  // 旧形状 steps[].description 折叠进 prompt（读兼容；不保留依赖/环检信息）。
+  // 旧形状 steps[].description 折叠进执行指引（读兼容；不保留依赖/环检信息）。
   const promptFromSteps = (rawSteps: unknown): string => {
     if (!Array.isArray(rawSteps)) return "";
     return rawSteps.slice(0, 20)
@@ -201,15 +204,15 @@ function sanitizeDecompose(raw: unknown): PersistedDecompose | undefined {
       .join("\n");
   };
 
-  // 当前格式 tasks[] 优先（字段为 prompt/kind/dependsOn）；旧格式 nodes[]
-  // （同字段）次之；更旧的 tasks[]（字段为 guidance）与顶层 steps 由字段
-  // 折叠兼容，steps 包成单个 task_1，步骤描述折叠进 prompt。
+  // 当前格式 tasks[] 优先（字段为 executionGuidance/kind/dependsOn）；旧格式
+  // nodes[] 与旧 tasks[]（字段为 description/prompt/guidance）由字段折叠兼容；
+  // 顶层 steps 包成单个 task_1，步骤描述折叠进 executionGuidance。
   const rawTasks: unknown[] = Array.isArray(obj.tasks)
     ? obj.tasks.slice(0, MAX_TASKS)
     : Array.isArray(obj.nodes)
       ? obj.nodes.slice(0, MAX_TASKS)
       : Array.isArray(obj.steps)
-        ? [{ id: "task_1", description: "", prompt: promptFromSteps(obj.steps) }]
+        ? [{ id: "task_1", description: promptFromSteps(obj.steps) }]
         : [];
   const usedTaskIds = new Set<string>();
   const uniqueId = (base: string, fallback: string): string => {
@@ -227,16 +230,14 @@ function sanitizeDecompose(raw: unknown): PersistedDecompose | undefined {
   const tasks: PersistedDecomposeTask[] = rawTasks.flatMap((rawTask, ti) => {
     if (!rawTask || typeof rawTask !== "object") return [];
     const t = rawTask as Record<string, unknown>;
-    // prompt 优先；旧字段 guidance 读兼容；更旧的 task.steps 折叠进 prompt。
-    let prompt = typeof t.prompt === "string" && t.prompt.trim()
-      ? clip(t.prompt.trim(), MAX_UNDERSTANDING_CHARS)
-      : "";
-    if (!prompt && typeof t.guidance === "string" && t.guidance.trim()) {
-      prompt = clip(t.guidance.trim(), MAX_UNDERSTANDING_CHARS);
-    }
-    if (!prompt) {
-      prompt = promptFromSteps(Array.isArray(t.steps) ? t.steps : []);
-    }
+    // 旧字段读兼容：description / prompt / guidance / steps 的执行指引折叠进
+    // executionGuidance，避免旧轮次里的「怎么做」被丢弃。
+    const legacyGuidance = [
+      typeof t.description === "string" ? t.description.trim() : "",
+      typeof t.prompt === "string" ? t.prompt.trim() : "",
+      typeof t.guidance === "string" ? t.guidance.trim() : "",
+      promptFromSteps(Array.isArray(t.steps) ? t.steps : []),
+    ].filter(Boolean).join("\n");
     const title = typeof t.title === "string" && t.title.trim()
       ? clip(t.title.trim(), MAX_STEP_DESCRIPTION_CHARS)
       : undefined;
@@ -245,14 +246,15 @@ function sanitizeDecompose(raw: unknown): PersistedDecompose | undefined {
           .map((dep) => dep.trim())
           : undefined;
     const kind = t.kind === "implementation" || t.kind === "verification" ? t.kind : undefined;
-    const description = typeof t.description === "string" && t.description.trim()
-      ? clip(t.description.trim(), MAX_STEP_DESCRIPTION_CHARS)
-      : "";
+    const baseGuidance = typeof t.executionGuidance === "string" ? t.executionGuidance.trim() : "";
+    const merged = legacyGuidance && !baseGuidance.includes(legacyGuidance)
+      ? (baseGuidance ? `${baseGuidance}\n${legacyGuidance}` : legacyGuidance)
+      : baseGuidance;
+    const executionGuidance = clip(merged, MAX_UNDERSTANDING_CHARS);
     return [{
       id: uniqueId(typeof t.id === "string" ? t.id : "", `task_${ti + 1}`),
       ...(title ? { title } : {}),
-      description,
-      prompt: prompt || undefined,
+      executionGuidance,
       ...(dependsOn ? { dependsOn } : {}),
       ...(kind ? { kind } : {}),
       ...(typeof t.result === "string" && t.result.trim()

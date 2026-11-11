@@ -6,18 +6,18 @@ import { useI18n } from "../../i18n";
 // ── DecomposeCard: task_decompose result (intent + tasks) ───────────────────
 // 参照 ZCode-main 的 run-line：默认折叠成一条单行状态条
 // （图标 + 灯点轨道 + 当前任务一句话 + n/m），点击展开精简卡片
-// （意图一行 + 任务行：状态灯 + 标题/描述）。任务 prompt / 依赖 /
-// 相关历史等次级信息收入任务行下的 <details>，不再平铺。
+// （意图一行 + 任务行：状态灯 + 标题/描述）。任务依赖 / 相关历史等
+// 次级信息收入任务行下的 <details>，不再平铺。
 // 仅在 pnpm dev（import.meta.env.DEV）时由 ChatLog footer 渲染。
-// 节点式分解：节点含 title/description/prompt/kind/dependsOn，
+// 节点式分解：节点含 title/executionGuidance/kind/dependsOn，
+// executionGuidance 是指导下属如何完成任务的执行指引；
 // 任务相关历史与节点同级（顶层）。
 
 interface DecomposeTaskRow {
   id: string;
   title?: string;
-  description: string;
-  /** 节点执行指令（旧数据可能是 guidance）。 */
-  prompt?: string;
+  /** 执行指引：指导下属如何完成该任务。 */
+  executionGuidance: string;
   dependsOn?: string[];
   /** 会话活动计划中匹配到的执行状态；null 表示未关联（不参与进度统计）。 */
   status: TaskStatusDto | null;
@@ -51,14 +51,20 @@ function joinPlanStatus(
   tasks: DecompositionSnapshot["tasks"],
   planTasks?: TaskItemDto[],
 ): { rows: DecomposeTaskRow[]; joined: boolean } {
-  const rows: DecomposeTaskRow[] = (tasks ?? []).map((t) => ({ ...t, status: null }));
+  const rows: DecomposeTaskRow[] = (tasks ?? []).map((t) => ({
+    id: t.id,
+    ...(t.title ? { title: t.title } : {}),
+    executionGuidance: t.executionGuidance,
+    ...(t.dependsOn ? { dependsOn: t.dependsOn } : {}),
+    status: null,
+  }));
   if (!planTasks || planTasks.length === 0) return { rows, joined: false };
-  const byDesc = new Map(planTasks.map((p) => [normDesc(p.description), p]));
+  const byDesc = new Map(planTasks.map((p) => [normDesc(p.executionGuidance), p]));
   let matched = false;
   for (const row of rows) {
     const p =
-      planTasks.find((q) => q.id === row.id && normDesc(q.description) === normDesc(row.description)) ??
-      byDesc.get(normDesc(row.description));
+      planTasks.find((q) => q.id === row.id && normDesc(q.executionGuidance) === normDesc(row.executionGuidance)) ??
+      byDesc.get(normDesc(row.executionGuidance));
     if (p) {
       row.status = p.status;
       matched = true;
@@ -107,7 +113,12 @@ export function DecomposeCard({
   const allDone = joined && total > 0 && done === total;
 
   // 摘要词：与 TaskListBar 重复的任务详情交给任务栏，这里只给一句状态。
-  const hasDetail = Boolean(current?.title || current?.description || rows[0]?.title || rows[0]?.description);
+  const hasDetail = Boolean(
+    current?.title ||
+      current?.executionGuidance ||
+      rows[0]?.title ||
+      rows[0]?.executionGuidance,
+  );
 
   if (!open) {
     return (
@@ -122,9 +133,9 @@ export function DecomposeCard({
           {allDone
             ? t("全部完成")
             : current
-              ? current.title || current.description
+              ? current.title || current.executionGuidance
               : hasDetail
-                ? (rows[0]!.title || rows[0]!.description)
+                ? (rows[0]!.title || rows[0]!.executionGuidance)
                 : intent || t("任务分解：无需计划")}
         </span>
         {joined && total > 0 ? (
@@ -170,21 +181,19 @@ export function DecomposeCard({
                 <div className="decompose-task-head">
                   <span className={`decompose-task-dot s-${dotClass(task.status)}`} />
                   <span className="decompose-step-id">{task.id}</span>
-                  <span className="decompose-step-desc">{task.title || task.description}</span>
+                  <span className="decompose-step-desc">{task.title || task.executionGuidance}</span>
                 </div>
-                {(task.title && task.description) ||
+                {(task.title && task.executionGuidance) ||
                 task.dependsOn?.length ||
-                task.prompt ||
                 relevantHistory ? (
                   <details className="decompose-task-details">
                     <summary>{t("详情")}</summary>
-                    {task.title && task.description ? (
-                      <div className="decompose-task-line">{task.description}</div>
+                    {task.title && task.executionGuidance ? (
+                      <div className="decompose-task-line">{task.executionGuidance}</div>
                     ) : null}
                     {task.dependsOn && task.dependsOn.length > 0 ? (
                       <div className="decompose-task-line">{t("依赖：")}{task.dependsOn.join(", ")}</div>
                     ) : null}
-                    {task.prompt ? <div className="decompose-task-line">{task.prompt}</div> : null}
                     {relevantHistory ? (
                       <div className="decompose-task-line">{t("历史：")}{relevantHistory}</div>
                     ) : null}
