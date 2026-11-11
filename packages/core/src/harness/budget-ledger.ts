@@ -1,7 +1,5 @@
 export type BudgetKind =
   | "toolCalls"
-  | "readCalls"
-  | "readBytes"
   | "nestedCalls"
   | "subagents"
   | "taskNodes"
@@ -9,8 +7,6 @@ export type BudgetKind =
 
 export interface BudgetLimits {
   toolCalls: number;
-  readCalls: number;
-  readBytes: number;
   nestedCalls: number;
   subagents: number;
   taskNodes: number;
@@ -30,14 +26,19 @@ export interface BudgetCharge {
   reason?: string;
 }
 
+/**
+ * Read traffic is evidence gathering, not a cost driver, so it is not metered
+ * at all: `readCalls` / `readBytes` and `chargeRead()` were removed rather than
+ * set to an infinite limit, so a large investigation can never be aborted with
+ * "read budget exhausted". The counters below stay finite as runaway-loop
+ * guards only; they are sized well above any realistic single request.
+ */
 const DEFAULT_LIMITS: BudgetLimits = {
-  toolCalls: 160,
-  readCalls: 48,
-  readBytes: 2 * 1024 * 1024,
-  nestedCalls: 80,
-  subagents: 4,
-  taskNodes: 8,
-  modelCalls: 80,
+  toolCalls: 600,
+  nestedCalls: 300,
+  subagents: 16,
+  taskNodes: 32,
+  modelCalls: 300,
 };
 
 /**
@@ -52,8 +53,6 @@ export class BudgetLedger {
     this.limits = { ...DEFAULT_LIMITS, ...limits };
     this.used = sharedUsed ?? {
       toolCalls: 0,
-      readCalls: 0,
-      readBytes: 0,
       nestedCalls: 0,
       subagents: 0,
       taskNodes: 0,
@@ -90,7 +89,10 @@ export class BudgetLedger {
   charge(kind: BudgetKind, amount = 1): BudgetCharge {
     if (!Number.isFinite(amount) || amount < 0) return { ok: false, reason: "invalid budget amount" };
     if (this.remaining(kind) < amount) {
-      return { ok: false, reason: `budget exhausted: ${kind} (${this.limits[kind]})` };
+      return {
+        ok: false,
+        reason: `${kind} budget exhausted: used ${this.used[kind]} / limit ${this.limits[kind]}`,
+      };
     }
     this.used[kind] += amount;
     return { ok: true };
@@ -107,18 +109,6 @@ export class BudgetLedger {
       }
     }
     void name;
-    return { ok: true };
-  }
-
-  chargeRead(outputBytes: number): BudgetCharge {
-    const calls = this.charge("readCalls");
-    if (!calls.ok) return calls;
-    const bytes = Math.max(0, Math.ceil(outputBytes));
-    const byteCharge = this.charge("readBytes", bytes);
-    if (!byteCharge.ok) {
-      this.used.readCalls = Math.max(0, this.used.readCalls - 1);
-      return byteCharge;
-    }
     return { ok: true };
   }
 }

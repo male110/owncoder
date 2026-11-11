@@ -12,7 +12,7 @@ export const READ_TOOL_DEFS: ToolDef[] = [
     function: {
       name: "glob",
       description:
-        "Find workspace-relative files by a glob pattern. The search path is relative to the active workspace (default '.'); do not use /workspace or /e/... container/MSYS paths. Automatically skips .gitignore paths, dot directories, generated/vendor directories, and returns at most max_results paths.",
+        "Find workspace-relative files by a glob pattern. The search path is relative to the active workspace (default '.'); do not use /workspace or /e/... container/MSYS paths. Automatically skips .gitignore paths, dot directories, generated/vendor directories, and returns at most max_results paths. Skip it when the path is already named or known — call read_file on that path instead.",
       parameters: {
         type: "object",
         properties: {
@@ -30,7 +30,7 @@ export const READ_TOOL_DEFS: ToolDef[] = [
     function: {
       name: "grep",
       description:
-        "Search workspace file contents with a regex or literal string. file_path is workspace-relative; do not use /workspace or /e/... paths. Automatically skips .gitignore paths, dot/generated/vendor directories, lockfiles, binaries, and files over 2MB. Use output_mode 'files_with_matches' to locate files, or glob when you only know a filename pattern.",
+        "Search workspace file contents with a regex or literal string. file_path is workspace-relative; do not use /workspace or /e/... paths. Automatically skips .gitignore paths, dot/generated/vendor directories, lockfiles, binaries, and files over 2MB. output_mode 'content' returns matched lines, 'files_with_matches' only their paths, 'count' only totals; use glob when only a filename pattern is known. Skip it when the target file or range is already known — read that file directly.",
       parameters: {
         type: "object",
         properties: {
@@ -100,7 +100,8 @@ export const READ_TOOL_DEFS: ToolDef[] = [
       description:
         "Get a file outline: every symbol's type, start/end line numbers, and signature — usually over 90% fewer tokens than reading the source. " +
         "Non-source files (json/md/yaml) return the file header for navigation. " +
-        "The start/end line numbers from the outline can be used directly with read_file's offset/limit or to locate a symbol for read_symbol.",
+        "The start/end line numbers from the outline can be used directly with read_file's offset/limit or to locate a symbol for read_symbol. " +
+        "Only worth the extra round trip on large or unfamiliar files; for a small file whose path is known, call read_file directly.",
       parameters: {
         type: "object",
         properties: {
@@ -116,7 +117,8 @@ export const READ_TOOL_DEFS: ToolDef[] = [
     function: {
       name: "search_symbols",
       description:
-        "Search the code symbol index by exact or fuzzy symbol name. Returns symbol definitions with locations, signatures, and documentation. Use search_semantic for keyword-based vector search.",
+        "Search the code symbol index by exact or fuzzy symbol name. Returns symbol definitions with locations, signatures, and documentation. " +
+        "Pick one search tool, not both: use this when you already have a symbol name; use search_semantic when you only have keywords or a description of behavior.",
       parameters: {
         type: "object",
         properties: {
@@ -133,7 +135,7 @@ export const READ_TOOL_DEFS: ToolDef[] = [
     function: {
       name: "search_semantic",
       description:
-        "Keyword-driven vector search over embedded code chunks. Returns ranked vector hits with paths, line ranges, symbols, scores, and excerpts; does not perform exact symbol search or grep fallback. Prefer concise queries containing target keywords (identifiers, API names, domain terms) rather than long prose.",
+        "Keyword-driven vector search over embedded code chunks. Returns ranked vector hits with paths, line ranges, symbols, scores, and excerpts; does not perform exact symbol search or grep fallback. Prefer concise queries containing target keywords (identifiers, API names, domain terms) rather than long prose. Pick one search tool, not both: use this for keyword/semantic queries; use search_symbols when you already have the exact symbol name.",
       parameters: {
         type: "object",
         properties: {
@@ -150,13 +152,14 @@ export const READ_TOOL_DEFS: ToolDef[] = [
     function: {
       name: "graph_search",
       description:
-        "Graph search over the native symbol index: returns a symbol's definition plus callers (who invokes X) and callees (what X invokes), up to `depth` hops (1-4, default 2). " +
+        "Graph search over the native symbol index: returns a symbol's definition plus callers (who invokes X) and callees (what X invokes), up to `depth` hops (1-4, default 1). " +
+        "Use depth 1 unless the user explicitly asks for an audit or change-impact analysis, where depth 2+ is justified. " +
         "When a symbol is missing from the index, falls back to semantic Codemap lookup (including change risk and likely tests), then to a workspace file search over the exact symbol name.",
       parameters: {
         type: "object",
         properties: {
           query: { type: "string", description: "Symbol name (function/class/method)" },
-          depth: { type: "integer", description: "Graph hops 1-4 (default 2)" },
+          depth: { type: "integer", description: "Graph hops 1-4 (default 1); use 2+ only for an explicit audit or change-impact request" },
         },
         required: ["query"],
       },
@@ -167,7 +170,7 @@ export const READ_TOOL_DEFS: ToolDef[] = [
     readOnly: true,
     function: {
       name: "repo_map",
-      description: "Budgeted repository symbol map (names + locations, no bodies). Returns symbol names and their locations across the repository.",
+      description: "Budgeted repository symbol map (names + locations, no bodies). Returns symbol names and their locations across the repository. Skip when the target file is already known.",
       parameters: {
         type: "object",
         properties: {

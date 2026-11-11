@@ -51,7 +51,7 @@ export const ANALYZE_ISSUE_TOOL_DEF: ToolDef = {
   function: {
     name: "analyze_issue",
     description:
-      "Run a proactive bug-fix analysis: parse the issue → reproduce via verification → localize root-cause candidates. Returns a structured plan (symptom, failing checks, likely files, strategy) to guide apply_patch. Use before patching a non-trivial bug.",
+      "Run a bug-fix analysis: parse the issue → reproduce via verification → localize root-cause candidates. Returns a structured plan (symptom, failing checks, likely files, strategy) to guide apply_patch. Use only for non-trivial bugs whose fix site is unknown; skip it when you already know where to patch.",
     parameters: {
       type: "object",
       properties: {

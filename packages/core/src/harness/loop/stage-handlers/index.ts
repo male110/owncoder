@@ -210,6 +210,7 @@ export async function doPlainCompletion(ctx: SchedulerContext): Promise<string> 
       taskId: opts.sessionId,
       onDelta: (text: string) => { accumulated = applyStreamSnapshot(accumulated, text); opts.onEvent?.({ type: "assistant_delta", text }); },
       onThinkingDelta: (text: string) => opts.onEvent?.({ type: "thinking_delta", text }),
+      onRetry: (info) => opts.onEvent?.({ type: "llm_retry", ...info }),
       thinking: { effort: opts.workflow.thinking?.defaultEffort },
     });
     tracer.endSpan(spanId, "ok");

@@ -8,10 +8,10 @@ export const WEB_SEARCH_TOOL_DEF: ToolDef = {
   function: {
     name: "web_search",
     description:
-      "Search the web. Use this proactively when you do not know something or are stuck: " +
-      "unfamiliar errors, missing API/docs, library behavior, version-specific details, " +
-      "or after one local retry still fails. Do not guess — search first, then web_fetch " +
-      "the best official/source URL. Also use for latest documentation and current facts.",
+      "Search the web for facts about libraries, APIs, versions, and unfamiliar errors: " +
+      "missing API/docs, library behavior, version-specific details, " +
+      "or after one local retry still fails. Do not guess about such external facts — search, then web_fetch " +
+      "the best official/source URL. Never use it for facts already present in the workspace, and never before you have looked locally.",
     parameters: {
       type: "object",
       properties: {

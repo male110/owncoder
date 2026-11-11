@@ -88,6 +88,8 @@ export function applyChatEvent(
     chat.patchLiveState((rt) => ({
       liveEvents: upsertThinkingFn(rt.liveEvents, ev.text, rt.currentStage || undefined),
       liveStatus: "",
+      // 模型重新出字：上一次重试已成功，撤掉倒计时提示。
+      llmRetry: null,
     }), sid);
     return;
   }
@@ -98,6 +100,7 @@ export function applyChatEvent(
     chat.patchLiveState((rt) => ({
       liveEvents: upsertTextFn(sealThinkingFn(rt.liveEvents), ev.text),
       liveStatus: "",
+      llmRetry: null,
     }), sid);
     return;
   }
@@ -125,6 +128,7 @@ export function applyChatEvent(
         status: "running",
       }),
       liveStatus: toolStatusLabel("running", ev.name, ev.args),
+      llmRetry: null,
     }), sid);
     return;
   }
@@ -253,6 +257,22 @@ export function applyChatEvent(
       }
       return [...prev, ev.entry];
     }, sid);
+    return;
+  }
+
+  // ── llm_retry ─────────────────────────────────────────────────────────
+  // LLM 调用失败、正在等待重试。记录绝对重试时刻，界面据此每秒刷新倒计时，
+  // 避免重试等待期间只显示「思考中…」让用户以为卡死。
+  if (ev.type === "llm_retry") {
+    chat.patchLiveState(() => ({
+      llmRetry: {
+        attempt: ev.attempt,
+        maxRetries: ev.maxRetries,
+        retryAt: Date.now() + ev.delayMs,
+        reason: ev.reason,
+      },
+      liveStatus: "",
+    }), sid);
     return;
   }
 

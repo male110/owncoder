@@ -162,8 +162,18 @@ export async function runTaskDecompose(
             opts.onEvent?.({ type: "thinking_delta", text });
           }
         },
+        onRetry: (info) => opts.onEvent?.({ type: "llm_retry", ...info }),
       }),
       { maxRetries: 1, baseDelay: 3000, signal: opts.signal },
+      (attempt, err, delayMs) => {
+        opts.onEvent?.({
+          type: "llm_retry",
+          attempt,
+          maxRetries: 1,
+          delayMs,
+          reason: err.message,
+        });
+      },
     );
     const content = (planResult.result as { choices?: Array<{ message?: { content?: string | null } }> })
       .choices?.[0]?.message?.content ?? "";

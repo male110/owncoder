@@ -12,11 +12,13 @@ test("child ledgers share monotonic usage with the parent", () => {
   assert.equal(parent.chargeTool("read_file", true).ok, false);
 });
 
-test("read calls consume both logical calls and output bytes", () => {
-  const ledger = new BudgetLedger({ readCalls: 1, readBytes: 4 });
-  assert.equal(ledger.chargeRead(4).ok, true);
-  assert.equal(ledger.chargeRead(1).ok, false);
-  assert.equal(ledger.usedValue("readCalls"), 1);
+test("reads are not metered: the ledger exposes no read budget", () => {
+  const ledger = new BudgetLedger();
+  assert.equal("chargeRead" in ledger, false);
+  assert.equal("readCalls" in ledger.limits, false);
+  assert.equal("readBytes" in ledger.limits, false);
+  assert.equal(ledger.chargeTool("read_file").ok, true);
+  assert.equal(ledger.chargeTool("read_file").ok, true);
 });
 
 test("parallel callers cannot reserve beyond a shared limit", () => {

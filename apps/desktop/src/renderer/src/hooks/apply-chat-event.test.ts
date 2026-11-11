@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { applyChatEvent, toolStatusLabel } from "./apply-chat-event";
 import { useChatStore } from "../store/chat-store";
 import { useSessionStore } from "../store/session-store";
@@ -23,6 +23,7 @@ function resetChat(sessionId = "s1") {
     askRequests: [],
     status: "idle",
     currentStage: null,
+    llmRetry: null,
     decomposeFailureNotified: false,
     stopping: false,
     pendingDelete: false,
@@ -626,5 +627,82 @@ describe("任务分解失败提示", () => {
   it("非分解错误保持原有行为", () => {
     apply({ type: "error", message: "其它异常" });
     expect(useChatStore.getState().errorAlert?.message).toBe("其它异常");
+  });
+});
+
+
+describe("LLM 失败重试提示", () => {
+  beforeEach(() => {
+    resetChat();
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2020-01-01T00:00:00.000Z"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const retryEvent = {
+    type: "llm_retry",
+    attempt: 1,
+    maxRetries: 3,
+    delayMs: 3000,
+    reason: "timeout",
+  } as const;
+
+  it("记录重试次数与绝对重试时刻，并清空「思考中…」状态文字", () => {
+    apply({ type: "thinking_delta", text: "想" });
+    useChatStore.getState().patchLiveState(() => ({ liveStatus: "思考中…" }), "s1");
+
+    apply({ ...retryEvent });
+
+    const next = useChatStore.getState();
+    expect(next.liveStatus).toBe("");
+    expect(next.llmRetry).toEqual({
+      attempt: 1,
+      maxRetries: 3,
+      // delayMs 转成绝对时间戳，界面据此每秒刷新倒计时
+      retryAt: Date.now() + 3000,
+      reason: "timeout",
+    });
+  });
+
+  it("连续重试事件以后到者为准", () => {
+    apply({ ...retryEvent });
+    apply({ ...retryEvent, attempt: 2, delayMs: 6000, reason: "http_503" });
+
+    expect(useChatStore.getState().llmRetry).toMatchObject({
+      attempt: 2,
+      maxRetries: 3,
+      retryAt: Date.now() + 6000,
+      reason: "http_503",
+    });
+  });
+
+  it("模型重新出字或开始工具调用即撤掉倒计时", () => {
+    apply({ ...retryEvent });
+    apply({ type: "thinking_delta", text: "继续想" });
+    expect(useChatStore.getState().llmRetry).toBeNull();
+
+    apply({ ...retryEvent });
+    apply({ type: "assistant_delta", text: "回答" });
+    expect(useChatStore.getState().llmRetry).toBeNull();
+
+    apply({ ...retryEvent });
+    apply({ type: "tool_start", id: "c1", name: "read_file", args: {} });
+    expect(useChatStore.getState().llmRetry).toBeNull();
+  });
+
+  it("封口流式内容时清空重试提示", () => {
+    apply({ ...retryEvent });
+    useChatStore.getState().sealAllStreaming("s1");
+    expect(useChatStore.getState().llmRetry).toBeNull();
+  });
+
+  it("后台会话的重试只写入该会话运行时，不污染焦点镜像", () => {
+    apply({ ...retryEvent }, "s2");
+
+    expect(useChatStore.getState().llmRetry).toBeNull();
+    expect(useChatStore.getState().bySession.s2?.llmRetry).toMatchObject({ attempt: 1, reason: "timeout" });
   });
 });

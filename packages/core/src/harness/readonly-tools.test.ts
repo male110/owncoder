@@ -73,7 +73,8 @@ describe("搜索工具职责契约", () => {
       const queryDescription = (tool: typeof symbols[number]) =>
         (tool.function.parameters as { properties: { query: { description: string } } }).properties.query.description;
       expect(symbols[0]!.function.description).toContain("exact or fuzzy symbol name");
-      expect(symbols[0]!.function.description).toContain("Use search_semantic");
+      expect(symbols[0]!.function.description).toContain("Pick one search tool, not both");
+      expect(semantic[0]!.function.description).toContain("Pick one search tool, not both");
       expect(queryDescription(symbols[0]!)).toContain("symbol name");
       expect(queryDescription(symbols[0]!)).toContain("use search_semantic");
       expect(queryDescription(symbols[0]!)).not.toMatch(/natural.language/i);

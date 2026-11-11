@@ -15,7 +15,8 @@ export const DISPATCH_AGENT_TOOL_DEF: ToolDef = {
     description:
       "Dispatch a read-only research task to an Explore subagent that runs in an isolated context. " +
       "The subagent runs in an isolated context: its search hits and full-file reads stay there, and only its final report returns to this context. " +
-      "The subagent is read-only: implementation work cannot be delegated.",
+      "The subagent is read-only: implementation work cannot be delegated. " +
+      "Do not dispatch Explore for a request resolvable with <=2 targeted reads, and never as a pre-flight before an edit whose site is already known.",
     parameters: {
       type: "object",
       properties: {
@@ -32,7 +33,7 @@ export const DISPATCH_AGENT_TOOL_DEF: ToolDef = {
         thoroughness: {
           type: "string",
           enum: ["medium", "very thorough"],
-          description: 'Search breadth. "medium" for likely-location-first exploration (default); "very thorough" to check multiple directories, naming conventions, and symbol graph hops.',
+          description: 'Search breadth. "medium" for likely-location-first exploration (default); "very thorough" only for cross-cutting questions whose answer genuinely spans multiple directories or naming conventions.',
         },
       },
       required: ["task"],

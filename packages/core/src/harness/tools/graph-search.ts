@@ -9,7 +9,7 @@ export async function toolGraphSearch(
 ): Promise<ToolResult> {
   if (!query.trim()) return fail("graph_search requires a non-empty query (symbol name)");
   
-  const d = Math.min(Math.max(Math.trunc(depth) || 2, 1), 4);
+  const d = Math.min(Math.max(Math.trunc(depth) || 1, 1), 4);
 
   // 优先使用原生索引；仅在返回实际结果时使用，否则降级到 codemap
   if (ctx.index.graphSearch) {

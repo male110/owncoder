@@ -147,6 +147,12 @@ export interface ChatSessionRuntime {
   status: SessionStatus;
   /** Current stage (task_decompose or react loop) for coloring thinking blocks. */
   currentStage: "decompose" | "react" | null;
+  /**
+   * 当前 LLM 调用的失败重试状态；null 表示没有等待中的重试。
+   * retryAt 是本次重试真正发起的绝对时间戳（Date.now() + delayMs），
+   * 界面据此每秒刷新「N 秒后重试」倒计时。
+   */
+  llmRetry: LlmRetryState | null;
   /** 本次分解是否已提示失败，防止多条失败事件或关闭提示后重复弹出。 */
   decomposeFailureNotified: boolean;
   /**
@@ -161,6 +167,14 @@ export interface ChatSessionRuntime {
    * 定位 turnId 并真正整轮删除（deleteTurnPair）。
    */
   pendingDelete: boolean;
+}
+
+/** 等待中的 LLM 失败重试。attempt 从 1 起；retryAt 为重试发起的绝对时间戳。 */
+export interface LlmRetryState {
+  attempt: number;
+  maxRetries: number;
+  retryAt: number;
+  reason: string;
 }
 
 function dedupeHistoryTurns(turns: ChatTurnDto[]): ChatTurnDto[] {
@@ -191,6 +205,7 @@ function emptyRuntime(): ChatSessionRuntime {
     askRequests: [],
     status: "idle",
     currentStage: null,
+    llmRetry: null,
     decomposeFailureNotified: false,
     stopping: false,
     pendingDelete: false,
@@ -419,6 +434,8 @@ export interface ChatState {
   dangerousConfirmations: DangerousCommandRequestDto[];
   askRequests: AskUserRequestDto[];
   currentStage: "decompose" | "react" | null;
+  /** 等待中的 LLM 失败重试（焦点镜像）。 */
+  llmRetry: LlmRetryState | null;
   /** 本次分解是否已提示失败，防止多条失败事件或关闭提示后重复弹出。 */
   decomposeFailureNotified: boolean;
   /** 与 bySession[focus].stopping/pendingDelete 同步的焦点镜像。 */
@@ -464,7 +481,7 @@ export interface ChatActions {
 
   setLiveEvents: (events: LiveEvent[] | ((prev: LiveEvent[]) => LiveEvent[]), sessionId?: string) => void;
   /** Apply multiple live-turn fields in one Zustand transaction. */
-  patchLiveState: (patch: Partial<Pick<ChatSessionRuntime, "liveEvents" | "liveStatus" | "terminal" | "currentStage" | "decomposeFailureNotified" | "errorAlert" | "status">> | ((prev: ChatSessionRuntime) => Partial<Pick<ChatSessionRuntime, "liveEvents" | "liveStatus" | "terminal" | "currentStage" | "decomposeFailureNotified" | "errorAlert" | "status">>), sessionId?: string) => void;
+  patchLiveState: (patch: Partial<Pick<ChatSessionRuntime, "liveEvents" | "liveStatus" | "terminal" | "currentStage" | "llmRetry" | "decomposeFailureNotified" | "errorAlert" | "status">> | ((prev: ChatSessionRuntime) => Partial<Pick<ChatSessionRuntime, "liveEvents" | "liveStatus" | "terminal" | "currentStage" | "llmRetry" | "decomposeFailureNotified" | "errorAlert" | "status">>), sessionId?: string) => void;
 
   /** Append structured message from turn_complete event (阶段三). */
   pushStructuredMessage: (parts: MessagePart[], metadata: MessageMetadata, sessionId?: string) => void;
@@ -541,6 +558,7 @@ function readRuntime(s: ChatState & ChatActions, sid?: string): ChatSessionRunti
       dangerousConfirmations: s.dangerousConfirmations,
       askRequests: s.askRequests,
       currentStage: s.currentStage,
+      llmRetry: s.llmRetry,
       decomposeFailureNotified: s.decomposeFailureNotified,
       status: s.status,
       stopping: s.stopping,
@@ -580,6 +598,7 @@ export const useChatStore = create<ChatState & ChatActions>()((set, get) => ({
   dangerousConfirmations: [],
   askRequests: [],
   currentStage: null,
+  llmRetry: null,
   decomposeFailureNotified: false,
   stopping: false,
   pendingDelete: false,
@@ -613,6 +632,7 @@ export const useChatStore = create<ChatState & ChatActions>()((set, get) => ({
         dangerousConfirmations: rt.dangerousConfirmations,
         askRequests: rt.askRequests,
         currentStage: rt.currentStage,
+        llmRetry: rt.llmRetry,
         decomposeFailureNotified: rt.decomposeFailureNotified,
         stopping: rt.stopping,
         pendingDelete: rt.pendingDelete,
@@ -838,11 +858,11 @@ export const useChatStore = create<ChatState & ChatActions>()((set, get) => ({
       // Preserve decomposition cards so they survive session resets.
       // They'll be replaced when a new task_decomposition event fires.
       const decompositions = rt.liveEvents.filter((e) => e.kind === "decompose");
-      return applyRuntime(s, sid, { liveEvents: decompositions, liveStatus: "", errorAlert: null, taskRun: null });
+      return applyRuntime(s, sid, { liveEvents: decompositions, liveStatus: "", errorAlert: null, taskRun: null, llmRetry: null });
     }),
 
   sealAllStreaming: (sid) =>
-    set((s) => applyRuntime(s, sid, { liveEvents: sealAllStreamingFn(readRuntime(s, sid).liveEvents), liveStatus: "" })),
+    set((s) => applyRuntime(s, sid, { liveEvents: sealAllStreamingFn(readRuntime(s, sid).liveEvents), liveStatus: "", llmRetry: null })),
 
   clearAfterDone: (sid) => {
     get().sealAllStreaming(sid);
@@ -902,6 +922,7 @@ export const useChatStore = create<ChatState & ChatActions>()((set, get) => ({
       // ran. The `sending` flag is managed independently by setSending(false).
       const patch: Partial<ChatSessionRuntime> = {
         status: "completed",
+        llmRetry: null,
       };
       // Any still-pending dangerous-command confirmations are now stale (the
       // main process auto-rejects them on timeout/turn end), so clear them.

@@ -8,17 +8,25 @@ import { BUILTIN_TASK_DECOMPOSE_PROMPT } from "./task-decompose-prompt.js";
 describe("Agent evidence-first discipline", () => {
   it("uses short deterministic rules instead of exploration prose", () => {
     expect(BUILTIN_AGENT_PROMPT).toContain("## Evidence-first execution discipline");
+    expect(BUILTIN_AGENT_PROMPT).toMatch(/Default to acting/i);
+    expect(BUILTIN_AGENT_PROMPT).toMatch(/Never re-read a file to verify your own apply_patch/i);
+    expect(BUILTIN_AGENT_PROMPT).toMatch(/not a mandatory pre-flight/i);
     expect(BUILTIN_AGENT_PROMPT).toMatch(/exact file\/range/i);
     expect(BUILTIN_AGENT_PROMPT).toMatch(/fresh evidence/i);
     expect(BUILTIN_AGENT_PROMPT).toMatch(/Stop exploration/i);
-    expect(BUILTIN_AGENT_PROMPT).toMatch(/Most tasks require tools/i);
-    expect(BUILTIN_AGENT_PROMPT).toMatch(/not an absolute requirement/i);
+    expect(BUILTIN_AGENT_PROMPT).toMatch(/Tools are a means, not a warm-up/i);
+    expect(BUILTIN_AGENT_PROMPT).toMatch(/Never treat "read more" as the safer default/i);
     expect(BUILTIN_AGENT_PROMPT).toMatch(/follow the current codebase's existing code style/i);
     expect(BUILTIN_AGENT_PROMPT).toMatch(/single responsibility/i);
     expect(BUILTIN_AGENT_PROMPT).toMatch(/Prefer reusing existing code or mature third-party solutions/i);
     expect(BUILTIN_AGENT_PROMPT).toMatch(/unless the user explicitly asks/i);
+    expect(BUILTIN_AGENT_PROMPT).toMatch(/reuse only when the existing code's logic and semantics genuinely fit/i);
+    expect(BUILTIN_AGENT_PROMPT).toMatch(/Never contort the implementation to force reuse/i);
     expect(BUILTIN_AGENT_PROMPT).toMatch(/concise, clear comments/i);
     expect(BUILTIN_AGENT_PROMPT).toMatch(/Map types, document what the keys and values each represent/i);
+    expect(BUILTIN_AGENT_PROMPT).toMatch(/no more than 1 search or exploration call/i);
+    expect(BUILTIN_AGENT_PROMPT).toMatch(/up to 3 only when the target location is genuinely unknown/i);
+    expect(BUILTIN_AGENT_PROMPT).not.toMatch(/at most ~3 exploratory tool calls/i);
   });
 });
 
@@ -40,8 +48,8 @@ describe("task-decompose run_script guidance", () => {
   });
 
   it("keeps code exploration guidance tool-oriented and command-agnostic", () => {
-    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain("read the relevant implementation in one pass");
-    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain("Do not prescribe a search command");
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain("read that implementation in one pass");
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain("give an entry point, not a search command");
     expect(BUILTIN_TASK_DECOMPOSE_PROMPT).not.toContain("rg --files");
     expect(BUILTIN_TASK_DECOMPOSE_PROMPT).not.toContain("先在仓库根目录");
   });

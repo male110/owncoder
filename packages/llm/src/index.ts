@@ -764,6 +764,15 @@ export interface ChatCompletionOpts {
   /** 流式思考增量回调。非流式调用时仍可注册，用于将思考过程
    *  增量发到前端，让用户看到渐进反馈。 */
   onThinkingDelta?: (text: string) => void;
+  /** 失败重试前的通知回调。attempt 为即将开始的第几次重试（从 1 起），
+   *  delayMs 为本次重试前的等待毫秒数，reason 为触发原因（timeout/http/network）。
+   *  用于把「N 秒后重试」透传到界面，避免重试期间一直静默显示为运行中。 */
+  onRetry?: (info: {
+    attempt: number;
+    maxRetries: number;
+    delayMs: number;
+    reason: string;
+  }) => void;
 }
 
 export interface ChatCompletionStreamOpts extends ChatCompletionOpts {
@@ -888,6 +897,12 @@ export async function chatCompletion(
           if (isRetryableStatus(res.status, text) && attempt < maxRetries) {
             const retryDelay = (attempt + 1) * 3000; // 第1次3秒，第2次6秒，第3次9秒
             console.log(`[llm] HTTP ${res.status} error, retrying in ${Math.round(retryDelay)}ms (attempt ${attempt + 1}/${maxRetries})...`);
+            opts?.onRetry?.({
+              attempt: attempt + 1,
+              maxRetries,
+              delayMs: retryDelay,
+              reason: `http_${res.status}`,
+            });
             await delay(retryDelay);
             lastError = err;
             continue; // 重试
@@ -1001,6 +1016,12 @@ export async function chatCompletion(
           if (attempt < maxRetries) {
             const retryDelay = (attempt + 1) * 3000; // 第1次3秒，第2次6秒，第3次9秒
             console.log(`[llm] LLM 请求超时，${Math.round(retryDelay)}ms 后重试 (attempt ${attempt + 1}/${maxRetries})...`);
+            opts?.onRetry?.({
+              attempt: attempt + 1,
+              maxRetries,
+              delayMs: retryDelay,
+              reason: "timeout",
+            });
             await delay(retryDelay);
             lastError = err;
             continue;
@@ -1027,6 +1048,12 @@ export async function chatCompletion(
         if (attempt < maxRetries) {
           const retryDelay = (attempt + 1) * 3000; // 第1次3秒，第2次6秒，第3次9秒
           console.log(`[llm] Request error, retrying in ${Math.round(retryDelay)}ms (attempt ${attempt + 1}/${maxRetries})...`);
+          opts?.onRetry?.({
+            attempt: attempt + 1,
+            maxRetries,
+            delayMs: retryDelay,
+            reason: "network",
+          });
           await delay(retryDelay);
           lastError = err;
           continue;
@@ -1092,6 +1119,12 @@ export async function chatCompletionStream(
           if (attempt < maxRetries) {
             const retryDelay = (attempt + 1) * 3000; // 第1次3秒，第2次6秒，第3次9秒
             console.log(`[llm] Stream 请求超时，${Math.round(retryDelay)}ms 后重试 (attempt ${attempt + 1}/${maxRetries})...`);
+            opts?.onRetry?.({
+              attempt: attempt + 1,
+              maxRetries,
+              delayMs: retryDelay,
+              reason: "timeout",
+            });
             await delay(retryDelay);
             continue;
           }
@@ -1117,6 +1150,12 @@ export async function chatCompletionStream(
         if (attempt < maxRetries) {
           const retryDelay = (attempt + 1) * 3000; // 第1次3秒，第2次6秒，第3次9秒
           console.log(`[llm] Stream request error, retrying in ${Math.round(retryDelay)}ms (attempt ${attempt + 1}/${maxRetries})...`);
+          opts?.onRetry?.({
+            attempt: attempt + 1,
+            maxRetries,
+            delayMs: retryDelay,
+            reason: "network",
+          });
           await delay(retryDelay);
           continue;
         }
@@ -1136,6 +1175,12 @@ export async function chatCompletionStream(
         if (isRetryableStatus(res.status, text) && attempt < maxRetries) {
           const retryDelay = (attempt + 1) * 3000; // 第1次3秒，第2次6秒，第3次9秒
           console.log(`[llm] Stream HTTP ${res.status} error, retrying in ${Math.round(retryDelay)}ms (attempt ${attempt + 1}/${maxRetries})...`);
+          opts?.onRetry?.({
+            attempt: attempt + 1,
+            maxRetries,
+            delayMs: retryDelay,
+            reason: `http_${res.status}`,
+          });
           await delay(retryDelay);
           continue;
         }
@@ -1227,6 +1272,12 @@ export async function chatCompletionStream(
           if (attempt < maxRetries) {
             const retryDelay = (attempt + 1) * 3000; // 第1次3秒，第2次6秒，第3次9秒
             console.log(`[llm] Stream 读取超时，${Math.round(retryDelay)}ms 后重试 (attempt ${attempt + 1}/${maxRetries})...`);
+            opts?.onRetry?.({
+              attempt: attempt + 1,
+              maxRetries,
+              delayMs: retryDelay,
+              reason: "timeout",
+            });
             await delay(retryDelay);
             continue;
           }

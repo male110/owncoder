@@ -7,6 +7,7 @@ import { removeMessage } from "../hooks/queue-controller";
 import type { TabId } from "../SettingsPanel";
 import { ChatLog } from "./ChatLog";
 import { ErrorBanner } from "./ErrorBanner";
+import { LlmRetryNotice } from "./chat-log/LlmRetryNotice";
 import { useI18n } from "../i18n";
 
 
@@ -37,6 +38,7 @@ const EMPTY_RUNTIME: ChatSessionRuntime = {
   askRequests: [],
   status: "idle",
   currentStage: null,
+  llmRetry: null,
   decomposeFailureNotified: false,
   stopping: false,
   pendingDelete: false,
@@ -79,6 +81,7 @@ export function SessionChatPanel({
     queuedMessages,
     liveEvents,
     liveStatus,
+    llmRetry,
     errorAlert,
     stopping,
   } = rt;
@@ -206,6 +209,7 @@ export function SessionChatPanel({
           ) : liveStatus ? (
             <p className="live-status hero-status">{liveStatus}</p>
           ) : null}
+          {llmRetry ? <LlmRetryNotice retry={llmRetry} /> : null}
         </div>
           ) : (
         <>
@@ -234,6 +238,7 @@ export function SessionChatPanel({
             }}
             active={isActive}
             planTasks={planTasks}
+            llmRetry={llmRetry}
           />
         </>
       )}

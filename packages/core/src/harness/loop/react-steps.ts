@@ -93,15 +93,16 @@ export const MAX_REPEAT_TOOL_CALLS = 2;
 /** Hard cap on total tool invocations across the entire loop (fed to termination). */
 export const MAX_TOTAL_TOOL_CALLS = 100;
 
-/** Max consecutive iterations where the model produces ONLY read-only tool calls (no text content).
- *  This catches infinite exploration/browsing loops where the model calls list_dir/read_file
- *  with different paths each time, evading the fingerprint-based repeat detection. */
-export const MAX_CONSECUTIVE_READONLY_ITERS = 6;
+/**
+ * 连续只读迭代硬上限。`0`（默认）= 不限制：读取/搜索是收集证据的手段，
+ * 不应在任务中途把 agent 掐断（历史上的 "read budget is exhausted" 拦截）。
+ * 需要收紧时在 pipeline 的 stuck_detect.maxReadonlyIters 里给一个正整数。
+ * 真正的失控保护仍由 maxRepeat（相同调用指纹）与 maxTotal（总调用数）承担。
+ */
+export const MAX_CONSECUTIVE_READONLY_ITERS = 0;
 /** Soft transition threshold: when consecutive read-only iterations reach this
  *  count, inject a nudge pushing the model from exploration to implementation.
- *  Set to half the hard cap — gives the model a warning before checkTermination.
- *  This directly addresses the "总中断" bug where the agent keeps exploring
- *  without transitioning to implementation. */
+ *  纯提示，不阻断：只在硬上限开启（maxReadonlyIters > 0）时生效。 */
 export const READONLY_TRANSITION_THRESHOLD = 3;
 
 // READONLY_TOOLS 已迁移到 enhanced-tools.ts：从各工具定义的 readOnly 标记派生，

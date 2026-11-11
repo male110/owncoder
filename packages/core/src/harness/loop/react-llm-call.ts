@@ -85,6 +85,8 @@ export async function callModelForIteration(
           taskId: ctx.opts.sessionId,
           onDelta: (text: string) => { currentTurnAccumulated = applyStreamSnapshot(currentTurnAccumulated, text); ctx.opts.onEvent?.({ type: "assistant_delta", text }); },
           onThinkingDelta: (text: string) => ctx.opts.onEvent?.({ type: "thinking_delta", text }),
+          // LLM 层内部重试（超时/网络/可重试 HTTP）也要让用户看到倒计时
+          onRetry: (info) => ctx.opts.onEvent?.({ type: "llm_retry", ...info }),
           thinking: ctx.thinking,
         });
         // 空白响应兜底：模型既没有返回文本内容、也没有返回任何工具调用时，
@@ -104,6 +106,13 @@ export async function callModelForIteration(
           attempt,
           error: err.message,
           delayMs: delay,
+        });
+        ctx.opts.onEvent?.({
+          type: "llm_retry",
+          attempt,
+          maxRetries: ctx.llmMaxRetries,
+          delayMs: delay,
+          reason: err.message,
         });
       },
     );

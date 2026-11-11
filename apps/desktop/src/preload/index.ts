@@ -132,6 +132,8 @@ type ChatEventFields =
   | { type: "stage_start"; id: string; nodeType: string; label: string }
   | { type: "stage_done"; id: string; nodeType: string; label: string; ok?: boolean; report?: string }
   | ({ type: "task_decomposition" } & TaskDecompositionDto)
+  /** LLM 调用失败、等待重试。attempt 从 1 起，delayMs 为重试前等待毫秒数。 */
+  | { type: "llm_retry"; attempt: number; maxRetries: number; delayMs: number; reason: string }
   | { type: "error"; message: string }
   | { type: "warning"; message: string }
   | { type: "done"; assistantText: string }

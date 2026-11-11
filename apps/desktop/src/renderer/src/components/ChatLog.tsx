@@ -2,7 +2,7 @@ import { useMemo, useState, useEffect, useRef, useCallback } from "react";
 import { Virtuoso } from "react-virtuoso";
 import type { VirtuosoHandle } from "react-virtuoso";
 import type { ChatTurnDto, TaskItemDto } from "../../../preload/index";
-import type { LiveEvent } from "../store/chat-store";
+import type { LiveEvent, LlmRetryState } from "../store/chat-store";
 import { useI18n } from "../i18n";
 import {
   buildChatItems,
@@ -18,6 +18,7 @@ import {
 import { AssistantBubble } from "./chat-log/AssistantBubble";
 import { DecomposeCard } from "./chat-log/DecomposeCard";
 import { LiveEventStream } from "./chat-log/LiveEventStream";
+import { LlmRetryNotice } from "./chat-log/LlmRetryNotice";
 import { ProcessSteps } from "./chat-log/ProcessSteps";
 import { UserBubble } from "./chat-log/UserBubble";
 import { useCopyMenu } from "./chat-log/useCopyMenu";
@@ -62,6 +63,8 @@ interface Props {
   active?: boolean;
   /** 会话活动计划的任务（含执行状态），供任务分解卡片联动执行进度。 */
   planTasks?: TaskItemDto[];
+  /** 等待中的 LLM 失败重试；非空时在实时状态行展示倒计时。 */
+  llmRetry?: LlmRetryState | null;
 }
 
 export function ChatLog({
@@ -81,6 +84,7 @@ export function ChatLog({
   scrollerRef,
   active = true,
   planTasks,
+  llmRetry = null,
 }: Props) {
   const { t } = useI18n();
   const blocks = useMemo(
@@ -151,6 +155,7 @@ export function ChatLog({
   );
   const showLiveFooter =
     Boolean(derivedStatus) ||
+    llmRetry !== null ||
     decompositionCards.length > 0 ||
     nonDecomposeLiveEvents.length > 0;
 
@@ -426,6 +431,7 @@ export function ChatLog({
         />
         {showLiveFooter ? (
           <div className="chat-log-live-footer">
+            {llmRetry ? <LlmRetryNotice retry={llmRetry} /> : null}
             {derivedStatus ? (
               <div className={`chat-log-status${sending ? " sending" : ""}`}>
                 {sending ? <span className="tool-spinner" aria-hidden /> : null}

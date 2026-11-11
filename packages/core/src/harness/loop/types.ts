@@ -75,6 +75,12 @@ type TurnEventFields =
       /** True when the LLM call failed and the shown plan is a local heuristic fallback. */
       fallback: boolean;
     }
+  /**
+   * LLM 调用失败且即将重试。用于把「N 秒后重试」透传到界面，
+   * 避免重试等待期间界面一直静默显示为运行中。
+   * attempt 从 1 起；delayMs 为本次重试前的等待毫秒数。
+   */
+  | { type: "llm_retry"; attempt: number; maxRetries: number; delayMs: number; reason: string }
   | { type: "error"; message: string }
   /** Non-fatal problem the user should know about; the turn keeps running. */
   | { type: "warning"; message: string }

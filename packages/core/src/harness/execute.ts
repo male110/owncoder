@@ -92,7 +92,7 @@ export async function executeTool(ctx: ToolContext, call: ParsedToolCall): Promi
   const budget = ctx.budget;
   if (budget) {
     const charge = budget.chargeTool(name, ctx.nestedToolCall === true);
-    if (!charge.ok) return fail(`Budget exhausted before ${name}: ${charge.reason ?? "tool call limit"}`);
+    if (!charge.ok) return fail(`Tool budget exhausted before ${name}: ${charge.reason ?? "tool call limit"}`);
   }
 
   // Emit a live status entry so the UI shows "reading/writing file" progress
@@ -111,26 +111,6 @@ export async function executeTool(ctx: ToolContext, call: ParsedToolCall): Promi
 
   try {
     const rawResult = await runTool(ctx, call);
-    if (
-      ctx.budget &&
-      rawResult.ok &&
-      (rawResult.metadata?.kind === "read_file" || rawResult.metadata?.kind === "read_outline")
-    ) {
-      const readCharge = ctx.budget.chargeRead(Buffer.byteLength(rawResult.output, "utf8"));
-      if (!readCharge.ok) {
-        const denied = fail(`Budget exhausted after ${name}: ${readCharge.reason ?? "read budget"}`);
-        if (status && ctx.onTerminal) {
-          ctx.onTerminal({
-            id: termId,
-            command: status.command,
-            status: "error",
-            stderr: denied.output.slice(0, 4000),
-            at: new Date().toISOString(),
-          } as TerminalEntry);
-        }
-        return denied;
-      }
-    }
     // If the underlying operation completed just after cancellation, do not
     // allow its result to drive another model iteration.
     const result = ctx.signal?.aborted
@@ -281,7 +261,7 @@ async function runTool(ctx: ToolContext, call: ParsedToolCall): Promise<ToolResu
           },
         );
       case "graph_search":
-        return await toolGraphSearch(ctx, str(args.query), num(args.depth, 2));
+        return await toolGraphSearch(ctx, str(args.query), num(args.depth, 1));
       case "search_code":
       case "search_symbols":
         return await toolSearchSymbols(ctx, str(args.query || args.pattern), num(args.limit, 20));

@@ -13,6 +13,8 @@ const FORCE_FLUSH_EVENT_TYPES = new Set<ChatEventDto["type"]>([
   "error",
   "warning",
   "task_run_state",
+  // 重试倒计时必须立即到达渲染端，否则等待期间界面仍是「思考中…」。
+  "llm_retry",
 ]);
 
 interface BufferedSessionState {

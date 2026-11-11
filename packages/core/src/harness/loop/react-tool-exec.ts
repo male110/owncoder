@@ -300,8 +300,8 @@ function recordExplorationSkippedCall(ctx: ReActLoopContext, call: ParsedToolCal
  * 读→写→读→写 的正常节奏不受影响。
  */
 function recordReadonlyCapSkippedCall(ctx: ReActLoopContext, call: ParsedToolCall, id: string): void {
-  const output = `Skipped: the read budget is exhausted (${ctx.maxConsecutiveReadonlyIters} consecutive read-only iterations). ` +
-    "Do not read, search, or list again. Act on the evidence already in context: apply the edit, run the specified verification, or report the result.";
+  const output = `Skipped: read-only iteration cap reached (${ctx.maxConsecutiveReadonlyIters} consecutive read-only iterations). ` +
+    "This is a loop-safety limit, not a file-read cap. Do not read, search, or list again. Act on the evidence already in context: apply the edit, run the specified verification, or report the result.";
   ctx.opts.onEvent?.({ type: "tool_start", id, name: call.name, args: call.arguments });
   ctx.messages.push({ role: "tool", tool_call_id: id, name: call.name, content: output });
   ctx.history.push({ role: "tool", id, content: output, toolName: call.name, toolArgs: call.arguments });
@@ -448,8 +448,10 @@ export async function executeIterationTools(
   let ti = 0;
   while (ti < calls.length) {
     if (ctx.documentDelivered || ctx.handoffRequested) break;
-    // 连续只读硬上限：超过预算的只读调用一律拦截，交回模型强制转入实施。
+    // 连续只读硬上限：maxConsecutiveReadonlyIters <= 0 表示「不限制」（默认）。
+    // 只有显式配置正整数时才机械拦截，避免把正常的多轮证据收集误判为失控。
     if (
+      ctx.maxConsecutiveReadonlyIters > 0 &&
       ctx.consecutiveReadonlyIters >= ctx.maxConsecutiveReadonlyIters &&
       READONLY_TOOLS.has(calls[ti]!.name)
     ) {
@@ -458,8 +460,9 @@ export async function executeIterationTools(
       ti++;
       continue;
     }
-    // 同文件重复读上限：内容已在上下文，第 N+1 次读取拦截。
-    if (SOURCE_READ_TOOLS.has(calls[ti]!.name)) {
+    // 同文件重复读上限：maxSameFileReads <= 0 表示「不限制」（默认）。
+    // 开启后，内容已在上下文、第 N+1 次读取才拦截。
+    if (SOURCE_READ_TOOLS.has(calls[ti]!.name) && ctx.maxSameFileReads > 0) {
       const pathKey = readPathKey(ctx, String(calls[ti]!.arguments?.file_path ?? calls[ti]!.arguments?.path ?? ""));
       if (pathKey && (ctx.sameFileReads.get(pathKey) ?? 0) >= ctx.maxSameFileReads) {
         recordSameFileCapSkippedCall(ctx, calls[ti]!, openaiCalls[ti]!.id, pathKey);
@@ -522,7 +525,7 @@ export async function executeIterationTools(
   if (skippedReadonlyCap) {
     ctx.messages.push({
       role: "system",
-      content: `The read budget is exhausted (${ctx.maxConsecutiveReadonlyIters} consecutive read-only iterations). Reading more will not help: the answer must come from the evidence already in this context. Apply the edit, run the task's specified verification, or report what is blocking the result.`,
+      content: `Read-only iteration cap reached (${ctx.maxConsecutiveReadonlyIters} consecutive read-only iterations). This is a loop-safety limit, not a file-read cap. Reading more will not help: the answer must come from the evidence already in this context. Apply the edit, run the task's specified verification, or report what is blocking the result.`,
     });
   }
 

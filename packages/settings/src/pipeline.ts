@@ -255,7 +255,9 @@ export function defaultReactSteps(): ReactStepConfig[] {
     { id: "budget_check", enabled: true, params: { startIter: 6, interval: 3, maxChars: 24000 } },
     { id: "llm_call", enabled: true, params: { maxRetries: 2 } },
     { id: "parse_response", enabled: true, params: {} },
-    { id: "stuck_detect", enabled: true, params: { maxRepeat: 2, maxReadCount: 3, maxReadonlyIters: 6 } },
+    // maxReadonlyIters / maxReadCount 默认 0 = 不限制读取。
+    // 读取是收集证据的手段，不应在任务中途掐断；失控保护交给 maxRepeat（相同指纹）。
+    { id: "stuck_detect", enabled: true, params: { maxRepeat: 2, maxReadCount: 0, maxReadonlyIters: 0 } },
     { id: "tool_cap", enabled: true, params: { maxTotal: 200 } },
     { id: "git_snapshot", enabled: true, params: {} },
     { id: "tool_exec", enabled: true, params: { parallel: true } },

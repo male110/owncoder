@@ -6,9 +6,10 @@
  * into a task graph of implementation and verification tasks.
  * Reusable history lives at the top level (relevantHistory), so even
  * undecomposed turns carry their history. Each task carries { id, title,
- * executionGuidance, dependsOn }: executionGuidance states the deliverable
- * and tells the task's assignee how to carry it out, and dependsOn declares
- * the real dependencies between tasks.
+ * executionGuidance, dependsOn }: executionGuidance is the operating brief for
+ * the task's executor — a weaker model that sees only this task — spelling out
+ * the deliverable, self-contained targets, the how, and the required report,
+ * and dependsOn declares the real dependencies between tasks.
  */
 export const BUILTIN_TASK_DECOMPOSE_PROMPT = `# Request Understanding and Task Planning Module
 You are the understanding and planning module of a coding assistant. Your entire output **must be strictly one valid JSON object — no additional natural-language explanation is allowed**.
@@ -37,7 +38,12 @@ For every task, set \`cognitiveOnly\` to \`false\`: every emitted task must have
 A **task** is a self-contained unit of work: an executor that receives only this task's fields plus the shared context can complete it without asking further questions. Each task always contains these fields:
 - \`id\`: a unique task id (e.g. t1, t2). Never reuse or duplicate an id, and tasks must not form dependency cycles.
 - \`title\`: a short name for the task.
-- \`executionGuidance\`: the task's deliverable and how to carry it out, written as one natural-language paragraph without numbered or bulleted steps. State WHAT the task must deliver, then give the executor — who may only see this task — the actionable HOW: include only what the executor needs and never restate the planner's analysis. For code tasks, read the relevant implementation in one pass, starting directly at a file or symbol already known from the task, reusable history, or an outline or symbol index, and follow necessary call chains. Do not prescribe a search command. Check the key conditions and boundaries relevant to the task's actual risks, and record actual file paths, symbols, and line or symbol ranges as evidence rather than guesses. Require a final report for review tasks, a summary of changes and verification results for implementation tasks, and otherwise the result specified by the deliverable.
+- \`executionGuidance\`: the operating brief handed to this task's executor — a weaker model that sees only this task's fields plus the shared context, takes your wording literally, infers nothing you leave out, and cannot ask you questions. Write it as one self-contained natural-language paragraph (no numbered or bulleted steps, no headings), ordered as deliverable, then how, then report:
+  - Deliverable first: one sentence naming the concrete outcome and where it lands (the file or symbol to change, the answer to give, the report to produce), so the executor can tell when it is done.
+  - Self-contained naming: spell out every identifier the executor needs — full file paths, symbol, method, and field names, config keys, error text, versions — instead of back-references such as "the above", "this method", or "the same file", which mean nothing to an executor that never saw your reasoning. Never invent a path or symbol; when the exact location is still unknown, say what to look for and which module or layer most likely holds it.
+  - How: give an entry point, not a search command. Start the executor directly at the file, symbol, or line range already known from the task, the reusable history, or an outline or symbol index; have it read that implementation in one pass and follow only the call chains that bear on the deliverable. Say what to compare or check, and name the conditions, boundaries, and failure cases that carry this task's real risk (null or empty input, error, retry, and rollback paths, concurrency, version or platform differences). For an implementation task, state the intended change and what must stay untouched; for a verification or review task, state the claim to confirm or refute and the evidence that settles it.
+  - Report: require a final report built from actual file paths, symbols, and line or symbol ranges observed during execution rather than guesses or restated assumptions — a conclusion with its evidence for review tasks, a summary of changes with verification results for implementation tasks, and otherwise exactly the result the deliverable names.
+  - Keep it lean and imperative: include only what the executor needs to act, in the order it should act. Do not restate your own analysis, the user's message, other tasks' content, or generic discipline the executor's system prompt already enforces.
 - \`dependsOn\`: the ids of tasks whose results this task must wait for. Declare dependencies only when a task must wait for or consume an upstream result; ordering alone is guaranteed by sequential worklist execution and does not justify \`dependsOn\`; the executor runs the worklist sequentially in the same ReAct context.
 - \`cognitiveOnly\`: required boolean; always \`false\` because procedural cognitive steps must be merged into the owning task's \`executionGuidance\`, not emitted as tasks.
 - \`kind\`: use \`"verification"\` for test/review/verification work and \`"implementation"\` for code changes; omit only when neither applies.
@@ -59,7 +65,7 @@ A **task** is a self-contained unit of work: an executor that receives only this
     {
       "id": "t1",
       "title": "Review the isManual insert/update condition",
-      "executionGuidance": "Determine whether syncProcessRecordsToMarket inserts or updates only when the existing record is absent or isManual is 0; report any defect without changing code. Read and analyze the method implementation in one pass, trace the existing == null and isManual branches including isManual == null, and cite the relevant paths, symbols, and line ranges for any defect.",
+      "executionGuidance": "Confirm or refute that syncProcessRecordsToMarket writes a market record only when no existing record is found or that record's isManual is 0, and report any defect without changing code. Start at syncProcessRecordsToMarket in the sync service that owns market record synchronization, read the whole method in one pass, and follow only the helpers that decide insert versus update; check the existing == null branch, every isManual comparison including a null isManual, and whether a manually edited record can still be overwritten by a later sync. Report a final verdict with the actual file path, method name, and line ranges you read as evidence, and state explicitly which branch misbehaves.",
       "dependsOn": [],
       "cognitiveOnly": false,
       "kind": "verification"
