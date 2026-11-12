@@ -14,7 +14,7 @@ import type { ThinkingConfig } from "./thinking.js";
 import type { ModelRef } from "./model-ref.js";
 
 export type { ChatMessage, ChatAttachment, ChatResponse, ToolCall, ToolDef } from "./types.js";
-export type { ApiFormat } from "./protocol/types.js";
+export type { ApiFormat, ListedModel, ModelListPage } from "./protocol/types.js";
 export { API_FORMATS, isApiFormat } from "./protocol/types.js";
 export { resolveApiFormat, isOfficialAnthropicHost } from "./protocol/resolve.js";
 export { getCodec } from "./protocol/registry.js";
@@ -688,6 +688,23 @@ export class LlmTimeoutError extends Error {
   }
 }
 
+/**
+ * 响应体解析/解码失败（JSON 语法错误、协议字段缺失、网关把错误塞进 200 响应体）。
+ * 这类失败由服务端返回内容决定，重试同一请求只会得到同样的结果，
+ * 因此必须立即抛出，不能走网络错误的退避重试路径。
+ */
+export class LlmDecodeError extends Error {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
+    this.name = "LlmDecodeError";
+  }
+}
+
+/** 判断错误是否为响应体解码失败（不可重试）。 */
+export function isLlmDecodeError(e: unknown): boolean {
+  return e instanceof LlmDecodeError || (e instanceof Error && e.name === "LlmDecodeError");
+}
+
 /** 判断错误是否为我方不活跃超时（含被 AbortError/普通 Error 包装的情况）。 */
 export function isLlmTimeoutError(e: unknown): boolean {
   if (e instanceof LlmTimeoutError) return true;
@@ -933,7 +950,10 @@ export async function chatCompletion(
         try {
           json = JSON.parse(rawText);
         } catch (parseErr) {
-          const err = parseErr instanceof Error ? parseErr : new Error(String(parseErr));
+          const err = new LlmDecodeError(
+            parseErr instanceof Error ? parseErr.message : String(parseErr),
+            { cause: parseErr },
+          );
           writeCallLog({
             seq,
             timestamp: timestampStr(),
@@ -957,7 +977,10 @@ export async function chatCompletion(
         try {
           decoded = codec.decodeResponse(json);
         } catch (e) {
-          const err = e instanceof Error ? e : new Error(String(e));
+          const err = new LlmDecodeError(
+            e instanceof Error ? e.message : String(e),
+            { cause: e },
+          );
           writeCallLog({
             seq,
             timestamp: timestampStr(),
@@ -1009,6 +1032,11 @@ export async function chatCompletion(
           throw e;
         }
         const err = e instanceof Error ? e : new Error(String(e));
+
+        // 响应体解码失败：服务端内容决定，重试无意义，立即抛出
+        if (isLlmDecodeError(err)) {
+          throw err;
+        }
 
         // 我方不活跃超时：视为临时故障，按指数退避重试。
         // cs.signal.aborted 兜底某些 Node 版本把 abort reason 包装成 AbortError 的情况。
@@ -1334,14 +1362,17 @@ export async function chatCompletionStream(
           continue; // 重试整个请求
         }
         
+        // 空流是服务端偶发故障，保留普通 Error（可被上层退避重试）；
+        // 其余 finish() 失败都是响应体解码问题，包成 LlmDecodeError，
+        // 让 harness 层的 withRetry 识别为不可重试并立即抛出。
         const err = empty
           ? new Error(
               `Stream completed but received no content, tool_calls, or finish_reason from ${ref.model} (empty stream). ` +
                 `This may indicate a server-side issue with the model deployment or streaming compatibility.`,
             )
-          : e instanceof Error
-            ? e
-            : new Error(String(e));
+          : isLlmDecodeError(e)
+            ? (e as Error)
+            : new LlmDecodeError(e instanceof Error ? e.message : String(e), { cause: e });
         writeCallLog({
           seq,
           timestamp: timestampStr(),

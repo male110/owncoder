@@ -1,5 +1,5 @@
 import type { ChatChoiceMessage, ChatMessage, ChatResponse, ToolCall } from "../types.js";
-import type { ListedModel, ProtocolCodec, ProtocolEncodeInput, StreamHandlers, StreamParser } from "./types.js";
+import type { ListedModel, ModelListPage, ProtocolCodec, ProtocolEncodeInput, StreamHandlers, StreamParser } from "./types.js";
 import { normalizeApiBaseUrl } from "./url.js";
 
 function messageContent(message: ChatMessage): unknown {
@@ -211,7 +211,16 @@ export const openaiResponsesCodec: ProtocolCodec = {
   listModelsUrl(baseUrl: string): string { return new URL("models", normalizeApiBaseUrl(baseUrl)).toString(); },
   listModelsHeaders(apiKey: string | undefined): Record<string, string> { return this.buildHeaders(apiKey); },
   parseModelList(json: unknown): ListedModel[] {
-    const data = json as { data?: Array<{ id: string; name?: string }>; models?: Array<{ id: string; name?: string }> };
-    return (data.data ?? data.models ?? []).map((model) => ({ id: model.id, name: model.name || model.id }));
+    // 同 openai-chat：过滤掉缺少有效 id 的条目，避免 undefined id 污染设置存储。
+    const data = typeof json === "object" && json !== null ? (json as ModelListPage) : {};
+    const raw = data.data ?? data.models ?? [];
+    if (!Array.isArray(raw)) return [];
+    return raw
+      .filter((model) => typeof model?.id === "string" && model.id.trim().length > 0)
+      .map((model) => ({
+        id: model.id,
+        name: model.name || model.display_name || model.id,
+        ...(model.display_name ? { display_name: model.display_name } : {}),
+      }));
   },
 };

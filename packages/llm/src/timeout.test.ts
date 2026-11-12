@@ -125,10 +125,13 @@ describe("chatCompletion timeout handling", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const promise = chatCompletion(ref, messages, { timeout: 20_000 });
+    // 先挂上 rejection handler，再推进定时器：否则 promise 在 advance 期间
+    // 拒绝时无人接管，Node 会报 unhandled rejection。
+    const assertion = expect(promise).rejects.toThrow(/LLM request timed out after 20s without activity/);
     // 4 次尝试（20s 各）+ 3/6/9s 退避
     await vi.advanceTimersByTimeAsync(4 * 20_000 + 3_000 + 6_000 + 9_000 + 1_000);
 
-    await expect(promise).rejects.toThrow(/LLM request timed out after 20s without activity/);
+    await assertion;
     expect(fetchMock).toHaveBeenCalledTimes(4);
   });
 });

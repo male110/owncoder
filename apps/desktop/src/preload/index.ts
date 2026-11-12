@@ -647,12 +647,15 @@ export interface DesktopApi {
   onWorkspaceRestored: (
     handler: (ev: { root: string; name: string; sessionRestored: boolean }) => void,
   ) => () => void;
-  /** Fetch available models from a provider endpoint. */
+  /** Fetch available models from a provider endpoint (cursor-paginated pages merged). */
   fetchModelList: (
     baseUrl: string,
     apiKey?: string,
     apiFormat?: "openai-chat" | "openai-responses" | "anthropic-messages" | "google-gemini",
-  ) => Promise<{ ok: true; models: { id: string; name: string }[] } | { ok: false; error: string }>;
+  ) => Promise<
+    | { ok: true; models: { id: string; name: string; display_name?: string }[] }
+    | { ok: false; error: string }
+  >;
   /** Notify the main process that the settings panel opened/closed. */
   setSettingsPanelOpen: (open: boolean) => void;
   /** Sync frameless window chrome (titleBarOverlay / background) with UI theme. */

@@ -35,6 +35,24 @@ export interface StreamParser {
 export interface ListedModel {
   id: string;
   name: string;
+  /** 展示名（部分接口返回 display_name / displayName）；缺省时回退 name。 */
+  display_name?: string;
+}
+
+/**
+ * `GET /v1/models` 的分页响应体（OpenAI / Anthropic 风格的游标分页）。
+ * `data` 与 `models` 二者取其一承载模型数组；游标字段用于循环拉取全部页：
+ * 以 `last_id` 作为下一页的 `after` 游标，直到 `has_more === false`。
+ */
+export interface ModelListPage {
+  data?: ListedModel[];
+  models?: ListedModel[];
+  /** 本页首个模型 id。 */
+  first_id?: string;
+  /** 本页末个模型 id，作为下一页 `after` 游标。 */
+  last_id?: string;
+  /** 是否还有下一页。 */
+  has_more?: boolean;
 }
 
 export interface ProtocolCodec {

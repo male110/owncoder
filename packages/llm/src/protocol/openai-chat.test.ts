@@ -23,15 +23,15 @@ describe("openaiChatCodec", () => {
     expect(openaiChatCodec.buildUrl("https://api.openai.com/v1")).toBe(
       "https://api.openai.com/v1/chat/completions",
     );
-    // 无版本后缀时自动补 /v1；已有 /v1 不重复
+    // baseUrl 原样拼接协议路径：版本段由配置提供，不自动补 /v1
     expect(openaiChatCodec.buildUrl("https://api.openai.com")).toBe(
-      "https://api.openai.com/v1/chat/completions",
+      "https://api.openai.com/chat/completions",
     );
     expect(openaiChatCodec.buildUrl("https://api.openai.com/v1/")).toBe(
       "https://api.openai.com/v1/chat/completions",
     );
     expect(openaiChatCodec.listModelsUrl("https://api.openai.com")).toBe(
-      "https://api.openai.com/v1/models",
+      "https://api.openai.com/models",
     );
     expect(openaiChatCodec.listModelsUrl("https://api.openai.com/v1")).toBe(
       "https://api.openai.com/v1/models",
@@ -224,5 +224,29 @@ describe("openaiChatCodec", () => {
         models: [{ id: "llama3" }],
       }),
     ).toEqual([{ id: "llama3", name: "llama3" }]);
+    // display_name 可选：存在时透传，缺失时不产生该字段（不破坏 toEqual 断言）
+    expect(
+      openaiChatCodec.parseModelList({
+        data: [{ id: "deepseek-chat", name: "deepseek-chat", display_name: "DeepSeek V4 Flash" }],
+      }),
+    ).toEqual([{ id: "deepseek-chat", name: "deepseek-chat", display_name: "DeepSeek V4 Flash" }]);
+    expect(
+      openaiChatCodec.parseModelList({
+        data: [{ id: "m" }],
+      }),
+    ).toEqual([{ id: "m", name: "m" }]);
+  });
+
+  it("drops model entries without a usable id (Ollama /api/tags shape)", () => {
+    // 只有 name 没有 id 的条目必须被过滤，否则 undefined id 会写入设置存储并触发 zod 失败
+    expect(
+      openaiChatCodec.parseModelList({
+        models: [{ name: "llama3:latest" }, { id: "qwen2.5", name: "Qwen 2.5" }, { id: "   " }],
+      }),
+    ).toEqual([{ id: "qwen2.5", name: "Qwen 2.5" }]);
+    // 非对象 / 数组形状异常时返回空列表而不是抛错
+    expect(openaiChatCodec.parseModelList(null)).toEqual([]);
+    expect(openaiChatCodec.parseModelList("nope")).toEqual([]);
+    expect(openaiChatCodec.parseModelList({ data: "not-an-array" })).toEqual([]);
   });
 });

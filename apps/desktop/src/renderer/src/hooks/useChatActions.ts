@@ -6,6 +6,7 @@
  * Reads from stores; dispatches IPC calls; writes back to stores.
  */
 import { useCallback, useEffect, useRef } from "react";
+import { modelDisplayName } from "@owncoder/settings";
 import { customConfirm } from "../utils/customConfirm";
 import { useChatStore } from "../store/chat-store";
 import { useSessionStore } from "../store/session-store";
@@ -891,7 +892,7 @@ export function useChatActions(deps: {
       );
       config.selectedModels = [model, ...others];
       await window.owncoder.saveSettings(config);
-      session.setModelLabel(model.name);
+      session.setModelLabel(modelDisplayName(model));
       session.setAvailableModels(config.selectedModels);
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps

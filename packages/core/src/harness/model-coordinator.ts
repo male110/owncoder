@@ -10,7 +10,7 @@
  * a single identical model and their results discarded).
  */
 
-import { isLlmTimeoutError } from "@owncoder/llm";
+import { isLlmDecodeError, isLlmTimeoutError } from "@owncoder/llm";
 
 // ── Types ──────────────────────────────────────────────────
 
@@ -155,6 +155,9 @@ export async function withRetry<T>(
       // 临时故障，按指数退避重试；其余 AbortError（如调用方真正的取消）
       // 不重试。
       if (lastError.name === "AbortError" && !isLlmTimeoutError(lastError)) throw lastError;
+      // 响应体解码失败由服务端返回内容决定，重试同一请求只会得到同样结果，
+      // 立即抛出不进退避重试。
+      if (isLlmDecodeError(lastError)) throw lastError;
       if (attempt === p.maxRetries) break;
 
       // Check if retryable based on HTTP status.

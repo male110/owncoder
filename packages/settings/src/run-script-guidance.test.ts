@@ -7,15 +7,14 @@ import { BUILTIN_TASK_DECOMPOSE_PROMPT } from "./task-decompose-prompt.js";
 // 系统提示词不再重复路由散文。此处锁住"不再回潮"。
 describe("Agent evidence-first discipline", () => {
   it("uses short deterministic rules instead of exploration prose", () => {
-    expect(BUILTIN_AGENT_PROMPT).toContain("## Evidence-first execution discipline");
-    expect(BUILTIN_AGENT_PROMPT).toMatch(/Default to acting/i);
-    expect(BUILTIN_AGENT_PROMPT).toMatch(/Never re-read a file to verify your own apply_patch/i);
-    expect(BUILTIN_AGENT_PROMPT).toMatch(/not a mandatory pre-flight/i);
-    expect(BUILTIN_AGENT_PROMPT).toMatch(/exact file\/range/i);
-    expect(BUILTIN_AGENT_PROMPT).toMatch(/fresh evidence/i);
-    expect(BUILTIN_AGENT_PROMPT).toMatch(/Stop exploration/i);
-    expect(BUILTIN_AGENT_PROMPT).toMatch(/Tools are a means, not a warm-up/i);
-    expect(BUILTIN_AGENT_PROMPT).toMatch(/Never treat "read more" as the safer default/i);
+    expect(BUILTIN_AGENT_PROMPT).toContain("## Minimal reading discipline");
+    expect(BUILTIN_AGENT_PROMPT).toMatch(/Act first/i);
+    expect(BUILTIN_AGENT_PROMPT).toMatch(/end the exploration/i);
+    expect(BUILTIN_AGENT_PROMPT).toMatch(/Reuse what is already in context/i);
+    expect(BUILTIN_AGENT_PROMPT).toMatch(/analyze from it instead of re-reading/i);
+    expect(BUILTIN_AGENT_PROMPT).toMatch(/Tool responses confirm edits/i);
+    expect(BUILTIN_AGENT_PROMPT).toMatch(/do not re-read the file to verify your own change/i);
+    expect(BUILTIN_AGENT_PROMPT).toMatch(/read_outline/i);
     expect(BUILTIN_AGENT_PROMPT).toMatch(/follow the current codebase's existing code style/i);
     expect(BUILTIN_AGENT_PROMPT).toMatch(/single responsibility/i);
     expect(BUILTIN_AGENT_PROMPT).toMatch(/Prefer reusing existing code or mature third-party solutions/i);
@@ -24,9 +23,10 @@ describe("Agent evidence-first discipline", () => {
     expect(BUILTIN_AGENT_PROMPT).toMatch(/Never contort the implementation to force reuse/i);
     expect(BUILTIN_AGENT_PROMPT).toMatch(/concise, clear comments/i);
     expect(BUILTIN_AGENT_PROMPT).toMatch(/Map types, document what the keys and values each represent/i);
-    expect(BUILTIN_AGENT_PROMPT).toMatch(/no more than 1 search or exploration call/i);
-    expect(BUILTIN_AGENT_PROMPT).toMatch(/up to 3 only when the target location is genuinely unknown/i);
+    // 精简后不得回潮成冗长的探索散文
     expect(BUILTIN_AGENT_PROMPT).not.toMatch(/at most ~3 exploratory tool calls/i);
+    expect(BUILTIN_AGENT_PROMPT).not.toContain("## Evidence-first execution discipline");
+    expect(BUILTIN_AGENT_PROMPT).not.toContain("## Output format (Markdown)");
   });
 });
 

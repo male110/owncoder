@@ -1,4 +1,5 @@
 import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { modelDisplayName } from "@owncoder/settings";
 import { useI18n } from "../i18n";
 import type { ComposerProps } from "./composer/types";
 import { useComposerTextarea } from "./composer/useComposerTextarea";
@@ -192,7 +193,7 @@ function ComposerImpl({
               onOpenChange={setReactMenuOpen}
               groupedModels={groupedModels}
               availableModels={availableModels}
-              label={reactSelectedModel?.name || t("选择模型")}
+              label={reactSelectedModel ? modelDisplayName(reactSelectedModel) : t("选择模型")}
               variant="react"
               initialProviderId={reactProviderId}
               isSelected={(m) => m.providerId === reactProviderId && (m.name === reactModelId || m.id === reactModelId)}

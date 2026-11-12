@@ -5,6 +5,6 @@
  */
 export type { ModelRef } from "./model-ref.js";
 export type { ThinkingConfig, ThinkingEffort } from "./thinking.js";
-export type { ApiFormat } from "./protocol/types.js";
+export type { ApiFormat, ListedModel, ModelListPage } from "./protocol/types.js";
 export { API_FORMATS, isApiFormat } from "./protocol/types.js";
 export { resolveApiFormat, isOfficialAnthropicHost } from "./protocol/resolve.js";

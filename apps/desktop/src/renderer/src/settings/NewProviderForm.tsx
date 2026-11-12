@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { type ApiFormat, type Provider } from "@owncoder/settings";
+import { listedModelToEntry, type ApiFormat, type Provider } from "@owncoder/settings";
 import { useI18n } from "../i18n";
 
 export function NewProviderForm({
@@ -29,11 +29,10 @@ export function NewProviderForm({
         setFetchError(result.error ?? tr("未知错误"));
         return;
       }
-      const models = (result.models ?? []).map((m: { id: string; name: string }) => ({
-        id: m.id,
-        name: m.name || m.id,
-        providerId: providerId,
-      }));
+      // name 是请求用的模型 id，展示名放 displayName（providerId 属于 selectedModels，此处不需要）。
+      const models = (result.models ?? []).map((m: { id: string; name: string; display_name?: string }) =>
+        listedModelToEntry({ id: m.id, name: m.name || m.id, ...(m.display_name ? { display_name: m.display_name } : {}) }),
+      );
       onDone({
         id: providerId,
         name: name.trim() || new URL(baseUrl).hostname,

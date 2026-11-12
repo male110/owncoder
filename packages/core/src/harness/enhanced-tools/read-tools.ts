@@ -135,7 +135,7 @@ export const READ_TOOL_DEFS: ToolDef[] = [
     function: {
       name: "search_semantic",
       description:
-        "Keyword-driven vector search over embedded code chunks. Returns ranked vector hits with paths, line ranges, symbols, scores, and excerpts; does not perform exact symbol search or grep fallback. Prefer concise queries containing target keywords (identifiers, API names, domain terms) rather than long prose. Pick one search tool, not both: use this for keyword/semantic queries; use search_symbols when you already have the exact symbol name.",
+        "Keyword-driven vector search over embedded code chunks — the search target is code. Use concise keyword queries (identifiers, API names, domain terms) rather than long prose or whole code blocks. Example: `LlmRetryState retry`. Returns ranked hits with paths, line ranges, symbols, scores, and excerpts; does not perform exact symbol search or grep fallback. Use search_symbols when you already have the exact symbol name.",
       parameters: {
         type: "object",
         properties: {

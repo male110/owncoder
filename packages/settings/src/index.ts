@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import type { ModelRef } from "@owncoder/llm/browser";
+import type { ListedModel, ModelRef } from "@owncoder/llm/browser";
 import { resolveApiFormat } from "@owncoder/llm/browser";
 import {
   BUILTIN_AGENT_PROMPT,
@@ -74,6 +74,8 @@ const ProviderSchema = z.object({
   models: z.array(z.object({
     id: z.string(),
     name: z.string(),
+    /** 用户自定义展示名；仅用于界面，`name` 仍是发给服务端的模型标识。 */
+    displayName: z.string().optional(),
   })).default([]),
 });
 
@@ -82,6 +84,8 @@ const AvailableModelSchema = z.object({
   id: z.string(),
   name: z.string(),
   providerId: z.string(),
+  /** 用户自定义展示名；仅用于界面，`name` 仍是发给服务端的模型标识。 */
+  displayName: z.string().optional(),
 });
 
 export const SystemWorkflowConfigSchema = z.object({
@@ -230,8 +234,103 @@ export type ContextConfig = SystemWorkflowConfig["context"];
 export type SegmentRatios = ContextConfig["segments"];
 export type Provider = z.infer<typeof ProviderSchema>;
 export type AvailableModel = z.infer<typeof AvailableModelSchema>;
-export type { ThinkingEffort, ModelRef, ApiFormat } from "@owncoder/llm/browser";
+export type { ThinkingEffort, ModelRef, ApiFormat, ListedModel } from "@owncoder/llm/browser";
 export { resolveApiFormat, API_FORMATS, isApiFormat, isOfficialAnthropicHost } from "@owncoder/llm/browser";
+
+/** 界面展示名：用户自定义 displayName（或协议返回的 display_name）优先，其次 name。
+ *  注意：`name` 才是发给服务端的模型标识，展示名仅影响界面显示。 */
+export function modelDisplayName(
+  model: { name: string; displayName?: string; display_name?: string } | null | undefined,
+): string {
+  if (!model) return "";
+  const custom = model.displayName?.trim() || model.display_name?.trim();
+  return custom || model.name;
+}
+
+/** 模型能力分类；用于「获取所有模型」弹窗的分类浏览。 */
+export type ModelCategory = "text" | "image" | "video" | "audio" | "embedding" | "other";
+
+export const MODEL_CATEGORIES: readonly ModelCategory[] = [
+  "text",
+  "image",
+  "video",
+  "audio",
+  "embedding",
+  "other",
+] as const;
+
+/** 协议列表项 → 可持久化模型条目：`name` 固定为请求用的模型 id，
+ *  展示名（display_name / 协议的 name）落到 displayName，避免把展示名发给服务端。 */
+export function listedModelToEntry(
+  model: ListedModel,
+): { id: string; name: string; displayName?: string } {
+  const fallback = model.display_name?.trim() || (model.name && model.name !== model.id ? model.name : "");
+  return { id: model.id, name: model.id, ...(fallback ? { displayName: fallback } : {}) };
+}
+
+/** 分类判定顺序：越具体的能力越先匹配，未命中者归入文本。
+ *  embedding 必须早于 image/audio：`text-image-embedding-3` 这类 id 同时含 image 关键词。 */
+const CATEGORY_KEYWORDS: Array<[ModelCategory, string[]]> = [
+  ["video", ["video", "sora", "kling", "veo", "wan2", "hailuo", "seedance", "animat"]],
+  ["embedding", ["embed", "embedding", "bge", "gte-", "ada-002", "rerank", "reranker"]],
+  ["image", ["image", "dall", "flux", "sd3", "sdxl", "stable-diffusion", "seedream", "imagen", "midjourney", "photon"]],
+  ["audio", ["audio", "tts", "asr", "whisper", "speech", "voice", "sound", "music", "transcribe"]],
+];
+
+/** 按模型 id / 请求名的关键词推断能力分类。
+ *  展示名（displayName / display_name）不参与判定：它可由用户自定义，且厂商常写成
+ *  "Gemini 2.5 Flash (text, image & video input)" 这类描述，会把纯文本模型误归到视频页签。 */
+export function modelCategory(
+  model: { id: string; name: string; displayName?: string; display_name?: string },
+): ModelCategory {
+  const haystack = `${model.id} ${model.name}`.toLowerCase();
+  for (const [category, keywords] of CATEGORY_KEYWORDS) {
+    if (keywords.some((k) => haystack.includes(k))) return category;
+  }
+  // 纯数字/版本号的 id 无法判断能力，归入其它；其余默认文本（对话）模型。
+  return /^[\d.\-_]+$/.test(model.id) ? "other" : "text";
+}
+
+/** 模型系列（厂商）分组键，如 `deepseek-chat` / `DeepSeek-V4-Pro` → `deepseek`。 */
+export function modelSeriesKey(model: { id: string; name: string }): string {
+  const id = model.id.toLowerCase();
+  const leading = id.match(/[a-z]+/)?.[0] ?? "";
+  // 前缀过短（如 "gpt"、"k1"）时容易误合并，取第一段含字母的片段作为回退。
+  if (leading.length >= 3) return leading;
+  // 无字母 id（如 "1234"）回退到 id 本身，避免分组标题为空串。
+  const found = id.split(/[-_./:]/).find((part) => /[a-z]/.test(part));
+  return found || leading || id;
+}
+
+/** 分组键 → 展示用的系列名（首字母大写）。 */
+export function modelSeriesLabel(key: string): string {
+  return key ? key.charAt(0).toUpperCase() + key.slice(1) : key;
+}
+
+/** 按系列分组并按（组内数量降序、键名升序）排序，组内模型按展示名排序。 */
+export function groupModelsBySeries<
+  T extends { id: string; name: string; displayName?: string; display_name?: string },
+>(
+  models: T[],
+): Array<{ key: string; label: string; models: T[] }> {
+  const map = new Map<string, T[]>();
+  for (const m of models) {
+    const key = modelSeriesKey(m);
+    const list = map.get(key);
+    if (list) list.push(m);
+    else map.set(key, [m]);
+  }
+  return [...map.entries()]
+    .map(([key, list]) => ({
+      key,
+      label: modelSeriesLabel(key),
+      models: [...list].sort((a, b) => {
+        const byName = modelDisplayName(a).localeCompare(modelDisplayName(b));
+        return byName !== 0 ? byName : a.id.localeCompare(b.id);
+      }),
+    }))
+    .sort((a, b) => b.models.length - a.models.length || a.key.localeCompare(b.key));
+}
 
 /** Model settings stored in a dedicated `models.json` (providers + selected models,
  *  plus the legacy `models` field for v1 migration). Kept separate from workflow

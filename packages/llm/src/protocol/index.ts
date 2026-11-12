@@ -1,4 +1,4 @@
-export type { ApiFormat, ProtocolCodec, ProtocolEncodeInput, StreamHandlers, StreamParser, ListedModel } from "./types.js";
+export type { ApiFormat, ProtocolCodec, ProtocolEncodeInput, StreamHandlers, StreamParser, ListedModel, ModelListPage } from "./types.js";
 export { API_FORMATS, isApiFormat } from "./types.js";
 export { resolveApiFormat, isOfficialAnthropicHost } from "./resolve.js";
 export { getCodec, listCodecs } from "./registry.js";

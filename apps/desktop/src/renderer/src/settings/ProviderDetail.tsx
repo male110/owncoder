@@ -1,23 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  listedModelToEntry,
+  modelDisplayName,
   type ApiFormat,
   type AvailableModel,
+  type ListedModel,
   type Provider,
   type SystemWorkflowConfig,
 } from "@owncoder/settings";
 import { useI18n } from "../i18n";
-
-/** Subsequence fuzzy match: query chars appear in order within haystack. */
-function fuzzyMatchModel(name: string, id: string, query: string): boolean {
-  const targets = [name.toLowerCase(), id.toLowerCase()];
-  return targets.some((text) => {
-    let qi = 0;
-    for (let i = 0; i < text.length && qi < query.length; i++) {
-      if (text[i] === query[qi]) qi++;
-    }
-    return qi === query.length;
-  });
-}
+import { fuzzyMatchModel } from "./model-match";
+import { ModelBrowserModal } from "./ModelBrowserModal";
 
 export function ProviderDetail({
   provider,
@@ -44,6 +37,11 @@ export function ProviderDetail({
   const [manualModelId, setManualModelId] = useState("");
   const [listMode, setListMode] = useState<"add" | "search">("add");
   const [modelSearchQuery, setModelSearchQuery] = useState("");
+  // 「获取所有模型」弹窗的数据源；null = 未打开。
+  const [browseModels, setBrowseModels] = useState<ListedModel[] | null>(null);
+  // 正在通过设置图标自定义展示名的已接入模型 id；null = 无编辑态。
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState("");
   const modelListInputRef = useRef<HTMLInputElement>(null);
   const { t: tr } = useI18n();
 
@@ -61,6 +59,7 @@ export function ProviderDetail({
     setListMode("add");
     setModelSearchQuery("");
     setManualModelId("");
+    setEditingId(null);
   }, [provider.id, provider.name, provider.baseUrl, provider.apiKey, provider.apiFormat]);
 
   useEffect(() => {
@@ -83,6 +82,30 @@ export function ProviderDetail({
     [patch, provider.id],
   );
 
+  /** 已接入模型标识集合（弹窗中据此显示 ✓ / 禁用 +）。
+   *  同时收录 id 与 name：name 才是发给服务端的请求标识，历史数据里存在
+   *  `model_<providerId>_<raw>` 形式的 id，其 name 为裸 raw，只比 id 会漏判为未添加。 */
+  const addedIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const m of selectedModels) {
+      if (m.providerId !== provider.id) continue;
+      ids.add(m.id);
+      if (m.name) ids.add(m.name);
+    }
+    return ids;
+  }, [selectedModels, provider.id]);
+
+  /** 弹窗数据：目录（上次拉取结果）映射回 ListedModel，展示名走 displayName。 */
+  const catalogAsListed = useMemo<ListedModel[]>(
+    () =>
+      (provider.models ?? []).map((m) => ({
+        id: m.id,
+        name: m.name,
+        ...(m.displayName ? { display_name: m.displayName } : {}),
+      })),
+    [provider.models],
+  );
+
   const fetchModels = useCallback(async () => {
     setFetching(true);
     setFetchError("");
@@ -92,29 +115,59 @@ export function ProviderDetail({
         setFetchError(result.error ?? tr("未知错误"));
         return;
       }
-      const models = (result.models ?? []).map((m: { id: string; name: string }) => ({
+      const listed = (result.models ?? []).map((m) => ({
         id: m.id,
         name: m.name || m.id,
-        providerId: provider.id,
+        ...(m.display_name ? { display_name: m.display_name } : {}),
       }));
+      // 写回目录时保留用户已自定义的展示名；请求标识 name 固定为模型 id。
       patch((d) => {
         const idx = (d.providers ?? []).findIndex((p) => p.id === provider.id);
         if (idx < 0) return;
-
-        d.providers![idx]!.models = models;
-        const currentModels = new Map(models.map((model) => [model.id, model]));
-        d.selectedModels = (d.selectedModels ?? []).flatMap((selected) => {
-          if (selected.providerId !== provider.id) return [selected];
-          const current = currentModels.get(selected.id);
-          return current ? [{ ...selected, name: current.name }] : [];
+        const previous = new Map((d.providers![idx]!.models ?? []).map((m) => [m.id, m]));
+        d.providers![idx]!.models = listed.map((m) => {
+          const entry = listedModelToEntry(m);
+          const custom = previous.get(m.id)?.displayName?.trim();
+          return custom ? { ...entry, displayName: custom } : entry;
         });
       });
+      setBrowseModels(listed);
     } catch (e) {
       setFetchError(e instanceof Error ? e.message : String(e));
     } finally {
       setFetching(false);
     }
-  }, [baseUrl, apiKey, apiFormat, provider.id, patch]);
+  }, [baseUrl, apiKey, apiFormat, provider.id, patch, tr]);
+
+  const openBrowser = useCallback(() => {
+    if ((provider.models ?? []).length > 0) {
+      setBrowseModels(catalogAsListed);
+      return;
+    }
+    void fetchModels();
+  }, [catalogAsListed, fetchModels, provider.models]);
+
+  /** 弹窗中点 + ：把模型加入已接入列表（目录/已接入列表已含同一请求标识则不重复写入）。 */
+  const addModel = useCallback(
+    (model: ListedModel) => {
+      const entry = listedModelToEntry(model);
+      patch((d) => {
+        const idx = (d.providers ?? []).findIndex((p) => p.id === provider.id);
+        if (idx < 0) return;
+        const catalog = d.providers![idx]!.models ?? [];
+        // 同时比对 name：旧数据的 id 形如 model_<providerId>_<raw>，其 name 才是裸 raw，
+        // 只比 id 会让同一模型在目录里出现两条。
+        const same = (m: { id: string; name: string }) =>
+          m.id === entry.id || (!!m.name && m.name === entry.name);
+        if (!catalog.some(same)) {
+          d.providers![idx]!.models = [...catalog, entry];
+        }
+        if ((d.selectedModels ?? []).some((s) => s.providerId === provider.id && same(s))) return;
+        d.selectedModels = [...(d.selectedModels ?? []), { ...entry, providerId: provider.id }];
+      });
+    },
+    [patch, provider.id],
+  );
 
   const toggleModel = useCallback(
     (model: AvailableModel, checked: boolean) => {
@@ -141,17 +194,17 @@ export function ProviderDetail({
   const addManualModel = useCallback(() => {
     const raw = manualModelId.trim();
     if (!raw) return;
-    const modelId = `model_${provider.id}_${raw}`;
     patch((d) => {
       const idx = (d.providers ?? []).findIndex((p) => p.id === provider.id);
       if (idx < 0) return;
       const existing = d.providers![idx]!.models ?? [];
-      if (existing.some((m) => m.id === modelId)) return;
-      d.providers![idx]!.models = [...existing, { id: modelId, name: raw }];
-      d.selectedModels = [
-        ...(d.selectedModels ?? []),
-        { id: modelId, name: raw, providerId: provider.id },
-      ];
+      // 与 addModel 一致：同时比对 name，避免与旧格式 id（model_<providerId>_<raw>）重复。
+      const same = (m: { id: string; name: string }) => m.id === raw || m.name === raw;
+      if (!existing.some(same)) {
+        d.providers![idx]!.models = [...existing, { id: raw, name: raw }];
+      }
+      if ((d.selectedModels ?? []).some((s) => s.providerId === provider.id && same(s))) return;
+      d.selectedModels = [...(d.selectedModels ?? []), { id: raw, name: raw, providerId: provider.id }];
     });
     setManualModelId("");
   }, [manualModelId, provider.id, patch]);
@@ -167,17 +220,43 @@ export function ProviderDetail({
           (m) => m.providerId !== provider.id || m.id !== modelId,
         );
       });
+      setEditingId((prev) => (prev === modelId ? null : prev));
     },
     [patch, provider.id],
   );
 
-  const enabledCount = selectedModels.filter((m) => m.providerId === provider.id).length;
+  /** 保存自定义展示名：目录条目与已接入条目同步更新。 */
+  const saveDisplayName = useCallback(
+    (modelId: string, value: string) => {
+      const displayName = value.trim();
+      patch((d) => {
+        const idx = (d.providers ?? []).findIndex((p) => p.id === provider.id);
+        if (idx >= 0) {
+          d.providers![idx]!.models = (d.providers![idx]!.models ?? []).map((m) =>
+            m.id === modelId ? (displayName ? { ...m, displayName } : { id: m.id, name: m.name }) : m,
+          );
+        }
+        d.selectedModels = (d.selectedModels ?? []).map((m) =>
+          m.providerId === provider.id && m.id === modelId
+            ? displayName
+              ? { ...m, displayName }
+              : { id: m.id, name: m.name, providerId: m.providerId }
+            : m,
+        );
+      });
+      setEditingId(null);
+    },
+    [patch, provider.id],
+  );
 
-  const filteredModels = useMemo(() => {
-    if (listMode !== "search" || !modelSearchQuery.trim()) return provider.models;
+  const enabledCount = addedIds.size;
+
+  const addedModels = useMemo(() => {
+    const list = selectedModels.filter((m) => m.providerId === provider.id);
+    if (listMode !== "search" || !modelSearchQuery.trim()) return list;
     const q = modelSearchQuery.trim().toLowerCase();
-    return provider.models.filter((m) => fuzzyMatchModel(m.name, m.id, q));
-  }, [provider.models, listMode, modelSearchQuery]);
+    return list.filter((m) => fuzzyMatchModel(modelDisplayName(m), m.id, q));
+  }, [listMode, modelSearchQuery, provider.id, selectedModels]);
 
   const enterSearchMode = useCallback(() => {
     setListMode("search");
@@ -266,8 +345,13 @@ export function ProviderDetail({
           disabled={fetching || !baseUrl.trim()}
           onClick={() => void fetchModels()}
         >
-          {fetching ? tr("获取中...") : tr("获取模型列表")}
+          {fetching ? tr("获取中...") : tr("获取所有模型")}
         </button>
+        {(provider.models ?? []).length > 0 && (
+          <button type="button" className="ghost small" onClick={openBrowser}>
+            {tr("浏览模型目录")}
+          </button>
+        )}
       </div>
 
       {fetchError && <p className="error-text">{fetchError}</p>}
@@ -288,7 +372,7 @@ export function ProviderDetail({
         }}
       >
         <div className="model-detail-list-head">
-          {tr("模型列表")}
+          {tr("已接入模型")}
           {listMode === "search" && (
             <span className="model-list-mode-hint">{tr("按 Esc 退出搜索")}</span>
           )}
@@ -327,30 +411,64 @@ export function ProviderDetail({
             />
           )}
         </div>
-        {provider.models.length === 0 ? (
-          <p className="hint">{tr("点击「获取模型列表」拉取，或在上方手动输入模型 ID 后添加")}</p>
-        ) : filteredModels.length === 0 ? (
+        {selectedModels.filter((m) => m.providerId === provider.id).length === 0 ? (
+          <p className="hint">{tr("点击「获取所有模型」浏览目录，用 + 加入已接入列表，或在上方手动输入模型 ID")}</p>
+        ) : addedModels.length === 0 ? (
           <p className="hint">{tr("无匹配模型")}</p>
         ) : (
-          filteredModels.map((m) => {
-            const isSelected = selectedModels.some(
-              (s) => s.providerId === provider.id && s.id === m.id,
-            );
-            return (
-              <div key={m.id} className="model-detail-row">
+          addedModels.map((m) => (
+            <div key={`${m.providerId}\u0000${m.id}`} className="model-detail-row">
+              {editingId === m.id ? (
+                <span className="model-display-edit">
+                  <input
+                    autoFocus
+                    value={editingName}
+                    placeholder={m.name}
+                    onChange={(e) => setEditingName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        saveDisplayName(m.id, editingName);
+                      } else if (e.key === "Escape") {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setEditingId(null);
+                      }
+                    }}
+                    aria-label={tr("自定义展示名")}
+                  />
+                  <button type="button" className="ghost tiny" onClick={() => saveDisplayName(m.id, editingName)}>
+                    {tr("保存")}
+                  </button>
+                  <button type="button" className="ghost tiny" onClick={() => setEditingId(null)}>
+                    {tr("取消")}
+                  </button>
+                </span>
+              ) : (
                 <label className="model-detail-row-label">
                   <input
                     type="checkbox"
-                    checked={isSelected}
-                    onChange={(e) =>
-                      toggleModel(
-                        { id: m.id, name: m.name, providerId: provider.id },
-                        e.target.checked,
-                      )
-                    }
+                    checked
+                    onChange={(e) => toggleModel(m, e.target.checked)}
                   />
-                  <span className="model-detail-row-name">{m.name}</span>
+                  <span className="model-detail-row-name">{modelDisplayName(m)}</span>
+                  {m.displayName && m.displayName !== m.name ? (
+                    <span className="model-detail-row-id">{m.id}</span>
+                  ) : null}
                 </label>
+              )}
+              <span className="model-detail-row-actions">
+                <button
+                  type="button"
+                  className="ghost tiny"
+                  title={tr("自定义展示名")}
+                  onClick={() => {
+                    setEditingId(m.id);
+                    setEditingName(m.displayName ?? "");
+                  }}
+                >
+                  ⚙
+                </button>
                 <button
                   type="button"
                   className="ghost tiny danger"
@@ -359,11 +477,21 @@ export function ProviderDetail({
                 >
                   {tr("删除")}
                 </button>
-              </div>
-            );
-          })
+              </span>
+            </div>
+          ))
         )}
       </div>
+
+      {browseModels && (
+        <ModelBrowserModal
+          providerName={name || provider.baseUrl}
+          models={browseModels}
+          addedIds={addedIds}
+          onAdd={addModel}
+          onClose={() => setBrowseModels(null)}
+        />
+      )}
     </div>
   );
 }

@@ -6864,6 +6864,240 @@ button.ghost.tiny.danger:hover {
   background: rgba(224, 112, 112, 0.1);
 }
 
+/* 已接入模型行：展示名 + 次要的模型 id + 行内操作（⚙ 自定义展示名 / 删除） */
+
+.model-detail-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.model-detail-row-id {
+  font-size: 11px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-display-edit {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+.model-display-edit input {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 8px;
+  font-size: 12px;
+}
+
+/* ── 「获取所有模型」弹窗 ───────────────────────────────────────────────────── */
+
+.model-browser-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--scrim);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  z-index: 80;
+}
+
+.model-browser-modal {
+  width: min(760px, 100%);
+  max-height: min(640px, 100%);
+  display: flex;
+  flex-direction: column;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
+  overflow: hidden;
+}
+
+.model-browser-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.model-browser-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  min-width: 0;
+}
+
+.model-browser-sub,
+.model-browser-count {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-browser-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.model-browser-tabs {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.model-browser-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-alt);
+  color: var(--muted);
+  font: inherit;
+  font-size: 11px;
+  padding: 4px 9px;
+  cursor: pointer;
+}
+
+.model-browser-tab:hover {
+  color: var(--text);
+}
+
+.model-browser-tab.active {
+  color: var(--text);
+  border-color: var(--accent);
+  background: var(--accent-dim);
+}
+
+.model-browser-tab-count {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.75;
+}
+
+.model-browser-search {
+  flex: 1;
+  min-width: 160px;
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
+.model-browser-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 6px 14px 14px;
+}
+
+.model-browser-group {
+  margin-top: 10px;
+}
+
+.model-browser-group-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 6px 2px;
+  border-bottom: 1px solid var(--border);
+}
+
+.model-browser-group-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-browser-group-count {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.7;
+}
+
+.model-browser-group-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.model-browser-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 2px;
+  border-bottom: 1px solid var(--surface-tint);
+}
+
+.model-browser-item-main {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+
+.model-browser-item-name {
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-browser-item-id {
+  font-size: 11px;
+  color: var(--muted);
+  font-family: ui-monospace, Consolas, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-browser-add {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-alt);
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.model-browser-add:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+}
+
+.model-browser-add.added,
+.model-browser-add:disabled {
+  color: var(--muted);
+  cursor: default;
+  opacity: 0.7;
+}
+
 /* 鈹€鈹€ TaskListBar (approved plan step driver) 鈹€鈹€ */
 .task-bar {
   max-width: 860px;

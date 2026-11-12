@@ -2,6 +2,7 @@ import type { ChatChoiceMessage, ChatResponse, ToolCall } from "../types.js";
 import type { ThinkingEffort } from "../thinking.js";
 import type {
   ListedModel,
+  ModelListPage,
   ProtocolCodec,
   ProtocolEncodeInput,
   StreamHandlers,
@@ -488,14 +489,18 @@ export const openaiChatCodec: ProtocolCodec = {
   },
 
   parseModelList(json: unknown): ListedModel[] {
-    const data = json as {
-      data?: Array<{ id: string; name?: string }>;
-      models?: Array<{ id: string; name?: string }>;
-    };
-    return (data.data ?? data.models ?? []).map((m) => ({
-      id: m.id,
-      name: m.name || m.id,
-    }));
+    // 网络数据未经校验：部分服务（如 Ollama /api/tags）返回的条目只有 name 没有 id，
+    // 直接透传会让 undefined id 进入设置存储并触发 zod 校验失败，这里先过滤掉。
+    const data = typeof json === "object" && json !== null ? (json as ModelListPage) : {};
+    const raw = data.data ?? data.models ?? [];
+    if (!Array.isArray(raw)) return [];
+    return raw
+      .filter((m) => typeof m?.id === "string" && m.id.trim().length > 0)
+      .map((m) => ({
+        id: m.id,
+        name: m.name || m.id,
+        ...(m.display_name ? { display_name: m.display_name } : {}),
+      }));
   },
 };
 

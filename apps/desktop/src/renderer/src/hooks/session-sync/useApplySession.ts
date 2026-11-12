@@ -13,6 +13,7 @@
  * with refresh IPCs that trip the rate limiter).
  */
 import { useCallback } from "react";
+import { modelDisplayName } from "@owncoder/settings";
 import { useSessionStore } from "../../store/session-store";
 import { useChatStore } from "../../store/chat-store";
 import { getFocusSessionId, syncFocusSession } from "../../store/focus-session";
@@ -74,7 +75,7 @@ export function useApplySession(ctx: SessionSyncContext, refreshers: SyncRefresh
       const sel = snap.effective.selectedModels ?? [];
       session.setAvailableModels(sel);
       session.setProviders(snap.effective.providers ?? []);
-      session.setModelLabel(sel.length > 0 ? sel[0]!.name : t("未配置"));
+      session.setModelLabel(sel.length > 0 ? modelDisplayName(sel[0]) : t("未配置"));
       session.setThinkingEffort(snap.effective.thinking?.defaultEffort ?? "high");
 
       // 同步执行阶段单独配置（向后兼容旧配置）

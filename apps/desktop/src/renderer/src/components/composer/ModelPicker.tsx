@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { AvailableModel } from "@owncoder/settings";
+import { modelDisplayName, type AvailableModel } from "@owncoder/settings";
 import { useI18n } from "../../i18n";
 import { useMenuDismiss } from "./useMenuDismiss";
 import type { ModelGroup } from "./useGroupedModels";
@@ -196,7 +196,7 @@ export function ModelPicker({
                           onSelect(m);
                         }}
                       >
-                        <span className="model-menu-name">{m.name}</span>
+                        <span className="model-menu-name" title={m.id}>{modelDisplayName(m)}</span>
                         {isSelected(m) ? <span className="mode-check">✓</span> : null}
                       </button>
                     </li>

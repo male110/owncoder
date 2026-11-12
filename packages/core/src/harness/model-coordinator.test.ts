@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { LlmTimeoutError } from "@owncoder/llm";
+import { LlmDecodeError, LlmTimeoutError } from "@owncoder/llm";
 
 import { withRetry } from "./model-coordinator.ts";
 
@@ -33,6 +33,25 @@ describe("withRetry", () => {
       throw new DOMException("The user aborted a request", "AbortError");
     });
     await expect(withRetry(fn, { maxRetries: 3, baseDelay: 1 })).rejects.toThrow(/aborted/i);
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not retry an LlmDecodeError (server payload won't change)", async () => {
+    const fn = vi.fn(async () => {
+      throw new LlmDecodeError("LLM returned no choices");
+    });
+    await expect(
+      withRetry(fn, { maxRetries: 3, baseDelay: 1 }),
+    ).rejects.toThrow(/LLM returned no choices/);
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  it("recognizes an LlmDecodeError that only carries the error name", async () => {
+    const fn = vi.fn(async () => {
+      // 跨包/跨 realm 场景下 instanceof 失效，只保留 name
+      throw Object.assign(new Error("bad payload"), { name: "LlmDecodeError" });
+    });
+    await expect(withRetry(fn, { maxRetries: 2, baseDelay: 1 })).rejects.toThrow(/bad payload/);
     expect(fn).toHaveBeenCalledTimes(1);
   });
 

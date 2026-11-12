@@ -20,6 +20,7 @@ import {
   resolveApiFormat,
   resolveApiKey,
   type ApiFormat,
+  type ListedModel,
 } from "@owncoder/llm";
 import type { IpcContext } from "./types";
 import { mt } from "../i18n";
@@ -263,18 +264,42 @@ export function registerSettingsHandlers(ctx: IpcContext): void {
     async (_e, baseUrl: string, apiKey?: string, apiFormat?: ApiFormat) => {
       try {
         const codec = getCodec(resolveApiFormat({ apiFormat, baseUrl }));
-        const url = codec.listModelsUrl(baseUrl);
         const headers = codec.listModelsHeaders(apiKey);
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 15_000);
-        const res = await fetch(url, { headers, signal: controller.signal });
-        clearTimeout(timeout);
-        if (!res.ok) {
-          const body = await res.text().catch(() => "");
-          throw new Error(`HTTP ${res.status}: ${body.slice(0, 300)}`);
+        // v1/models 可能返回 first_id/last_id/has_more 游标分页；循环拉取直到
+        // has_more=false、游标不再前进、没有新增模型 id 或达到上限，按 id 去重合并。
+        const models: ListedModel[] = [];
+        const seenIds = new Set<string>();
+        let after: string | null = null;
+        const MAX_PAGES = 50;
+        for (let page = 0; page < MAX_PAGES; page++) {
+          const url = new URL(codec.listModelsUrl(baseUrl));
+          if (after) url.searchParams.set("after", after);
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), 15_000);
+          const res = await fetch(url, { headers, signal: controller.signal });
+          clearTimeout(timeout);
+          if (!res.ok) {
+            const body = await res.text().catch(() => "");
+            throw new Error(`HTTP ${res.status}: ${body.slice(0, 300)}`);
+          }
+          const data = await res.json();
+          const pageModels = codec.parseModelList(data);
+          let added = 0;
+          for (const m of pageModels) {
+            // 防御：codec 之外的实现或异常响应可能带出空 id，
+            // 否则 seenIds.has(undefined) 会从第二条起全部命中并静默丢弃模型。
+            if (typeof m?.id !== "string" || m.id.trim().length === 0) continue;
+            if (seenIds.has(m.id)) continue;
+            seenIds.add(m.id);
+            models.push(m);
+            added++;
+          }
+          const meta = data as { has_more?: boolean; last_id?: string; first_id?: string };
+          const lastId = typeof meta.last_id === "string" ? meta.last_id : null;
+          if (meta.has_more === false || !lastId || lastId === after || added === 0) break;
+          after = lastId;
         }
-        const data = await res.json();
-        return { ok: true as const, models: codec.parseModelList(data) };
+        return { ok: true as const, models };
       } catch (e) {
         return { ok: false as const, error: e instanceof Error ? e.message : String(e) };
       }

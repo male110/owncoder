@@ -553,13 +553,18 @@ export const anthropicMessagesCodec: ProtocolCodec = {
   },
 
   parseModelList(json: unknown): ListedModel[] {
-    const data = json as {
+    const data = (typeof json === "object" && json !== null ? json : {}) as {
       data?: Array<{ id: string; display_name?: string; name?: string }>;
     };
-    return (data.data ?? []).map((m) => ({
-      id: m.id,
-      name: m.display_name || m.name || m.id,
-    }));
+    const raw = data.data ?? [];
+    if (!Array.isArray(raw)) return [];
+    return raw
+      .filter((m) => typeof m?.id === "string" && m.id.trim().length > 0)
+      .map((m) => ({
+        id: m.id,
+        name: m.display_name || m.name || m.id,
+        ...(m.display_name ? { display_name: m.display_name } : {}),
+      }));
   },
 };
 

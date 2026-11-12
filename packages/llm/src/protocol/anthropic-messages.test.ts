@@ -469,6 +469,6 @@ describe("anthropicMessagesCodec listModels", () => {
       anthropicMessagesCodec.parseModelList({
         data: [{ id: "claude-sonnet-4", display_name: "Claude Sonnet 4" }],
       }),
-    ).toEqual([{ id: "claude-sonnet-4", name: "Claude Sonnet 4" }]);
+    ).toEqual([{ id: "claude-sonnet-4", name: "Claude Sonnet 4", display_name: "Claude Sonnet 4" }]);
   });
 });

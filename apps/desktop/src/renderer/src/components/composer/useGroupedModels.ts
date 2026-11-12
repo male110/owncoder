@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import type { AvailableModel, Provider } from "@owncoder/settings";
+import { modelDisplayName, type AvailableModel, type Provider } from "@owncoder/settings";
 
 export interface ModelGroup {
   providerId: string;
@@ -9,7 +9,7 @@ export interface ModelGroup {
 
 /**
  * 按平台分组：平台顺序跟随 providers 配置，未知平台按名称排在末尾；
- * 组内模型按名称排序，同名再按 id 排序。
+ * 组内模型按展示名（displayName 优先）排序，同名再按 id 排序。
  */
 export function groupModels(availableModels: AvailableModel[], providers: Provider[]): ModelGroup[] {
   const map = new Map<string, AvailableModel[]>();
@@ -33,7 +33,7 @@ export function groupModels(availableModels: AvailableModel[], providers: Provid
       providerId: pid,
       providerName: provider?.name || pid,
       models: [...(map.get(pid) ?? [])].sort((a, b) => {
-        const byName = a.name.localeCompare(b.name);
+        const byName = modelDisplayName(a).localeCompare(modelDisplayName(b));
         return byName !== 0 ? byName : a.id.localeCompare(b.id);
       }),
     };
