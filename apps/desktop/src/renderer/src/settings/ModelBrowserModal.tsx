@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+﻿import { useEffect, useMemo, useState } from "react";
 import {
   MODEL_CATEGORIES,
   groupModelsBySeries,
@@ -16,13 +16,14 @@ type CategoryTab = "all" | ModelCategory;
 
 /**
  * 「获取所有模型」结果弹窗：按能力分类浏览 + 模糊搜索 + 按模型系列分组，
- * 每个候选模型通过 + 添加到已接入列表（已添加项显示 ✓）。
+ * 每个候选模型通过 + 添加到已接入列表（已加入项显示 −，点击即移除）。
  */
 export function ModelBrowserModal({
   providerName,
   models,
   addedIds,
   onAdd,
+  onRemove,
   onClose,
 }: {
   providerName: string;
@@ -30,11 +31,23 @@ export function ModelBrowserModal({
   /** 已接入（selectedModels）中该平台的模型标识集合（含 id 与请求用的 name）。 */
   addedIds: Set<string>;
   onAdd: (model: ListedModel) => void;
+  onRemove: (model: ListedModel) => void;
   onClose: () => void;
 }) {
   const { t: tr } = useI18n();
   const [category, setCategory] = useState<CategoryTab>("all");
   const [query, setQuery] = useState("");
+  /** 已折叠分组的 key 集合（默认全部展开；切换分类/搜索时同名分组保持折叠状态）。 */
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
+
+  const toggleGroup = (key: string) => {
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -132,37 +145,53 @@ export function ModelBrowserModal({
           {totalVisible === 0 ? (
             <p className="hint">{tr("无匹配模型")}</p>
           ) : (
-            groups.map((group) => (
-              <section key={group.key} className="model-browser-group">
-                <header className="model-browser-group-head">
-                  <span className="model-browser-group-name">{group.label}</span>
-                  <span className="model-browser-group-count">{group.models.length}</span>
-                </header>
-                <ul className="model-browser-group-list">
-                  {group.models.map((m) => {
-                    // 历史数据的 id 可能是 model_<providerId>_<raw>，请求标识在 name 上，两者都要比。
-                    const added = addedIds.has(m.id) || (!!m.name && addedIds.has(m.name));
-                    return (
-                      <li key={m.id} className="model-browser-item">
-                        <span className="model-browser-item-main">
-                          <span className="model-browser-item-name">{modelDisplayName(m)}</span>
-                          <span className="model-browser-item-id">{m.id}</span>
-                        </span>
-                        <button
-                          type="button"
-                          className={`model-browser-add ${added ? "added" : ""}`}
-                          disabled={added}
-                          title={added ? tr("已添加") : tr("添加到已接入列表")}
-                          onClick={() => onAdd(m)}
-                        >
-                          {added ? "✓" : "+"}
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
-              </section>
-            ))
+            groups.map((group) => {
+              const open = !collapsed.has(group.key);
+              return (
+                <section key={group.key} className="model-browser-group">
+                  <header className="model-browser-group-head">
+                    <button
+                      type="button"
+                      className="model-browser-group-toggle"
+                      aria-expanded={open}
+                      title={open ? tr("折叠") : tr("展开")}
+                      onClick={() => toggleGroup(group.key)}
+                    >
+                      <span className="model-browser-group-chev" aria-hidden>
+                        {open ? "▾" : "▸"}
+                      </span>
+                      <span className="model-browser-group-name">{group.label}</span>
+                      <span className="model-browser-group-count">{group.models.length}</span>
+                    </button>
+                  </header>
+                  {open && (
+                    <ul className="model-browser-group-list">
+                      {group.models.map((m) => {
+                        // 历史数据的 id 可能是 model_<providerId>_<raw>，请求标识在 name 上，两者都要比。
+                        const added = addedIds.has(m.id) || (!!m.name && addedIds.has(m.name));
+                        return (
+                          <li key={m.id} className="model-browser-item">
+                            <span className="model-browser-item-main">
+                              <span className="model-browser-item-name">{modelDisplayName(m)}</span>
+                              <span className="model-browser-item-id">{m.id}</span>
+                            </span>
+                            <button
+                              type="button"
+                              className={`model-browser-add ${added ? "added" : ""}`}
+                              title={added ? tr("从已接入列表移除") : tr("添加到已接入列表")}
+                              aria-label={added ? tr("从已接入列表移除") : tr("添加到已接入列表")}
+                              onClick={() => (added ? onRemove(m) : onAdd(m))}
+                            >
+                              {added ? "−" : "+"}
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </section>
+              );
+            })
           )}
         </div>
       </div>

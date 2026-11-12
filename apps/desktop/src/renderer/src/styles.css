@@ -6864,7 +6864,7 @@ button.ghost.tiny.danger:hover {
   background: rgba(224, 112, 112, 0.1);
 }
 
-/* 已接入模型行：展示名 + 次要的模型 id + 行内操作（⚙ 自定义展示名 / 删除） */
+/* 已接入模型行：展示名 + 次要的原始 name（紧跟复制按钮）+ 行内操作（删除） */
 
 .model-detail-row-actions {
   display: flex;
@@ -6881,19 +6881,145 @@ button.ghost.tiny.danger:hover {
   white-space: nowrap;
 }
 
-.model-display-edit {
-  display: flex;
+/* 原始 name 后的复制按钮：复制模型 name（请求标识），成功后短暂显示 ✓。
+   默认无边框弱化存在感，悬停才显形，避免与行尾操作按钮抢视觉。 */
+button.ghost.model-copy-btn {
+  display: inline-flex;
   align-items: center;
-  gap: 6px;
-  flex: 1;
-  min-width: 0;
+  justify-content: center;
+  flex-shrink: 0;
+  min-width: 24px;
+  height: 20px;
+  padding: 2px 6px;
+  line-height: 1;
+  border-color: transparent;
+  color: var(--muted);
+  transition: color 120ms ease, border-color 120ms ease;
 }
 
-.model-display-edit input {
+button.ghost.model-copy-btn:hover {
+  color: var(--text);
+  border-color: var(--border);
+}
+
+button.ghost.model-copy-btn.copied {
+  color: var(--success);
+}
+
+/* 行内展示名编辑框：与平台名称输入框同款（透明底、仅下划线、聚焦蓝色下划线）；
+   宽度随内容自适应（field-sizing，空值时按占位符计宽），不撑满整行，左侧复选框保留。 */
+.model-display-edit-input {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 13px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-bottom-color: var(--border);
+  color: var(--text);
+  padding: 2px 0;
+  field-sizing: content;
+  max-width: 100%;
+  min-width: 0;
+  cursor: text;
+}
+
+.model-display-edit-input:focus {
+  outline: none;
+  border-bottom-color: rgba(100, 180, 255, 0.7);
+}
+
+/* ── 供应商详情页：已接入模型按系列分组（与「获取所有模型」弹窗同一设计语言） ── */
+
+/* 每个系列分组渲染成一张卡片：组头是卡片标题条，其下模型行整体缩进，一眼可见归属 */
+.provider-model-group {
+  margin-top: 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-2);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.24);
+  overflow: hidden;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+:root[data-theme="light"] .provider-model-group {
+  box-shadow: 0 1px 2px rgba(13, 13, 13, 0.05);
+}
+
+/* 组头标题条：系列名 + 数量胶囊（系列名保留 display_name/name 的原始大小写，不强制大写） */
+.provider-model-group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  background: var(--surface-tint);
+  border-bottom: 1px solid var(--border);
+}
+
+.provider-model-group-name {
   flex: 1;
   min-width: 0;
-  padding: 5px 8px;
-  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 数量收成小胶囊徽标：字号更小、颜色更淡，不与系列名争层级 */
+.provider-model-group-count {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--overlay-03);
+  font-size: 10px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+  opacity: 0.85;
+}
+
+/* 子模型列表：整体缩进到组名文字之下，并用左侧竖向引导线把同组模型串成一棵树 */
+.provider-model-group-list {
+  list-style: none;
+  margin: 0;
+  padding: 2px 0 4px;
+}
+
+.provider-model-group-list .provider-model-group-item {
+  position: relative;
+  /* 28px = 组头左内边距 10px + 组名起始偏移 10px + 间距 8px：引导线落在组名文字左缘下方 */
+  margin-left: 28px;
+  padding-left: 12px;
+}
+
+.provider-model-group-list .provider-model-group-item:last-child {
+  padding-bottom: 2px;
+}
+
+.provider-model-group-list .provider-model-group-item::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--border);
+}
+
+/* 首/末行的引导线只画到行中点，形成树形分支的收口；单行分组保留整条线 */
+.provider-model-group-list .provider-model-group-item:first-child::before {
+  top: 50%;
+}
+
+.provider-model-group-list .provider-model-group-item:last-child::before {
+  bottom: 50%;
+}
+
+.provider-model-group-list .provider-model-group-item:only-child::before {
+  top: 0;
+  bottom: 0;
 }
 
 /* ── 「获取所有模型」弹窗 ───────────────────────────────────────────────────── */
@@ -6907,8 +7033,10 @@ button.ghost.tiny.danger:hover {
   justify-content: center;
   padding: 24px;
   z-index: 80;
+  animation: model-browser-fade 0.16s ease;
 }
 
+/* 弹窗主体：接触阴影 + 环境阴影双层，顶部 1px 内高光模拟 macOS 面板质感 */
 .model-browser-modal {
   width: min(760px, 100%);
   max-height: min(640px, 100%);
@@ -6917,8 +7045,45 @@ button.ghost.tiny.danger:hover {
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 14px;
-  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
+  box-shadow:
+    inset 0 1px 0 var(--overlay-02),
+    0 2px 8px rgba(0, 0, 0, 0.35),
+    0 24px 64px rgba(0, 0, 0, 0.55);
   overflow: hidden;
+  animation: model-browser-in 0.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+:root[data-theme="light"] .model-browser-modal {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.7),
+    0 2px 6px rgba(13, 13, 13, 0.08),
+    0 16px 40px rgba(13, 13, 13, 0.14);
+}
+
+@keyframes model-browser-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes model-browser-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* 弹窗内所有按钮共用一套键盘焦点环；搜索框另有自己的聚焦描边，不叠加 */
+.model-browser-modal button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .model-browser-head {
@@ -6926,7 +7091,7 @@ button.ghost.tiny.danger:hover {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 12px 14px;
+  padding: 12px 16px;
   border-bottom: 1px solid var(--border);
 }
 
@@ -6936,6 +7101,8 @@ button.ghost.tiny.danger:hover {
   gap: 8px;
   font-size: 14px;
   font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--heading-text);
   min-width: 0;
 }
 
@@ -6949,18 +7116,60 @@ button.ghost.tiny.danger:hover {
   white-space: nowrap;
 }
 
+/* 平台名收成小胶囊，与标题、数量形成三级排版层次 */
+.model-browser-sub {
+  flex: 0 1 auto;
+  min-width: 0;
+  padding: 2px 8px;
+  border: 1px solid var(--glass-border);
+  border-radius: 999px;
+  background: var(--overlay-02);
+  font-size: 10px;
+}
+
+.model-browser-count {
+  font-variant-numeric: tabular-nums;
+}
+
+/* 关闭按钮：平时是无边框图标，hover 才浮现底色 */
+.model-browser-head button.ghost.tiny {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-color: transparent;
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.model-browser-head button.ghost.tiny:hover {
+  color: var(--text);
+  border-color: var(--glass-border);
+  background: var(--overlay-04);
+}
+
+/* 工具栏：页签在左、搜索在右，用略淡的底色与列表区分层（VS Code 侧栏头部做法） */
 .model-browser-toolbar {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   flex-wrap: wrap;
-  padding: 10px 14px;
+  padding: 10px 16px;
   border-bottom: 1px solid var(--border);
+  background: var(--overlay-01);
 }
 
 .model-browser-tabs {
   display: flex;
-  gap: 6px;
+  gap: 4px;
   flex-wrap: wrap;
 }
 
@@ -6968,85 +7177,259 @@ button.ghost.tiny.danger:hover {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  border: 1px solid var(--border);
+  border: 1px solid transparent;
   border-radius: 999px;
-  background: var(--bg-alt);
+  background: transparent;
   color: var(--muted);
   font: inherit;
   font-size: 11px;
-  padding: 4px 9px;
+  font-weight: 500;
+  padding: 4px 10px;
   cursor: pointer;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
 }
 
 .model-browser-tab:hover {
   color: var(--text);
+  background: var(--overlay-03);
 }
 
 .model-browser-tab.active {
   color: var(--text);
-  border-color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
   background: var(--accent-dim);
 }
 
 .model-browser-tab-count {
   font-variant-numeric: tabular-nums;
+  font-size: 10px;
+  opacity: 0.6;
+}
+
+.model-browser-tab.active .model-browser-tab-count {
+  opacity: 0.85;
+}
+
+/* 搜索框：内凹输入质感 + 聚焦时描边提亮，与弹窗圆角层级保持一致 */
+.model-browser-search {
+  flex: 1;
+  min-width: 180px;
+  padding: 6px 10px;
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  background: var(--input-inset);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+.model-browser-search::placeholder {
+  color: var(--muted);
   opacity: 0.75;
 }
 
-.model-browser-search {
-  flex: 1;
-  min-width: 160px;
-  padding: 6px 10px;
-  font-size: 12px;
+.model-browser-search:hover {
+  border-color: var(--glass-border-hover);
+}
+
+.model-browser-search:focus {
+  outline: none;
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  background: var(--panel);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent);
 }
 
 .model-browser-body {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 6px 14px 14px;
+  padding: 4px 16px 16px;
 }
 
+/* 列表滚动条比全局更细，避免与卡片边缘争夺注意力 */
+.model-browser-body::-webkit-scrollbar {
+  width: 6px;
+}
+
+.model-browser-body::-webkit-scrollbar-thumb {
+  border-width: 1px;
+  background: var(--scrollbar-thumb);
+}
+
+.model-browser-body > .hint {
+  padding: 48px 16px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* 每个系列分组渲染成一张卡片：组头是卡片标题条，其下模型行整体缩进，一眼可见归属 */
 .model-browser-group {
-  margin-top: 10px;
+  margin-top: 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-2);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.24);
+  overflow: hidden;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+
+:root[data-theme="light"] .model-browser-group {
+  box-shadow: 0 1px 2px rgba(13, 13, 13, 0.05);
+}
+
+/* 卡片 hover 时边框与阴影同时抬一档，暗示整块可交互（Linear 卡片反馈） */
+.model-browser-group:hover {
+  border-color: var(--glass-border-hover);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+}
+
+:root[data-theme="light"] .model-browser-group:hover {
+  box-shadow: 0 2px 6px rgba(13, 13, 13, 0.08);
 }
 
 .model-browser-group-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
   font-size: 11px;
   font-weight: 600;
   color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  padding: 6px 2px;
+  background: var(--surface-tint);
   border-bottom: 1px solid var(--border);
 }
 
+/* 折叠时组头成为卡片唯一子元素，去掉多余的分隔线 */
+.model-browser-group-head:last-child {
+  border-bottom: none;
+}
+
+/* 组头本身即折叠开关：点击收起/展开该系列下的模型列表 */
+.model-browser-group-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+.model-browser-group-toggle:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+
+/* 卡片 overflow:hidden 会裁掉外描边，组头改用内嵌焦点环 */
+.model-browser-modal .model-browser-group-toggle:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+.model-browser-group-toggle:active {
+  background: var(--overlay-04);
+}
+
+.model-browser-group-chev {
+  flex: none;
+  width: 10px;
+  font-size: 10px;
+  opacity: 0.6;
+  transition: opacity 0.15s ease;
+}
+
+.model-browser-group-toggle:hover .model-browser-group-chev {
+  opacity: 1;
+}
+
+/* 组名不再撑满整行，数量胶囊紧随其后（间距由组头 gap 提供）；超长时仍省略号截断 */
 .model-browser-group-name {
+  flex: 0 1 auto;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+/* 数量收成小胶囊徽标：字号更小、颜色更淡，不与系列名争层级 */
 .model-browser-group-count {
+  flex: none;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--overlay-03);
+  font-size: 10px;
+  font-weight: 500;
   font-variant-numeric: tabular-nums;
-  opacity: 0.7;
-}
-
-.model-browser-group-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
+  letter-spacing: 0;
+  opacity: 0.85;
 }
 
 .model-browser-item {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 6px 2px;
+  gap: 12px;
+  padding: 6px 10px;
   border-bottom: 1px solid var(--surface-tint);
+  transition: background 0.12s ease;
+}
+
+.model-browser-item:hover {
+  background: var(--overlay-02);
+}
+
+/* 子模型列表：整体缩进到组名文字之下，并用左侧竖向引导线把同组模型串成一棵树 */
+.model-browser-group-list {
+  list-style: none;
+  margin: 0;
+  padding: 2px 0 4px;
+}
+
+.model-browser-group-list .model-browser-item {
+  position: relative;
+  /* 28px = 组头左内边距 10px + chevron 宽 10px + 间距 8px：引导线正好落在组名文字左缘下方 */
+  margin-left: 28px;
+  padding-left: 12px;
+}
+
+.model-browser-group-list .model-browser-item:last-child {
+  border-bottom: none;
+}
+
+.model-browser-group-list .model-browser-item::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--border);
+}
+
+/* 首/末行的引导线只画到行中点，形成树形分支的收口；单行分组保留整条线 */
+.model-browser-group-list .model-browser-item:first-child::before {
+  top: 50%;
+}
+
+.model-browser-group-list .model-browser-item:last-child::before {
+  bottom: 50%;
+}
+
+.model-browser-group-list .model-browser-item:only-child::before {
+  top: 0;
+  bottom: 0;
 }
 
 .model-browser-item-main {
@@ -7059,6 +7442,8 @@ button.ghost.tiny.danger:hover {
 
 .model-browser-item-name {
   font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -7067,6 +7452,7 @@ button.ghost.tiny.danger:hover {
 .model-browser-item-id {
   font-size: 11px;
   color: var(--muted);
+  opacity: 0.85;
   font-family: ui-monospace, Consolas, monospace;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -7075,27 +7461,56 @@ button.ghost.tiny.danger:hover {
 
 .model-browser-add {
   flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 24px;
   height: 24px;
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 7px;
   background: var(--bg-alt);
   color: var(--text);
   font-size: 14px;
   line-height: 1;
   cursor: pointer;
+  transition:
+    background 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease,
+    transform 0.15s ease;
 }
 
 .model-browser-add:hover:not(:disabled) {
   border-color: var(--accent);
   background: var(--accent-dim);
+  color: var(--accent);
 }
 
-.model-browser-add.added,
-.model-browser-add:disabled {
-  color: var(--muted);
-  cursor: default;
-  opacity: 0.7;
+.model-browser-add:active:not(:disabled) {
+  transform: scale(0.94);
+}
+
+/* 已加入：− 常态与 + 完全一致，仅 hover 时以柔和警示色图标/边框轻微暗示「点击即移除」 */
+.model-browser-add.added:hover {
+  border-color: color-mix(in srgb, var(--danger-text) 55%, var(--border));
+  color: var(--danger-text);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .model-browser-overlay,
+  .model-browser-modal {
+    animation: none;
+  }
+
+  .model-browser-modal button,
+  .model-browser-group,
+  .model-browser-group-toggle,
+  .model-browser-group-chev,
+  .model-browser-item,
+  .model-browser-add,
+  .model-browser-search {
+    transition: none;
+  }
 }
 
 /* 鈹€鈹€ TaskListBar (approved plan step driver) 鈹€鈹€ */

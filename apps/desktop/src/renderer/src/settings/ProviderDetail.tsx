@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  groupModelsBySeries,
   listedModelToEntry,
   modelDisplayName,
   type ApiFormat,
@@ -39,10 +40,16 @@ export function ProviderDetail({
   const [modelSearchQuery, setModelSearchQuery] = useState("");
   // 「获取所有模型」弹窗的数据源；null = 未打开。
   const [browseModels, setBrowseModels] = useState<ListedModel[] | null>(null);
-  // 正在通过设置图标自定义展示名的已接入模型 id；null = 无编辑态。
+  // 正在行内编辑展示名的已接入模型 id（点击行进入）；null = 无编辑态。
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState("");
+  // 刚复制过原始 name 的模型 id（对应按钮短暂显示 ✓）；null = 无复制反馈。
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  // 当前编辑会话是否已提交，保证同一次编辑只保存一次（blur 不重复提交）。
+  const editCommittedRef = useRef(false);
   const modelListInputRef = useRef<HTMLInputElement>(null);
+  // 复制反馈的恢复定时器；新复制 / 切换平台 / 卸载时清掉，避免旧定时器提前复位。
+  const copyFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { t: tr } = useI18n();
 
   useEffect(() => {
@@ -60,11 +67,21 @@ export function ProviderDetail({
     setModelSearchQuery("");
     setManualModelId("");
     setEditingId(null);
+    setCopiedId(null);
+    if (copyFeedbackTimerRef.current) {
+      clearTimeout(copyFeedbackTimerRef.current);
+      copyFeedbackTimerRef.current = null;
+    }
   }, [provider.id, provider.name, provider.baseUrl, provider.apiKey, provider.apiFormat]);
 
   useEffect(() => {
     modelListInputRef.current?.focus();
   }, [listMode]);
+
+  // 卸载时清掉复制反馈定时器，避免对已卸载组件 setState。
+  useEffect(() => () => {
+    if (copyFeedbackTimerRef.current) clearTimeout(copyFeedbackTimerRef.current);
+  }, []);
 
   const syncProvider = useCallback(
     (field: "name" | "baseUrl" | "apiKey" | "apiFormat", value: string) => {
@@ -225,10 +242,41 @@ export function ProviderDetail({
     [patch, provider.id],
   );
 
-  /** 保存自定义展示名：目录条目与已接入条目同步更新。 */
+  /** 弹窗中点 − 移除：ListedModel 与已接入条目字段名不同，按 id/name 双匹配定位后复用 removeModel。 */
+  const removeListedModel = useCallback(
+    (model: ListedModel) => {
+      const target = selectedModels.find(
+        (s) =>
+          s.providerId === provider.id &&
+          (s.id === model.id || (!!s.name && !!model.name && s.name === model.name)),
+      );
+      if (target) {
+        removeModel(target.id);
+        return;
+      }
+      const catalog = provider.models ?? [];
+      const same = (m: { id: string; name: string }) =>
+        m.id === model.id || (!!m.name && !!model.name && m.name === model.name);
+      const hit = catalog.find(same);
+      if (hit) removeModel(hit.id);
+    },
+    [selectedModels, provider.id, provider.models, removeModel],
+  );
+
+  /** 失焦自动保存展示名（唯一提交路径）：目录条目与已接入条目同步更新。 */
   const saveDisplayName = useCallback(
     (modelId: string, value: string) => {
+      // 同一次编辑会话只提交一次，避免 blur 重复触发写入。
+      if (editCommittedRef.current) return;
+      editCommittedRef.current = true;
       const displayName = value.trim();
+      // 与当前展示名（未设置时回退 name）一致即未变化，不写 patch，
+      // 避免无意义的 dirty 标记与自动保存。
+      const current = selectedModels.find((s) => s.providerId === provider.id && s.id === modelId);
+      if (displayName === modelDisplayName(current)) {
+        setEditingId(null);
+        return;
+      }
       patch((d) => {
         const idx = (d.providers ?? []).findIndex((p) => p.id === provider.id);
         if (idx >= 0) {
@@ -246,8 +294,36 @@ export function ProviderDetail({
       });
       setEditingId(null);
     },
-    [patch, provider.id],
+    [patch, provider.id, selectedModels],
   );
+
+  /** 进入某一行的展示名编辑态；初值取展示名，未设置或为空时回退模型 name。
+   *  切换行不在此显式保存：点击其他行会先触发输入框 blur，由 blur 唯一落盘。 */
+  const beginEdit = useCallback(
+    (modelId: string) => {
+      if (editingId === modelId) return;
+      const model = selectedModels.find((s) => s.providerId === provider.id && s.id === modelId);
+      editCommittedRef.current = false;
+      setEditingId(modelId);
+      setEditingName(modelDisplayName(model));
+    },
+    [editingId, provider.id, selectedModels],
+  );
+
+  /** 复制模型原始 name（发给服务端的请求标识，而非展示名）；成功后按钮短暂显示 ✓。 */
+  const copyModelName = useCallback(async (modelId: string, value: string) => {
+    try {
+      await navigator.clipboard.writeText(value);
+    } catch {
+      return; // 剪贴板不可用（权限 / 受限上下文）时静默忽略，与消息复制一致。
+    }
+    setCopiedId(modelId);
+    if (copyFeedbackTimerRef.current) clearTimeout(copyFeedbackTimerRef.current);
+    copyFeedbackTimerRef.current = setTimeout(() => {
+      copyFeedbackTimerRef.current = null;
+      setCopiedId(null);
+    }, 1500);
+  }, []);
 
   /** “已启用 N”徽标计数：按 selectedModels 条目数统计，不能用 addedIds.size——
    *  addedIds 同时收录 id 与 name，旧格式条目（id !== name）会被算成 2 个。 */
@@ -262,6 +338,10 @@ export function ProviderDetail({
     const q = modelSearchQuery.trim().toLowerCase();
     return list.filter((m) => fuzzyMatchModel(modelDisplayName(m), m.id, q));
   }, [listMode, modelSearchQuery, provider.id, selectedModels]);
+
+  /** 已接入模型按系列分组（组内按展示名排序，组间按数量降序）；
+   *  AvailableModel 满足 groupModelsBySeries 的入参约束（id/name/displayName），无需映射。 */
+  const groupedModels = useMemo(() => groupModelsBySeries(addedModels), [addedModels]);
 
   const enterSearchMode = useCallback(() => {
     setListMode("search");
@@ -421,69 +501,102 @@ export function ProviderDetail({
         ) : addedModels.length === 0 ? (
           <p className="hint">{tr("无匹配模型")}</p>
         ) : (
-          addedModels.map((m) => (
-            <div key={`${m.providerId}\u0000${m.id}`} className="model-detail-row">
-              {editingId === m.id ? (
-                <span className="model-display-edit">
-                  <input
-                    autoFocus
-                    value={editingName}
-                    placeholder={m.name}
-                    onChange={(e) => setEditingName(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        e.preventDefault();
-                        saveDisplayName(m.id, editingName);
-                      } else if (e.key === "Escape") {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        setEditingId(null);
-                      }
-                    }}
-                    aria-label={tr("自定义展示名")}
-                  />
-                  <button type="button" className="ghost tiny" onClick={() => saveDisplayName(m.id, editingName)}>
-                    {tr("保存")}
-                  </button>
-                  <button type="button" className="ghost tiny" onClick={() => setEditingId(null)}>
-                    {tr("取消")}
-                  </button>
-                </span>
-              ) : (
-                <label className="model-detail-row-label">
-                  <input
-                    type="checkbox"
-                    checked
-                    onChange={(e) => toggleModel(m, e.target.checked)}
-                  />
-                  <span className="model-detail-row-name">{modelDisplayName(m)}</span>
-                  {m.displayName && m.displayName !== m.name ? (
-                    <span className="model-detail-row-id">{m.id}</span>
-                  ) : null}
-                </label>
-              )}
-              <span className="model-detail-row-actions">
-                <button
-                  type="button"
-                  className="ghost tiny"
-                  title={tr("自定义展示名")}
-                  onClick={() => {
-                    setEditingId(m.id);
-                    setEditingName(m.displayName ?? "");
-                  }}
-                >
-                  ⚙
-                </button>
-                <button
-                  type="button"
-                  className="ghost tiny danger"
-                  title={tr("移除该模型")}
-                  onClick={() => removeModel(m.id)}
-                >
-                  {tr("删除")}
-                </button>
-              </span>
-            </div>
+          groupedModels.map((group) => (
+            <section key={group.key} className="provider-model-group">
+              <header className="provider-model-group-head">
+                <span className="provider-model-group-name">{group.label}</span>
+                <span className="provider-model-group-count">{group.models.length}</span>
+              </header>
+              <ul className="provider-model-group-list">
+                {group.models.map((m) => (
+                  <li key={`${m.providerId} ${m.id}`} className="provider-model-group-item">
+                    <div
+                      className="model-detail-row"
+                      onClick={() => {
+                        if (editingId === m.id) return;
+                        beginEdit(m.id);
+                      }}
+                    >
+                      {/* 非 label：行内点击要进入展示名编辑，若用 label 会把点击转发给
+                          checkbox 从而取消勾选（等价于移除模型）。编辑态只把名称换成
+                          输入框，左侧复选框始终保留。 */}
+                      <span className="model-detail-row-label">
+                        <input
+                          type="checkbox"
+                          checked
+                          onClick={(e) => e.stopPropagation()}
+                          onChange={(e) => toggleModel(m, e.target.checked)}
+                        />
+                        {editingId === m.id ? (
+                          // 仅失焦保存并退出编辑：Enter/Esc 无提交或取消语义，按键不外溢到列表快捷键
+                          <input
+                            autoFocus
+                            className="model-display-edit-input"
+                            value={editingName}
+                            placeholder={m.name}
+                            onChange={(e) => setEditingName(e.target.value)}
+                            onBlur={() => saveDisplayName(m.id, editingName)}
+                            onClick={(e) => e.stopPropagation()}
+                            onKeyDown={(e) => e.stopPropagation()}
+                            aria-label={tr("自定义展示名")}
+                          />
+                        ) : (
+                          <span className="model-detail-row-name">{modelDisplayName(m)}</span>
+                        )}
+                        {/* 有自定义展示名时主名称显示展示名，这里补显原始 name（请求标识）；
+                            复制按钮紧跟其后，保证视觉上「name + 复制」相邻，而非跟在展示名后。 */}
+                        {m.displayName && m.displayName !== m.name ? (
+                          <span className="model-detail-row-id">{m.name}</span>
+                        ) : null}
+                        {/* 复制的是原始 name（请求标识），与展示名无关；点击不冒泡到行的编辑入口。 */}
+                        <button
+                          type="button"
+                          className={`ghost tiny model-copy-btn${copiedId === m.id ? " copied" : ""}`}
+                          title={copiedId === m.id ? tr("已复制") : tr("复制模型名称")}
+                          aria-label={tr("复制模型名称")}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            void copyModelName(m.id, m.name);
+                          }}
+                        >
+                          {copiedId === m.id ? (
+                            "✓"
+                          ) : (
+                            <svg
+                              width="12"
+                              height="12"
+                              viewBox="0 0 16 16"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="1.5"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              aria-hidden="true"
+                            >
+                              <rect x="5.5" y="5.5" width="8" height="8" rx="1.5" />
+                              <path d="M10.5 5.5v-2A1.5 1.5 0 0 0 9 2H4A1.5 1.5 0 0 0 2.5 3.5v5A1.5 1.5 0 0 0 4 10h1.5" />
+                            </svg>
+                          )}
+                        </button>
+                      </span>
+                      <span className="model-detail-row-actions">
+                        <button
+                          type="button"
+                          className="ghost tiny danger"
+                          title={tr("移除该模型")}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            removeModel(m.id);
+                          }}
+                        >
+                          {tr("删除")}
+                        </button>
+                      </span>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </section>
           ))
         )}
       </div>
@@ -494,6 +607,7 @@ export function ProviderDetail({
           models={browseModels}
           addedIds={addedIds}
           onAdd={addModel}
+          onRemove={removeListedModel}
           onClose={() => setBrowseModels(null)}
         />
       )}

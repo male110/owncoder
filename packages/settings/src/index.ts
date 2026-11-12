@@ -238,13 +238,15 @@ export type { ThinkingEffort, ModelRef, ApiFormat, ListedModel } from "@owncoder
 export { resolveApiFormat, API_FORMATS, isApiFormat, isOfficialAnthropicHost } from "@owncoder/llm/browser";
 
 /** 界面展示名：用户自定义 displayName（或协议返回的 display_name）优先，其次 name。
- *  注意：`name` 才是发给服务端的模型标识，展示名仅影响界面显示。 */
+ *  注意：`name` 才是发给服务端的模型标识，展示名仅影响界面显示。
+ *  永不回落到 id：id 是内部/请求标识，不是给人看的名称；name 缺失时返回空串，
+ *  由调用方决定降级展示（如分组场景归入空键组），避免把 id 当展示名泄漏到界面。 */
 export function modelDisplayName(
   model: { name: string; displayName?: string; display_name?: string } | null | undefined,
 ): string {
   if (!model) return "";
   const custom = model.displayName?.trim() || model.display_name?.trim();
-  return custom || model.name;
+  return custom || model.name || "";
 }
 
 /** 模型能力分类；用于「获取所有模型」弹窗的分类浏览。 */
@@ -291,15 +293,36 @@ export function modelCategory(
   return /^[\d.\-_]+$/.test(model.id) ? "other" : "text";
 }
 
-/** 模型系列（厂商）分组键，如 `deepseek-chat` / `DeepSeek-V4-Pro` → `deepseek`。 */
-export function modelSeriesKey(model: { id: string; name: string }): string {
-  const id = model.id.toLowerCase();
-  const leading = id.match(/[a-z]+/)?.[0] ?? "";
-  // 前缀过短（如 "gpt"、"k1"）时容易误合并，取第一段含字母的片段作为回退。
-  if (leading.length >= 3) return leading;
-  // 无字母 id（如 "1234"）回退到 id 本身，避免分组标题为空串。
-  const found = id.split(/[-_./:]/).find((part) => /[a-z]/.test(part));
-  return found || leading || id;
+/** 模型系列（厂商）分组键，如 `deepseek-chat` / `DeepSeek-V4-Pro` → `deepseek`。
+ *  扫描来源为展示名回落结果（display_name/displayName → name，永不回落到 id）：旧格式迁移条目
+ *  （id 为 `model_<providerId>_<raw>`、name 为裸 raw）若直接扫 id，首段字母 `model`
+ *  会被误当作系列词，导致所有迁移条目并入 "Model" 组；无 displayName 时取 name
+ *  （如 `atria-dawn`）才能得到正确的系列键。
+ *  来源可能带供应商/命名空间前缀（如 `atria/kimi-k2.7-code`），此时首段字母只是
+ *  供应商名，会把不同系列的模型误并成一组；因此当含命名空间分隔符（`/` 或 `:`）
+ *  时剥离首段，再取段首连续字母 ≥3 的系列词（`qwen3` → `qwen`），
+ *  确保 `atria/kimi-k2.7-code` → `kimi` 而非 `atria`。 */
+export function modelSeriesKey(
+  model: { id: string; name: string; displayName?: string; display_name?: string },
+): string {
+  // 真实数据 id 可能带前导/尾随空格（服务端返回或手动输入带入），不 trim 会让
+  // 首段字母匹配失败（" kimi" 的 /^[a-z]+/ 锚定段首落空）而误落到后续段（如 code），
+  // 或把带空格的整段当作键，导致同一 kimi 系列被拆成不同分组。
+  const id = modelDisplayName(model).trim().toLowerCase();
+  // 命名空间分隔符（/ 或 :）明确区分供应商与系列；连字符/下划线/点不剥离，避免误伤裸 id。
+  const nsMatch = id.match(/^([a-z]+)[\/:](.+)$/);
+  const scanTarget = (nsMatch ? nsMatch[2]! : id).trim();
+  const parts = scanTarget.split(/[-_./:]/);
+  for (const part of parts) {
+    const lead = part.match(/^[a-z]+/)?.[0] ?? "";
+    if (lead.length >= 3) return lead;
+  }
+  // 无合格片段时回退到首个含字母的段（保留旧行为，如 "1.5-v2" → "v2"）。
+  const found = parts.find((part) => /[a-z]/.test(part));
+  if (found) return found;
+  // 无字母片段（如纯数字 name "1234"）时返回空串：该条目没有可识别的系列词，
+  // 归入空键组（组标签为空串），绝不回落到 id——id 不是展示名来源。
+  return id.match(/[a-z]+/)?.[0] ?? "";
 }
 
 /** 分组键 → 展示用的系列名（首字母大写）。 */
@@ -307,7 +330,24 @@ export function modelSeriesLabel(key: string): string {
   return key ? key.charAt(0).toUpperCase() + key.slice(1) : key;
 }
 
-/** 按系列分组并按（组内数量降序、键名升序）排序，组内模型按展示名排序。 */
+/** 从展示名中提取系列前缀并保留原始大小写（如 "DeepSeek V4 Flash" → "DeepSeek"）。
+ *  取首个空白分隔词，再取其中首个连续字母段；无字母或与分组键不一致时（如展示名回落
+ *  到带供应商前缀的 name "atria/kimi-k2.7-code" 首词为 "atria"）回落为小写键首字母大写。 */
+function seriesLabelFromDisplayName(displayName: string, key: string): string {
+  const trimmed = displayName.trim();
+  if (!trimmed) return modelSeriesLabel(key);
+  // "DeepSeek V4 Flash" → "DeepSeek"；"DeepSeek-V4-Pro" → "DeepSeek"；"glm-4" → "glm"。
+  const seg = trimmed.split(/\s+/)[0].match(/[A-Za-z]+/)?.[0];
+  // 展示名首词系列与分组键不一致时，以分组键为准，避免供应商前缀污染组名。
+  if (!seg || seg.toLowerCase() !== key) return modelSeriesLabel(key);
+  return seg;
+}
+
+/** 按系列分组并按组标签（分组名称）升序排序，组内模型按展示名排序。
+ *  组显示标签取该组代表模型（组内展示名排序首个）展示名中的系列前缀，
+ *  保留 display_name/name 的原始大小写（如 "DeepSeek" 而非 "DEEPSEEK"/"Deepseek"）。
+ *  组间排序按标签的 localeCompare 升序（标签相同时回落键名升序）；空标签组
+ *  （无可识别系列词的条目）排最后，避免空名组占据列表顶部。 */
 export function groupModelsBySeries<
   T extends { id: string; name: string; displayName?: string; display_name?: string },
 >(
@@ -321,15 +361,24 @@ export function groupModelsBySeries<
     else map.set(key, [m]);
   }
   return [...map.entries()]
-    .map(([key, list]) => ({
-      key,
-      label: modelSeriesLabel(key),
-      models: [...list].sort((a, b) => {
+    .map(([key, list]) => {
+      const sorted = [...list].sort((a, b) => {
         const byName = modelDisplayName(a).localeCompare(modelDisplayName(b));
         return byName !== 0 ? byName : a.id.localeCompare(b.id);
-      }),
-    }))
-    .sort((a, b) => b.models.length - a.models.length || a.key.localeCompare(b.key));
+      });
+      return {
+        key,
+        label: seriesLabelFromDisplayName(modelDisplayName(sorted[0]), key),
+        models: sorted,
+      };
+    })
+    .sort((a, b) => {
+      // 组间按分组名称（标签）升序；空标签组（""）排最后。
+      const aEmpty = a.label ? 0 : 1;
+      const bEmpty = b.label ? 0 : 1;
+      if (aEmpty !== bEmpty) return aEmpty - bEmpty;
+      return a.label.localeCompare(b.label) || a.key.localeCompare(b.key);
+    });
 }
 
 /** Model settings stored in a dedicated `models.json` (providers + selected models,

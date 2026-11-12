@@ -598,8 +598,8 @@ export function useChatActions(deps: {
     if (!sid) return;
 
     console.log("[onSend] after sid check, text=", text?.substring(0, 50), "session=", session);
-    // 只匹配单斜杠开头的命令（如 /clear），不匹配双斜杠（如 // 注释）
-    if (text && text.startsWith("/") && !text.startsWith("//")) { void runSlash(text, sid); return; }
+    // 只有已执行的命令才消费消息；粘贴的绝对路径、块注释等仍按普通文本发送。
+    if (text && text.startsWith("/") && !text.startsWith("//") && await runSlash(text, sid)) return;
     console.log("[onSend] checking workspace...");
     const sendSession = useSessionStore.getState();
     if (!sendSession.workspace) { console.log("[onSend] workspace not ready → return"); chat.setLiveStatus(t("工作区尚未就绪，请稍候…"), sid); return; }

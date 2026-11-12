@@ -412,39 +412,117 @@ function detectToolLoop(
   // Need at least maxRepeat + 1 calls to detect a loop
   // E.g., maxRepeat=2 requires 3 calls (first + 2 repeats)
   const minCallsForDetection = maxRepeat + 1;
-  
+
   if (history.length < minCallsForDetection) {
     return { isLoop: false };
   }
-  
+
   // 检查最近的 minCallsForDetection 次调用是否**连续相同**
   // 只有连续的重复才算循环，中间有其他操作打断则不算
   const recentCalls = history.slice(-minCallsForDetection);
-  
+
   // 计算第一个调用的指纹
   const firstFp = toolCallFingerprint(
     recentCalls[0].name,
     recentCalls[0].arguments,
     recentCalls[0].result
   );
-  
+
   // 检查后续所有调用是否都与第一个相同
+  let allSame = true;
   for (let i = 1; i < recentCalls.length; i++) {
     const currentFp = toolCallFingerprint(
       recentCalls[i].name,
       recentCalls[i].arguments,
       recentCalls[i].result
     );
-    
+
     if (currentFp !== firstFp) {
       // 发现不同的调用，说明不是连续重复
-      return { isLoop: false };
+      allSame = false;
+      break;
     }
   }
-  
-  // 所有调用都相同，确认为循环
-  const [toolName] = firstFp.split("::");
-  return { isLoop: true, toolName, count: minCallsForDetection };
+
+  if (allSame) {
+    // 所有调用都相同，确认为循环
+    const [toolName] = firstFp.split("::");
+    return { isLoop: true, toolName, count: minCallsForDetection };
+  }
+
+  // 扁平逐调用检测未命中：多工具批次盲区。
+  // 一次 LLM 请求可能返回多个不同工具调用（如 read a + read b 一批），
+  // 扁平序列退化为 a,b,a,b,…，单调用级比较永远凑不齐连续相同指纹。
+  // 这里按 ToolCallRecord.iteration（记录于 updateStateAfterTools）把历史
+  // 分成迭代批次，若最近 maxRepeat+1 个非空批次的调用序列完全相同，同样判定为循环。
+  const batchLoop = detectBatchToolLoop(history, maxRepeat);
+  if (batchLoop) {
+    return batchLoop;
+  }
+
+  return { isLoop: false };
+}
+
+/**
+ * 批次级循环检测：按 iteration 把 toolCallHistory 分组，比较最近
+ * maxRepeat + 1 个非空批次的指纹序列是否完全相同。
+ *
+ * 批次内顺序敏感（与单调用级检测一致：同一批工具调用的执行顺序也是
+ * 可观察行为的一部分），因此用有序指纹列表而非多重集比较。
+ */
+function detectBatchToolLoop(
+  history: ToolCallRecord[],
+  maxRepeat: number,
+): { isLoop: true; toolName: string; count: number } | null {
+  const minBatchesForDetection = maxRepeat + 1;
+
+  // 按 iteration 分组，保留迭代顺序（iteration 单调递增，直接按出现顺序收集）
+  const batches: ToolCallRecord[][] = [];
+  let currentIteration: number | null = null;
+  let currentBatch: ToolCallRecord[] = [];
+
+  for (const record of history) {
+    if (currentIteration === null || record.iteration !== currentIteration) {
+      if (currentBatch.length > 0) {
+        batches.push(currentBatch);
+      }
+      currentBatch = [record];
+      currentIteration = record.iteration;
+    } else {
+      currentBatch.push(record);
+    }
+  }
+  if (currentBatch.length > 0) {
+    batches.push(currentBatch);
+  }
+
+  if (batches.length < minBatchesForDetection) {
+    return null;
+  }
+
+  const recentBatches = batches.slice(-minBatchesForDetection);
+  // 空批次不会进入 batches，但批次大小不同直接视为不循环
+  const referenceFps = recentBatches[0].map((r) =>
+    toolCallFingerprint(r.name, r.arguments, r.result)
+  );
+
+  for (let i = 1; i < recentBatches.length; i++) {
+    const batchFps = recentBatches[i].map((r) =>
+      toolCallFingerprint(r.name, r.arguments, r.result)
+    );
+    if (batchFps.length !== referenceFps.length) {
+      return null;
+    }
+    for (let j = 0; j < referenceFps.length; j++) {
+      if (batchFps[j] !== referenceFps[j]) {
+        return null;
+      }
+    }
+  }
+
+  // 批次完全相同：以批次中第一个调用的工具名作为代表
+  const [toolName] = referenceFps[0].split("::");
+  return { isLoop: true, toolName, count: minBatchesForDetection };
 }
 
 /** CJK Unified Ideographs — used to detect runs that whitespace tokenization cannot split. */
