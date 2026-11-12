@@ -1,6 +1,8 @@
 // ── 工具卡片参数/结果格式化辅助 ─────────────────────────────────────────────
 
 export function summarizeArgs(name: string, args: Record<string, unknown>): string {
+  // 子代理任务描述已由下方 Explore 卡片展示，标题不再重复。
+  if (name === "dispatch_agent") return "";
   const pick = (k: string) => (typeof args[k] === "string" ? String(args[k]) : undefined);
   if (name === "read_file" || name === "write_file" || name === "apply_patch" || name === "read_outline" || name === "read_symbol") {
     const p = pick("path") ?? pick("filePath") ?? pick("file_path") ?? "";

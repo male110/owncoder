@@ -648,6 +648,7 @@ export const en = {
   "已添加": "Added",
   "添加到已接入列表": "Add to connected models",
   "自定义展示名": "Customize display name",
+  "复制模型名称": "Copy model name",
   "删除此偏好记忆？": "Delete this memory?",
   "暂无全局偏好记忆": "No global memories yet",
   "暂无项目偏好记忆": "No project memories yet",

@@ -6864,7 +6864,7 @@ button.ghost.tiny.danger:hover {
   background: rgba(224, 112, 112, 0.1);
 }
 
-/* 已接入模型行：展示名 + 次要的模型 id + 行内操作（⚙ 自定义展示名 / 删除） */
+/* 已接入模型行：展示名 + 次要的原始 name（紧跟复制按钮）+ 行内操作（删除） */
 
 .model-detail-row-actions {
   display: flex;
@@ -6881,19 +6881,50 @@ button.ghost.tiny.danger:hover {
   white-space: nowrap;
 }
 
-.model-display-edit {
-  display: flex;
+/* 原始 name 后的复制按钮：复制模型 name（请求标识），成功后短暂显示 ✓。
+   默认无边框弱化存在感，悬停才显形，避免与行尾操作按钮抢视觉。 */
+button.ghost.model-copy-btn {
+  display: inline-flex;
   align-items: center;
-  gap: 6px;
-  flex: 1;
-  min-width: 0;
+  justify-content: center;
+  flex-shrink: 0;
+  min-width: 24px;
+  height: 20px;
+  padding: 2px 6px;
+  line-height: 1;
+  border-color: transparent;
+  color: var(--muted);
+  transition: color 120ms ease, border-color 120ms ease;
 }
 
-.model-display-edit input {
-  flex: 1;
+button.ghost.model-copy-btn:hover {
+  color: var(--text);
+  border-color: var(--border);
+}
+
+button.ghost.model-copy-btn.copied {
+  color: var(--success);
+}
+
+/* 行内展示名编辑框：与平台名称输入框同款（透明底、仅下划线、聚焦蓝色下划线）；
+   宽度随内容自适应（field-sizing，空值时按占位符计宽），不撑满整行，左侧复选框保留。 */
+.model-display-edit-input {
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 13px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-bottom-color: var(--border);
+  color: var(--text);
+  padding: 2px 0;
+  field-sizing: content;
+  max-width: 100%;
   min-width: 0;
-  padding: 5px 8px;
-  font-size: 12px;
+  cursor: text;
+}
+
+.model-display-edit-input:focus {
+  outline: none;
+  border-bottom-color: rgba(100, 180, 255, 0.7);
 }
 
 /* ── 「获取所有模型」弹窗 ───────────────────────────────────────────────────── */
