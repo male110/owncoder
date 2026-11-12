@@ -249,7 +249,12 @@ export function ProviderDetail({
     [patch, provider.id],
   );
 
-  const enabledCount = addedIds.size;
+  /** “已启用 N”徽标计数：按 selectedModels 条目数统计，不能用 addedIds.size——
+   *  addedIds 同时收录 id 与 name，旧格式条目（id !== name）会被算成 2 个。 */
+  const enabledCount = useMemo(
+    () => selectedModels.filter((m) => m.providerId === provider.id).length,
+    [provider.id, selectedModels],
+  );
 
   const addedModels = useMemo(() => {
     const list = selectedModels.filter((m) => m.providerId === provider.id);

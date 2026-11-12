@@ -12,7 +12,19 @@ import { getCodec } from "./protocol/registry.js";
 import { createSseFramer } from "./protocol/sse.js";
 import type { ThinkingConfig } from "./thinking.js";
 import type { ModelRef } from "./model-ref.js";
+import {
+  isLlmDecodeError,
+  isLlmTimeoutError,
+  LlmDecodeError,
+  LlmTimeoutError,
+} from "./errors.js";
 
+export {
+  isLlmDecodeError,
+  isLlmTimeoutError,
+  LlmDecodeError,
+  LlmTimeoutError,
+} from "./errors.js";
 export type { ChatMessage, ChatAttachment, ChatResponse, ToolCall, ToolDef } from "./types.js";
 export type { ApiFormat, ListedModel, ModelListPage } from "./protocol/types.js";
 export { API_FORMATS, isApiFormat } from "./protocol/types.js";
@@ -676,50 +688,6 @@ const LLM_TIMEOUT_MS = 120_000;
  */
 const LLM_NONSTREAM_TIMEOUT_MS = 300_000;
 
-/**
- * LLM 请求不活跃超时（我方定时器触发，区别于用户取消）。
- * harness 层的 withRetry 据此把超时当作可重试的临时故障，按指数退避
- * 重试，而不是像用户取消一样立即终止。
- */
-export class LlmTimeoutError extends Error {
-  constructor(timeoutMs: number) {
-    super(`LLM request timed out after ${Math.round(timeoutMs / 1000)}s without activity`);
-    this.name = "LlmTimeoutError";
-  }
-}
-
-/**
- * 响应体解析/解码失败（JSON 语法错误、协议字段缺失、网关把错误塞进 200 响应体）。
- * 这类失败由服务端返回内容决定，重试同一请求只会得到同样的结果，
- * 因此必须立即抛出，不能走网络错误的退避重试路径。
- */
-export class LlmDecodeError extends Error {
-  constructor(message: string, options?: { cause?: unknown }) {
-    super(message, options);
-    this.name = "LlmDecodeError";
-  }
-}
-
-/** 判断错误是否为响应体解码失败（不可重试）。 */
-export function isLlmDecodeError(e: unknown): boolean {
-  return e instanceof LlmDecodeError || (e instanceof Error && e.name === "LlmDecodeError");
-}
-
-/** 判断错误是否为我方不活跃超时（含被 AbortError/普通 Error 包装的情况）。 */
-export function isLlmTimeoutError(e: unknown): boolean {
-  if (e instanceof LlmTimeoutError) return true;
-  if (e instanceof Error) {
-    if (e.name === "LlmTimeoutError") return true;
-    // 某些 Node 版本/流读取路径会把 abort reason 的 message 复制到新错误上，
-    // 用消息特征兜底识别（该文案为 LLM 层独有，网关错误不会包含）。
-    if (/timed out after \d+s without activity/.test(e.message)) return true;
-    const cause = (e as Error & { cause?: unknown }).cause;
-    if (cause instanceof Error && /timed out after \d+s without activity/.test(cause.message)) {
-      return true;
-    }
-  }
-  return false;
-}
 
 /**
  * Combine a user-supplied AbortSignal with a timeout into a single signal.

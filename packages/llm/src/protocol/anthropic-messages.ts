@@ -8,6 +8,7 @@ import type {
   StreamParser,
 } from "./types.js";
 import { normalizeApiBaseUrl } from "./url.js";
+import { LlmDecodeError } from "../errors.js";
 
 const ANTHROPIC_VERSION = "2023-06-01";
 const DEFAULT_MAX_TOKENS = 16384;
@@ -349,7 +350,9 @@ class AnthropicStreamParser implements StreamParser {
   feed(event: { event?: string; data: string }): boolean {
     const data = event.data;
     if (event.event === "error") {
-      throw new Error(anthropicErrorMessage(data, "Anthropic stream error"));
+      // 流内 event:error 是服务端已明确返回的错误内容，重试同一请求只会得到
+      // 同样结果，抛 LlmDecodeError 让 harness 的 withRetry 立即终止而非退避重试。
+      throw new LlmDecodeError(anthropicErrorMessage(data, "Anthropic stream error"));
     }
     if (!data || data === "[DONE]") return false;
     let payload: {
@@ -390,7 +393,7 @@ class AnthropicStreamParser implements StreamParser {
 
     const type = event.event || payload.type;
     if (type === "error" || payload.error) {
-      throw new Error(anthropicErrorMessage(payload, "Anthropic stream error"));
+      throw new LlmDecodeError(anthropicErrorMessage(payload, "Anthropic stream error"));
     }
     if (!type || type === "ping") return false;
 

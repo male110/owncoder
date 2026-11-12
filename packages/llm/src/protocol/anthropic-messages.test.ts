@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ChatMessage, ToolDef } from "../types.ts";
+import { isLlmDecodeError, LlmDecodeError } from "../errors.ts";
 import {
   anthropicMessagesCodec,
   decodeAnthropicResponse,
@@ -452,6 +453,24 @@ describe("anthropicMessagesCodec stream", () => {
         data: JSON.stringify({ type: "error", error: { message: "rate limited" } }),
       }),
     ).toThrow(/rate limited/);
+  });
+
+  it("流内错误事件抛 LlmDecodeError，让 withRetry 立即终止而非退避重试", () => {
+    const byEvent = anthropicMessagesCodec.createStreamParser({});
+    expect(() =>
+      byEvent.feed({ event: "error", data: JSON.stringify({ error: { message: "Overloaded" } }) }),
+    ).toThrow(LlmDecodeError);
+
+    const byPayload = anthropicMessagesCodec.createStreamParser({});
+    let caught: unknown;
+    try {
+      byPayload.feed({ data: JSON.stringify({ type: "error", error: { message: "rate limited" } }) });
+    } catch (e) {
+      caught = e;
+    }
+    expect(caught).toBeInstanceOf(LlmDecodeError);
+    expect(isLlmDecodeError(caught)).toBe(true);
+    expect((caught as Error).message).toMatch(/rate limited/);
   });
 });
 

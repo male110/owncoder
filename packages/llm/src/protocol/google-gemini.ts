@@ -146,7 +146,19 @@ export const googleGeminiCodec: ProtocolCodec = {
   listModelsUrl(baseUrl: string): string { return new URL("models", normalizeApiBaseUrl(baseUrl)).toString(); },
   listModelsHeaders(apiKey: string | undefined): Record<string, string> { return this.buildHeaders(apiKey); },
   parseModelList(json: unknown): ListedModel[] {
-    const models = (json as { models?: Array<{ name?: string; displayName?: string }> }).models ?? [];
-    return models.filter((model) => model.name).map((model) => ({ id: model.name!.replace(/^models\//, ""), name: model.displayName || model.name!.replace(/^models\//, "") }));
+    // 网络数据未经校验：json 可能为 null、models 可能不是数组、条目可能为 null，
+    // 直接属性访问/遍历会抛 TypeError 让设置页整块崩掉，这里逐层收窄。
+    const data = typeof json === "object" && json !== null ? (json as { models?: unknown }) : {};
+    const models = data.models;
+    if (!Array.isArray(models)) return [];
+    return models
+      .filter(
+        (model): model is { name: string; displayName?: string } =>
+          typeof model?.name === "string" && model.name.trim().length > 0,
+      )
+      .map((model) => {
+        const id = model.name.replace(/^models\//, "");
+        return { id, name: model.displayName || id };
+      });
   },
 };

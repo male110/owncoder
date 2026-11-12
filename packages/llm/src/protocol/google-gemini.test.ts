@@ -71,4 +71,21 @@ describe("googleGeminiCodec", () => {
       { id: "call_1", type: "function", function: { name: "second", arguments: '{"b":2}' } },
     ]);
   });
+
+  it("parseModelList 容忍 null / 非数组 / 脏条目，不抛 TypeError", () => {
+    expect(googleGeminiCodec.parseModelList(null)).toEqual([]);
+    expect(googleGeminiCodec.parseModelList(undefined)).toEqual([]);
+    expect(googleGeminiCodec.parseModelList("nope")).toEqual([]);
+    expect(googleGeminiCodec.parseModelList({ models: null })).toEqual([]);
+    expect(googleGeminiCodec.parseModelList({ models: { a: 1 } })).toEqual([]);
+    expect(
+      googleGeminiCodec.parseModelList({
+        models: [null, undefined, {}, { name: "  " }, { name: 42 }, { name: "models/gemini-2.0-flash", displayName: "Flash" }],
+      }),
+    ).toEqual([{ id: "gemini-2.0-flash", name: "Flash" }]);
+    // 无 displayName 时回落到去掉 models/ 前缀的 id
+    expect(googleGeminiCodec.parseModelList({ models: [{ name: "models/embedding-001" }] })).toEqual([
+      { id: "embedding-001", name: "embedding-001" },
+    ]);
+  });
 });
