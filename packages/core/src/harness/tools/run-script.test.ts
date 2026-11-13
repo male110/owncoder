@@ -320,7 +320,7 @@ test("run_script tool is registered for both modes", async () => {
   assert.ok(planTools.some((t) => t.function.name === "run_script"));
 });
 
-test("run_script code 参数描述携带防截断、搜索工具和路径纪律", () => {
+test("run_script code 参数描述保留载荷纪律与单次调用禁令", () => {
   const def = allEnhancedTools({ mode: "agent" }).find(t => t.function.name === "run_script")!;
   const codeDesc = (def.function.parameters as { properties: { code?: { description?: string } } }).properties.code?.description ?? "";
   for (const text of [
@@ -328,17 +328,14 @@ test("run_script code 参数描述携带防截断、搜索工具和路径纪律"
     "引号总数为偶数",
     "每步 code 不超过 200 字符",
     "Unexpected token",
-    "tools.call(\"glob\"",
-    "tools.call(\"grep\"",
+    "不要用 run_script 包装单个 grep、glob、read_file",
+    "实质过滤、聚合、解析结果",
     ".gitignore",
-    "/workspace",
-    "/e/...",
-    "PowerShell",
-    "powershell.exe",
-    "/dev/null",
+    "how_to_call_tools",
   ]) {
     assert.ok(codeDesc.includes(text), text);
   }
+  // 工具调用形式与路径/平台纪律由 description 的 hard_rules 承载，不再在 code 参数里重复。
   for (const text of ["tools.call(\"glob\"", "tools.call(\"grep\"", ".gitignore", "workspace-relative", "PowerShell", "powershell.exe", "/dev/null"]) {
     assert.ok(def.function.description.includes(text), text);
   }

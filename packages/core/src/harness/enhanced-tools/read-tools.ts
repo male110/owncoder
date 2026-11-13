@@ -12,7 +12,7 @@ export const READ_TOOL_DEFS: ToolDef[] = [
     function: {
       name: "glob",
       description:
-        "Find workspace-relative files by a glob pattern. The search path is relative to the active workspace (default '.'); do not use /workspace or /e/... container/MSYS paths. Automatically skips .gitignore paths, dot directories, generated/vendor directories, and returns at most max_results paths. Skip it when the path is already named or known — call read_file on that path instead.",
+        "Find workspace-relative files by a glob pattern. The search path is relative to the active workspace (default '.'); do not use /workspace or /e/... container/MSYS paths. Automatically skips .gitignore paths, dot directories, generated/vendor directories, and returns at most max_results paths. Skip it when the path is already named or known — call read_file on that path instead. This is a top-level tool: call it directly, and never wrap a single search in run_script to forward its output.",
       parameters: {
         type: "object",
         properties: {
@@ -30,7 +30,7 @@ export const READ_TOOL_DEFS: ToolDef[] = [
     function: {
       name: "grep",
       description:
-        "Search workspace file contents with a regex or literal string. file_path is workspace-relative; do not use /workspace or /e/... paths. Automatically skips .gitignore paths, dot/generated/vendor directories, lockfiles, binaries, and files over 2MB. output_mode 'content' returns matched lines, 'files_with_matches' only their paths, 'count' only totals; use glob when only a filename pattern is known. Skip it when the target file or range is already known — read that file directly.",
+        "Search workspace file contents with a regex or literal string. file_path is workspace-relative; do not use /workspace or /e/... paths. Automatically skips .gitignore paths, dot/generated/vendor directories, lockfiles, binaries, and files over 2MB. output_mode 'content' returns matched lines, 'files_with_matches' only their paths, 'count' only totals; use glob when only a filename pattern is known. Skip it when the target file or range is already known — read that file directly. This is a top-level tool: call it directly, and never wrap a single search in run_script to forward its output.",
       parameters: {
         type: "object",
         properties: {
@@ -135,7 +135,7 @@ export const READ_TOOL_DEFS: ToolDef[] = [
     function: {
       name: "search_semantic",
       description:
-        "Keyword-driven vector search over embedded code chunks — the search target is code. Use concise keyword queries (identifiers, API names, domain terms) rather than long prose or whole code blocks. Example: `LlmRetryState retry`. Returns ranked hits with paths, line ranges, symbols, scores, and excerpts; does not perform exact symbol search or grep fallback. Use search_symbols when you already have the exact symbol name.",
+        "Keyword-driven vector search over embedded code chunks — the search target is code. Use concise keyword queries (identifiers, API names, domain terms) rather than long prose or whole code blocks. Example: `LlmRetryState retry`. Returns ranked hits with paths, line ranges, symbols, scores, and excerpts; does not perform exact symbol search or grep fallback. Pick one search tool, not both: use search_symbols when you already have the exact symbol name.",
       parameters: {
         type: "object",
         properties: {

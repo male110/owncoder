@@ -84,6 +84,7 @@ export const PARALLEL_SAFE_TOOLS: ReadonlySet<string> = new Set([
   "read_symbol",
   "read_outline",
   "glob",
+  "grep",
   "repo_map",
   "search_symbols",
   "search_semantic",

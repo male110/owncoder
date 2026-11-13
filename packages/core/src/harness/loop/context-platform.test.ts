@@ -37,15 +37,13 @@ describe("平台和项目上下文", () => {
     expect(platform).toContain("- OS: Windows (win32)\n- Release: 10.0.26200\n- Path separator: `\\`");
     expect(platform).toContain("The current runtime environment is Windows. **Terminal commands are executed with PowerShell semantics; please use PowerShell syntax.**");
     expect(platform).not.toContain("run_script");
-    expect(project).toContain("## Tool selection");
-    expect(project).toContain("Call a single `grep`, `glob`, or `read_file` directly as a top-level tool call");
-    expect(project).toContain("materially filter, aggregate, parse, or cross-match tool results");
-    expect(project).toContain("Each `tools.call` inside `run_script` consumes a nested-call budget in addition to the outer call");
-    expect(project).toContain("`run_script` executes JavaScript and is independent of the current project.");
+    // 工具选择规则已提升到内置系统提示词，不再作为项目上下文片段重复注入。
+    expect(platform).not.toContain("## Tool selection");
+    expect(project ?? "").not.toContain("## Tool selection");
+    expect(project ?? "").not.toContain("Call a single `grep`, `glob`, or `read_file` directly as a top-level tool call");
     if (enabled) {
       expect(project).toContain("## Project Tech Stack");
       expect(project).toContain("## Project Size");
-      expect(project.indexOf("## Project Size")).toBeLessThan(project.indexOf("## Tool selection"));
     }
   });
 });
