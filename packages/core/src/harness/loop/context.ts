@@ -160,15 +160,6 @@ export async function buildInitialContext(args: BuildContextArgs): Promise<Build
   };
 
   pushSystem(buildPlatformInfo(), "platform");
-  const runScriptInfo = [
-    "## Tool selection",
-    "- Call a single `grep`, `glob`, or `read_file` directly as a top-level tool call when its result can be used as returned.",
-    "- Use `run_script` when JavaScript will materially filter, aggregate, parse, or cross-match tool results, or when one script coordinates multiple tool calls.",
-    "- Each `tools.call` inside `run_script` consumes a nested-call budget in addition to the outer call, so wrapping one simple call is more expensive.",
-    "- `run_script` executes JavaScript and is independent of the current project.",
-  ].join("\n");
-  budgetUsed += estimateTokens(runScriptInfo);
-  contextCharsUsed += runScriptInfo.length;
 
   // Tech stack, project size, and project rules are now candidates (truncatable).
   // They will be added to the candidate pool later.
@@ -422,7 +413,7 @@ export async function buildInitialContext(args: BuildContextArgs): Promise<Build
   // Fixed segments separate platform info from optional content (tech stack,
   // project size, rules moved to candidates).
   const fixedSegments: FixedSegments = {
-    systemPrompt: basePromptTokens + estimateTokens(runScriptInfo), // Built-in prompt and fixed tool guidance
+    systemPrompt: basePromptTokens, // Built-in prompt and fixed tool guidance
     platformInfo: platformInfoTokens,      // Platform information (OS, shell, etc)
     toolDefs: 0,                          // @reserved — currently included in systemPrompt
     userInput: estimateTokens(opts.userMessage),
@@ -537,10 +528,10 @@ export async function buildInitialContext(args: BuildContextArgs): Promise<Build
     }
   }
   
-  // Wrap all collected project context parts with semantic tag
-  projectContextParts.push(runScriptInfo);
+  // Wrap all collected project context parts with semantic tag.
+  // 工具选择规则已在内置系统提示词中，这里只放真正的项目上下文；空则不占一条消息。
   const wrappedProjectContext = tagProjectContext(projectContextParts.join("\n\n"));
-  messages.push({ role: "system", content: wrappedProjectContext });
+  if (wrappedProjectContext) messages.push({ role: "system", content: wrappedProjectContext });
 
   if (contextNode && ctxEnabled) emitStage(opts.onEvent, "done", contextNode);
   log("stage_done emitted", {

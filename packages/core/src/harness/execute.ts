@@ -430,7 +430,7 @@ async function runTool(ctx: ToolContext, call: ParsedToolCall): Promise<ToolResu
       // ── 沙箱脚本（Think-in-Code）：模型写 JS 编排只读工具 + bash，只有 console 输出进对话 ──
       case "run_script": {
         if (typeof args.code !== "string" || !args.code.trim()) {
-          return fail('run_script 参数错误：必须提供非空字符串 code，例如 {"code":"const r = await tools.call(\\"read_file\\", {file_path:\\"src/x.ts\\"}); console.log(r.output.split(\\"\\\\n\\").length + \\" lines\\")"}；参数名是 code。');
+          return fail('run_script 参数错误：必须提供非空字符串 code。顶层工具调用请直接发起（不要把单次 grep/glob/read_file 包进 run_script）；需要脚本编排时示例：{"code":"const g = await tools.call(\\"grep\\", {pattern:\\"executeTool\\", output_mode:\\"files_with_matches\\"}); for (const p of g.output.split(\\"\\\\n\\").filter(Boolean).slice(0,3)) console.log(p)"}；参数名是 code。');
         }
         return await toolRunScript(ctx, args.code, {
           timeoutMs: args.timeout_ms === undefined ? undefined : num(args.timeout_ms, 120_000),

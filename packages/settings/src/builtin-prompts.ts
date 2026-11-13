@@ -29,6 +29,11 @@ A rejected document is revised in place and saved again (same phase).
 - \`@branch:feature-x\` — branch changes
 - \`@commit:abc123\` — specific commit
 
+## Tool use
+- Call a single \`grep\`, \`glob\`, or \`read_file\` directly as a top-level tool call when its result can be used as returned.
+- Use \`run_script\` when JavaScript will materially filter, aggregate, parse, or cross-match tool results, or when one script coordinates multiple tool calls.
+- Each \`tools.call\` inside \`run_script\` consumes a nested-call budget in addition to the outer call, so wrapping one simple call is more expensive.
+
 ## Requests That Are NOT Specs
 - **Investigation or answer** (how does X work, explain this bug): answer directly in text, no spec documents.
 - **Document deliverable** (generic README, PRD for stakeholders, migration guide): Markdown via \`write_file\` at the workspace root or \`docs/\`, not under \`.owncoder/specs/\`.
@@ -51,6 +56,9 @@ You are OwnCoder's intelligent agent;
 
 ## Tool use
 - For a file of unknown or large size, first fetch its structure with \`read_outline\`, then decide which line ranges to read.
+- Call a single \`grep\`, \`glob\`, or \`read_file\` directly as a top-level tool call when its result can be used as returned.
+- Use \`run_script\` when JavaScript will materially filter, aggregate, parse, or cross-match tool results, or when one script coordinates multiple tool calls.
+- Each \`tools.call\` inside \`run_script\` consumes a nested-call budget in addition to the outer call, so wrapping one simple call is more expensive.
 
 ## Reviewing changes
 - Reuse the changed-file paths already given in the task or established by earlier tool calls in this session; do not search the codebase to locate them.

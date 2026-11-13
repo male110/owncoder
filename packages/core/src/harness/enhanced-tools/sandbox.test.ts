@@ -15,8 +15,10 @@ function getCodeDescription(): string {
 describe("run_script tool guidance", () => {
   it("routes simple one-off file tools to top-level calls", () => {
     const description = getDescription();
-    expect(description).toContain("one-off `grep`, `glob`, or `read_file` as ordinary top-level tool calls");
-    expect(description).toContain("Do not wrap a single grep, glob, or read_file call merely to forward its output");
+    expect(description).toContain("Do not wrap a single `grep`, `glob`, or `read_file` call in run_script to forward its output");
+    expect(description).toContain("issue that call directly as a top-level tool call");
+    expect(description).toContain("One locate-then-read is two ordinary top-level calls, not a chain");
+    expect(description).toContain("Never wrap a single search in run_script");
   });
 
   it("keeps materially transformed and multi-call work in scope", () => {
@@ -25,17 +27,18 @@ describe("run_script tool guidance", () => {
     expect(description).toContain("aggregating");
     expect(description).toContain("parsing");
     expect(description).toContain("cross-matching");
-    expect(description).toContain("script materially transforms its result");
+    expect(description).toContain("three or more files");
   });
 
   it("explains nested-call cost and limits tools.call wording to scripts", () => {
     const description = getDescription();
     expect(description).toContain("Each tools.call inside the script is also charged as a nested call");
-    expect(description).toContain("Inside the script only");
+    expect(description).toContain("Inside the script");
 
     const codeDescription = getCodeDescription();
-    expect(codeDescription).toContain("单个 grep、glob、read_file 若只是原样转发结果，应直接调用对应顶层工具");
-    expect(codeDescription).toContain("实质过滤、聚合或解析结果");
+    expect(codeDescription).toContain("不要用 run_script 包装单个 grep、glob、read_file 来转发结果");
+    expect(codeDescription).toContain("实质过滤、聚合、解析结果");
+    expect(codeDescription).not.toContain("tools.call(\"read_file\"");
   });
 
   it("does not claim run_script is read-only", () => {

@@ -54,7 +54,7 @@ export function buildExploreSubagentPrompt(
     ...(envLines.length > 1 ? ["", ...envLines] : []),
     "",
     "Tool capabilities:",
-    "- Use `glob` to find files by name pattern and `grep` to search file contents; both are workspace-relative and honor .gitignore automatically.",
+    "- Use `glob` to find files by name pattern and `grep` to search file contents; both are workspace-relative and honor .gitignore automatically. Call one `grep`, `glob`, or `read_file` directly as a top-level tool call; reserve `run_script` for multi-file filtering, counting, parsing, aggregating, or cross-matching, not for a single locate-then-read.",
     "- Use `read_file` when you know the specific file path you need to read; `read_outline` / `read_symbol` for structure- and symbol-level reads; `search_symbols` for symbol-level lookup; `search_semantic` for keyword-based vector code search; `repo_map` / `graph_search` / `project_deps` for repository-level navigation.",
     "- For analysis that spans many files (filter / count / parse / aggregate / cross-match), `run_script` lets you program it: read/filter inside the script, keep intermediate results in variables, and print only the needed original code with file paths and original line numbers. Scripts can call the tools of this role (tools.list()).",
     "",

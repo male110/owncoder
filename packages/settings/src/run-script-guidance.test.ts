@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 import { BUILTIN_AGENT_PROMPT, BUILTIN_SPEC_PROMPT } from "./builtin-prompts.js";
 import { BUILTIN_TASK_DECOMPOSE_PROMPT } from "./task-decompose-prompt.js";
 
-// run_script 引导已从系统提示词（spec/agent）与任务分解提示词中全部移除：
-// 工具调用形式、组合规则与搜索套路随 run_script 工具描述下发（工具列表同一上下文可见），
-// 系统提示词不再重复路由散文。此处锁住"不再回潮"。
+// run_script 的工具选择规则已从项目上下文片段提升到内置系统提示词（spec/agent）：
+// 单次 grep/glob/read_file 直接作为顶层工具调用，run_script 只用于实质过滤/聚合/解析/交叉比对
+// 或编排多次工具调用；嵌套 tools.call 额外消耗嵌套调用预算。此处锁住该规则存在且不再回潮。
 describe("Agent evidence-first discipline", () => {
   it("uses short deterministic rules instead of exploration prose", () => {
     expect(BUILTIN_AGENT_PROMPT).toContain("## Minimal reading discipline");
@@ -32,8 +32,10 @@ describe("Agent evidence-first discipline", () => {
 
 for (const [mode, prompt] of [["agent", BUILTIN_AGENT_PROMPT], ["spec", BUILTIN_SPEC_PROMPT]] as const) {
   describe(`${mode} run_script guidance`, () => {
-    it("no longer carries run_script routing text", () => {
-      expect(prompt).not.toContain("run_script");
+    it("carries the promoted tool-selection rule", () => {
+      expect(prompt).toContain("Call a single `grep`, `glob`, or `read_file` directly as a top-level tool call");
+      expect(prompt).toMatch(/Use `run_script` when JavaScript will materially filter, aggregate, parse, or cross-match/);
+      expect(prompt).toMatch(/consumes a nested-call budget/);
       expect(prompt).not.toContain("Investigation Routing");
       expect(prompt).not.toContain("Investigation Strategy");
       expect(prompt).not.toContain("RUN_SCRIPT_EXAMPLES");

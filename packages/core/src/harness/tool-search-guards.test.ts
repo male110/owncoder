@@ -17,6 +17,13 @@ describe("search tool descriptions carry skip guards", () => {
     expect(grep).not.toMatch(/to locate files/i);
   });
 
+  it("glob and grep declare themselves top-level tools, not run_script payloads", () => {
+    for (const tool of [describeTool("glob"), describeTool("grep")]) {
+      expect(tool).toMatch(/This is a top-level tool: call it directly/i);
+      expect(tool).toMatch(/never wrap a single search in run_script to forward its output/i);
+    }
+  });
+
   it("symbol and semantic search route to one tool instead of both", () => {
     expect(describeTool("search_symbols")).toMatch(/Pick one search tool, not both/i);
     expect(describeTool("search_semantic")).toMatch(/Pick one search tool, not both/i);

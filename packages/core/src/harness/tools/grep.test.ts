@@ -185,8 +185,9 @@ test("grep respects extraIgnore from workflow index settings", async () => {
   );
 });
 
-test("grep is not parallel-safe so workspace scans do not pile up", () => {
-  assert.equal(PARALLEL_SAFE_TOOLS.has("grep"), false);
+test("grep is parallel-safe like glob so independent searches can batch", () => {
+  assert.equal(PARALLEL_SAFE_TOOLS.has("grep"), true);
+  assert.equal(PARALLEL_SAFE_TOOLS.has("glob"), true);
   assert.equal(PARALLEL_SAFE_TOOLS.has("search_symbols"), true);
   assert.equal(PARALLEL_SAFE_TOOLS.has("search_semantic"), true);
 });
