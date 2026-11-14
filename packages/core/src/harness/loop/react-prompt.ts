@@ -29,7 +29,7 @@ export function summarizeToolActionForUser(
   if (name === "save_spec" || name === "save_design" || name === "save_tasks") {
     const label = SPEC_DOC_LABEL[name] ?? "Document";
     const p = out.replace(/^(?:Spec|Design|Tasks) saved to\s*/i, "").replace(/\.\n[\s\S]*$/s, "").trim();
-    return `${label} saved${p ? `: ${p}` : ""}. Review it in the spec panel — approve to continue to the next phase (or ask for changes).`;
+    return `${label} saved${p ? `: ${p}` : ""}. Reply "下一步"/"next" in the chat to approve and continue to the next phase (or describe the changes you want).`;
   }
   if (name === "write_file") {
     const p = out.replace(/^Wrote\s*/i, "").replace(/\s*\([^)]*\)\s*$/, "").trim();

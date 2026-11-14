@@ -3,6 +3,10 @@
  * No live LLM required.
  *
  *   pnpm smoke
+ *
+ * harness 内部工具（parser / search-replace / plans / compact / terminal /
+ * checkpoint / rules / session-store）不在 @owncoder/core 的根导出面上，按 dist
+ * 深路径加载——与下方 checkpoint 的既有做法一致。
  */
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm, writeFile, mkdir } from "node:fs/promises";
@@ -11,64 +15,69 @@ import { join, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const core = await import(pathToFileURL(join(here, "../packages/core/dist/index.js")).href);
-const { createIndexClient } = await import(
-  pathToFileURL(join(here, "../packages/index/dist/index.js")).href
-);
-const checkpoint = await import(
-  pathToFileURL(join(here, "../packages/core/dist/harness/checkpoint.js")).href
+const dist = (pkg, rel = "index.js") =>
+  pathToFileURL(join(here, `../packages/${pkg}/dist/${rel}`)).href;
+
+const core = await import(dist("core"));
+const { createIndexClient } = await import(dist("index"));
+const checkpoint = await import(dist("core", "harness/checkpoint.js"));
+const { parseToolCallsFromAssistant } = await import(dist("core", "harness/parser.js"));
+const { applySearchReplace } = await import(dist("core", "harness/tools/search-replace.js"));
+const { isPlanPath, writePlanFile } = await import(dist("core", "plans.js"));
+const { compactHistory } = await import(dist("core", "history-compact.js"));
+const { looksDangerous } = await import(dist("core", "harness/terminal.js"));
+const { writeRule, loadCombinedRules, listRules } = await import(dist("core", "rules.js"));
+const { createSessionFile, saveSessionById, loadSessionById } = await import(
+  dist("core", "session-store.js")
 );
 
-const {
-  applySearchReplacePatch,
-  parseToolCallsFromAssistant,
-
-  isPlanPath,
-  writePlanFile,
-  compactHistory,
-  looksDangerous,
-  createSession,
-} = core;
+const { createSession } = core;
 
 console.log("— parser / patch / writable —");
 {
   const calls = parseToolCallsFromAssistant({
-    content: `<tool_call name="save_plan">{"title":"T","content":"# Hi"}</tool_call>`,
-  });
+    content: `<tool_call name="save_plan">{"title":"T","content":"# Hi"}</tool_call>`,  });
   assert.equal(calls[0]?.name, "save_plan");
 
-  const r = applySearchReplacePatch(
+  const r = applySearchReplace(
     "a\nb\nc\n",
     `<<<<<<< SEARCH\nb\n=======\nB\n>>>>>>> REPLACE`,
   );
-  assert.equal(r.ok, true);
+  assert.equal(r.success, true);
   assert.ok(r.content?.includes("B"));
 
-  // PRD / markdown resilience: heading level drift (## vs ###) should still apply.
-  const prd = applySearchReplacePatch(
+  // PRD / markdown: heading level drift (## vs ###) is NOT tolerated any more.
+  // Character-level fuzzy matching was removed on purpose (it could land an edit
+  // in a structurally similar but wrong place), so a drifted heading must fail
+  // loudly with a diagnostic instead of silently rewriting the wrong section.
+  const prd = applySearchReplace(
     "# PRD\n\n## 待用户确认\n\n等待用户确认。\n",
     `<<<<<<< SEARCH\n### 待用户确认\n\n等待用户确认。\n=======\n### 用户确认\n\n已确认。\n>>>>>>> REPLACE`,
   );
-  assert.equal(prd.ok, true, "markdown heading level drift should be tolerated");
-  assert.ok(prd.content?.includes("## 用户确认"), prd.content);
+  assert.equal(prd.success, false, "heading level drift must not be applied fuzzily");
+  assert.match(prd.error ?? "", /Could not find SEARCH text/);
+  assert.ok(!prd.content, "failed patch must not return content");
 
   // PRD / markdown resilience: indentation / leading-whitespace drift.
-  const indented = applySearchReplacePatch(
+  const indented = applySearchReplace(
     "- item\n  - sub\n    detail\n",
     `<<<<<<< SEARCH\n  - sub\n    detail\n=======\n  - sub\n    updated detail\n>>>>>>> REPLACE`,
   );
-  assert.equal(indented.ok, true, "indentation drift should be tolerated");
+  assert.equal(indented.success, true, "indentation drift should be tolerated");
   assert.ok(indented.content?.includes("updated detail"), indented.content);
 
   // PRD / markdown resilience: CRLF file with LF patch.
-  const crlf = applySearchReplacePatch(
+  const crlf = applySearchReplace(
     "line one\r\nline two\r\nline three\r\n",
     `<<<<<<< SEARCH\nline two\r\n=======\nLINE 2\n>>>>>>> REPLACE`,
   );
-  assert.equal(crlf.ok, true, "CRLF content with LF patch should apply");
+  assert.equal(crlf.success, true, "CRLF content with LF patch should apply");
   assert.ok(crlf.content?.includes("LINE 2"), crlf.content);
+  assert.ok(crlf.content?.includes("line one\r\n"), "surrounding CRLF endings preserved");
 
   assert.equal(isPlanPath(".owncoder/plans/x.md"), true);
+  assert.equal(isPlanPath(".owncoder/specs/feature/tasks.md"), true);
+  assert.equal(isPlanPath("src/main.ts"), false);
 
   assert.equal(looksDangerous("rm -rf /"), true);
   assert.equal(looksDangerous("pnpm test"), false);
@@ -124,10 +133,26 @@ console.log("— compact —");
       toolName: "read_file",
     });
   }
-  const c = compactHistory(hist, { maxChars: 5000, keepRecentTurns: 2, toolMaxChars: 100 });
-  const chars = c.reduce((n, t) => n + t.content.length, 0);
-  assert.ok(chars < 12_000, `compacted size ${chars}`);
-  assert.ok(c.length < hist.length);
+  const charsOf = (turns) => turns.reduce((n, t) => n + t.content.length, 0);
+  const before = charsOf(hist);
+  // compactHistory(history, { recentWindow, budgetBytes, reason }) →
+  // { history, compacted, oldCount }: older turns collapse into one summary turn.
+  const c = compactHistory(hist, { recentWindow: 6, budgetBytes: 5000, reason: "manual" });
+  assert.equal(c.compacted, true);
+  assert.ok(c.oldCount > 0, `oldCount ${c.oldCount}`);
+  assert.ok(c.history.length < hist.length, `${c.history.length} < ${hist.length}`);
+  assert.ok(charsOf(c.history) < before, `compacted ${charsOf(c.history)} < ${before}`);
+  assert.equal(c.history[0]?.metadata?.isCompressed, true);
+  assert.equal(c.history[0]?.metadata?.compressionReason, "manual");
+
+  // Under budget → returned untouched.
+  const noop = compactHistory(hist.slice(0, 2), {
+    recentWindow: 6,
+    budgetBytes: 5000,
+    reason: "auto",
+  });
+  assert.equal(noop.compacted, false);
+  assert.equal(noop.history.length, 2);
 }
 
 console.log("— plan + checkpoint rollback —");
@@ -137,6 +162,10 @@ console.log("— plan + checkpoint rollback —");
     await mkdir(join(dir, "src"), { recursive: true });
     await writeFile(join(dir, "src", "hello.ts"), "export const n = 1;\n", "utf8");
 
+    // Checkpoints are git-based and scoped per session, so a session file must
+    // exist before the orchestrator can report an active session id.
+    const { meta } = await createSessionFile(dir, { mode: "agent" });
+
     const session = createSession();
     const wf = session.getState().workflow;
     session.setWorkflow({
@@ -144,9 +173,12 @@ console.log("— plan + checkpoint rollback —");
       harness: { ...wf.harness, checkpoint: true },
     });
     await session.openWorkspace(dir, "p5");
+    const sessionId = session.getState().activeSessionId;
+    assert.equal(sessionId, meta.id);
 
     const rel = await writePlanFile(dir, "# Demo\n1. Edit src/hello.ts\n", { title: "Demo" });
     assert.ok(rel.startsWith(".owncoder/plans/"));
+    assert.ok(isPlanPath(rel));
 
     const files = [];
     await checkpoint.snapshotFileBeforeWrite(dir, "src/hello.ts", files);
@@ -158,6 +190,7 @@ console.log("— plan + checkpoint rollback —");
       history: [],
       files,
       touched: ["src/hello.ts"],
+      sessionId,
     };
     await checkpoint.persistCheckpoint(dir, cp);
     const restored = await checkpoint.restoreCheckpointFiles(dir, cp);
@@ -167,6 +200,14 @@ console.log("— plan + checkpoint rollback —");
 
     const listed = await session.listCheckpoints();
     assert.ok(listed.length >= 1);
+    assert.ok(listed.some((c) => c.id === cp.id));
+
+    // A checkpoint without a session id cannot be persisted (git worktree is
+    // per-session), so the guard must reject rather than write to a stray dir.
+    await assert.rejects(
+      () => checkpoint.persistCheckpoint(dir, { ...cp, id: checkpoint.newCheckpointId(), sessionId: null }),
+      /sessionId is required/,
+    );
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -201,8 +242,11 @@ console.log("— session persist / restore —");
 {
   const dir = await mkdtemp(join(tmpdir(), "owncoder-sess-"));
   try {
-    const { createSession: cs, loadPersistedSession, savePersistedSession } = core;
-    await savePersistedSession(dir, {
+    const { createSession: cs } = core;
+    // Sessions are stored per-id under .owncoder/sessions/, so create the file
+    // first and then save the snapshot against that id.
+    const { meta } = await createSessionFile(dir, { mode: "agent" });
+    await saveSessionById(dir, meta.id, {
       mode: "agent",
       history: [
         { role: "user", content: "hello" },
@@ -213,16 +257,16 @@ console.log("— session persist / restore —");
       todoAnchor: "1. do x",
       lastCheckpointId: null,
       documentWorkflow: {
-        stage: "awaiting_prd_confirmation",
+        stage: "awaiting_spec_confirmation",
         documentPath: "PRD.md",
         updatedAt: "2026-08-18T00:00:00.000Z",
       },
     });
-    const loaded = await loadPersistedSession(dir);
+    const loaded = await loadSessionById(dir, meta.id);
     assert.equal(loaded?.history.length, 2);
     assert.equal(loaded?.mode, "agent");
     assert.equal(loaded?.todoAnchor, "1. do x");
-    assert.equal(loaded?.documentWorkflow?.stage, "awaiting_prd_confirmation");
+    assert.equal(loaded?.documentWorkflow?.stage, "awaiting_spec_confirmation");
 
     const s2 = cs();
     await s2.openWorkspace(dir, "sess");
@@ -246,7 +290,7 @@ console.log("— project rules —");
 {
   const dir = await mkdtemp(join(tmpdir(), "owncoder-rules-"));
   try {
-    const { writeRule, loadCombinedRules, listRules, createSession: cs } = core;
+    const { createSession: cs } = core;
     await writeRule(dir, "00-style.md", "# Style\nUse TypeScript.\n");
     await writeRule(dir, "testing.md", "# Test\nRun pnpm test.\n");
     const listed = await listRules(dir);
@@ -263,27 +307,27 @@ console.log("— project rules —");
   }
 }
 
-console.log("— workflow diff / summary —");
+console.log("— workflow fingerprint / effective model / pipeline editing —");
 {
-  const settings = await import(
-    pathToFileURL(join(here, "../packages/settings/dist/index.js")).href
-  );
+  const settings = await import(dist("settings"));
   const {
     BUILTIN_WORKFLOW,
-    diffWorkflow,
-    summarizeEffectiveWorkflow,
+    workflowFingerprint,
+    getActiveModelRef,
     updatePipelineNode,
-    orderedEnabledNodes,
-    isNodeEnabled,
     modePipeline,
-    mergeWorkflow,
-    addModePipelineNode,
-    removeModePipelineNode,
-    moveModePipelineNode,
+    walkLinearNodes,
+    removePipelineNode,
+    movePipelineNode,
+    positionConstraintsOf,
+    isFixedPipelineNode,
+    resolvePrompts,
   } = settings;
-  assert.equal(diffWorkflow(BUILTIN_WORKFLOW).length, 0);
-  const tweaked = structuredClone(BUILTIN_WORKFLOW);
 
+  // diffWorkflow() → workflowFingerprint(): unchanged config hashes identically.
+  assert.equal(workflowFingerprint(BUILTIN_WORKFLOW), workflowFingerprint(structuredClone(BUILTIN_WORKFLOW)));
+
+  const tweaked = structuredClone(BUILTIN_WORKFLOW);
   tweaked.providers = [
     {
       id: "local",
@@ -294,87 +338,94 @@ console.log("— workflow diff / summary —");
     },
   ];
   tweaked.selectedModels = [{ id: "qwen2.5", name: "qwen2.5", providerId: "local" }];
-  const diffs = diffWorkflow(tweaked);
-
-  assert.ok(diffs.some((d) => d.path === "selectedModels"));
-  assert.ok(diffs.some((d) => d.path === "providers"));
-  const sum = summarizeEffectiveWorkflow(tweaked);
-
-  assert.ok(sum.defaultModel.includes("qwen2.5"));
+  // summarizeEffectiveWorkflow() → getActiveModelRef(): the effective model.
+  const active = getActiveModelRef(tweaked);
+  assert.equal(active.model, "qwen2.5");
+  assert.equal(active.providerId, "local");
+  assert.equal(active.baseUrl, "http://127.0.0.1:11434/v1");
+  // A provider/model change must move the fingerprint (it used to show up as
+  // `providers` / `selectedModels` diff entries).
+  assert.notEqual(workflowFingerprint(tweaked), workflowFingerprint(BUILTIN_WORKFLOW));
 
   // Dual-mode pipelines: context → call model → (review)
-  const planPipe = modePipeline(BUILTIN_WORKFLOW, "spec");
+  const specPipe = modePipeline(BUILTIN_WORKFLOW, "spec");
   const agentPipe = modePipeline(BUILTIN_WORKFLOW, "agent");
-  assert.ok(planPipe.nodes.some((n) => n.type === "explore_tools"));
+  assert.ok(specPipe.nodes.some((n) => n.type === "explore_tools"));
   // document_intent_router is a legacy node type, no longer in the builtin spec pipeline
   assert.ok(agentPipe.nodes.some((n) => n.type === "execute_tools"));
   assert.ok(agentPipe.nodes.some((n) => n.type === "present_changes"));
-  assert.ok(!planPipe.nodes.some((n) => n.type === "intent"));
+  assert.ok(!specPipe.nodes.some((n) => n.type === "intent"));
   assert.ok(!agentPipe.nodes.some((n) => n.type === "load_anchors"));
   assert.ok(!agentPipe.nodes.some((n) => n.type === "verify"));
-  assert.ok(isNodeEnabled(planPipe, "explore_tools"));
   const ctx = agentPipe.nodes.find((n) => n.type === "context_gather");
   assert.equal(ctx?.params?.injectAnchors, true);
 
-  // Disable llm node → ordered list skips it
-  let withDisabled = updatePipelineNode(BUILTIN_WORKFLOW, "spec", "llm", {
-    enabled: false,
-  });
-  const ordered = orderedEnabledNodes(withDisabled.modes.spec.pipeline);
-  assert.ok(!ordered.some((n) => n.type === "explore_tools"));
-
-  // Merge overlay restores / overlays pipeline node
-  const merged = mergeWorkflow(BUILTIN_WORKFLOW, {
-    version: 1,
-    modes: {
-      spec: {
-        pipeline: {
-          nodes: [{ id: "llm", type: "explore_tools", enabled: false }],
-          edges: BUILTIN_WORKFLOW.modes.spec.pipeline.edges,
-        },
-      },
-    },
-  });
-  assert.equal(isNodeEnabled(merged.modes.spec.pipeline, "explore_tools"), false);
-
-  // Agent llm prompt change shows in diff
-  const execNode = BUILTIN_WORKFLOW.modes.agent.pipeline.nodes.find(
-    (n) => n.type === "execute_tools",
-  );
-  withDisabled = updatePipelineNode(BUILTIN_WORKFLOW, "agent", execNode.id, {
+  // Agent llm prompt change shows in the fingerprint
+  const execNode = agentPipe.nodes.find((n) => n.type === "execute_tools");
+  const withPrompts = updatePipelineNode(BUILTIN_WORKFLOW, "agent", execNode.id, {
     prompt: "Custom agent prompt for smoke",
   });
-  const pDiffs = diffWorkflow(withDisabled);
-  assert.ok(pDiffs.some((d) => String(d.path).includes("llm") && d.section === "pipeline"));
+  assert.equal(
+    withPrompts.modes.agent.pipeline.nodes.find((n) => n.id === execNode.id)?.prompt,
+    "Custom agent prompt for smoke",
+  );
+  assert.notEqual(workflowFingerprint(withPrompts), workflowFingerprint(BUILTIN_WORKFLOW));
 
-  // Add / remove / move middle nodes (Dify-style); spine fixed
-  let edited = removeModePipelineNode(BUILTIN_WORKFLOW, "agent", "present");
-  assert.ok(!edited.modes.agent.pipeline.nodes.some((n) => n.type === "present_changes"));
-  assert.ok(edited.modes.agent.pipeline.nodes.some((n) => n.type === "context_gather"));
-  assert.ok(edited.modes.agent.pipeline.nodes.some((n) => n.type === "end"));
-  edited = addModePipelineNode(edited, "agent", "verify", "llm");
-  assert.ok(edited.modes.agent.pipeline.nodes.some((n) => n.type === "verify"));
-  edited = addModePipelineNode(edited, "agent", "present_changes", "llm");
-  const midIds = edited.modes.agent.pipeline.nodes
-    .filter((n) => !["start", "end"].includes(n.type))
-    .map((n) => n.type);
-  assert.ok(midIds.includes("present_changes"));
-  const present = edited.modes.agent.pipeline.nodes.find((n) => n.type === "present_changes");
-  edited = moveModePipelineNode(edited, "agent", present.id, "down");
-  assert.throws(() => removeModePipelineNode(edited, "agent", "context"), /fixed|required/i);
-  // Same type can be added multiple times
-  edited = addModePipelineNode(edited, "agent", "execute_tools", "llm");
-  const execCount = edited.modes.agent.pipeline.nodes.filter(
-    (n) => n.type === "execute_tools",
-  ).length;
-  assert.ok(execCount >= 2);
+  // Remove / move middle nodes (Dify-style); spine fixed.
+  // addModePipelineNode/removeModePipelineNode/moveModePipelineNode(workflow, mode, …)
+  // → removePipelineNode/movePipelineNode(pipeline, …) operating on the pipeline.
+  const typesOf = (pipe) => walkLinearNodes(pipe).map((n) => n.type);
+  assert.deepEqual(typesOf(agentPipe), [
+    "start",
+    "context_gather",
+    "task_decompose",
+    "execute_tools",
+    "post_verify",
+    "present_changes",
+    "end",
+  ]);
+
+  const withoutPresent = removePipelineNode(agentPipe, "present");
+  assert.ok(!withoutPresent.nodes.some((n) => n.type === "present_changes"));
+  assert.ok(withoutPresent.nodes.some((n) => n.type === "context_gather"));
+  assert.ok(withoutPresent.nodes.some((n) => n.type === "end"));
+  // The deletion is recorded so the factory node is not merged back on reload.
+  assert.ok(withoutPresent.removed?.some((r) => r === "id:present"));
+  assert.ok(withoutPresent.removed?.some((r) => r === "type:present_changes"));
+  // Source pipeline is untouched (pure function).
+  assert.ok(agentPipe.nodes.some((n) => n.type === "present_changes"));
+
+  // Fixed spine cannot be removed.
+  assert.equal(isFixedPipelineNode({ type: "context_gather" }), true);
+  assert.throws(() => removePipelineNode(agentPipe, "context"), /fixed|required/i);
+  // The last model-calling node is protected too.
+  const onlyLlm = removePipelineNode(
+    removePipelineNode(removePipelineNode(agentPipe, "present"), "postverify"),
+    "decompose",
+  );
+  assert.throws(() => removePipelineNode(onlyLlm, "llm"), /模型调用|at least one/i);
+
+  // Moving within one slot region is allowed; crossing regions is rejected.
+  const moved = movePipelineNode(agentPipe, "present", "up");
+  assert.deepEqual(typesOf(moved), [
+    "start",
+    "context_gather",
+    "task_decompose",
+    "execute_tools",
+    "present_changes",
+    "post_verify",
+    "end",
+  ]);
+  assert.equal(positionConstraintsOf("present_changes")?.slot, "post-model");
+  assert.throws(() => movePipelineNode(agentPipe, "postverify", "up"), /跨槽位|slot/i);
+  // Fixed nodes never move.
+  assert.equal(movePipelineNode(agentPipe, "context", "down"), agentPipe);
 
   // Builtin prompts are baked into the builtin pipeline nodes (English,
   // canonical); resolvePrompts reads them straight from the nodes.
-  const { resolvePrompts } = settings;
   const resolved = resolvePrompts(BUILTIN_WORKFLOW);
-  assert.ok(resolved.plan.includes("Plan Mode"));
-  assert.ok(resolved.agent.includes("Agent Mode"));
+  assert.ok(resolved.spec.includes("Spec Mode"), resolved.spec.slice(0, 40));
+  assert.ok(resolved.agent.includes("Agent Mode"), resolved.agent.slice(0, 40));
 }
 
 console.log("smoke-p5: ok");

@@ -10,7 +10,7 @@ import { chatCompletionStream, writeEventLog, type ChatMessage } from "@owncoder
 import { withRetry } from "../model-coordinator.ts";
 import { normalizeUsage, type NormalizedUsage } from "../observability.ts";
 import { formatCurrentTaskContext } from "./react-prompt.ts";
-import { applyStreamSnapshot } from "./streaming-snapshot";
+import { applyStreamSnapshot } from "./streaming-snapshot.ts";
 import { applyRunEvent, finalizeTerminal } from "./react-finalize.ts";
 import type { ReActLoopContext, ReActReturn } from "./react-loop-context.ts";
 

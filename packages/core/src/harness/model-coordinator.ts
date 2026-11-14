@@ -62,21 +62,8 @@ export function classifyTask(
     taskType = "summarization";
   }
 
-  // Detect complexity
-  let complexity: TaskClassification["complexity"] = "medium";
-  if (length < 50 && historyLength < 2) {
-    complexity = "low";
-  } else if (length > 500 || historyLength > 10) {
-    complexity = "high";
-  }
-
-  if (
-    taskType === "debugging" ||
-    taskType === "refactoring" ||
-    taskType === "planning"
-  ) {
-    complexity = "high";
-  }
+  // Complexity is trace metadata only; the decomposition LLM decides Planner routing.
+  const complexity: TaskClassification["complexity"] = length < 50 ? "low" : "medium";
 
   // Estimate tokens
   const estimatedTokens = Math.ceil(length * 0.3) + historyLength * 200;

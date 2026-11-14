@@ -32,7 +32,6 @@ import { SessionChatPanel } from "./components/SessionChatPanel";
 import { Composer } from "./components/Composer";
 import { ChangesBar } from "./components/ChangesBar";
 import { PlansBar } from "./components/PlansBar";
-import { SpecsBar } from "./components/SpecsBar";
 import { TaskListBar } from "./components/TaskListBar";
 import { TerminalDock } from "./components/TerminalDock";
 import { CommandPalette } from "./components/CommandPalette";
@@ -60,7 +59,6 @@ export function App() {
     workspace, projects, sessions, sessionsByProject, activeSessionId, sessionTitle,
     expanded, mode, modelLabel, availableModels, providers, llmConfigured,
     activePlanPathBySession, activePlanMetaBySession, plansBySession,
-    currentFeatureBySession, specsBySession,
     gitStatus, changesBySession, thinkingEffort,
     separateStageModels, reactModelId, reactProviderId, reactThinkingEffort,
   } = useSessionStore();
@@ -79,13 +77,6 @@ export function App() {
   const sessionPlans = activeSessionId
     ? (plansBySession[activeSessionId] ?? [])
     : [];
-  const sessionCurrentFeature = activeSessionId
-    ? (currentFeatureBySession[activeSessionId] ?? null)
-    : null;
-  const sessionSpecs = activeSessionId
-    ? (specsBySession[activeSessionId] ?? [])
-    : [];
-
   const historyLength = useChatStore((s) => s.history.length);
   const sending = useChatStore((s) => s.sending);
   const terminal = useChatStore((s) => s.terminal);
@@ -174,7 +165,7 @@ export function App() {
 
   const {
     onSend, onRegenerate,
-    onApprovePlan, onApproveSpec, onRejectSpec, onSaveSpecDoc, onUpdateTask,
+    onApprovePlan, onUpdateTask,
     onRollback, onKeepAll, onKeepFile, onUndoFile,
     onSelectModel, onMode, onSelectThinkingEffort, onSelectReactThinkingEffort, sendQueued,
   } = useChatActions({
@@ -478,28 +469,6 @@ export function App() {
             onViewDiff={openEditorDiff}
             onOpenFile={openEditorFile}
           />
-          <SpecsBar
-            currentFeature={sessionCurrentFeature}
-            specs={sessionSpecs}
-            activePlanPath={sessionActivePlanPath}
-            busy={busy || sending}
-            onApprove={(feature) => void onApproveSpec(feature)}
-            onReject={(feature, feedback) => void onRejectSpec(feature, feedback)}
-            onReadSpec={(feature, phase) => window.owncoder.readSpec(feature, phase)}
-            onSaveSpec={(feature, phase, content) => void onSaveSpecDoc(feature, phase, content)}
-            onOpenFile={openEditorFile}
-          />
-          <SpecsBar
-            currentFeature={sessionCurrentFeature}
-            specs={sessionSpecs}
-            activePlanPath={sessionActivePlanPath}
-            busy={busy || sending}
-            onApprove={(feature) => void onApproveSpec(feature)}
-            onReject={(feature, feedback) => void onRejectSpec(feature, feedback)}
-            onReadSpec={(feature, phase) => window.owncoder.readSpec(feature, phase)}
-            onSaveSpec={(feature, phase, content) => void onSaveSpecDoc(feature, phase, content)}
-            onOpenFile={openEditorFile}
-          />
           <PlansBar
             plans={sessionPlans}
             activePlanPath={sessionActivePlanPath}
@@ -512,6 +481,7 @@ export function App() {
             <TaskListBar
               meta={sessionActivePlanMeta as ActivePlanMetaDto}
               busy={busy || sending}
+              onExecute={() => void onExecuteTasks()}
               onUpdateTask={(id, s) => void onUpdateTask(id, s)}
             />
           ) : null}

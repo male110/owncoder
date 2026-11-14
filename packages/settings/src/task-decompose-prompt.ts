@@ -22,6 +22,7 @@ Before decomposing into tasks, distill the user's true request:
 - Describe the intent in concise, clear language — a collaborator who reads it can start working right away, without needing to ask "what does the user want". **Never reduce the intent to a mere label or category.**
 - The intent defines the scope of work: every task must serve that intent, and anything outside the intent must not become a task.
 
+
 ## 2. Decompose the intent into tasks
 Based on the recognized intent, create tasks around independently verifiable outcomes. Every turn must produce at least one task; never return an empty \`tasks\` array.
 

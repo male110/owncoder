@@ -37,11 +37,11 @@ describe("Termination Logic", () => {
       const result = checkTermination(state, DEFAULT_TERMINATION_CONFIG);
       expect(result.shouldTerminate).toBe(false);
     });
-    it("should terminate on cost budget exceeded", () => {
+    it("should not terminate when cost exceeds the legacy budget threshold", () => {
       const state = createLoopState();
       state.totalCost = 15.1;
       const result = checkTermination(state, DEFAULT_TERMINATION_CONFIG);
-      assertTerminated(result); expect(result.reason).toContain("Cost budget exceeded");
+      expect(result.shouldTerminate).toBe(false);
     });
   });
   // ══════════════════════════════════════════════════════════════════════════�?
@@ -965,12 +965,12 @@ describe("Termination Logic", () => {
         const result = checkTermination(state, config);
         expect(result.shouldTerminate).toBe(false);
       });
-      it("should handle cost at exact limit", () => {
+      it("should ignore the legacy cost limit at the exact threshold", () => {
         const state = createLoopState();
         const config = { ...DEFAULT_TERMINATION_CONFIG, maxCostPerTurn: 1.0 };
         state.totalCost = 1.0;
         const result = checkTermination(state, config);
-        assertTerminated(result); expect(result.reason).toContain("Cost budget exceeded");
+        expect(result.shouldTerminate).toBe(false);
       });
       it("should handle all limits disabled", () => {
         const state = createLoopState();

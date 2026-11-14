@@ -287,14 +287,13 @@ Turn 2: "I still need more information about the auth module."
 这样「只差几个字」的近重复报告也能 ≥ 80%。纯文本退出路径必须调用
 `updateStateAfterResponse`，否则计数停在上一轮工具调用，第二层抓不到。
 
-### 场景 5: 预算超限（<1%）
+### 场景 5: 成本统计超过旧阈值
 
 ```typescript
-// Token 预算检查已禁用；仅成本预算会触发终止
+// Token 和成本预算终止检查均已禁用；成本仍会持续累计并用于展示
 state.totalCost = 15.1
 
-// → 终止原因: "Cost budget exceeded ($15.10/$15.00)"
-// → aborted: false
+// → 继续执行，不会因成本达到旧的 $15.00 阈值而终止
 ```
 
 ---

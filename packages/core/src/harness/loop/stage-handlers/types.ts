@@ -44,14 +44,22 @@ export interface SchedulerState {
   /** A stage produced the whole reply locally; stop all remaining pipeline stages. */
   shortCircuited: boolean;
   /**
-   * First enabled verify node visited during this turn. The single endpoint in
+   * First verify node visited during this turn. The single endpoint in
    * `loop.ts` uses it to issue ONE final LLM verification report (instead of
-   * one per verify node). Null if no verify node ran (or all were disabled).
+   * one per verify node). Null if no verify node ran.
    */
   verifyNodeForReport: PipelineNode | null;
   /** A ReAct stage could not proceed without additional user input/context. */
   blocked: boolean;
   blockedReason?: string;
+  /** Native dispatch_agent tool call requested by the decomposition model. */
+  planRequested?: boolean;
+  /** Agent plan approval gate result for this turn. */
+  planApproval?: "approved" | "rejected" | "needs_revision" | "unavailable" | null;
+  /** User feedback returned while revising or rejecting the generated plan. */
+  planApprovalFeedback?: string;
+  /** Read-only Planner output, set only after a validated plan is produced. */
+  approvedAgentPlan?: string;
   /** 本轮统一任务运行状态（由 ReAct 回写）。 */
   taskRunState?: import("../../../task-run.ts").TaskRunState | null;
   /** 成功门禁拒绝。 */
@@ -101,8 +109,6 @@ export interface SchedulerContext {
   state: SchedulerState;
   hasToolStage: boolean;
   hasExecute: boolean;
-  /** Deterministic local route computed before the pipeline starts. */
-  requestRoute?: import("../request-router.ts").RequestRoute;
 
   taskClassification: ReturnType<typeof classifyTask>;
   /** Legacy load_anchors node (undefined after migration; kept for backward compat). */

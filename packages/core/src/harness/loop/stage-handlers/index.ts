@@ -24,7 +24,7 @@ import { normalizeUsage } from "../../observability.ts";
 import type { StageHandler, SchedulerContext } from "./types.ts";
 import { pushCurrentUserMessageOnce } from "./history.ts";
 import { taskDecomposeHandler, buildDecomposeContext } from "./task-decompose.ts";
-import { applyStreamSnapshot } from "../streaming-snapshot";
+import { applyStreamSnapshot } from "../streaming-snapshot.ts";
 import { exploreToolsHandler, executeToolsHandler } from "./tools.ts";
 import { verifyHandler, postVerifyHandler } from "./verify.ts";
 
@@ -43,6 +43,8 @@ export {
   pushHistoryBlockToMessages,
   pushCurrentUserMessageOnce,
 } from "./history.ts";
+
+export { runAgentPlanner } from "./planner.ts";
 
 export {
   parseDecomposeAnswer,

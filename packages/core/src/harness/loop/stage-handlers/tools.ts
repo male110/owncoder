@@ -8,8 +8,17 @@
 import { assertLlmAuth } from "@owncoder/llm";
 import { resolveStageModel, emitStage } from "../stages.ts";
 import { resolveLoopStrategy } from "../loop-strategy.ts";
+import type { ThinkingEffort } from "@owncoder/llm";
 import type { AgentLoopOpts } from "../types.ts";
 import type { SchedulerState, StageHandler, StageHandlerContext } from "./types.ts";
+import { requireAgentPlanApproval } from "./planner.ts";
+
+export function resolveReactThinkingEffort(opts: Pick<AgentLoopOpts, "workflow">): ThinkingEffort | undefined {
+  if (!opts.workflow.harness.separateStageModels) {
+    return opts.workflow.thinking?.defaultEffort;
+  }
+  return opts.workflow.harness.reactThinkingEffort ?? "medium";
+}
 
 /** 把分解结果中的任务字段合并进 activeTasks，供 ReAct 循环直接使用。 */
 function withDecomposeHistory(opts: AgentLoopOpts, state: SchedulerState): AgentLoopOpts {
@@ -41,6 +50,8 @@ async function runToolLoop(ctx: StageHandlerContext): Promise<void> {
     opts, messages, history, toolsFinal, toolCtx, memory, tracer,
     reasoningTrace, state, node, taskClassification,
   } = ctx;
+
+  if (opts.mode === "agent" && !requireAgentPlanApproval(ctx)) return;
 
   // 使用分阶段模型配置（如果启用）
   const stageModel = resolveStageModel(opts.workflow, opts.mode, node, "react");
@@ -77,6 +88,7 @@ async function runToolLoop(ctx: StageHandlerContext): Promise<void> {
     };
   }
 
+  const reactThinkingEffort = resolveReactThinkingEffort(opts);
   const reactResult = await resolveLoopStrategy(loopParams.loopStrategy).run({
     opts: enrichedOpts,
     model: stageModel,
@@ -102,7 +114,7 @@ async function runToolLoop(ctx: StageHandlerContext): Promise<void> {
     maxRedundantRangesPerFile: loopParams.maxRedundantRangesPerFile,
     // ── Pass reactSteps from node.params so UI config takes effect at runtime ──
     reactSteps: loopParams.reactSteps,
-    thinking: opts.workflow.thinking?.defaultEffort ? { effort: opts.workflow.thinking.defaultEffort } : undefined,
+    thinking: reactThinkingEffort ? { effort: reactThinkingEffort } : undefined,
   });
 
   tracer.endSpan(loopSpanId, reactResult.aborted ? "error" : "ok");

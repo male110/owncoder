@@ -8,6 +8,7 @@ import {
 } from "./task-decompose-prompt.js";
 
 export const PipelineNodeTypeSchema = z.enum([
+  "agent_planner",
   "start",
   "context_gather",
   "history_compact", // deprecated: no-op under 方案A, handler removed; kept so old saved pipelines degrade gracefully
@@ -28,7 +29,6 @@ export const PipelineNodeTypeSchema = z.enum([
 export type PipelineNodeType = z.infer<typeof PipelineNodeTypeSchema>;
 
 // ── Node Type Registry (single source of node metadata) ─────────
-// T1: skeleton. positionConstraints filled in T11.
 
 export interface NodeTypePositionConstraints {
   deletable: boolean;
@@ -39,29 +39,26 @@ export interface NodeTypePositionConstraints {
 export interface NodeTypeDescriptor {
   type: PipelineNodeType;
   label: string;
-  palette?: string;
-  hint?: string;
   fixed?: boolean;
-  addableIn?: ReadonlyArray<"spec" | "agent">;
   /** Filled in T11. */
   positionConstraints?: NodeTypePositionConstraints;
 }
 
 export const NODE_TYPE_REGISTRY: ReadonlyArray<NodeTypeDescriptor> = [
   { type: "start", label: "开始", fixed: true, positionConstraints: { deletable: false, repeatable: false } },
-  { type: "context_gather", label: "收集上下文", fixed: true, hint: "固定起点：组装上下文（规则、@、检索、仓库地图、Git；Agent 还可注入活动计划/TODO）。", positionConstraints: { deletable: false, repeatable: false, slot: "pre-model" } },
-  { type: "history_compact", label: "压缩历史", hint: "旧节点：已移除运行处理器，仅保留旧配置兼容，执行时跳过。历史上下文由任务分解和模型调用前的统一注入提供。", positionConstraints: { deletable: true, repeatable: false, slot: "pre-model" } },
-  { type: "document_intent_router", label: "文档意图识别", hint: "旧节点：一次 LLM 调用把用户回复归类为“确认/问下一步/其他”。已删除——一个标签装不下用户的真实意思，而且它的判定结果任务分解看不到，两者会互相矛盾。PRD/TDD 的确认判断已并入 Plan 模式「调用模型」的提示词。", positionConstraints: { deletable: true, repeatable: false, slot: "pre-model" } },
-  { type: "agent_intent_router", label: "Agent 意图识别", hint: "旧节点：一次 LLM 调用把用户消息归类为“执行当前任务/问进度/其他”。已删除，原因同上；理解用户意图已并入「任务分解」——先读懂再分解，同一次调用。", positionConstraints: { deletable: true, repeatable: false, slot: "pre-model" } },
-  { type: "task_decompose", label: "理解与任务分解", palette: "识别意图，再分解为独立任务", hint: "一次 LLM 调用：先结合对话历史、用户偏好和项目规则识别用户意图（这是一切的基础），再把意图分解为独立任务——每个任务只含任务内容、建议性的完成指导与相关历史，不产出详细步骤（Agent 模式）。琐碎请求返回空任务列表。可禁用以跳过该阶段。", addableIn: ["agent"], positionConstraints: { deletable: true, repeatable: false, slot: "pre-model" } },
-  { type: "explore_tools", label: "调用模型", palette: "大模型 + 只读工具循环", hint: "调用大模型（流式）。模型可发起只读工具；多轮直到不再调工具。可添加多个，按顺序执行。", addableIn: ["spec"], positionConstraints: { deletable: true, repeatable: true, slot: "mid" } },
-  { type: "draft_plan", label: "计划提示词", hint: "旧节点：计划系统提示词。出厂已并入「调用模型」。" , positionConstraints: { deletable: true, repeatable: false } },
-  { type: "save_plan", label: "保存计划", hint: "旧节点：是否允许 save_plan。出厂已并入「调用模型」参数。", positionConstraints: { deletable: true, repeatable: false } },
-  { type: "load_anchors", label: "活动计划/TODO", hint: "旧节点：注入 ACTIVE PLAN / TODO。出厂已并入「收集上下文」。" , positionConstraints: { deletable: true, repeatable: false } },
-  { type: "execute_tools", label: "调用模型", palette: "大模型 + 读/写工具循环", hint: "调用大模型（流式）。模型可发起读/写/终端等工具；多轮循环。可添加多个，按顺序执行。", addableIn: ["agent"], positionConstraints: { deletable: true, repeatable: true, slot: "mid" } },
-  { type: "verify", label: "检验", palette: "结束后再检验一次", hint: "再调一次模型做简短检验（可选）。", addableIn: ["spec", "agent"], positionConstraints: { deletable: true, repeatable: true, slot: "post-model" } },
-  { type: "post_verify", label: "执行验证", palette: "对修改文件做执行级验证", hint: "对工具修改的文件做执行级验证（语法检查等），不需要 LLM 调用。", addableIn: ["agent"], positionConstraints: { deletable: true, repeatable: false, slot: "post-model" } },
-  { type: "present_changes", label: "变更审阅", palette: "Keep / Undo 审阅写入", hint: "对本回合工具写入的文件做 Keep / Undo 审阅（不是再调一次模型）。", addableIn: ["agent"], positionConstraints: { deletable: true, repeatable: false, slot: "post-model" } },
+  { type: "context_gather", label: "收集上下文", fixed: true, positionConstraints: { deletable: false, repeatable: false, slot: "pre-model" } },
+  { type: "history_compact", label: "压缩历史", positionConstraints: { deletable: true, repeatable: false, slot: "pre-model" } },
+  { type: "document_intent_router", label: "文档意图识别", positionConstraints: { deletable: true, repeatable: false, slot: "pre-model" } },
+  { type: "agent_intent_router", label: "Agent 意图识别", positionConstraints: { deletable: true, repeatable: false, slot: "pre-model" } },
+  { type: "task_decompose", label: "理解与任务分解", fixed: true, positionConstraints: { deletable: false, repeatable: false, slot: "pre-model" } },
+  { type: "explore_tools", label: "调用模型", positionConstraints: { deletable: true, repeatable: true, slot: "mid" } },
+  { type: "draft_plan", label: "计划提示词", positionConstraints: { deletable: true, repeatable: false } },
+  { type: "save_plan", label: "保存计划", positionConstraints: { deletable: true, repeatable: false } },
+  { type: "load_anchors", label: "活动计划/TODO", positionConstraints: { deletable: true, repeatable: false } },
+  { type: "execute_tools", label: "调用模型", positionConstraints: { deletable: false, repeatable: false, slot: "mid" } },
+  { type: "verify", label: "检验", positionConstraints: { deletable: true, repeatable: true, slot: "post-model" } },
+  { type: "post_verify", label: "执行验证", positionConstraints: { deletable: true, repeatable: false, slot: "post-model" } },
+  { type: "present_changes", label: "变更审阅", positionConstraints: { deletable: true, repeatable: false, slot: "post-model" } },
   { type: "end", label: "结束", fixed: true, positionConstraints: { deletable: false, repeatable: false } },
 ];
 
@@ -76,11 +73,8 @@ export function positionConstraintsOf(
   return resolveNodeType(type)?.positionConstraints;
 }
 
-// ── ReAct Loop Steps (data-driven, editable in pipeline editor) ───
-//
-// Each step inside the ReAct loop is a configurable sub-node. Users can
-// enable/disable steps and edit their parameters in the settings UI —
-// like Dify's node inspector, but for the loop body.
+// ── ReAct Loop Steps ────────────────────────────────────────────
+// Runtime defaults and supported tuning parameters for the fixed ReAct loop.
 
 export const ReactStepIdSchema = z.enum([
   "abort_check",
@@ -98,7 +92,7 @@ export const ReactStepIdSchema = z.enum([
 
 export type ReactStepId = z.infer<typeof ReactStepIdSchema>;
 
-/** A single configurable step inside the ReAct loop. */
+/** Runtime configuration for a step in the fixed ReAct loop. */
 export const ReactStepConfigSchema = z.object({
   id: ReactStepIdSchema,
   enabled: z.boolean().default(true),
@@ -368,7 +362,6 @@ export const PipelineNodeSchema = z.object({
   id: z.string().min(1),
   type: PipelineNodeTypeSchema,
   label: z.string().optional(),
-  enabled: z.boolean().default(true),
   /** English prompt used at runtime (canonical). */
   prompt: z.string().optional(),
   /** Optional model name override for this stage (empty = mode/default model). */
@@ -436,20 +429,10 @@ function isRemovedNode(
 export type PipelineNode = z.infer<typeof PipelineNodeSchema>;
 export type ModePipeline = z.infer<typeof ModePipelineSchema>;
 
-/** UI labels — derived from NODE_TYPE_REGISTRY (mirror real runtime). */
+/** Node labels — derived from NODE_TYPE_REGISTRY. */
 export const NODE_TYPE_LABELS: Record<PipelineNodeType, string> = Object.fromEntries(
   NODE_TYPE_REGISTRY.map((d) => [d.type, d.label]),
 ) as Record<PipelineNodeType, string>;
-
-/** Short palette blurb — derived from NODE_TYPE_REGISTRY. */
-export const NODE_TYPE_PALETTE: Partial<Record<PipelineNodeType, string>> = Object.fromEntries(
-  NODE_TYPE_REGISTRY.filter((d) => d.palette !== undefined).map((d) => [d.type, d.palette as string]),
-) as Partial<Record<PipelineNodeType, string>>;
-
-/** Node hints — derived from NODE_TYPE_REGISTRY. */
-export const NODE_TYPE_HINTS: Partial<Record<PipelineNodeType, string>> = Object.fromEntries(
-  NODE_TYPE_REGISTRY.filter((d) => d.hint !== undefined).map((d) => [d.type, d.hint as string]),
-) as Partial<Record<PipelineNodeType, string>>;
 
 /**
  * Spec = pre-model context → call model (with plan tools) → end.
@@ -458,19 +441,19 @@ export const NODE_TYPE_HINTS: Partial<Record<PipelineNodeType, string>> = Object
 export function builtinSpecPipeline(): ModePipeline {
   return ModePipelineSchema.parse({
     nodes: [
-      { id: "start",   type: "start",         label: "开始",     enabled: true, position: { x: 300, y: 40 } },
+      { id: "start",   type: "start",         label: "开始",     position: { x: 300, y: 40 } },
       {
-        id: "context", type: "context_gather", label: "收集上下文", enabled: true,
+        id: "context", type: "context_gather", label: "收集上下文",
         position: { x: 300, y: 170 },
         params: { injectRules: true, injectMentions: true },
       },
       {
-        id: "llm",     type: "explore_tools",  label: "调用模型", enabled: true,
+        id: "llm",     type: "explore_tools",  label: "调用模型",
         position: { x: 300, y: 300 },
         prompt: BUILTIN_SPEC_PROMPT.trim(),
         params: { maxIterations: 200, allowSpecFiles: true },
       },
-      { id: "end",     type: "end",            label: "结束",     enabled: true, position: { x: 300, y: 430 } },
+      { id: "end",     type: "end",            label: "结束",     position: { x: 300, y: 430 } },
     ],
     edges: [
       { id: "e1", from: "start",   to: "context" },
@@ -481,41 +464,41 @@ export function builtinSpecPipeline(): ModePipeline {
 }
 
 /**
- * Agent = context → decompose task → compact history → call model (+tools/writes) → post-verify → review writes.
- * Every step is an explicit, configurable pipeline node.
+ * Agent = context → decompose (optional native planner tool and approval) → ReAct loop → post-verify → review writes.
+ * This is a fixed product workflow; user pipeline overlays do not alter its stages.
  */
 export function builtinAgentPipeline(): ModePipeline {
   return ModePipelineSchema.parse({
     nodes: [
-      { id: "start",      type: "start",           label: "开始",     enabled: true, position: { x: 300, y: 40  } },
+      { id: "start",      type: "start",           label: "开始",     position: { x: 300, y: 40  } },
       {
-        id: "context",    type: "context_gather",   label: "收集上下文", enabled: true,
+        id: "context",    type: "context_gather",   label: "收集上下文",
         position: { x: 300, y: 170 },
         params: { injectRules: true, injectMentions: true, injectAnchors: true },
       },
       {
-        id: "decompose",  type: "task_decompose",   label: "理解与任务分解", enabled: true,
+        id: "decompose",  type: "task_decompose",   label: "理解与任务分解",
         position: { x: 300, y: 300 },
         prompt: BUILTIN_TASK_DECOMPOSE_PROMPT.trim(),
       },
       {
-        id: "llm",        type: "execute_tools",    label: "调用模型", enabled: true,
+        id: "llm",        type: "execute_tools",    label: "调用模型",
         position: { x: 300, y: 690 },
         prompt: BUILTIN_AGENT_PROMPT.trim(),
         params: { maxIterations: 200 },
       },
-      { id: "postverify", type: "post_verify",      label: "执行验证", enabled: true, position: { x: 300, y: 820 } },
+      { id: "postverify", type: "post_verify",      label: "执行验证", position: { x: 300, y: 820 } },
       {
-        id: "present",    type: "present_changes",  label: "变更审阅", enabled: true,
+        id: "present",    type: "present_changes",  label: "变更审阅",
         position: { x: 300, y: 950 },
         params: { autoKeepChanges: false },
       },
-      { id: "end",        type: "end",              label: "结束",     enabled: true, position: { x: 300, y: 1080 } },
+      { id: "end",        type: "end",              label: "结束",     position: { x: 300, y: 1080 } },
     ],
     edges: [
       { id: "e1",  from: "start",      to: "context"    },
       { id: "e2",  from: "context",    to: "decompose"  },
-      { id: "e3",  from: "decompose",  to: "llm"        },
+      { id: "e3",  from: "decompose",  to: "llm" },
       { id: "e3b", from: "llm",        to: "postverify" },
       { id: "e4",  from: "postverify", to: "present"    },
       { id: "e5",  from: "present",    to: "end"        },
@@ -527,17 +510,6 @@ export function builtinAgentPipeline(): ModePipeline {
 export const FIXED_PIPELINE_TYPES = new Set<PipelineNodeType>(
   NODE_TYPE_REGISTRY.filter((d) => d.fixed === true).map((d) => d.type),
 );
-
-/**
- * Catalog of nodes users can insert between 收集上下文 and 结束.
- * Same type may be added multiple times (each instance has its own id/params).
- * Type set mirrors NODE_TYPE_REGISTRY.addableIn; array order is UI display order
- * (order-sensitive, hence kept explicit rather than derived).
- */
-export const ADDABLE_PIPELINE_TYPES: Record<"spec" | "agent", PipelineNodeType[]> = {
-  spec: [],
-  agent: [],
-};
 
 export function isFixedPipelineNode(node: PipelineNode): boolean {
   return FIXED_PIPELINE_TYPES.has(node.type);
@@ -582,131 +554,6 @@ export function rebuildLinearEdges(nodeIds: string[]): ModePipeline["edges"] {
   return edges;
 }
 
-function newNodeId(type: PipelineNodeType, existing: Set<string>): string {
-  let i = 1;
-  let id = `${type}_${i}`;
-  while (existing.has(id)) {
-    i += 1;
-    id = `${type}_${i}`;
-  }
-  return id;
-}
-
-export function createPipelineNode(
-  type: PipelineNodeType,
-  _mode: "spec" | "agent",
-  existingIds: Set<string>,
-): PipelineNode {
-  const id = newNodeId(type, existingIds);
-  const label = NODE_TYPE_LABELS[type];
-  switch (type) {
-    case "explore_tools":
-      return {
-        id,
-        type,
-        label: "调用模型",
-        enabled: true,
-        prompt: BUILTIN_SPEC_PROMPT.trim(),
-        params: { maxIterations: 200, allowSpecFiles: true, reactSteps: defaultReactSteps() },
-      };
-    case "execute_tools":
-      return {
-        id,
-        type,
-        label: "调用模型",
-        enabled: true,
-        prompt: BUILTIN_AGENT_PROMPT.trim(),
-        params: { maxIterations: 200, reactSteps: defaultReactSteps() },
-      };
-    // Legacy, non-addable: kept only so a hand-edited workflow.json still parses.
-    // The migrator drops these nodes; their behaviour moved into the 任务分解 and
-    // Plan 「调用模型」 prompts.
-    case "document_intent_router":
-    case "agent_intent_router":
-      return { id, type, label: resolveNodeType(type)?.label ?? type, enabled: false };
-    case "present_changes":
-      return {
-        id,
-        type,
-        label: "变更审阅",
-        enabled: true,
-        params: { autoKeepChanges: false },
-      };
-    case "verify":
-      return {
-        id,
-        type,
-        label: "检验",
-        enabled: true,
-        prompt:
-          "Audit the completed work against the user request using only the conversation, tool results, and recorded checks. " +
-          "Do not call tools or redo work. Return a concise verdict: Verified, Partially verified, or Not verified; then list requirement evidence " +
-          "and any gap or next action. Never claim a check passed unless its result is present in context.",
-      };
-    case "task_decompose":
-      return {
-        id,
-        type,
-        label: "理解与任务分解",
-        enabled: true,
-        prompt: BUILTIN_TASK_DECOMPOSE_PROMPT.trim(),
-      };
-    default:
-      return { id, type, label, enabled: true };
-  }
-}
-
-/**
- * Insert a node after `afterId` (default: after context_gather, before end).
- * Rebuilds a single linear edge chain.
- */
-export function addPipelineNode(
-  pipeline: ModePipeline,
-  type: PipelineNodeType,
-  mode: "spec" | "agent",
-  afterId?: string,
-): ModePipeline {
-  if (FIXED_PIPELINE_TYPES.has(type)) {
-    throw new Error(`cannot add fixed type: ${type}`);
-  }
-  const allowed = ADDABLE_PIPELINE_TYPES[mode];
-  if (!allowed.includes(type)) {
-    throw new Error(`type ${type} not addable in ${mode} mode`);
-  }
-  // T12: reject non-repeatable types that already exist in the pipeline.
-  const constraints = positionConstraintsOf(type);
-  if (constraints && !constraints.repeatable) {
-    const existing = pipeline.nodes.some((n) => n.type === type);
-    if (existing) {
-      throw new Error(`节点类型「${NODE_TYPE_LABELS[type]}」不可重复添加：已存在同类型节点`);
-    }
-  }
-  const linear = walkLinearNodes(pipeline);
-  const ids = new Set(pipeline.nodes.map((n) => n.id));
-  const node = createPipelineNode(type, mode, ids);
-  const endIdx = linear.findIndex((n) => n.type === "end");
-  const contextIdx = linear.findIndex((n) => n.type === "context_gather");
-  const minInsert = contextIdx >= 0 ? contextIdx + 1 : 1;
-  const maxInsert = endIdx >= 0 ? endIdx : linear.length;
-  let insertAt = maxInsert;
-  if (afterId) {
-    const idx = linear.findIndex((n) => n.id === afterId);
-    if (idx >= 0) insertAt = idx + 1;
-  }
-  insertAt = Math.max(minInsert, Math.min(insertAt, maxInsert));
-  const nextNodes = [...linear];
-  nextNodes.splice(insertAt, 0, node);
-  return ModePipelineSchema.parse({
-    nodes: nextNodes,
-    edges: rebuildLinearEdges(nextNodes.map((n) => n.id)),
-    // Re-adding a type un-suppresses it; the factory node's own id stays
-    // suppressed so the new instance is not duplicated by the merge.
-    removed: (pipeline.removed ?? []).filter(
-      (r) => r !== removedTypeKey(type) && r !== removedIdKey(node.id) && r !== node.id,
-    ),
-  });
-}
-
 export function removePipelineNode(pipeline: ModePipeline, nodeId: string): ModePipeline {
   const node = pipeline.nodes.find((n) => n.id === nodeId);
   if (!node) return pipeline;
@@ -749,47 +596,6 @@ export function removePipelineNode(pipeline: ModePipeline, nodeId: string): Mode
   });
 }
 
-export function movePipelineNode(
-  pipeline: ModePipeline,
-  nodeId: string,
-  direction: "up" | "down",
-): ModePipeline {
-  const node = pipeline.nodes.find((n) => n.id === nodeId);
-  if (!node || isFixedPipelineNode(node)) return pipeline;
-  const linear = walkLinearNodes(pipeline);
-  const idx = linear.findIndex((n) => n.id === nodeId);
-  if (idx < 0) return pipeline;
-  const swapWith = direction === "up" ? idx - 1 : idx + 1;
-  if (swapWith < 0 || swapWith >= linear.length) return pipeline;
-  const other = linear[swapWith]!;
-  // Cannot move past start/context (up) or end (down); context stays after start
-  if (isFixedPipelineNode(other)) return pipeline;
-  // T12: reject swaps across different slot regions (pre-model / mid / post-model).
-  if (!canSwapSlots(node, other)) {
-    const nodeSlot = positionConstraintsOf(node.type)?.slot;
-    const otherSlot = positionConstraintsOf(other.type)?.slot;
-    throw new Error(
-      `不能将「${NODE_TYPE_LABELS[node.type]}」（${nodeSlot ?? "无槽位"}）移过` +
-      `「${NODE_TYPE_LABELS[other.type]}」（${otherSlot ?? "无槽位"}）：跨槽位移动不允许`,
-    );
-  }
-  const next = [...linear];
-  [next[idx], next[swapWith]] = [next[swapWith]!, next[idx]!];
-  // Enforce start first, end last, context second
-  const start = next.find((n) => n.type === "start")!;
-  const end = next.find((n) => n.type === "end")!;
-  const context = next.find((n) => n.type === "context_gather")!;
-  const middle = next.filter(
-    (n) => n.type !== "start" && n.type !== "end" && n.type !== "context_gather",
-  );
-  const normalized = [start, context, ...middle, end];
-  return ModePipelineSchema.parse({
-    nodes: normalized,
-    edges: rebuildLinearEdges(normalized.map((n) => n.id)),
-    removed: pipeline.removed ?? [],
-  });
-}
-
 /** T12: slot ordering helper — returns -1 when the node has no slot constraint. */
 function slotOrder(slot?: NodeTypePositionConstraints["slot"]): number {
   if (slot === "pre-model") return 0;
@@ -798,13 +604,6 @@ function slotOrder(slot?: NodeTypePositionConstraints["slot"]): number {
   return -1;
 }
 
-/** T12: two nodes can swap only within the same slot (or if either has no slot). */
-function canSwapSlots(a: PipelineNode, b: PipelineNode): boolean {
-  const aSlot = slotOrder(positionConstraintsOf(a.type)?.slot);
-  const bSlot = slotOrder(positionConstraintsOf(b.type)?.slot);
-  if (aSlot < 0 || bSlot < 0) return true;
-  return aSlot === bSlot;
-}
 export function findPipelineNode(
   pipeline: ModePipeline,
   type: PipelineNodeType,

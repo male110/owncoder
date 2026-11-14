@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { applyStreamSnapshot, pushStreamSnapshot } from "./streaming-snapshot";
+import { applyStreamSnapshot, pushStreamSnapshot } from "./streaming-snapshot.ts";
 
 describe("applyStreamSnapshot", () => {
   it("replaces the accumulated value with the next cumulative snapshot", () => {

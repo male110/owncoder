@@ -46,16 +46,13 @@ import {
 } from "./session-plans.ts";
 import type {
   SpecFeature as SpecFeatureDto,
-  SpecPhase as SpecPhaseDto,
   SpecStatus as SpecStatusDto,
 } from "./specs.ts";
 import {
   approveSpecPhase,
   getSpecStatus as getSpecFeatureStatus,
   listSpecFeatures,
-  readSpecDocument,
   rejectSpecPhase,
-  saveSpecDocument,
   type SpecsHost,
 } from "./session-specs.ts";
 import type { SessionState } from "./session-runtime.ts";
@@ -64,7 +61,7 @@ import {
 } from "./changes.ts";
 import { getGitStatus, type GitStatus } from "./git.ts";
 import { McpManager } from "./mcp/client.ts";
-import { deleteDecomposeRound } from "./turn-rounds.ts";
+import { deleteDecomposeRound, loadRecentRounds } from "./turn-rounds.ts";
 import {
   beginTurn,
   deleteTurn,
@@ -73,6 +70,7 @@ import {
   loadRecentTurns,
   loadOlderTurns,
   projectConversationTurns,
+  projectRecentRoundTurns,
   sanitizeOversizedFinalJson,
   sanitizeOversizedEventPayloads,
 } from "./conversation-store.ts";
@@ -551,8 +549,18 @@ export class SessionOrchestrator {
     const page = beforeSeq == null
       ? await loadRecentTurns(root, sessionId, limit)
       : await loadOlderTurns(root, sessionId, beforeSeq, limit);
+    const recentRound = beforeSeq == null
+      ? (await loadRecentRounds(root, sessionId, 1))[0]
+      : undefined;
+    const latestInFlight = Boolean(this.runtimes.get(sessionId)?.abort);
     if (page.turns.length > 0) {
-      return { turns: this.projectTurns(page.turns), beforeSeq: page.beforeSeq, hasMore: page.hasMore };
+      return {
+        turns: recentRound && !latestInFlight
+          ? projectRecentRoundTurns(page.turns, recentRound)
+          : this.projectTurns(page.turns),
+        beforeSeq: page.beforeSeq,
+        hasMore: page.hasMore,
+      };
     }
 
     // First open: migrate from the durable session JSON (full transcript), not
@@ -569,10 +577,20 @@ export class SessionOrchestrator {
       const migrated = beforeSeq == null
         ? await loadRecentTurns(root, sessionId, limit)
         : await loadOlderTurns(root, sessionId, beforeSeq, limit);
-      return { turns: this.projectTurns(migrated.turns), beforeSeq: migrated.beforeSeq, hasMore: migrated.hasMore };
+      return {
+        turns: recentRound && !latestInFlight
+          ? projectRecentRoundTurns(migrated.turns, recentRound)
+          : this.projectTurns(migrated.turns),
+        beforeSeq: migrated.beforeSeq,
+        hasMore: migrated.hasMore,
+      };
     }
 
-    return { turns: [], beforeSeq: null, hasMore: false };
+    return {
+      turns: recentRound && !latestInFlight ? projectRecentRoundTurns([], recentRound) : [],
+      beforeSeq: null,
+      hasMore: false,
+    };
   }
 
   private projectTurns(turns: import("./conversation-store.ts").ConversationTurn[]): ChatTurn[] {
@@ -1398,21 +1416,8 @@ export class SessionOrchestrator {
     return listSpecFeatures(this.specsHost, sessionId);
   }
 
-  async readSpec(feature: string, phase: SpecPhaseDto): Promise<string> {
-    return readSpecDocument(this.specsHost, feature, phase);
-  }
-
   async getSpecStatus(feature: string): Promise<SpecStatusDto> {
     return getSpecFeatureStatus(this.specsHost, feature);
-  }
-
-  async saveSpecDoc(
-    feature: string,
-    phase: SpecPhaseDto,
-    content: string,
-    sessionId?: string,
-  ): Promise<SessionState> {
-    return saveSpecDocument(this.specsHost, feature, phase, content, sessionId);
   }
 
   async approveSpec(feature: string, sessionId?: string): Promise<SessionState> {

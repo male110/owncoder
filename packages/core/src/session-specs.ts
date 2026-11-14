@@ -25,12 +25,8 @@ import {
   phaseUnderReview,
   readFeatureState,
   readSpecPhase,
-  saveDesign,
-  saveSpec,
-  saveTasks,
   writeFeatureState,
   type SpecFeature,
-  type SpecPhase,
   type SpecStatus,
   type SpecStage,
 } from "./specs.ts";
@@ -66,16 +62,6 @@ export async function listSpecFeatures(
   return listSpecs(root);
 }
 
-export async function readSpecDocument(
-  host: SpecsHost,
-  feature: string,
-  phase: SpecPhase,
-): Promise<string> {
-  const root = host.sessionWorkspaceRoot();
-  if (!root) throw new Error(ERR_NO_WORKSPACE);
-  return readSpecPhase(root, feature, phase);
-}
-
 export async function getSpecStatus(
   host: SpecsHost,
   feature: string,
@@ -83,23 +69,6 @@ export async function getSpecStatus(
   const root = host.sessionWorkspaceRoot();
   if (!root) throw new Error(ERR_NO_WORKSPACE);
   return readSpecStatusFromDisk(root, feature);
-}
-
-/** UI 内联编辑后保存某阶段文档（不改变审批闸门状态）。 */
-export async function saveSpecDocument(
-  host: SpecsHost,
-  feature: string,
-  phase: SpecPhase,
-  content: string,
-  sessionId?: string,
-): Promise<SessionState> {
-  const root = sessionId ? host.sessionWorkspaceRoot(sessionId) : host.sessionWorkspaceRoot();
-  if (!root) throw new Error(ERR_NO_WORKSPACE);
-  if (phase === "spec") await saveSpec(root, feature, content);
-  else if (phase === "design") await saveDesign(root, feature, content);
-  else await saveTasks(root, feature, content);
-  await host.persist(sessionId);
-  return host.getState(sessionId);
 }
 
 /**

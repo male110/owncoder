@@ -98,11 +98,9 @@ export function useSessionSwitch(
           });
           if (!isNavigationCurrent(navigationVersion)) return;
 
-          // 4. Apply backend snapshot. On cache hits prefer in-memory history
-          // (may include newer sealed liveEvents) but still sync mode/title/plan.
-          // getChatHistoryPage 负责分页游标；若 conversation store 暂空，保留上面
-          // 已写入的 runtime history，避免空页把首屏消息盖掉。
-          if (isFirstVisit || !existing?.history?.length) {
+          // 4. Reconcile idle cached history with the durable per-round projection.
+          // Keep in-flight messages intact; an empty store must not erase runtime history.
+          if (!existing?.sending && !(existing?.liveEvents?.length)) {
             const page = await window.owncoder.getChatHistoryPage(id, undefined, 10);
             if (!isNavigationCurrent(navigationVersion)) return;
             const currentHistory = useChatStore.getState().bySession[id]?.history ?? [];

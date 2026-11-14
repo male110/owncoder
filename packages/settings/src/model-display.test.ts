@@ -92,6 +92,7 @@ describe("modelSeriesKey", () => {
     // 斜杠/冒号分隔的命名空间前缀（如 atria/）是供应商名，不应作为系列键。
     expect(modelSeriesKey({ id: "atria/kimi-k2.7-code", name: "atria/kimi-k2.7-code" })).toBe("kimi");
     expect(modelSeriesKey({ id: "atria/qwen3-coder-flash", name: "atria/qwen3-coder-flash" })).toBe("qwen");
+    expect(modelSeriesKey({ id: "zai-org/GLM-5.1", name: "zai-org/GLM-5.1" })).toBe("glm");
     expect(modelSeriesKey({ id: "atria/atria-dawn", name: "atria/atria-dawn" })).toBe("atria");
     // 裸 id 不剥离前缀。
     expect(modelSeriesKey({ id: "atria-dawn", name: "atria-dawn" })).toBe("atria");

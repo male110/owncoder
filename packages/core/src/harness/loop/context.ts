@@ -98,20 +98,18 @@ export async function buildInitialContext(args: BuildContextArgs): Promise<Build
     timer.reset();
   };
 
-  const ctxEnabled = !contextNode || contextNode.enabled !== false;
   const ctxParams = (contextNode?.params ?? {}) as Record<string, unknown>;
   const contextControl = new ContextControlState(
     opts.workspaceRoot,
     resolveContextControlConfig(ctxParams.contextControl),
   );
   const anchorsEnabled =
-    opts.mode === "agent" &&
-    (anchorsNode ? anchorsNode.enabled !== false : ctxParams.injectAnchors !== false);
+    opts.mode === "agent" && ctxParams.injectAnchors !== false;
   const mentionPaths = extractMentionPaths(opts.userMessage);
   const activePaths = opts.activePlan ? extractPathsFromPlan(opts.activePlan.content) : [];
   const selectionMode = resolveMinimumContextConfig(ctxParams.contextSelection, 0).mode;
 
-  if (contextNode && ctxEnabled) emitStage(opts.onEvent, "start", contextNode);
+  if (contextNode) emitStage(opts.onEvent, "start", contextNode);
   log("stage_start emitted");
 
   const basePromptTokens = estimateTokens(systemPrompt);
@@ -165,7 +163,7 @@ export async function buildInitialContext(args: BuildContextArgs): Promise<Build
   // They will be added to the candidate pool later.
   
   const mentionPromise =
-    ctxEnabled && ctxParams.injectMentions !== false
+    ctxParams.injectMentions !== false
       ? loadMentionedFiles(opts.workspaceRoot, mentionPaths)
       : Promise.resolve([]);
 
@@ -186,76 +184,72 @@ export async function buildInitialContext(args: BuildContextArgs): Promise<Build
   };
 
   // ── Add tech stack as truncatable candidate ──
-  if (ctxEnabled) {
-    try {
-      const idxStatus = opts.index.status();
-      const techStackLines: string[] = [];
-      if (idxStatus.root) {
-        techStackLines.push(`- Workspace root: \`${idxStatus.root}\``);
-      }
-      if (typeof idxStatus.fileCount === "number" && idxStatus.fileCount > 0) {
-        techStackLines.push(`- Indexed source files: ${idxStatus.fileCount}`);
-      }
-      if (typeof idxStatus.tagCount === "number" && idxStatus.tagCount > 0) {
-        techStackLines.push(`- Indexed symbols: ${idxStatus.tagCount}`);
-      }
-      // Note: idxStatus.kind is the index build state (idle/building/ready/error),
-      // not the project kind, so it is deliberately not surfaced here.
-      const ecosystems = await detectProjectEcosystem(opts.workspaceRoot);
-      if (ecosystems.length > 0) {
-        techStackLines.push(`- Detected project stack: ${ecosystems.join("; ")}`);
-      } else {
-        techStackLines.push(
-          "- Detected project stack: unknown (no recognized manifest such as pom.xml, build.gradle, package.json or Cargo.toml found at the workspace root).",
-        );
-      }
-      if (techStackLines.length > 0) {
-        addCandidate({
-          source: "tech-stack",
-          content: [
-            "## Project Tech Stack",
-            ...techStackLines,
-            "- Use `repo_map` / `read_file` for deeper structure on demand, and the `glob` tool (not shell `ls`/`find`) for file listings — the summary above is intentionally compact.",
-          ].join("\n"),
-          provenance: "project tech stack",
-          freshness: "current",
-          mandatory: false, // Truncatable
-        });
-      }
-    } catch {
-      // Index not ready or unavailable — skip silently
+  try {
+    const idxStatus = opts.index.status();
+    const techStackLines: string[] = [];
+    if (idxStatus.root) {
+      techStackLines.push(`- Workspace root: \`${idxStatus.root}\``);
     }
+    if (typeof idxStatus.fileCount === "number" && idxStatus.fileCount > 0) {
+      techStackLines.push(`- Indexed source files: ${idxStatus.fileCount}`);
+    }
+    if (typeof idxStatus.tagCount === "number" && idxStatus.tagCount > 0) {
+      techStackLines.push(`- Indexed symbols: ${idxStatus.tagCount}`);
+    }
+    // Note: idxStatus.kind is the index build state (idle/building/ready/error),
+    // not the project kind, so it is deliberately not surfaced here.
+    const ecosystems = await detectProjectEcosystem(opts.workspaceRoot);
+    if (ecosystems.length > 0) {
+      techStackLines.push(`- Detected project stack: ${ecosystems.join("; ")}`);
+    } else {
+      techStackLines.push(
+        "- Detected project stack: unknown (no recognized manifest such as pom.xml, build.gradle, package.json or Cargo.toml found at the workspace root).",
+      );
+    }
+    if (techStackLines.length > 0) {
+      addCandidate({
+        source: "tech-stack",
+        content: [
+          "## Project Tech Stack",
+          ...techStackLines,
+          "- Use `repo_map` / `read_file` for deeper structure on demand, and the `glob` tool (not shell `ls`/`find`) for file listings — the summary above is intentionally compact.",
+        ].join("\n"),
+        provenance: "project tech stack",
+        freshness: "current",
+        mandatory: false, // Truncatable
+      });
+    }
+  } catch {
+    // Index not ready or unavailable — skip silently
   }
 
   // ── Add project size as truncatable candidate ──
-  if (ctxEnabled) {
-    try {
-      const idxStatus = opts.index.status();
-      if (typeof idxStatus.fileCount === "number" && idxStatus.fileCount > 0) {
-        const isLarge = idxStatus.fileCount >= 1500;
-        addCandidate({
-          source: "project-size",
-          content: [
-            "## Project Size",
-            `- Indexed source files: ${idxStatus.fileCount}`,
-            isLarge
-              ? "- This is a **large project** (≥1500 source files). Do NOT run full build commands (mvn compile, mvn verify, mvn package, gradle build, cargo build, npm run build, etc.). Use targeted checks only (type_check, lsp_diagnostics, or bash for specific commands)."
-              : "",
-          ]
-            .filter(Boolean)
-            .join("\n"),
-          provenance: "project size information",
-          freshness: "current",
-          mandatory: false, // Truncatable
-        });
-      }
-    } catch {
-      // Index not ready or unavailable — skip silently
+  try {
+    const idxStatus = opts.index.status();
+    if (typeof idxStatus.fileCount === "number" && idxStatus.fileCount > 0) {
+      const isLarge = idxStatus.fileCount >= 1500;
+      addCandidate({
+        source: "project-size",
+        content: [
+          "## Project Size",
+          `- Indexed source files: ${idxStatus.fileCount}`,
+          isLarge
+            ? "- This is a **large project** (≥1500 source files). Do NOT run full build commands (mvn compile, mvn verify, mvn package, gradle build, cargo build, npm run build, etc.). Use targeted checks only (type_check, lsp_diagnostics, or bash for specific commands)."
+            : "",
+        ]
+          .filter(Boolean)
+          .join("\n"),
+        provenance: "project size information",
+        freshness: "current",
+        mandatory: false, // Truncatable
+      });
     }
+  } catch {
+    // Index not ready or unavailable — skip silently
   }
 
   // ── Add project rules as truncatable candidate ──
-  if (ctxEnabled && ctxParams.injectRules !== false && opts.projectRules?.trim()) {
+  if (ctxParams.injectRules !== false && opts.projectRules?.trim()) {
     addCandidate({
       source: "rules",
       content: `## Project rules\nFollow these project-specific rules unless the user explicitly overrides them.\n\n${opts.projectRules.trim()}`,
@@ -268,7 +262,7 @@ export async function buildInitialContext(args: BuildContextArgs): Promise<Build
   // ── Available skills catalog (mandatory: the model must know skills exist
   // to invoke use_skill; the catalog is name/description only, bodies load
   // on demand via the tool) ──
-  if (ctxEnabled && ctxParams.injectSkills !== false && opts.skillsCatalog?.trim()) {
+  if (ctxParams.injectSkills !== false && opts.skillsCatalog?.trim()) {
     addCandidate({
       source: "skills",
       content: opts.skillsCatalog.trim(),
@@ -278,7 +272,7 @@ export async function buildInitialContext(args: BuildContextArgs): Promise<Build
     });
   }
 
-  if (ctxEnabled && ctxParams.injectMemories !== false && opts.memoriesBlock?.trim()) {
+  if (ctxParams.injectMemories !== false && opts.memoriesBlock?.trim()) {
     addCandidate({
       source: "memory",
       content: opts.memoriesBlock,
@@ -290,7 +284,6 @@ export async function buildInitialContext(args: BuildContextArgs): Promise<Build
 
   const knowledgeCtx = memory.getKnowledgeContext(opts.userMessage);
   if (
-    ctxEnabled &&
     knowledgeCtx.trim() &&
     (selectionMode === "apply" || legacyOptionalBudgetUsed < budgets.total * 0.7)
   ) {
@@ -312,7 +305,6 @@ export async function buildInitialContext(args: BuildContextArgs): Promise<Build
 
   const shortTermCtx = memory.getShortTermContext();
   if (
-    ctxEnabled &&
     shortTermCtx.trim() &&
     opts.history.length > 2 &&
     (selectionMode === "apply" || legacyOptionalBudgetUsed < budgets.total * 0.75)
@@ -335,7 +327,7 @@ export async function buildInitialContext(args: BuildContextArgs): Promise<Build
 
   const mentionFiles = await mentionPromise;
   log("mentions loaded", { count: mentionFiles.length });
-  if (ctxEnabled && ctxParams.injectMentions !== false) {
+  if (ctxParams.injectMentions !== false) {
     const mentionsBlock = formatMentionsBlock(mentionFiles);
     if (mentionsBlock.trim()) {
       addCandidate({
@@ -392,14 +384,12 @@ export async function buildInitialContext(args: BuildContextArgs): Promise<Build
   // 召回 → 按文件聚合。freshness=indexed 用于
   // registerIndexedCandidates 溯源（读取记账 / 失效跟踪）。
   // best-effort：索引不可用 / 空结果 / 抛错 → 不入池，行为与现状一致。
-  if (ctxEnabled && opts.requestRoute?.mode !== "precise_single_file" && opts.requestRoute?.mode !== "simple_direct") {
-    const navCandidate = await buildIndexNavigationCandidate(opts.index, opts.userMessage);
-    if (navCandidate) addCandidate(navCandidate);
-  }
+  const navCandidate = await buildIndexNavigationCandidate(opts.index, opts.userMessage);
+  if (navCandidate) addCandidate(navCandidate);
 
   // Knowledge graph population (index → memory). Repo map / deps are
   // available on demand via `repo_map` / `project_deps` tools.
-  if (ctxEnabled && !opts.disableKnowledgeGraph) {
+  if (!opts.disableKnowledgeGraph) {
     try {
       await memory.populateFromIndex(opts.index, opts.workspaceRoot);
       log("knowledge graph populated");
@@ -533,7 +523,7 @@ export async function buildInitialContext(args: BuildContextArgs): Promise<Build
   const wrappedProjectContext = tagProjectContext(projectContextParts.join("\n\n"));
   if (wrappedProjectContext) messages.push({ role: "system", content: wrappedProjectContext });
 
-  if (contextNode && ctxEnabled) emitStage(opts.onEvent, "done", contextNode);
+  if (contextNode) emitStage(opts.onEvent, "done", contextNode);
   log("stage_done emitted", {
     budgetUsed,
     promptTokenCapacity,

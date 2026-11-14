@@ -36,7 +36,7 @@ describe("pipeline cancellation", () => {
     const controller = new AbortController();
     controller.abort();
     const ctx = context(controller.signal);
-    await runPipelineScheduler([{ id: "test", type: "context_gather", enabled: true } as PipelineNode], ctx);
+    await runPipelineScheduler([{ id: "test", type: "context_gather" } as PipelineNode], ctx);
     expect(ctx.state.aborted).toBe(true);
     expect(inject).not.toHaveBeenCalled();
     expect(complete).not.toHaveBeenCalled();
@@ -53,7 +53,7 @@ describe("pipeline cancellation", () => {
     }));
     handlers.set("context_gather", { run });
     const ctx = context(controller.signal);
-    const running = runPipelineScheduler([{ id: "test", type: "context_gather", enabled: true } as PipelineNode], ctx);
+    const running = runPipelineScheduler([{ id: "test", type: "context_gather" } as PipelineNode], ctx);
     controller.abort();
     await running;
     expect(cleanup).toHaveBeenCalledOnce();

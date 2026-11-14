@@ -512,9 +512,7 @@ export interface DesktopApi {
   updateTask: (taskId: string, status: TaskStatusDto, result?: string, sessionId?: string) => Promise<ActivePlanMetaDto | null>;
   // ── Spec workflow（spec → design → tasks 审批流） ──
   listSpecs: (sessionId?: string) => Promise<SpecFeatureDto[]>;
-  readSpec: (feature: string, phase: SpecPhaseDto) => Promise<string>;
   getSpecStatus: (feature: string) => Promise<SpecStatusDto>;
-  saveSpecDoc: (feature: string, phase: SpecPhaseDto, content: string, sessionId?: string) => Promise<Partial<SessionStateDto>>;
   approveSpec: (feature: string, sessionId?: string) => Promise<Partial<SessionStateDto>>;
   rejectSpec: (feature: string, feedback: string, sessionId?: string) => Promise<Partial<SessionStateDto>>;
   setTodoAnchor: (todo: string | null) => Promise<unknown>;
@@ -729,9 +727,7 @@ const api: DesktopApi = {
   listPlans: (sessionId?: string) => ipcRenderer.invoke("plans:list", sessionId),
   readPlan: (path) => ipcRenderer.invoke("plans:read", path),
   listSpecs: (sessionId?: string) => ipcRenderer.invoke("specs:list", sessionId),
-  readSpec: (feature, phase) => ipcRenderer.invoke("specs:read", feature, phase),
   getSpecStatus: (feature) => ipcRenderer.invoke("specs:status", feature),
-  saveSpecDoc: (feature, phase, content, sessionId) => ipcRenderer.invoke("specs:save", feature, phase, content, sessionId),
   approveSpec: (feature, sessionId) => ipcRenderer.invoke("specs:approve", feature, sessionId),
   rejectSpec: (feature, feedback, sessionId) => ipcRenderer.invoke("specs:reject", feature, feedback, sessionId),
   listRules: () => ipcRenderer.invoke("rules:list"),

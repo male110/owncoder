@@ -14,6 +14,7 @@ import {
   loadTurn,
   migrateLegacyHistory,
   projectConversationTurns,
+  projectRecentRoundTurns,
   sanitizeOversizedEventPayloads,
   sanitizeOversizedFinalJson,
   slimDurableEvent,
@@ -250,6 +251,75 @@ describe("conversation store", () => {
       { role: "tool", id: "t2", toolName: "ask_user", content: "q", turnId: "legacy-final" },
       { ...assistant("done"), turnId: "legacy-final" },
     ]);
+  });
+
+  it("does not replay the previous assistant reply for a failed turn without a reply", () => {
+    const turns = [
+      {
+        turnId: "failed-legacy",
+        turnSeq: 2,
+        status: "failed" as const,
+        startedAt: "t2",
+        completedAt: "t3",
+        user: user("YYYY"),
+        taskDecomposition: null,
+        report: null,
+        events: [],
+        final: {
+          history: [user("xxx"), assistant("previous reply"), user("YYYY")],
+        },
+      },
+    ];
+
+    expect(projectConversationTurns(turns)).toEqual([
+      { ...user("YYYY"), turnId: "failed-legacy" },
+    ]);
+  });
+
+  it("projects the newest reply from its own round and drops a stale previous reply", () => {
+    const turns = [
+      { turnId: "previous", turnSeq: 17, status: "completed" as const, startedAt: "t1",
+        user: user("old"), taskDecomposition: null, report: null, events: [], final: assistant("old reply") },
+      { turnId: "latest", turnSeq: 18, status: "failed" as const, startedAt: "t2",
+        user: user("new"), taskDecomposition: null, report: null, events: [], final: assistant("old reply") },
+    ];
+    const round = { index: 18, turnId: "latest", createdAt: "t2", updatedAt: "t2", userInput: "new" };
+    expect(projectRecentRoundTurns(turns, round)).toEqual([
+      { ...user("old"), turnId: "previous" },
+      { ...assistant("old reply"), turnId: "previous" },
+      { ...user("new"), turnId: "latest" },
+    ]);
+    expect(projectRecentRoundTurns(turns, { ...round, assistantReport: "new reply" })).toEqual([
+      { ...user("old"), turnId: "previous" },
+      { ...assistant("old reply"), turnId: "previous" },
+      { ...user("new"), turnId: "latest" },
+      { ...assistant("new reply"), turnId: "latest" },
+    ]);
+  });
+
+  it("projects an interrupted newest round missing from completed-turn pagination", () => {
+    const turns = [{ turnId: "previous", turnSeq: 17, status: "completed" as const,
+      startedAt: "t1", user: user("old"), taskDecomposition: null, report: null,
+      events: [], final: assistant("old reply") }];
+    const round = { index: 18, turnId: "latest", createdAt: "t2", updatedAt: "t2", userInput: "new" };
+    expect(projectRecentRoundTurns(turns, round)).toEqual([
+      { ...user("old"), turnId: "previous" },
+      { ...assistant("old reply"), turnId: "previous" },
+      { ...user("new"), turnId: "latest" },
+    ]);
+    expect(projectRecentRoundTurns(turns, { ...round, assistantReport: "new reply" }).at(-1)).toEqual(
+      { ...assistant("new reply"), turnId: "latest" },
+    );
+  });
+
+  it("keeps legacy projection when a round is absent or older than the page", () => {
+    const turns = [{ turnId: "newest", turnSeq: 19, status: "completed" as const,
+      startedAt: "t3", user: user("current"), taskDecomposition: null, report: null,
+      events: [], final: assistant("current reply") }];
+    const expected = projectConversationTurns(turns);
+    expect(projectRecentRoundTurns(turns)).toEqual(expected);
+    expect(projectRecentRoundTurns(turns, { index: 18, turnId: "older",
+      createdAt: "t2", updatedAt: "t2", userInput: "old" })).toEqual(expected);
   });
 
   it("projectConversationTurns keeps identical user text across different turns", () => {

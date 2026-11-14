@@ -17,7 +17,6 @@ import { allEnhancedTools } from "./enhanced-tools.ts";
 import { OS_LOCALE } from "./tools/shared.ts";
 import { BudgetLedger } from "./budget-ledger.ts";
 import { EvidenceStore } from "./evidence-store.ts";
-import { routeRequest } from "./loop/request-router.ts";
 
 // ── Language directive: single source of truth for reply-language instruction ──
 // All LLM calls within one task (main agent loop AND pre-loop stages such as
@@ -139,8 +138,6 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
   const memory = opts.memory ?? new MemoryManager();
   const reasoningTrace = createReasoningTrace();
   const taskClassification = classifyTask(opts.userMessage, opts.history.length);
-  const requestRoute = opts.requestRoute ?? routeRequest(opts.userMessage);
-  if (opts.requestRoute !== requestRoute) opts = { ...opts, requestRoute };
 
   const pipeline = modePipeline(opts.workflow, opts.mode);
   const budgets = contextBudgets(opts.workflow);
@@ -149,10 +146,10 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
 
   const anchorsNode = findPipelineNode(pipeline, "load_anchors");
   const exploreNodes = pipeline.nodes.filter(
-    (n: PipelineNode) => n.type === "explore_tools" && n.enabled !== false,
+    (n: PipelineNode) => n.type === "explore_tools",
   );
   const executeNodes = pipeline.nodes.filter(
-    (n: PipelineNode) => n.type === "execute_tools" && n.enabled !== false,
+    (n: PipelineNode) => n.type === "execute_tools",
   );
   const exploreNode = exploreNodes[0];
   const executeNode = executeNodes[0];
@@ -523,6 +520,10 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
     shortCircuited: false,
     blocked: false,
     blockedReason: undefined,
+    planRequested: false,
+    planApproval: null,
+    planApprovalFeedback: undefined,
+    approvedAgentPlan: undefined,
     verifyNodeForReport: null,
     decomposeTokens: 0,
     taskRunState: opts.taskRunState ?? null,
@@ -530,7 +531,7 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
   };
 
   const schedulerCtx: SchedulerContext = {
-    opts,
+    opts: { ...opts },
     messages,
     history,
     memory,
@@ -543,7 +544,6 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
     state,
     hasToolStage,
     hasExecute,
-    requestRoute,
 
     taskClassification,
     anchorsNode,

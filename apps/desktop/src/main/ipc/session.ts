@@ -144,15 +144,7 @@ export function registerSessionHandlers(ctx: IpcContext): void {
 
   ipcMain.handle("specs:list", (_e, sessionId?: string) => session.listSpecs(sessionId));
 
-  ipcMain.handle("specs:read", (_e, feature: string, phase: string) =>
-    session.readSpec(feature, phase as never),
-  );
-
   ipcMain.handle("specs:status", (_e, feature: string) => session.getSpecStatus(feature));
-
-  ipcMain.handle("specs:save", (_e, feature: string, phase: string, content: string, sessionId?: string) =>
-    session.saveSpecDoc(feature, phase as never, content, sessionId),
-  );
 
   ipcMain.handle("specs:approve", (_e, feature: string, sessionId?: string) =>
     session.approveSpec(feature, sessionId),

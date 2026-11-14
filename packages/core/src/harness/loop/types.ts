@@ -479,8 +479,6 @@ export interface AgentLoopOpts {
   forcedFinalReportOnLimit?: boolean;
   /** Shared request budget; child loops reuse the same monotonic ledger. */
   budget?: import("../budget-ledger.ts").BudgetLedger;
-  /** Deterministic local route chosen before pipeline execution. */
-  requestRoute?: import("./request-router.ts").RequestRoute;
 }
 
 export interface AgentLoopResult {

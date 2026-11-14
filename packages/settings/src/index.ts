@@ -19,9 +19,6 @@ import {
 
 export {
   NODE_TYPE_LABELS,
-  NODE_TYPE_HINTS,
-  NODE_TYPE_PALETTE,
-  ADDABLE_PIPELINE_TYPES,
   ModePipelineSchema,
   NODE_TYPE_REGISTRY,
   resolveNodeType,
@@ -31,10 +28,7 @@ export {
   findPipelineNode,
   positionConstraintsOf,
   isFixedPipelineNode,
-  addPipelineNode,
   removePipelineNode,
-  movePipelineNode,
-  createPipelineNode,
   type PipelineNode,
   type PipelineNodeType,
   type ModePipeline,
@@ -310,8 +304,8 @@ export function modelSeriesKey(
   // 或把带空格的整段当作键，导致同一 kimi 系列被拆成不同分组。
   const id = modelDisplayName(model).trim().toLowerCase();
   // 命名空间分隔符（/ 或 :）明确区分供应商与系列；连字符/下划线/点不剥离，避免误伤裸 id。
-  const nsMatch = id.match(/^([a-z]+)[\/:](.+)$/);
-  const scanTarget = (nsMatch ? nsMatch[2]! : id).trim();
+  const nsMatch = id.match(/^[a-z][a-z0-9_-]*[\/:](.+)$/);
+  const scanTarget = (nsMatch ? nsMatch[1]! : id).trim();
   const parts = scanTarget.split(/[-_./:]/);
   for (const part of parts) {
     const lead = part.match(/^[a-z]+/)?.[0] ?? "";
@@ -336,11 +330,15 @@ export function modelSeriesLabel(key: string): string {
 function seriesLabelFromDisplayName(displayName: string, key: string): string {
   const trimmed = displayName.trim();
   if (!trimmed) return modelSeriesLabel(key);
+  const namespaceMatch = trimmed.match(/^([^\s/:]+)[\/:](.+)$/);
+  const seriesName = namespaceMatch?.[2]?.trim() ?? trimmed;
   // "DeepSeek V4 Flash" → "DeepSeek"；"DeepSeek-V4-Pro" → "DeepSeek"；"glm-4" → "glm"。
-  const seg = trimmed.split(/\s+/)[0].match(/[A-Za-z]+/)?.[0];
+  const seg = seriesName.split(/\s+/)[0].match(/[A-Za-z]+/)?.[0];
   // 展示名首词系列与分组键不一致时，以分组键为准，避免供应商前缀污染组名。
   if (!seg || seg.toLowerCase() !== key) return modelSeriesLabel(key);
-  return seg;
+  if (!namespaceMatch) return seg;
+  if (namespaceMatch[1]!.toLowerCase() === key || /[A-Z]/.test(seg)) return seg;
+  return modelSeriesLabel(key);
 }
 
 /** 按系列分组并按组标签（分组名称）升序排序，组内模型按展示名排序。
@@ -456,7 +454,6 @@ function pipelineFingerprint(p: ModePipeline): unknown {
     nodes: p.nodes.map((n) => ({
       id: n.id,
       type: n.type,
-      enabled: n.enabled !== false,
       promptLen: n.prompt?.length ?? 0,
       promptHead: (n.prompt ?? "").slice(0, 48),
       model: n.model ?? "",

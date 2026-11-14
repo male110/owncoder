@@ -63,16 +63,14 @@ export function migratePipeline(
   for (const la of linear.filter((n) => n.type === "load_anchors")) {
     const ctx = findType("context_gather");
     if (ctx) {
-      if (la.enabled !== false) {
-        const ctxNode = byId.get(ctx.id)!;
-        ctxNode.params = { ...ctxNode.params, injectAnchors: true };
-      }
+      const ctxNode = byId.get(ctx.id)!;
+      ctxNode.params = { ...ctxNode.params, injectAnchors: true };
       report.moved.push({
         fromType: "load_anchors",
         fromId: la.id,
         toType: "context_gather",
         toId: ctx.id,
-        paramMap: { enabled: "injectAnchors" },
+        paramMap: {},
       });
     } else {
       report.dropped.push({
@@ -114,13 +112,13 @@ export function migratePipeline(
     const target = findType("explore_tools") ?? findType("execute_tools");
     if (target) {
       const tgtNode = byId.get(target.id)!;
-      tgtNode.params = { ...tgtNode.params, allowSpecFiles: sp.enabled !== false };
+      tgtNode.params = { ...tgtNode.params, allowSpecFiles: true };
       report.moved.push({
         fromType: "save_plan",
         fromId: sp.id,
         toType: target.type,
         toId: target.id,
-        paramMap: { enabled: "allowSpecFiles" },
+        paramMap: {},
       });
     } else {
       report.dropped.push({

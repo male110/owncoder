@@ -90,15 +90,18 @@ export function resolveStageModel(
  * time by pipeline-migrator (T3/T4), so no filter is needed here. Any residual
  * legacy node has no stage handler and is skipped by the scheduler.
  *
+ * Nodes have no enable switch: presence in the pipeline is the only condition,
+ * so every node between context_gather and end is dispatched and stages such as
+ * task_decompose can never be silently dropped by configuration.
+ *
  * This is the key bridge between the UI pipeline editor and the execution engine.
  */
 export function resolveMidStages(pipeline: ReturnType<typeof modePipeline>): PipelineNode[] {
   const linear = walkLinearNodes(pipeline);
   const ctxIdx = linear.findIndex((n: PipelineNode) => n.type === "context_gather");
   const endIdx = linear.findIndex((n: PipelineNode) => n.type === "end");
-  const slice = linear.slice(
+  return linear.slice(
     ctxIdx >= 0 ? ctxIdx : 0,
     endIdx >= 0 ? endIdx : undefined,
   );
-  return slice.filter((n: PipelineNode) => n.enabled !== false);
 }

@@ -12,7 +12,7 @@ export async function toolSaveTasks(
     return fail("Spec mode: spec file writes disabled in settings");
   }
   if (!content.trim()) return fail("save_tasks requires non-empty content");
-  const feat = feature.trim() || inferFeatureFromContent(content);
+  const feat = feature.trim() || ctx.currentFeature?.trim() || inferFeatureFromContent(content);
   if (!feat) return fail("save_tasks requires a feature name (pass `feature` explicitly)");
   // Gate: the tasks phase only starts after the user approved the design.
   const state = await readFeatureState(ctx.workspaceRoot, feat);
@@ -32,7 +32,7 @@ export async function toolSaveTasks(
   return okMutation(
     cap(
       `Tasks saved to ${rel}.\nThis phase now PAUSES for the user's review. ` +
-        `Once the user approves the tasks, the workspace switches to Agent mode and executes them in order.`,
+        `Confirm the list in the chat: the user replies "下一步"/"next" to approve — the workspace then switches to Agent mode and executes them in order.`,
       ctx.maxOutputChars,
     ),
     rel,

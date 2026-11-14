@@ -76,6 +76,41 @@ function assertFeatureName(feature: string): string {
   return slug;
 }
 
+/**
+ * 把一个特性解析到磁盘上唯一的一个目录。
+ *
+ * 同一特性在不同阶段可能被写成不同的名字（"登录流程" 之后再给英文 slug
+ * "login-flow"，或 "login-flow" 与 "loginflow"）。slugify 已经吃掉大部分
+ * 差异，但只差分隔符的写法仍会各建一个目录——那正是同一项目出现两份 spec
+ * 的来源。因此当已存在目录与请求名在去掉分隔符后一致时，复用已存在目录。
+ */
+async function resolveFeatureSlug(workspaceRoot: string, feature: string): Promise<string> {
+  const slug = assertFeatureName(feature);
+  let entries;
+  try {
+    entries = await fs.readdir(resolve(workspaceRoot, SPECS_DIR), { withFileTypes: true });
+  } catch {
+    return slug;
+  }
+  const names = entries
+    .filter((ent) => ent.isDirectory() && !ent.name.startsWith("."))
+    .map((ent) => ent.name);
+  if (names.length === 0) return slug;
+  const candidates = await Promise.all(names.map(async (name) => {
+    let mtimeMs = 0;
+    for (const file of ["spec.md", "design.md", "tasks.md", STATE_FILE]) {
+      try {
+        mtimeMs = Math.max(mtimeMs, (await fs.stat(join(resolve(workspaceRoot, SPECS_DIR), name, file))).mtimeMs);
+      } catch {
+        // Ignore missing legacy phase files.
+      }
+    }
+    return { name, mtimeMs };
+  }));
+  return candidates.sort((a, b) => b.mtimeMs - a.mtimeMs || a.name.localeCompare(b.name))[0]!.name;
+
+}
+
 // ── Save / read each phase ─────────────────────────────────
 
 export async function saveSpec(
@@ -108,7 +143,7 @@ async function savePhase(
   file: string,
   content: string,
 ): Promise<string> {
-  const slug = assertFeatureName(feature);
+  const slug = await resolveFeatureSlug(workspaceRoot, feature);
   const dir = featureDirAbs(workspaceRoot, slug);
   await fs.mkdir(dir, { recursive: true });
   const body = content.trim().startsWith("#")
@@ -123,7 +158,7 @@ export async function readSpecPhase(
   feature: string,
   phase: SpecPhase,
 ): Promise<string> {
-  const slug = assertFeatureName(feature);
+  const slug = await resolveFeatureSlug(workspaceRoot, feature);
   try {
     return await fs.readFile(join(featureDirAbs(workspaceRoot, slug), `${phase}.md`), "utf8");
   } catch {
@@ -155,7 +190,7 @@ export async function readFeatureState(
   workspaceRoot: string,
   feature: string,
 ): Promise<SpecWorkflowState | null> {
-  const slug = assertFeatureName(feature);
+  const slug = await resolveFeatureSlug(workspaceRoot, feature);
   try {
     const raw = await fs.readFile(join(featureDirAbs(workspaceRoot, slug), STATE_FILE), "utf8");
     const parsed = JSON.parse(raw) as Partial<SpecWorkflowState>;
@@ -171,7 +206,7 @@ export async function writeFeatureState(
   feature: string,
   stage: SpecStage,
 ): Promise<void> {
-  const slug = assertFeatureName(feature);
+  const slug = await resolveFeatureSlug(workspaceRoot, feature);
   const dir = featureDirAbs(workspaceRoot, slug);
   await fs.mkdir(dir, { recursive: true });
   const state: SpecWorkflowState = {
@@ -195,8 +230,12 @@ export async function listSpecs(workspaceRoot: string): Promise<SpecFeature[]> {
     return [];
   }
   const out: SpecFeature[] = [];
+  const directories = entries.filter((ent) => ent.isDirectory() && !ent.name.startsWith("."));
+  const canonicalName = directories.length > 0
+    ? (await resolveFeatureSlug(workspaceRoot, directories[0]!.name))
+    : null;
   for (const ent of entries) {
-    if (!ent.isDirectory() || ent.name.startsWith(".")) continue;
+    if (!ent.isDirectory() || ent.name.startsWith(".") || (canonicalName && ent.name !== canonicalName)) continue;
     const fdir = join(dir, ent.name);
     const phases: SpecPhase[] = [];
     let mtimeMs = 0;
@@ -246,7 +285,7 @@ export async function getSpecStatus(
   workspaceRoot: string,
   feature: string,
 ): Promise<SpecStatus> {
-  const slug = assertFeatureName(feature);
+  const slug = await resolveFeatureSlug(workspaceRoot, feature);
   const dir = featureDirAbs(workspaceRoot, slug);
   const hasSpec = await fileExists(join(dir, "spec.md"));
   const hasDesign = await fileExists(join(dir, "design.md"));

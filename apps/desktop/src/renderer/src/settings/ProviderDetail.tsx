@@ -339,7 +339,7 @@ export function ProviderDetail({
     return list.filter((m) => fuzzyMatchModel(modelDisplayName(m), m.id, q));
   }, [listMode, modelSearchQuery, provider.id, selectedModels]);
 
-  /** 已接入模型按系列分组（组内按展示名排序，组间按数量降序）；
+  /** 已接入模型按系列分组（组内按展示名排序，组间按分组名称升序）；
    *  AvailableModel 满足 groupModelsBySeries 的入参约束（id/name/displayName），无需映射。 */
   const groupedModels = useMemo(() => groupModelsBySeries(addedModels), [addedModels]);
 

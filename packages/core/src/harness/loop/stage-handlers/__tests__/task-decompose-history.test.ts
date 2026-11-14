@@ -1176,7 +1176,7 @@ describe("分解历史轮次编号与排序", () => {
     expect([...context.matchAll(/^## Round (\d+)\n\[user\] (回退请求-\d+)/gm)].map((match) => [match[1], match[2]])).toEqual([
       ["3", "回退请求-3"], ["2", "回退请求-2"], ["1", "回退请求-1"],
     ]);
-    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain("Conversation history is presented from newest to oldest (nearest to farthest)");
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain("Conversation history is presented newest to oldest");
     expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain("Round 1 is the earliest session");
   });
 });

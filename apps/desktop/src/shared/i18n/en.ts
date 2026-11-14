@@ -231,6 +231,7 @@ export const en = {
   "任务进度": "Task progress",
   "进度 {{pct}}%": "Progress {{pct}}%",
   "全部完成": "All done",
+  "执行": "Execute",
   "验收：": "Acceptance: ",
   "跳过此任务": "Skip this task",
   "重置为待执行": "Reset to pending",
@@ -459,6 +460,10 @@ export const en = {
     "Plan approved. Configure the LLM first, then send a message to start.",
   "开始执行": "Start execution",
   "计划已批准，自动开始执行 {{count}} 个任务…": "Plan approved; starting {{count}} tasks automatically…",
+  "任务已准备好。请先配置 LLM，再发送消息开始执行。": "Tasks are ready. Configure an LLM, then send a message to start execution.",
+  "开始执行 {{count}} 个任务…": "Starting {{count}} tasks…",
+  "任务已准备好，请打开任务详情后点击执行。": "Tasks are ready. Open the task details and click Execute.",
+  "已确认当前文档。请先配置 LLM，再发送消息继续。": "The document is confirmed. Configure an LLM, then send a message to continue.",
   "撤销上次 Agent 改动？将恢复文件与对话到检查点。":
     "Undo the last Agent changes? Files and the conversation will be restored to the checkpoint.",
   "本次会话的检查点已不在磁盘上，这些文件修改无法再通过「撤销」回滚。":
@@ -743,14 +748,11 @@ export const en = {
   "Requirements": "Requirements",
   "Design": "Design",
   "Tasks": "Tasks",
-  "正在加载文档…": "Loading document…",
-  "保存修改": "Save changes",
   "批准并进入下一阶段": "Approve & continue to the next phase",
   "批准任务并开始执行": "Approve tasks & start execution",
   "驳回：写下修改意见（留空则直接驳回）":
     "Request changes: describe what to fix (empty to reject outright)",
   "驳回修改": "Request changes",
-  "已保存修改，等待审批。": "Saved. Awaiting review.",
   "任务已批准。请先配置 LLM，再发送消息开始执行。":
     "Tasks approved. Configure the LLM first, then send a message to start.",
   "任务已批准，自动开始执行 {{count}} 个任务…":
@@ -758,6 +760,8 @@ export const en = {
   "请根据以下反馈修改并重新保存：" : "Please revise per this feedback and re-save: ",
   "请重新审视该文档并修改后重新保存。":
     "Please review this document, revise it, and re-save.",
+  "{{feature}}/{{phase}}.md 已生成。在对话里回复「下一步」即批准并继续。":
+    "{{feature}}/{{phase}}.md is ready. Reply \"next\" in the chat to approve and continue.",
 } as const;
 
 /** msgid 全集（key 即中文文案源）；t() 的合法入参类型。 */

@@ -35,6 +35,9 @@ import { emitStage, resolveStageModel } from "../stages.ts";
 import type { AgentLoopOpts } from "../types.ts";
 import type { TaskItem } from "../../../plans.ts";
 import type { StageHandler } from "./types.ts";
+import { DISPATCH_AGENT_TOOL_DEF } from "../../enhanced-tools/subagent.ts";
+import { runAgentPlanner } from "./planner.ts";
+import type { ToolCall } from "@owncoder/llm";
 import {
   collectToolCallsFromTurns,
   persistDecomposeRound,
@@ -91,9 +94,12 @@ export async function runTaskDecompose(
   budgets: ReturnType<typeof contextBudgets>,
   prompt?: string,
   messages?: ChatMessage[],
+  allowPlanner = true,
 ): Promise<{ 
   task: TaskItem | null; 
   decomposeTokens: number;
+  planToolCall?: ToolCall;
+  invalidToolCall?: boolean;
   rawDecompose?: {
     intent: string;
     userConstraints?: string[];
@@ -123,8 +129,12 @@ export async function runTaskDecompose(
     const { tagUserInput } = await import("../../message-tags.js");
     const currentAttachments = (opts.attachments ?? [])
       .filter((attachment, index, all) => all.findIndex((item) => item.url === attachment.url) === index);
+    const plannerAvailable = allowPlanner && opts.mode === "agent" && !opts.activePlan && !opts.readOnly
+      && (!opts.allowedTools || opts.allowedTools.includes("dispatch_agent"));
     const decomposeMessages: ChatMessage[] = [
-      { role: "system", content: systemPrompt },
+      { role: "system", content: systemPrompt + (plannerAvailable
+        ? "\n\nException to the JSON-only output rule: if a separate codebase-grounded execution plan and user approval are necessary before editing, invoke dispatch_agent as a native API tool call INSTEAD of emitting JSON. Otherwise return the usual task JSON directly, without calling a tool. Only you decide whether to call it; never encode this decision as a JSON field. Give the subagent the user's actual intent, constraints, and relevant prior context; require ## Final Report with 目标, numbered 步骤, 相关文件 with evidence, 风险与不确定性, 验证方式. The subagent is strictly read-only; never start editing before approval."
+        : "") },
       {
         role: "user",
         content: [
@@ -148,6 +158,7 @@ export async function runTaskDecompose(
     let lastThinkingDelta = "";
     const planResult = await withRetry(
       () => chatCompletionStream(model, decomposeMessages, {
+        ...(plannerAvailable ? { tools: [DISPATCH_AGENT_TOOL_DEF] } : {}),
         signal: opts.signal,
         apiKey: opts.llmApiKey,
         purpose: "task_decompose",
@@ -175,14 +186,22 @@ export async function runTaskDecompose(
         });
       },
     );
-    const content = (planResult.result as { choices?: Array<{ message?: { content?: string | null } }> })
-      .choices?.[0]?.message?.content ?? "";
+    const responseMessage = planResult.result.choices[0]?.message;
+    const toolCalls = responseMessage?.tool_calls ?? [];
+    const content = responseMessage?.content ?? "";
     const planUsage = normalizeUsage(
-      (planResult.result as { usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } }).usage,
+      planResult.result.usage,
       decomposeMessages.map((message) => String(message.content ?? "")).join("\n"),
       content,
     );
     tracer.recordTokenUsage(planUsage.promptTokens, planUsage.completionTokens);
+    // Only API-level tool_calls count: text or JSON mentioning dispatch_agent is not a call.
+    if (toolCalls.length > 0) {
+      const planToolCall = toolCalls.length === 1 && toolCalls[0]?.type === "function"
+        && toolCalls[0].function.name === "dispatch_agent" ? toolCalls[0] : undefined;
+      tracer.endSpan(planSpanId, "ok");
+      return { task: null, decomposeTokens: 0, planToolCall, invalidToolCall: !planToolCall, fallback: false };
+    }
     const planText = content;
 
     let answer = parseDecomposeAnswer(planText);
@@ -386,11 +405,23 @@ export const taskDecomposeHandler: StageHandler = {
       ctx.state.decomposeCount = 0;
     }
     
-    const result = await runTaskDecompose(
+    let result = await runTaskDecompose(
       opts, model, tracer, memory, reasoningTrace, ctx.budgets, node.prompt, ctx.messages,
     );
-    
-    if (opts.signal?.aborted) {
+
+    if (result.planToolCall) {
+      ctx.state.planRequested = true;
+      await runAgentPlanner(ctx, result.planToolCall);
+      if (ctx.state.planApproval === "approved" && ctx.state.approvedAgentPlan && !ctx.state.aborted) {
+        // 审批是前置阶段；将完整计划作为本轮用户输入重新走普通分解流程。
+        ctx.opts.userMessage = ctx.state.approvedAgentPlan;
+        result = await runTaskDecompose(
+          ctx.opts, model, tracer, memory, reasoningTrace, ctx.budgets, node.prompt, ctx.messages, false,
+        );
+      }
+    }
+
+    if (opts.signal?.aborted || ctx.state.aborted || ctx.state.blocked) {
       emitStage(opts.onEvent, "done", node);
       return;
     }
@@ -401,19 +432,27 @@ export const taskDecomposeHandler: StageHandler = {
     ctx.state.turnInformationTask = result.task;
     ctx.state.decomposeTokens = result.decomposeTokens;
     ctx.state.rawDecompose = result.rawDecompose;
-    if (result.rawDecompose) {
+    if (result.invalidToolCall) {
+      ctx.state.planRequested = true;
+      ctx.state.planApproval = "unavailable";
+      ctx.state.blocked = true;
+      ctx.state.blockedReason = "模型返回了无效或多个工具调用，未执行任何工具";
+      emitStage(opts.onEvent, "done", node);
+      return;
+    }
+    if (ctx.state.rawDecompose && !ctx.state.blocked && !ctx.state.aborted) {
       opts.onEvent?.({
         type: "task_decomposition",
-        intent: result.rawDecompose.intent,
-        userConstraints: result.rawDecompose.userConstraints ?? [],
-        tasks: result.rawDecompose.tasks.map((task) => ({
+        intent: ctx.state.rawDecompose.intent,
+        userConstraints: ctx.state.rawDecompose.userConstraints ?? [],
+        tasks: ctx.state.rawDecompose.tasks.map((task) => ({
           id: task.id,
           ...(task.title ? { title: task.title } : {}),
           executionGuidance: task.executionGuidance,
           ...(task.dependsOn ? { dependsOn: task.dependsOn } : {}),
           ...(task.kind ? { kind: task.kind } : {}),
         })),
-        relevantHistory: result.rawDecompose.relevantHistory ?? "",
+        relevantHistory: ctx.state.rawDecompose.relevantHistory ?? "",
         fallback: result.fallback === true,
       });
       // 任务分解结果已由 LLM 响应日志中的 [ASSISTANT] 记录；这里只保留状态消息，
@@ -423,12 +462,12 @@ export const taskDecomposeHandler: StageHandler = {
         message: result.fallback ? "Task decomposition fallback generated" : "Task decomposition completed",
       });
     }
-    if (opts.sessionId && result.rawDecompose) {
+    if (opts.sessionId && ctx.state.rawDecompose && !ctx.state.blocked && !ctx.state.aborted) {
       const persisted: PersistedDecompose = {
-        intent: result.rawDecompose.intent,
-        userConstraints: result.rawDecompose.userConstraints ?? [],
-        relevantHistory: result.rawDecompose.relevantHistory ?? "",
-        tasks: result.rawDecompose.tasks.map((task) => ({
+        intent: ctx.state.rawDecompose.intent,
+        userConstraints: ctx.state.rawDecompose.userConstraints ?? [],
+        relevantHistory: ctx.state.rawDecompose.relevantHistory ?? "",
+        tasks: ctx.state.rawDecompose.tasks.map((task) => ({
           id: task.id,
           ...(task.title ? { title: task.title } : {}),
           executionGuidance: task.executionGuidance,

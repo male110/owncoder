@@ -185,15 +185,15 @@ export async function runPostVerify(
 /**
  * verify: per-node marker only. The actual LLM verification report is deferred
  * to the single endpoint in `loop.ts` so that one pipeline containing N verify
- * nodes triggers exactly ONE `chatCompletionStream` call. The first enabled
- * verify node is kept so the endpoint can resolve the model + prompt config
- * the same way the previous per-node call would have.
+ * nodes triggers exactly ONE `chatCompletionStream` call. The first verify node
+ * is kept so the endpoint can resolve the model + prompt config the same way
+ * the previous per-node call would have.
  */
 export const verifyHandler: StageHandler = {
   async run(ctx) {
     const { opts, state, node } = ctx;
     emitStage(opts.onEvent, "start", node);
-    if (node.enabled !== false && state.verifyNodeForReport === null) {
+    if (state.verifyNodeForReport === null) {
       state.verifyNodeForReport = node;
     }
     emitStage(opts.onEvent, "done", node);

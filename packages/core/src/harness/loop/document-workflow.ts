@@ -5,7 +5,7 @@ import type { DocumentMetadata, DocumentWorkflowState, DocumentType } from "./ty
  * context.
  *
  * Each phase document is written by its save_* tool, which pauses the turn
- * until the user approves it (UI spec panel). The system prompt reads this
+ * until the user approves it by replying in the chat. The system prompt reads this
  * block to know which phase is under review and what comes next, so it never
  * races ahead of the user's approval.
  */

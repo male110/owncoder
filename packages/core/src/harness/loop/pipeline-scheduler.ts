@@ -10,8 +10,8 @@
  * - Execution order is solely determined by pipeline edge order (walkLinearNodes).
  * - context_gather / history_compact / task_decompose are no longer special-cased;
  *   they run at their pipeline position like any other node.
- * - If history_compact does not run before the first model call (disabled or moved),
- *   a fallback injects raw history + user message so the LLM always receives input.
+ * - If history_compact is absent or moved after the first model call, a fallback
+ *   injects raw history + user message so the LLM always receives input.
  * - If no explore/execute node exists, a plain LLM completion is inserted before
  *   the first post-model stage (verify / post_verify / present_changes).
  */
@@ -51,17 +51,6 @@ export async function runPipelineScheduler(
     }
     console.log(ts(`stage start: ${node.type}`));
     const stageT0 = performance.now();
-    // A deterministic precise route is already fully located. Skip global
-    // context gathering and decomposition so the executor can perform the
-    // smallest evidence-first read/edit cycle.
-    if (
-      (ctx.requestRoute?.mode === "precise_single_file" &&
-        (node.type === "context_gather" || node.type === "task_decompose")) ||
-      (ctx.requestRoute?.mode === "simple_direct" && node.type === "task_decompose")
-    ) {
-      console.log(ts(`stage skipped: ${node.type} reason=${ctx.requestRoute?.mode ?? "route"}`));
-      continue;
-    }
     // Before any model-calling stage, ensure history + user message are in messages.
     if (!ctx.state.userMessageInjected && isModelCallingStage(node)) {
       await injectHistoryAndUserMessage(ctx);

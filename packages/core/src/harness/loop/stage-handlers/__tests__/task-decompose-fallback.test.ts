@@ -12,7 +12,9 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { chatCompletionStream } from "@owncoder/llm";
 import { BUILTIN_WORKFLOW } from "@owncoder/settings";
-import { runTaskDecompose } from "../task-decompose.ts";
+import { runTaskDecompose, taskDecomposeHandler } from "../task-decompose.ts";
+import { builtinAgentPipeline } from "@owncoder/settings";
+import type { StageHandlerContext } from "../types.ts";
 import { contextBudgets } from "../../../budget.ts";
 import { Tracer } from "../../../observability.ts";
 import { createReasoningTrace } from "../../../agent-reasoning.ts";
@@ -94,6 +96,103 @@ describe("runTaskDecompose — relevantHistory 本地兜底", () => {
     // 兜底生效：relevantHistory 非空且含证据文件路径
     expect(result.rawDecompose!.relevantHistory).toContain("src/auth.ts");
     expect(result.rawDecompose!.relevantHistory).toContain("UserService");
+  });
+
+  it("模型未调用工具时沿用原任务 JSON，不读取伪装字段", async () => {
+    mockedStream.mockResolvedValue({ choices: [{ message: { content: decomposeJson({ plannerDecision: "plan" }) } }] } as never);
+    const result = await runTaskDecompose(
+      makeOpts([], tmpDir), {} as never, new Tracer(), new MemoryManager(), createReasoningTrace(), contextBudgets(BUILTIN_WORKFLOW),
+    );
+    expect(vi.mocked(chatCompletionStream).mock.calls.at(-1)?.[2]?.tools?.map((tool) => tool.function.name)).toEqual(["dispatch_agent"]);
+    expect(result.planToolCall).toBeUndefined();
+    expect(result.rawDecompose?.tasks[0]?.id).toBe("t1");
+    expect(result.fallback).toBe(false);
+  });
+
+  it("只读或禁用子代理的角色不会收到计划工具", async () => {
+    mockedStream.mockResolvedValue({ choices: [{ message: { content: decomposeJson() } }] } as never);
+    const readOnly = { ...makeOpts([], tmpDir), readOnly: true };
+    await runTaskDecompose(readOnly, {} as never, new Tracer(), new MemoryManager(), createReasoningTrace(), contextBudgets(BUILTIN_WORKFLOW));
+    expect(mockedStream.mock.calls.at(-1)?.[2]?.tools).toBeUndefined();
+    const restricted = { ...makeOpts([], tmpDir), allowedTools: ["read_file"] };
+    await runTaskDecompose(restricted, {} as never, new Tracer(), new MemoryManager(), createReasoningTrace(), contextBudgets(BUILTIN_WORKFLOW));
+    expect(mockedStream.mock.calls.at(-1)?.[2]?.tools).toBeUndefined();
+  });
+
+  it("模型原生工具调用优先于同时返回的任务 JSON", async () => {
+    const call = { id: "call-1", type: "function", function: { name: "dispatch_agent", arguments: JSON.stringify({ task: "只读制定计划" }) } };
+    mockedStream.mockResolvedValue({ choices: [{ message: { content: decomposeJson(), tool_calls: [call] } }] } as never);
+    const result = await runTaskDecompose(
+      makeOpts([], tmpDir), {} as never, new Tracer(), new MemoryManager(), createReasoningTrace(), contextBudgets(BUILTIN_WORKFLOW),
+    );
+    expect(result.planToolCall).toEqual(call);
+    expect(result.rawDecompose).toBeUndefined();
+  });
+
+  it("只读子代理审批后完整计划重新进入任务分解，并发布普通任务给 ReAct", async () => {
+    const call = { id: "call-1", type: "function", function: { name: "dispatch_agent", arguments: JSON.stringify({ task: "只读制定计划" }) } };
+    mockedStream.mockResolvedValueOnce({ choices: [{ message: { content: "", tool_calls: [call] } }] } as never)
+      .mockResolvedValueOnce({ choices: [{ message: { content: decomposeJson() } }] } as never);
+    const report = ["## Final Report", "### 目标", "修复问题", "### 步骤", "1. 修复并测试", "### 相关文件", "src/auth.ts", "### 风险与不确定性", "无", "### 验证方式", "运行测试"].join("\n");
+    const approval = vi.fn().mockResolvedValue("approve");
+    const dispatch = vi.fn().mockResolvedValue(report);
+    const ctx = {
+      opts: { ...makeOpts([], tmpDir), askUser: approval, onEvent: vi.fn() },
+      node: builtinAgentPipeline().nodes.find((node) => node.type === "task_decompose"),
+      tracer: new Tracer(), memory: new MemoryManager(), reasoningTrace: createReasoningTrace(),
+      budgets: contextBudgets(BUILTIN_WORKFLOW), messages: [], history: [],
+      toolCtx: { workflow: BUILTIN_WORKFLOW, availableTools: new Set(["dispatch_agent"]), dispatchSubagent: dispatch },
+      state: { decomposeCount: 0, decomposeTokens: 0, blocked: false, aborted: false },
+    } as unknown as StageHandlerContext;
+    await taskDecomposeHandler.run(ctx);
+    expect(dispatch).toHaveBeenCalledOnce();
+    expect(approval).toHaveBeenCalledOnce();
+    expect(ctx.state.approvedAgentPlan).toBe(report);
+    expect(ctx.opts.userMessage).toBe(report);
+    expect(mockedStream).toHaveBeenCalledTimes(2);
+    expect(mockedStream.mock.calls[1]?.[1][1]?.content).toContain(report);
+    expect(mockedStream.mock.calls[1]?.[2]?.tools).toBeUndefined();
+    expect(ctx.state.rawDecompose?.tasks[0]?.id).toBe("t1");
+    expect(ctx.opts.onEvent).toHaveBeenCalledWith(expect.objectContaining({ type: "task_decomposition", tasks: [expect.objectContaining({ id: "t1" })] }));
+  });
+
+  it("拒绝计划时不会重新分解或发布任务", async () => {
+    const call = { id: "call-1", type: "function", function: { name: "dispatch_agent", arguments: JSON.stringify({ task: "只读制定计划" }) } };
+    mockedStream.mockResolvedValueOnce({ choices: [{ message: { content: "", tool_calls: [call] } }] } as never);
+    const report = ["## Final Report", "### 目标", "修复问题", "### 步骤", "1. 修复并测试", "### 相关文件", "src/auth.ts", "### 风险与不确定性", "无", "### 验证方式", "运行测试"].join("\n");
+    const ctx = {
+      opts: { ...makeOpts([], tmpDir), askUser: vi.fn().mockResolvedValue("reject"), onEvent: vi.fn() },
+      node: builtinAgentPipeline().nodes.find((node) => node.type === "task_decompose"),
+      tracer: new Tracer(), memory: new MemoryManager(), reasoningTrace: createReasoningTrace(),
+      budgets: contextBudgets(BUILTIN_WORKFLOW), messages: [], history: [],
+      toolCtx: { workflow: BUILTIN_WORKFLOW, availableTools: new Set(["dispatch_agent"]), dispatchSubagent: vi.fn().mockResolvedValue(report) },
+      state: { decomposeCount: 0, decomposeTokens: 0, blocked: false, aborted: false },
+    } as unknown as StageHandlerContext;
+    await taskDecomposeHandler.run(ctx);
+    expect(ctx.state.blocked).toBe(true);
+    expect(ctx.opts.userMessage).not.toBe(report);
+    expect(ctx.state.rawDecompose).toBeUndefined();
+    expect(mockedStream).toHaveBeenCalledOnce();
+    expect(ctx.opts.onEvent).not.toHaveBeenCalledWith(expect.objectContaining({ type: "task_decomposition" }));
+  });
+
+  it("无效或多个原生工具调用阻断执行且不调用子代理", async () => {
+    mockedStream.mockResolvedValue({ choices: [{ message: { content: decomposeJson(), tool_calls: [
+      { id: "1", type: "function", function: { name: "dispatch_agent", arguments: "{}" } },
+      { id: "2", type: "function", function: { name: "dispatch_agent", arguments: "{}" } },
+    ] } }] } as never);
+    const dispatch = vi.fn();
+    const ctx = {
+      opts: makeOpts([], tmpDir), node: builtinAgentPipeline().nodes.find((node) => node.type === "task_decompose"),
+      tracer: new Tracer(), memory: new MemoryManager(), reasoningTrace: createReasoningTrace(),
+      budgets: contextBudgets(BUILTIN_WORKFLOW), messages: [], history: [],
+      toolCtx: { availableTools: new Set(["dispatch_agent"]), dispatchSubagent: dispatch },
+      state: { decomposeCount: 0, decomposeTokens: 0, blocked: false, aborted: false },
+    } as unknown as StageHandlerContext;
+    await taskDecomposeHandler.run(ctx);
+    expect(ctx.state.blocked).toBe(true);
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(ctx.state.rawDecompose).toBeUndefined();
   });
 
   it("fallback evidence is bounded even when one read is huge", async () => {

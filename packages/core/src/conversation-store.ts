@@ -2,6 +2,7 @@ import Database from "better-sqlite3";
 import { mkdir, unlink } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import type { ChatTurn } from "./harness/loop/types.ts";
+import type { TurnRoundRecord } from "./turn-rounds.ts";
 
 export type ConversationTurnStatus = "running" | "completed" | "cancelled" | "failed";
 
@@ -515,7 +516,28 @@ export function projectConversationTurns(turns: ConversationTurn[]): ChatTurn[] 
     // already-sanitized-but-still-small legacy rows. Tool timelines primarily
     // come from events.
     if (final && typeof final === "object" && "history" in final && Array.isArray(final.history)) {
-      for (const row of final.history) {
+      // Older final_json rows may contain the complete session transcript,
+      // not only this turn. Scope that legacy history to the current user
+      // boundary so a failed turn without an assistant reply cannot inherit
+      // the previous turn's assistant message on reload.
+      const history = final.history;
+      const userIndex = turn.user
+        ? [...history].reverse().findIndex((row) =>
+            row &&
+            typeof row === "object" &&
+            row.role === turn.user?.role &&
+            row.content === turn.user?.content &&
+            (!turn.user?.id || row.id === turn.user.id),
+          )
+        : -1;
+      const anchor = userIndex >= 0 ? history.length - 1 - userIndex : -1;
+      const nextUser = anchor >= 0
+        ? history.findIndex((row, index) => index > anchor && row?.role === "user")
+        : -1;
+      const scopedHistory = anchor >= 0
+        ? history.slice(anchor + 1, nextUser >= 0 ? nextUser : undefined)
+        : history;
+      for (const row of scopedHistory) {
         if (!row || typeof row !== "object" || typeof row.content !== "string") continue;
         if (row.role === "tool" || row.role === "assistant" || row.role === "system") {
           pushUnique({ ...row });
@@ -546,6 +568,29 @@ export function projectConversationTurns(turns: ConversationTurn[]): ChatTurn[] 
     projected.push(...local);
   }
   return projected;
+}
+
+/** Reconcile the newest UI page with its own per-round record, without touching stored data. */
+export function projectRecentRoundTurns(turns: ConversationTurn[], round?: TurnRoundRecord): ChatTurn[] {
+  if (!round?.turnId) return projectConversationTurns(turns);
+
+  const match = turns.findIndex((turn) => turn.turnId === round.turnId);
+  const newest = turns[turns.length - 1];
+  if (match < 0 && newest && round.createdAt < newest.startedAt) {
+    return projectConversationTurns(turns);
+  }
+  if (match >= 0 && match !== turns.length - 1) {
+    return projectConversationTurns(turns);
+  }
+
+  const before = projectConversationTurns(match < 0 ? turns : turns.slice(0, match));
+  const current: ChatTurn[] = match < 0
+    ? [{ role: "user", content: round.userInput, turnId: round.turnId }]
+    : projectConversationTurns([turns[match]!]).filter((item) => item.role !== "assistant");
+  if (round.assistantReport?.trim()) {
+    current.push({ role: "assistant", content: round.assistantReport, turnId: round.turnId });
+  }
+  return [...before, ...current];
 }
 
 export async function migrateLegacyHistory(root: string, sessionId: string, history: ChatTurn[]): Promise<void> {

@@ -74,8 +74,9 @@ export interface TerminationConfig {
   // Hard limits (safety nets)
   maxIterations: number;              // Default: 39 (vs LangChain 15, your old 200)
   maxTotalToolCalls: number;          // Default: 100
-  /** Kept for API compat; token budget check is disabled (cost is the sole spend guard). */
+  /** Kept for API compatibility; token and cost budget checks are disabled. */
   maxTokensPerTurn: number;           // Default: Number.MAX_SAFE_INTEGER (effectively unlimited)
+  /** Kept for API compatibility; cost is tracked but does not terminate the loop. */
   maxCostPerTurn: number;             // Default: 15.0 USD
   
   // Loop detection
@@ -202,18 +203,6 @@ export function checkTermination(
       aborted: false,
       limitReached: true,
       metadata: { totalToolCalls: state.totalToolCalls },
-    };
-  }
-  
-  // 1.3 Cost budget limit (token budget intentionally omitted — cost is the sole spend guard)
-  if (config.enableBudgetLimits && state.totalCost >= config.maxCostPerTurn) {
-    return {
-      shouldTerminate: true,
-      reason: `Cost budget exceeded ($${state.totalCost.toFixed(2)}/$${config.maxCostPerTurn.toFixed(2)})`,
-      lastAssistant: state.lastContent || synthesizeFallbackResponse(state),
-      aborted: false,
-      limitReached: true,
-      metadata: { totalCost: state.totalCost },
     };
   }
   

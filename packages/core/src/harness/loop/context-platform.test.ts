@@ -12,7 +12,7 @@ vi.mock("../tools/shared.ts", async (importOriginal) => ({
 import { buildInitialContext } from "./context.ts";
 
 describe("平台和项目上下文", () => {
-  it.each([true, false])("生成 Windows 平台信息和独立项目上下文（上下文启用：%s）", async (enabled) => {
+  it("生成 Windows 平台信息和独立项目上下文", async () => {
     const messages: ChatMessage[] = [];
     const args = {
       opts: {
@@ -27,7 +27,7 @@ describe("平台和项目上下文", () => {
       memory: { getKnowledgeContext: () => "", getShortTermContext: () => "" },
       budgets: { total: 128000, system: 20000, plan: 20000, files: 20000, map: 20000 },
       systemPrompt: "",
-      contextNode: { enabled, params: { contextSelection: false, injectAnchors: false } },
+      contextNode: { params: { contextSelection: false, injectAnchors: false } },
       anchorsNode: undefined,
       messages,
     } as unknown as BuildContextArgs;
@@ -41,9 +41,7 @@ describe("平台和项目上下文", () => {
     expect(platform).not.toContain("## Tool selection");
     expect(project ?? "").not.toContain("## Tool selection");
     expect(project ?? "").not.toContain("Call a single `grep`, `glob`, or `read_file` directly as a top-level tool call");
-    if (enabled) {
-      expect(project).toContain("## Project Tech Stack");
-      expect(project).toContain("## Project Size");
-    }
+    expect(project).toContain("## Project Tech Stack");
+    expect(project).toContain("## Project Size");
   });
 });

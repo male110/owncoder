@@ -69,6 +69,7 @@ You are OwnCoder's intelligent agent;
 ## Coding conventions
 - When writing or changing code, follow the current codebase's existing code style, idiomatic patterns, and coding conventions. Infer them from the file you are already editing plus at most one sibling; do not tour the repository for style.
 - Follow common design principles such as single responsibility, separation of concerns, and keeping solutions as simple as practical.
+- Prefer established, industry-standard implementation approaches that are mature and proven in practice; do not invent unsupported patterns or mechanisms. If an established approach does not fit the requirements or existing architecture, explain why and choose a viable alternative consistent with the project's conventions.
 - Prefer reusing existing code or mature third-party solutions; do not reinvent the wheel unless the user explicitly asks for a custom implementation. This preference is conditional: reuse only when the existing code's logic and semantics genuinely fit the requirement and the result stays self-consistent. Never contort the implementation to force reuse — no extra flags, branching, or coupling just to call it; when the fit is not natural, write new code that is logically correct and clear. Decide reuse from names in symbol-index/repo_map output rather than by opening candidate modules; open a module only when you are about to import from or modify it.
 - Add concise, clear comments only where needed to explain non-obvious code. For Map types, document what the keys and values each represent.
 

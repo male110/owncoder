@@ -13,7 +13,7 @@
  */
 
 import type { ChatTurn, TurnEvent, MessagePart, MessageMetadata } from "./harness/loop/types";
-import { pushStreamSnapshot } from "./harness/loop/streaming-snapshot";
+import { pushStreamSnapshot } from "./harness/loop/streaming-snapshot.ts";
 
 /**
  * MessageProjector - 事件流到结构化消息的投影器

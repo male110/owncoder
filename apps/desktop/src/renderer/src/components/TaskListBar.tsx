@@ -6,6 +6,7 @@ import { useI18n } from "../i18n";
 interface Props {
   meta: ActivePlanMetaDto;
   busy?: boolean;
+  onExecute: () => void;
   onUpdateTask: (taskId: string, status: TaskStatusDto) => void;
 }
 
@@ -25,7 +26,7 @@ const STATUS_LABEL: Record<TaskStatusDto, MsgId> = {
   skipped: "已跳过",
 };
 
-export function TaskListBar({ meta, busy, onUpdateTask }: Props) {
+export function TaskListBar({ meta, busy, onExecute, onUpdateTask }: Props) {
   const [open, setOpen] = useState(false);
   // map 回调里 t 已是任务项，取词函数用别名 tr。
   const { t: tr } = useI18n();
@@ -37,17 +38,27 @@ export function TaskListBar({ meta, busy, onUpdateTask }: Props) {
 
   return (
     <section className={open ? "task-bar open" : "task-bar"}>
-      <button type="button" className="task-bar-head" onClick={() => setOpen((v) => !v)}>
-        <span className="activity-chev">{open ? "▾" : "▸"}</span>
-        <span className="task-bar-title">{tr("任务进度")}</span>
+      <div className="task-bar-head">
+        <button type="button" className="task-bar-toggle" onClick={() => setOpen((v) => !v)}>
+          <span className="activity-chev">{open ? "▾" : "▸"}</span>
+          <span className="task-bar-title">{tr("任务进度")}</span>
+        </button>
         <span className="task-bar-count">{done}/{total}</span>
         <div className="task-bar-progress" aria-label={tr("进度 {{pct}}%", { pct })}>
           <div className="task-bar-progress-fill" style={{ width: `${pct}%` }} />
         </div>
         {allDone ? <span className="task-bar-done">{tr("全部完成")}</span> : null}
-      </button>
+      </div>
       {open ? (
-        <ol className="task-list">
+        <>
+          {!allDone ? (
+            <div className="task-actions task-list-execute">
+              <button type="button" className="ghost tiny accent" disabled={busy} onClick={onExecute}>
+                {tr("执行")}
+              </button>
+            </div>
+          ) : null}
+          <ol className="task-list">
           {meta.tasks.map((t) => {
             const isCurrent = t.id === meta.currentTaskId && t.status === "in_progress";
             return (
@@ -96,7 +107,8 @@ export function TaskListBar({ meta, busy, onUpdateTask }: Props) {
               </li>
             );
           })}
-        </ol>
+          </ol>
+        </>
       ) : null}
     </section>
   );
