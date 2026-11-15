@@ -22,7 +22,7 @@ function makeContext(answer = "approve"): StageHandlerContext {
 
 const call = {
   id: "call-1", type: "function" as const,
-  function: { name: "dispatch_agent", arguments: JSON.stringify({ agent_type: "Explore", task: "只读调研并生成计划" }) },
+  function: { name: "dispatch_agent", arguments: JSON.stringify({ agent_type: "Planner", task: "只读调研并生成计划" }) },
 };
 
 describe("原生子代理计划调用与审批", () => {
@@ -39,7 +39,7 @@ describe("原生子代理计划调用与审批", () => {
     ctx.state.blocked = false;
     ctx.state.planApproval = null;
     await runAgentPlanner(ctx, call);
-    expect(ctx.toolCtx.dispatchSubagent).toHaveBeenCalledWith({ agentType: "Explore", task: "只读调研并生成计划", thoroughness: "medium" });
+    expect(ctx.toolCtx.dispatchSubagent).toHaveBeenCalledWith({ agentType: "Planner", task: "只读调研并生成计划", thoroughness: "medium" });
     expect(ctx.state.planApproval).toBe("approved");
     expect(ctx.state.approvedAgentPlan).toBe(report);
     expect(ctx.state.rawDecompose).toBeUndefined();
@@ -73,6 +73,19 @@ describe("原生子代理计划调用与审批", () => {
     expect(invalidReport.state.blocked).toBe(true);
     expect(invalidReport.opts.askUser).not.toHaveBeenCalled();
     expect(validatePlannerReport("## Final Report\n### 目标\n无步骤").missing).toContain("步骤");
+  });
+
+  it("任务分解阶段拒绝 Explore 等非计划子代理", async () => {
+    const exploreCall = {
+      ...call,
+      function: { ...call.function, arguments: JSON.stringify({ agent_type: "Explore", task: "只读调研并生成计划" }) },
+    };
+    const ctx = makeContext();
+    await runAgentPlanner(ctx, exploreCall);
+    expect(ctx.state.blocked).toBe(true);
+    expect(ctx.state.blockedReason).toContain("Planner");
+    expect(ctx.toolCtx.dispatchSubagent).not.toHaveBeenCalled();
+    expect(ctx.opts.askUser).not.toHaveBeenCalled();
   });
 
   it("中止及确认通道缺失时 fail closed", async () => {

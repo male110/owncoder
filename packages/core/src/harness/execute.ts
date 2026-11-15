@@ -296,8 +296,8 @@ async function runTool(ctx: ToolContext, call: ParsedToolCall): Promise<ToolResu
           return fail("dispatch_agent 当前不可用：宿主未提供子智能体运行环境。");
         }
         const thoroughness = str(args.thoroughness ?? "medium");
-        if (agentType !== "Explore") {
-          return fail(`dispatch_agent 暂不支持 agent_type="${agentType}"，目前只支持 "Explore"（只读代码调研）。`);
+        if (agentType !== "Explore" && agentType !== "Planner") {
+          return fail(`dispatch_agent 暂不支持 agent_type="${agentType}"，目前只支持 "Explore"（只读代码调研）与 "Planner"（只读计划子代理）。`);
         }
         const report = await ctx.dispatchSubagent({ agentType, task, thoroughness });
         return ok(report);

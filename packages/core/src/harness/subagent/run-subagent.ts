@@ -22,10 +22,15 @@ import {
   EXPLORE_SUBAGENT_ALLOWED_TOOLS,
   EXPLORE_SUBAGENT_TYPE,
 } from "./explore-subagent.ts";
+import {
+  buildPlannerSubagentPrompt,
+  PLANNER_SUBAGENT_ALLOWED_TOOLS,
+  PLANNER_SUBAGENT_TYPE,
+} from "./planner-subagent.ts";
 import { queryIndexNavigation, renderNavigationBlock } from "../index-navigation.ts";
 
 export interface DispatchSubagentRequest {
-  /** 目前只支持 "Explore"；其他值由调用方提前拒绝。 */
+  /** 支持 "Explore"（通用只读调研）与 "Planner"（任务分解阶段计划子代理）；其他值由调用方提前拒绝。 */
   agentType: string;
   /** 派给子智能体的具体调研问题，原样作为它的 user 消息。 */
   task: string;
@@ -73,9 +78,10 @@ export async function runExploreSubagent(
   deps: DispatchSubagentDeps,
 ): Promise<string> {
   const { runAgentLoop } = await import("../loop.ts");
+  const isPlanner = request.agentType === PLANNER_SUBAGENT_TYPE;
   if (deps.budget) {
     const reservation = deps.budget.charge("subagents");
-    if (!reservation.ok) return `## Final Report\n\nExplore suppressed: ${reservation.reason ?? "subagent budget exhausted"}.`;
+    if (!reservation.ok) return `## Final Report\n\n${isPlanner ? "Planner" : "Explore"} suppressed: ${reservation.reason ?? "subagent budget exhausted"}.`;
   }
   const thoroughness = request.thoroughness === "very thorough" ? "very thorough" : "medium";
   const maxIterations =
@@ -84,7 +90,7 @@ export async function runExploreSubagent(
       : EXPLORE_MEDIUM_MAX_ITERATIONS;
 
   // start/done 共用同一个 id，保证阶段条能正确配对收口。
-  const stageId = `subagent-explore-${Date.now()}`;
+  const stageId = `subagent-${isPlanner ? "planner" : "explore"}-${Date.now()}`;
 
   const env: ExplorePromptEnv = {
     workingDirectory: deps.workspaceRoot,
@@ -96,7 +102,7 @@ export async function runExploreSubagent(
     type: "stage_start",
     id: stageId,
     nodeType: "subagent",
-    label: `Explore: ${request.task.slice(0, 60)}`,
+    label: `${isPlanner ? "Planner" : "Explore"}: ${request.task.slice(0, 60)}`,
   });
 
   // 检索优先的探索起点（Cursor 式 auto-context）：任务文本 → 索引符号
@@ -130,9 +136,9 @@ export async function runExploreSubagent(
       autoApproveDangerousBash: deps.autoApproveDangerousBash,
       maxIterations,
       // 机制层只读沙箱：白名单之外的工具全部不可用。
-      allowedTools: [...EXPLORE_SUBAGENT_ALLOWED_TOOLS],
+      allowedTools: [...(isPlanner ? PLANNER_SUBAGENT_ALLOWED_TOOLS : EXPLORE_SUBAGENT_ALLOWED_TOOLS)],
       readOnly: true,
-      systemPromptOverride: buildExploreSubagentPrompt(thoroughness, env) + navBlock,
+      systemPromptOverride: (isPlanner ? buildPlannerSubagentPrompt(env) : buildExploreSubagentPrompt(thoroughness, env)) + navBlock,
       // 预算耗尽时追加一次无工具强制总结，保证父智能体拿到已收集的发现。
       forcedFinalReportOnLimit: true,
       budget: deps.budget,
@@ -145,7 +151,7 @@ export async function runExploreSubagent(
         if (!FORWARDED_EVENT_TYPES.has(ev.type)) return;
         if (ev.type === "tool_start" || ev.type === "tool_end") {
           const provenance: SubagentProvenance = {
-            agentType: EXPLORE_SUBAGENT_TYPE,
+            agentType: isPlanner ? PLANNER_SUBAGENT_TYPE : EXPLORE_SUBAGENT_TYPE,
             id: stageId,
             task: request.task.slice(0, 80),
           };
@@ -161,14 +167,14 @@ export async function runExploreSubagent(
 
     const report = result.assistantText?.trim();
     if (!report) {
-      return "## Final Report\n\nExplore subagent finished without producing a report.";
+      return `## Final Report\n\n${isPlanner ? "Planner" : "Explore"} subagent finished without producing a report.`;
     }
     // 硬限制终态：显式标注为部分结果，让父智能体知道发现可能不完整，
     // 而不是把它误当成完整结论。
     if (result.blocked) {
-      const notice = `[Explore partial result: ${result.blockedReason ?? "reached the iteration limit"}; findings below may be incomplete]`;
+      const notice = `[${isPlanner ? "Planner" : "Explore"} partial result: ${result.blockedReason ?? "reached the iteration limit"}; findings below may be incomplete]`;
       const wrappedReport = report.startsWith("## Final Report") ? report : `## Final Report\n\n${report}`;
-      return report.startsWith("[Explore partial result") ? report : `${notice}\n\n${wrappedReport}`;
+      return report.startsWith("[Explore partial result") || report.startsWith("[Planner partial result") ? report : `${notice}\n\n${wrappedReport}`;
     }
     // Ensure the report starts with a Final Report heading so the parent LLM
     // knows this is the complete exploration output to use directly for the next step.
@@ -181,9 +187,9 @@ export async function runExploreSubagent(
       type: "stage_done",
       id: stageId,
       nodeType: "subagent",
-      label: "Explore finished",
+      label: `${isPlanner ? "Planner" : "Explore"} finished`,
     });
   }
 }
 
-export { EXPLORE_SUBAGENT_TYPE };
+export { EXPLORE_SUBAGENT_TYPE, PLANNER_SUBAGENT_TYPE };

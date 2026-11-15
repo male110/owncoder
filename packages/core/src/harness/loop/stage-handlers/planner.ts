@@ -2,6 +2,7 @@ import type { StageHandlerContext } from "./types.ts";
 import type { AgentLoopOpts } from "../types.ts";
 import { executeTool } from "../../execute.ts";
 import type { ToolCall } from "@owncoder/llm";
+import { PLANNER_SUBAGENT_TYPE } from "../../subagent/planner-subagent.ts";
 export async function requestAgentPlanApproval(
   ctx: StageHandlerContext,
   planText: string,
@@ -129,11 +130,15 @@ export async function runAgentPlanner(ctx: StageHandlerContext, call: ToolCall):
     if (call.type !== "function" || call.function.name !== "dispatch_agent") throw new Error("只允许 dispatch_agent 工具调用");
     const args = JSON.parse(call.function.arguments) as Record<string, unknown>;
     if (!args || typeof args !== "object" || Array.isArray(args)) throw new Error("无效工具参数");
-    if (args.agent_type !== undefined && args.agent_type !== "Explore") throw new Error("只允许 Explore 子代理");
+    // 任务分解阶段只允许计划子代理（Planner）；Explore 等其他类型直接拒绝，
+    // 避免误调度只读调研代理导致计划结构校验失败后暂停执行。
+    if (args.agent_type !== undefined && args.agent_type !== PLANNER_SUBAGENT_TYPE) {
+      throw new Error(`任务分解阶段只允许调用计划子代理（agent_type="${PLANNER_SUBAGENT_TYPE}"），不允许调用 "${String(args.agent_type)}"`);
+    }
     if (typeof args.task !== "string" || !args.task.trim()) throw new Error("缺少计划任务");
     if (args.thoroughness !== undefined && args.thoroughness !== "medium" && args.thoroughness !== "very thorough") throw new Error("无效搜索广度");
     const result = await executeTool(ctx.toolCtx, {
-      id: call.id, name: call.function.name, arguments: args, rawArguments: call.function.arguments,
+      id: call.id, name: call.function.name, arguments: { ...args, agent_type: PLANNER_SUBAGENT_TYPE }, rawArguments: call.function.arguments,
     });
     if (!result.ok) throw new Error(result.output);
     report = result.output;
@@ -151,7 +156,7 @@ export async function runAgentPlanner(ctx: StageHandlerContext, call: ToolCall):
     state.aborted = true;
     return;
   }
-  if (report.startsWith("[Explore partial result")) {
+  if (report.startsWith("[Explore partial result") || report.startsWith("[Planner partial result")) {
     state.planApproval = "unavailable";
     state.blocked = true;
     state.blockedReason = "只读 Planner 未完成计划，执行已暂停";

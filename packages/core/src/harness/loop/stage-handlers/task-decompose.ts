@@ -36,6 +36,7 @@ import type { AgentLoopOpts } from "../types.ts";
 import type { TaskItem } from "../../../plans.ts";
 import type { StageHandler } from "./types.ts";
 import { DISPATCH_AGENT_TOOL_DEF } from "../../enhanced-tools/subagent.ts";
+import { PLANNER_SUBAGENT_TYPE } from "../../subagent/planner-subagent.ts";
 import { runAgentPlanner } from "./planner.ts";
 import type { ToolCall } from "@owncoder/llm";
 import {
@@ -133,7 +134,7 @@ export async function runTaskDecompose(
       && (!opts.allowedTools || opts.allowedTools.includes("dispatch_agent"));
     const decomposeMessages: ChatMessage[] = [
       { role: "system", content: systemPrompt + (plannerAvailable
-        ? "\n\nException to the JSON-only output rule: if a separate codebase-grounded execution plan and user approval are necessary before editing, invoke dispatch_agent as a native API tool call INSTEAD of emitting JSON. Otherwise return the usual task JSON directly, without calling a tool. Only you decide whether to call it; never encode this decision as a JSON field. Give the subagent the user's actual intent, constraints, and relevant prior context; require ## Final Report with 目标, numbered 步骤, 相关文件 with evidence, 风险与不确定性, 验证方式. The subagent is strictly read-only; never start editing before approval."
+        ? `\n\nException to the JSON-only output rule: if a separate codebase-grounded execution plan and user approval are necessary before editing, invoke dispatch_agent as a native API tool call INSTEAD of emitting JSON, with agent_type="${PLANNER_SUBAGENT_TYPE}" (the planning subagent; do NOT use "Explore" or any other agent_type in this stage). Otherwise return the usual task JSON directly, without calling a tool. Only you decide whether to call it; never encode this decision as a JSON field. Give the subagent the user's actual intent, constraints, and relevant prior context; require ## Final Report with 目标, numbered 步骤, 相关文件 with evidence, 风险与不确定性, 验证方式. The subagent is strictly read-only; never start editing before approval.`
         : "") },
       {
         role: "user",
@@ -199,8 +200,33 @@ export async function runTaskDecompose(
     if (toolCalls.length > 0) {
       const planToolCall = toolCalls.length === 1 && toolCalls[0]?.type === "function"
         && toolCalls[0].function.name === "dispatch_agent" ? toolCalls[0] : undefined;
+      // 阶段级约束：任务分解阶段只接受计划子代理（Planner）。
+      // 模型误传 Explore 等其他类型时，不进入只读 Planner 校验分支，
+      // 而是直接改写为 Planner 调度（runAgentPlanner 内部还会再校验一次）。
+      let normalizedPlanToolCall = planToolCall;
+      if (planToolCall) {
+        try {
+          const parsed = JSON.parse(planToolCall.function.arguments) as Record<string, unknown>;
+          if (parsed && typeof parsed === "object" && !Array.isArray(parsed)
+            && parsed.agent_type !== undefined && parsed.agent_type !== PLANNER_SUBAGENT_TYPE) {
+            opts.onEvent?.({
+              type: "warning",
+              message: `任务分解阶段不允许调用 "${String(parsed.agent_type)}" 子代理，已改写为计划子代理 ${PLANNER_SUBAGENT_TYPE}`,
+            });
+            normalizedPlanToolCall = {
+              ...planToolCall,
+              function: {
+                ...planToolCall.function,
+                arguments: JSON.stringify({ ...parsed, agent_type: PLANNER_SUBAGENT_TYPE }),
+              },
+            };
+          }
+        } catch {
+          // 参数解析失败交给 runAgentPlanner 的既有校验报错处理。
+        }
+      }
       tracer.endSpan(planSpanId, "ok");
-      return { task: null, decomposeTokens: 0, planToolCall, invalidToolCall: !planToolCall, fallback: false };
+      return { task: null, decomposeTokens: 0, planToolCall: normalizedPlanToolCall, invalidToolCall: !planToolCall, fallback: false };
     }
     const planText = content;
 

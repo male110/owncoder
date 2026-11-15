@@ -13,17 +13,18 @@ export const DISPATCH_AGENT_TOOL_DEF: ToolDef = {
   function: {
     name: "dispatch_agent",
     description:
-      "Dispatch a read-only research task to an Explore subagent that runs in an isolated context. " +
+      "Dispatch a read-only research task to a subagent that runs in an isolated context. " +
       "The subagent runs in an isolated context: its search hits and full-file reads stay there, and only its final report returns to this context. " +
       "The subagent is read-only: implementation work cannot be delegated. " +
-      "Do not dispatch Explore for a request resolvable with <=2 targeted reads, and never as a pre-flight before an edit whose site is already known.",
+      "Use \"Explore\" for general read-only codebase research; use \"Planner\" only in the task-decompose stage to produce a structured execution plan (## Final Report with 目标, numbered 步骤, 相关文件, 风险与不确定性, 验证方式). " +
+      "Do not dispatch a subagent for a request resolvable with <=2 targeted reads, and never as a pre-flight before an edit whose site is already known.",
     parameters: {
       type: "object",
       properties: {
         agent_type: {
           type: "string",
-          enum: ["Explore"],
-          description: 'Subagent type. Only "Explore" (read-only codebase research) is supported. Default "Explore".',
+          enum: ["Explore", "Planner"],
+          description: 'Subagent type. "Explore" (read-only codebase research) or "Planner" (read-only planning subagent for the task-decompose stage). Default "Explore".',
         },
         task: {
           type: "string",
