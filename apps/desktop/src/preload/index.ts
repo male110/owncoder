@@ -512,7 +512,7 @@ export interface DesktopApi {
   updateTask: (taskId: string, status: TaskStatusDto, result?: string, sessionId?: string) => Promise<ActivePlanMetaDto | null>;
   // ── Spec workflow（spec → design → tasks 审批流） ──
   listSpecs: (sessionId?: string) => Promise<SpecFeatureDto[]>;
-  getSpecStatus: (feature: string) => Promise<SpecStatusDto>;
+  getSpecStatus: (feature: string, sessionId?: string) => Promise<SpecStatusDto>;
   approveSpec: (feature: string, sessionId?: string) => Promise<Partial<SessionStateDto>>;
   rejectSpec: (feature: string, feedback: string, sessionId?: string) => Promise<Partial<SessionStateDto>>;
   setTodoAnchor: (todo: string | null) => Promise<unknown>;
@@ -537,7 +537,7 @@ export interface DesktopApi {
   getGitStatus: (workspaceRoot?: string) => Promise<GitStatusDto>;
   listMcpTools: () => Promise<McpToolDto[]>;
   listPlans: (sessionId?: string) => Promise<PlanInfoDto[]>;
-  readPlan: (path: string) => Promise<string>;
+  readPlan: (path: string, sessionId?: string) => Promise<string>;
   listRules: () => Promise<RuleFileDto[]>;
   readRule: (name: string) => Promise<string>;
   writeRule: (name: string, content: string) => Promise<RuleFileDto>;
@@ -725,9 +725,9 @@ const api: DesktopApi = {
   getGitStatus: (workspaceRoot?: string) => ipcRenderer.invoke("git:status", workspaceRoot),
   listMcpTools: () => ipcRenderer.invoke("mcp:listTools"),
   listPlans: (sessionId?: string) => ipcRenderer.invoke("plans:list", sessionId),
-  readPlan: (path) => ipcRenderer.invoke("plans:read", path),
+  readPlan: (path, sessionId) => ipcRenderer.invoke("plans:read", path, sessionId),
   listSpecs: (sessionId?: string) => ipcRenderer.invoke("specs:list", sessionId),
-  getSpecStatus: (feature) => ipcRenderer.invoke("specs:status", feature),
+  getSpecStatus: (feature, sessionId) => ipcRenderer.invoke("specs:status", feature, sessionId),
   approveSpec: (feature, sessionId) => ipcRenderer.invoke("specs:approve", feature, sessionId),
   rejectSpec: (feature, feedback, sessionId) => ipcRenderer.invoke("specs:reject", feature, feedback, sessionId),
   listRules: () => ipcRenderer.invoke("rules:list"),

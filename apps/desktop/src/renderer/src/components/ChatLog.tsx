@@ -37,6 +37,7 @@ export function toolStatusLabel(
 // ── ChatLog ───────────────────────────────────────────────────────────────────
 
 interface Props {
+  sessionId?: string;
   turns: ChatTurnDto[];
   liveEvents: LiveEvent[];
   liveStatus: string;
@@ -68,6 +69,7 @@ interface Props {
 }
 
 export function ChatLog({
+  sessionId,
   turns,
   liveEvents,
   liveStatus,
@@ -172,6 +174,7 @@ export function ChatLog({
     if (b.kind === "assistant") {
       return (
         <AssistantBubble
+          sessionId={sessionId}
           turn={b.turn}
           canRegenerate={i === lastAssistantIdx && !sending && liveEvents.length === 0}
           regenerating={sending}
@@ -186,7 +189,7 @@ export function ChatLog({
     if (b.kind === "process") return <ProcessSteps items={b.items} />;
     // 进行中轮次的工具链由 LiveToolCard / liveStatus 展示，不在列表里重复。
     return null;
-  }, [lastAssistantIdx, sending, stopping, liveEvents.length, onRegenerate, onDeleteTurn, onDiscardInflight, onOpenFile]);
+  }, [sessionId, workspaceRoot, lastAssistantIdx, sending, stopping, liveEvents.length, onRegenerate, onDeleteTurn, onDiscardInflight, onOpenFile]);
 
   // History rows only — live status/stream render after Virtuoso inside the
   // shared scroller so streaming updates don't depend on Footer remounts.

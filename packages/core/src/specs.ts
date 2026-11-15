@@ -12,15 +12,15 @@
  *
  * Each phase pauses for the user's approval before the next one starts. The
  * gate state lives in `<feature>/.state.json` next to the documents so it
- * survives session restarts and is shared across sessions.
+ * survives restarts within its owning session; other sessions cannot adopt it.
  */
 
 import { promises as fs } from "node:fs";
 import { join, resolve } from "node:path";
 import { fromMarkdown } from "mdast-util-from-markdown";
-import { parseTasksFromMarkdown, type TaskItem } from "./plans.ts";
+import { parseTasksFromMarkdown, readPlanFile, sessionArtifactDir, type TaskItem } from "./plans.ts";
 
-const SPECS_DIR = ".owncoder/specs";
+
 const STATE_FILE = ".state.json";
 
 export type SpecPhase = "spec" | "design" | "tasks";
@@ -35,6 +35,7 @@ export type SpecStage =
   | "approved";
 
 export interface SpecWorkflowState {
+  sessionId: string;
   feature: string;
   stage: SpecStage;
   updatedAt: string;
@@ -61,12 +62,12 @@ export interface SpecStatus {
   stage: SpecStage | null;
 }
 
-export function featureDirRel(feature: string): string {
-  return `${SPECS_DIR}/${slugify(feature)}`;
+export function featureDirRel(feature: string, sessionId: string): string {
+  return `${sessionArtifactDir("specs", sessionId)}/${slugify(feature)}`;
 }
 
-function featureDirAbs(workspaceRoot: string, feature: string): string {
-  return resolve(workspaceRoot, featureDirRel(feature));
+function featureDirAbs(workspaceRoot: string, feature: string, sessionId: string): string {
+  return resolve(workspaceRoot, featureDirRel(feature, sessionId));
 }
 
 function assertFeatureName(feature: string): string {
@@ -84,23 +85,23 @@ function assertFeatureName(feature: string): string {
  * 差异，但只差分隔符的写法仍会各建一个目录——那正是同一项目出现两份 spec
  * 的来源。因此当已存在目录与请求名在去掉分隔符后一致时，复用已存在目录。
  */
-async function resolveFeatureSlug(workspaceRoot: string, feature: string): Promise<string> {
+async function resolveFeatureSlug(workspaceRoot: string, feature: string, sessionId: string): Promise<string> {
   const slug = assertFeatureName(feature);
   let entries;
   try {
-    entries = await fs.readdir(resolve(workspaceRoot, SPECS_DIR), { withFileTypes: true });
+    entries = await fs.readdir(resolve(workspaceRoot, sessionArtifactDir("specs", sessionId)), { withFileTypes: true });
   } catch {
     return slug;
   }
   const names = entries
-    .filter((ent) => ent.isDirectory() && !ent.name.startsWith("."))
+    .filter((ent) => ent.isDirectory() && !ent.name.startsWith(".") && ent.name.replace(/-/g, "") === slug.replace(/-/g, ""))
     .map((ent) => ent.name);
   if (names.length === 0) return slug;
   const candidates = await Promise.all(names.map(async (name) => {
     let mtimeMs = 0;
     for (const file of ["spec.md", "design.md", "tasks.md", STATE_FILE]) {
       try {
-        mtimeMs = Math.max(mtimeMs, (await fs.stat(join(resolve(workspaceRoot, SPECS_DIR), name, file))).mtimeMs);
+        mtimeMs = Math.max(mtimeMs, (await fs.stat(join(resolve(workspaceRoot, sessionArtifactDir("specs", sessionId)), name, file))).mtimeMs);
       } catch {
         // Ignore missing legacy phase files.
       }
@@ -117,24 +118,27 @@ export async function saveSpec(
   workspaceRoot: string,
   feature: string,
   content: string,
+  sessionId: string,
 ): Promise<string> {
-  return savePhase(workspaceRoot, feature, "spec.md", content);
+  return savePhase(workspaceRoot, feature, "spec.md", content, sessionId);
 }
 
 export async function saveDesign(
   workspaceRoot: string,
   feature: string,
   content: string,
+  sessionId: string,
 ): Promise<string> {
-  return savePhase(workspaceRoot, feature, "design.md", content);
+  return savePhase(workspaceRoot, feature, "design.md", content, sessionId);
 }
 
 export async function saveTasks(
   workspaceRoot: string,
   feature: string,
   content: string,
+  sessionId: string,
 ): Promise<string> {
-  return savePhase(workspaceRoot, feature, "tasks.md", content);
+  return savePhase(workspaceRoot, feature, "tasks.md", content, sessionId);
 }
 
 async function savePhase(
@@ -142,25 +146,28 @@ async function savePhase(
   feature: string,
   file: string,
   content: string,
+  sessionId: string,
 ): Promise<string> {
-  const slug = await resolveFeatureSlug(workspaceRoot, feature);
-  const dir = featureDirAbs(workspaceRoot, slug);
+  const slug = await resolveFeatureSlug(workspaceRoot, feature, sessionId);
+  const dir = featureDirAbs(workspaceRoot, slug, sessionId);
   await fs.mkdir(dir, { recursive: true });
   const body = content.trim().startsWith("#")
     ? content
     : `# ${file.replace(".md", "")}: ${slug}\n\n${content}`;
   await fs.writeFile(join(dir, file), body.endsWith("\n") ? body : `${body}\n`, "utf8");
-  return `${featureDirRel(slug)}/${file}`;
+  await fs.writeFile(`${join(dir, file)}.owner.json`, JSON.stringify({ sessionId }), "utf8");
+  return `${featureDirRel(slug, sessionId)}/${file}`;
 }
 
 export async function readSpecPhase(
   workspaceRoot: string,
   feature: string,
   phase: SpecPhase,
+  sessionId: string,
 ): Promise<string> {
-  const slug = await resolveFeatureSlug(workspaceRoot, feature);
+  const slug = await resolveFeatureSlug(workspaceRoot, feature, sessionId);
   try {
-    return await fs.readFile(join(featureDirAbs(workspaceRoot, slug), `${phase}.md`), "utf8");
+    return await readPlanFile(workspaceRoot, `${featureDirRel(slug, sessionId)}/${phase}.md`, sessionId);
   } catch {
     throw new Error(`${phase}.md not found for feature ${slug}`);
   }
@@ -189,13 +196,14 @@ export function phaseUnderReview(stage: SpecStage | null): SpecPhase | null {
 export async function readFeatureState(
   workspaceRoot: string,
   feature: string,
+  sessionId: string,
 ): Promise<SpecWorkflowState | null> {
-  const slug = await resolveFeatureSlug(workspaceRoot, feature);
+  const slug = await resolveFeatureSlug(workspaceRoot, feature, sessionId);
   try {
-    const raw = await fs.readFile(join(featureDirAbs(workspaceRoot, slug), STATE_FILE), "utf8");
+    const raw = await fs.readFile(join(featureDirAbs(workspaceRoot, slug, sessionId), STATE_FILE), "utf8");
     const parsed = JSON.parse(raw) as Partial<SpecWorkflowState>;
-    if (!parsed || typeof parsed.stage !== "string") return null;
-    return { feature: slug, stage: parsed.stage as SpecStage, updatedAt: parsed.updatedAt ?? "" };
+    if (!parsed || parsed.sessionId !== sessionId || parsed.feature !== slug || typeof parsed.stage !== "string") return null;
+    return { sessionId, feature: slug, stage: parsed.stage as SpecStage, updatedAt: parsed.updatedAt ?? "" };
   } catch {
     return null;
   }
@@ -205,11 +213,13 @@ export async function writeFeatureState(
   workspaceRoot: string,
   feature: string,
   stage: SpecStage,
+  sessionId: string,
 ): Promise<void> {
-  const slug = await resolveFeatureSlug(workspaceRoot, feature);
-  const dir = featureDirAbs(workspaceRoot, slug);
+  const slug = await resolveFeatureSlug(workspaceRoot, feature, sessionId);
+  const dir = featureDirAbs(workspaceRoot, slug, sessionId);
   await fs.mkdir(dir, { recursive: true });
   const state: SpecWorkflowState = {
+    sessionId,
     feature: slug,
     stage,
     updatedAt: new Date().toISOString(),
@@ -221,8 +231,8 @@ export async function writeFeatureState(
 
 // ── List / status ──────────────────────────────────────────
 
-export async function listSpecs(workspaceRoot: string): Promise<SpecFeature[]> {
-  const dir = resolve(workspaceRoot, SPECS_DIR);
+export async function listSpecs(workspaceRoot: string, sessionId: string): Promise<SpecFeature[]> {
+  const dir = resolve(workspaceRoot, sessionArtifactDir("specs", sessionId));
   let entries;
   try {
     entries = await fs.readdir(dir, { withFileTypes: true });
@@ -230,19 +240,18 @@ export async function listSpecs(workspaceRoot: string): Promise<SpecFeature[]> {
     return [];
   }
   const out: SpecFeature[] = [];
-  const directories = entries.filter((ent) => ent.isDirectory() && !ent.name.startsWith("."));
-  const canonicalName = directories.length > 0
-    ? (await resolveFeatureSlug(workspaceRoot, directories[0]!.name))
-    : null;
+
+
   for (const ent of entries) {
-    if (!ent.isDirectory() || ent.name.startsWith(".") || (canonicalName && ent.name !== canonicalName)) continue;
+    if (!ent.isDirectory() || ent.name.startsWith(".")) continue;
+    if (!await readFeatureState(workspaceRoot, ent.name, sessionId)) continue;
     const fdir = join(dir, ent.name);
     const phases: SpecPhase[] = [];
     let mtimeMs = 0;
     let title = ent.name;
     for (const p of ["spec", "design", "tasks"] as SpecPhase[]) {
       const pFile = join(fdir, `${p}.md`);
-      if (await fileExists(pFile)) {
+      if (await readPlanFile(workspaceRoot, `${featureDirRel(ent.name, sessionId)}/${p}.md`, sessionId).then(() => true, () => false)) {
         phases.push(p);
         const st = await fs.stat(pFile);
         if (st.mtimeMs > mtimeMs) mtimeMs = st.mtimeMs;
@@ -268,7 +277,7 @@ export async function listSpecs(workspaceRoot: string): Promise<SpecFeature[]> {
         }
       }
     }
-    const state = await readFeatureState(workspaceRoot, ent.name);
+    const state = await readFeatureState(workspaceRoot, ent.name, sessionId);
     out.push({
       name: ent.name,
       title,
@@ -284,12 +293,14 @@ export async function listSpecs(workspaceRoot: string): Promise<SpecFeature[]> {
 export async function getSpecStatus(
   workspaceRoot: string,
   feature: string,
+  sessionId: string,
 ): Promise<SpecStatus> {
-  const slug = await resolveFeatureSlug(workspaceRoot, feature);
-  const dir = featureDirAbs(workspaceRoot, slug);
-  const hasSpec = await fileExists(join(dir, "spec.md"));
-  const hasDesign = await fileExists(join(dir, "design.md"));
-  const hasTasks = await fileExists(join(dir, "tasks.md"));
+  const slug = await resolveFeatureSlug(workspaceRoot, feature, sessionId);
+  const dir = featureDirAbs(workspaceRoot, slug, sessionId);
+  const exists = (phase: SpecPhase) => readSpecPhase(workspaceRoot, slug, phase, sessionId).then(() => true, () => false);
+  const hasSpec = await exists("spec");
+  const hasDesign = await exists("design");
+  const hasTasks = await exists("tasks");
   let tasks: TaskItem[] = [];
   if (hasTasks) {
     try {
@@ -305,7 +316,7 @@ export async function getSpecStatus(
       : !hasTasks
         ? "design"
         : "ready";
-  const state = await readFeatureState(workspaceRoot, slug);
+  const state = await readFeatureState(workspaceRoot, slug, sessionId);
   return {
     feature: slug,
     hasSpec,
@@ -334,15 +345,6 @@ export function formatSpecStatus(status: SpecStatus): string {
 }
 
 // ── helpers ────────────────────────────────────────────────
-
-async function fileExists(p: string): Promise<boolean> {
-  try {
-    await fs.access(p);
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 function slugify(s: string): string {
   return s

@@ -75,7 +75,7 @@ export function App() {
     ? (activePlanPathBySession[activeSessionId] ?? null)
     : null;
   const sessionPlans = activeSessionId
-    ? (plansBySession[activeSessionId] ?? [])
+    ? (plansBySession[activeSessionId] ?? []).filter((plan) => plan.sessionId === activeSessionId)
     : [];
   const historyLength = useChatStore((s) => s.history.length);
   const sending = useChatStore((s) => s.sending);
@@ -165,7 +165,7 @@ export function App() {
 
   const {
     onSend, onRegenerate,
-    onApprovePlan, onUpdateTask,
+    onApprovePlan, onUpdateTask, onExecuteTasks,
     onRollback, onKeepAll, onKeepFile, onUndoFile,
     onSelectModel, onMode, onSelectThinkingEffort, onSelectReactThinkingEffort, sendQueued,
   } = useChatActions({
@@ -239,13 +239,32 @@ export function App() {
     handleCloseEditorTab(path);
   }, [editorDirtyByPath, handleCloseEditorTab]);
 
-  /** 普通打开文件：激活/追加 tab，并取消该路径上的 diff 模式。 */
-  const openEditorFile = useCallback((path: string, line?: number, column?: number) => {
-    setEditorPath(path);
-    if (line !== undefined) {
-      setEditorLocation((current) => ({ path, line, column, requestId: (current?.requestId ?? 0) + 1 }));
+  const artifactSession = useRef(activeSessionId);
+  useEffect(() => {
+    if (artifactSession.current === activeSessionId) return;
+    artifactSession.current = activeSessionId;
+    for (const path of editorTabs) {
+      if (/[\\/]\.owncoder[\\/](plans|specs)[\\/]/i.test(`/${path}`)) handleCloseEditorTab(path);
     }
-  }, [setEditorPath]);
+  }, [activeSessionId, editorTabs, handleCloseEditorTab]);
+
+  /** 文档引用先确认当前会话归属，再允许打开编辑器缓存。 */
+  const openEditorFile = useCallback((path: string, line?: number, column?: number) => {
+    const open = () => {
+      setEditorPath(path);
+      if (line !== undefined) {
+        setEditorLocation((current) => ({ path, line, column, requestId: (current?.requestId ?? 0) + 1 }));
+      }
+    };
+    if (/[\\/]\.owncoder[\\/](plans|specs)[\\/]/i.test(`/${path}`)) {
+      const sid = activeSessionId;
+      void window.owncoder.readPlan(path, sid ?? undefined).then(() => {
+        if (sid === useSessionStore.getState().activeSessionId) open();
+      }, () => {});
+    } else {
+      open();
+    }
+  }, [activeSessionId, setEditorPath]);
 
   const fileNameOf = useCallback((path: string) => {
     const parts = path.replace(/\\/g, "/").split("/");
@@ -470,11 +489,12 @@ export function App() {
             onOpenFile={openEditorFile}
           />
           <PlansBar
+            key={activeSessionId}
             plans={sessionPlans}
             activePlanPath={sessionActivePlanPath}
             busy={busy || sending}
             onApprovePlan={(p) => void onApprovePlan(p)}
-            onReadPlan={(p) => window.owncoder.readPlan(p)}
+            onReadPlan={(p) => window.owncoder.readPlan(p, activeSessionId ?? undefined)}
             onOpenFile={openEditorFile}
           />
           {sessionActivePlanMeta && sessionActivePlanMeta.tasks.length > 0 && sessionActivePlanMeta.path ? (

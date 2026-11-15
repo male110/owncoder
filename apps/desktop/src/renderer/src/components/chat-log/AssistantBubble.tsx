@@ -1,4 +1,4 @@
-import { useState, memo } from "react";
+import { useEffect, useState, memo } from "react";
 import type { ChatTurnDto } from "../../../../preload/index";
 import { Markdown } from "../Markdown";
 import { useI18n } from "../../i18n";
@@ -23,6 +23,7 @@ export function PlanCard({ planPath, onOpen }: { planPath: string; onOpen: (path
 }
 
 function AssistantBubbleImpl({
+  sessionId,
   turn,
   canRegenerate,
   regenerating,
@@ -31,6 +32,7 @@ function AssistantBubbleImpl({
   workspaceRoot,
   onDelete,
 }: {
+  sessionId?: string;
   turn: ChatTurnDto;
   canRegenerate: boolean;
   regenerating: boolean;
@@ -45,6 +47,18 @@ function AssistantBubbleImpl({
 
   const planPath      = extractPlanPath(turn.content);
   const displayContent = planPath ? stripPlanMarker(turn.content) : turn.content;
+  const [validatedPlan, setValidatedPlan] = useState<string | null>(null);
+  const validationKey = `${sessionId}:${planPath}`;
+  useEffect(() => {
+    let cancelled = false;
+    setValidatedPlan(null);
+    if (planPath && sessionId) {
+      void window.owncoder.readPlan(planPath, sessionId).then(() => {
+        if (!cancelled) setValidatedPlan(validationKey);
+      }, () => {});
+    }
+    return () => { cancelled = true; };
+  }, [planPath, sessionId, validationKey]);
 
   // 压缩相关信息
   const isCompressed = turn.isCompressed === true;
@@ -61,6 +75,7 @@ function AssistantBubbleImpl({
     } catch { /* ignore */ }
   };
 
+  if (planPath && validatedPlan !== validationKey) return null;
   return (
     <div className={`msg assistant ${isCompressed ? "compressed" : ""}`}>
       {isCompressed && (
@@ -156,6 +171,7 @@ function AssistantBubbleImpl({
 }
 
 export const AssistantBubble = memo(AssistantBubbleImpl, (prev, next) =>
+  prev.sessionId === next.sessionId &&
   (prev.turn === next.turn ||
     (prev.turn.id === next.turn.id &&
       prev.turn.content === next.turn.content &&

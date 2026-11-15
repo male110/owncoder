@@ -61,6 +61,24 @@ describe("pipeline cancellation", () => {
     expect(complete).not.toHaveBeenCalled();
   });
 
+  it.each([true, false])("交付计划后停止执行、验证与兜底生成（工具阶段：%s）", async (hasToolStage) => {
+    const ctx = context(new AbortController().signal);
+    ctx.hasToolStage = hasToolStage;
+    const execute = vi.fn();
+    const verify = vi.fn();
+    handlers.set("task_decompose", { run: vi.fn(async () => { ctx.state.awaitingUserConfirmation = true; }) });
+    handlers.set("execute_tools", { run: execute });
+    handlers.set("verify", { run: verify });
+    await runPipelineScheduler([
+      { id: "plan", type: "task_decompose" },
+      { id: "execute", type: "execute_tools" },
+      { id: "verify", type: "verify" },
+    ] as PipelineNode[], ctx);
+    expect(execute).not.toHaveBeenCalled();
+    expect(verify).not.toHaveBeenCalled();
+    expect(complete).not.toHaveBeenCalled();
+  });
+
   it("runs the fallback normally without cancellation", async () => {
     const ctx = context(new AbortController().signal);
     complete.mockResolvedValue("done");

@@ -2,8 +2,8 @@
  * Task decomposition stage handler and related utilities.
  *
  * This module handles the task_decompose pipeline node, which analyzes the user's
- * request and breaks it down into structured steps with information needs and stop
- * conditions. The decomposition result guides the subsequent ReAct loop exploration.
+ * request and breaks it down into tasks with execution guidance and dependencies.
+ * The decomposition result feeds the subsequent ReAct task driver.
  *
  * 拆分说明：会话历史解析（decompose-history.ts）、分解上下文装配（decompose-context.ts）、
  * 答案解析与兜底分解（decompose-answer.ts）、历史相关度召回（decompose-relevance.ts）
@@ -76,10 +76,7 @@ export {
   packFallbackRelevantHistory,
 } from "./decompose-relevance.ts";
 
-/**
- * Convert this turn's decomposition into a task with stop criteria.
- * No longer tracks information needs - stop criteria are evaluated directly.
- */
+/** 兼容旧返回结构；当前分解不再生成独立的 turnInformationTask。 */
 function buildTurnInformationTask(): TaskItem | null {
   return null;
 }
@@ -130,11 +127,14 @@ export async function runTaskDecompose(
     const { tagUserInput } = await import("../../message-tags.js");
     const currentAttachments = (opts.attachments ?? [])
       .filter((attachment, index, all) => all.findIndex((item) => item.url === attachment.url) === index);
-    const plannerAvailable = allowPlanner && opts.mode === "agent" && !opts.activePlan && !opts.readOnly
+    const plannerAvailable = allowPlanner && (opts.mode === "agent" || opts.mode === "spec") && !opts.activePlan && !opts.readOnly
       && (!opts.allowedTools || opts.allowedTools.includes("dispatch_agent"));
+    const plannerCriteria = opts.mode === "spec"
+      ? `when the user asks how to change or design an existing codebase and the answer needs tracing across modules or workflow boundaries, repository evidence to select an approach, or a separately approved plan for later implementation`
+      : `when the user requests a codebase-grounded implementation approach for a cross-file core change, architectural adjustment, complex migration, or other high-impact change, and that approach needs repository evidence and separate user approval before implementation`;
     const decomposeMessages: ChatMessage[] = [
       { role: "system", content: systemPrompt + (plannerAvailable
-        ? `\n\nException to the JSON-only output rule: if a separate codebase-grounded execution plan and user approval are necessary before editing, invoke dispatch_agent as a native API tool call INSTEAD of emitting JSON, with agent_type="${PLANNER_SUBAGENT_TYPE}" (the planning subagent; do NOT use "Explore" or any other agent_type in this stage). Otherwise return the usual task JSON directly, without calling a tool. Only you decide whether to call it; never encode this decision as a JSON field. Give the subagent the user's actual intent, constraints, and relevant prior context; require ## Final Report with 目标, numbered 步骤, 相关文件 with evidence, 风险与不确定性, 验证方式. The subagent is strictly read-only; never start editing before approval.`
+        ? `\n\nException to the JSON-only output rule: ${plannerCriteria}, invoke dispatch_agent as a native API tool call INSTEAD of emitting JSON, with agent_type="${PLANNER_SUBAGENT_TYPE}" (the planning subagent; do NOT use "Explore" or any other agent_type in this stage). This applies even if the current turn delivers only a design, proposal, or execution plan and does not edit code; do not infer a code-changing implementation task from that deliverable. ${opts.mode === "spec" ? `Do not invoke Planner solely for the word design: ordinary conceptual answers, explanations of a known single file, and obvious local edits with no separate repository-grounded plan return the usual task JSON instead. An explicit request to implement with a clear edit site proceeds as an implementation task only in Agent mode; Spec mode never edits source code.` : `Do not invoke Planner for an ordinary conceptual discussion or explanation, a small single-file change, or a task with an already clear edit site that needs no separate approval; return the usual task JSON directly instead.`} Only you decide whether to call it; never encode this decision as a JSON field. Give the subagent the user's actual intent, constraints, and relevant prior context; require ## Final Report with 目标, numbered 步骤, 相关文件 backed by actual code paths and line or symbol ranges, 风险与不确定性, 验证方式. The subagent is strictly read-only; never start editing before approval.`
         : "") },
       {
         role: "user",
@@ -412,12 +412,9 @@ export async function runTaskDecompose(
 // ── Stage Handler ──────────────────────────────────────────────────
 
 /**
- * task_decompose: analyze the user's request and break it down into structured
- * steps with information needs. The decomposition guides the subsequent ReAct
- * loop exploration phase.
- *
- * 方案A：handler 只做分解并把完整执行上下文写入 rawDecompose / TaskItem.context；
- * 用户消息与上下文注入由 injectHistoryAndUserMessage 负责（history_compact 已短路）。
+ * 将请求分解为 rawDecompose 中的任务、执行指引与共享历史，交给后续 ReAct。
+ * 需要 Planner 时只生成并保存完整计划，然后结束本轮等待批准。
+ * 用户消息注入由调度器的 injectHistoryAndUserMessage 负责。
  */
 export const taskDecomposeHandler: StageHandler = {
   async run(ctx) {
@@ -431,20 +428,25 @@ export const taskDecomposeHandler: StageHandler = {
       ctx.state.decomposeCount = 0;
     }
     
-    let result = await runTaskDecompose(
-      opts, model, tracer, memory, reasoningTrace, ctx.budgets, node.prompt, ctx.messages,
+    const approvedPlan = ctx.state.planApproval === "approved" ? ctx.state.approvedAgentPlan : undefined;
+    const approvedInput = approvedPlan
+      ? opts.mode === "spec"
+        ? `${opts.userMessage}\n\n## 已批准的只读设计计划（不授权源码实施）\n${approvedPlan}`
+        : approvedPlan
+      : opts.userMessage;
+    if (approvedPlan && opts.mode === "agent") opts.userMessage = approvedInput;
+    const result = await runTaskDecompose(
+      { ...opts, userMessage: approvedInput }, model, tracer, memory, reasoningTrace, ctx.budgets, node.prompt, ctx.messages, !approvedPlan,
     );
+    if (approvedPlan && result.rawDecompose) {
+      result.rawDecompose.relevantHistory = [result.rawDecompose.relevantHistory, approvedPlan].filter(Boolean).join("\n\n");
+    }
 
     if (result.planToolCall) {
       ctx.state.planRequested = true;
       await runAgentPlanner(ctx, result.planToolCall);
-      if (ctx.state.planApproval === "approved" && ctx.state.approvedAgentPlan && !ctx.state.aborted) {
-        // 审批是前置阶段；将完整计划作为本轮用户输入重新走普通分解流程。
-        ctx.opts.userMessage = ctx.state.approvedAgentPlan;
-        result = await runTaskDecompose(
-          ctx.opts, model, tracer, memory, reasoningTrace, ctx.budgets, node.prompt, ctx.messages, false,
-        );
-      }
+      emitStage(opts.onEvent, "done", node);
+      return;
     }
 
     if (opts.signal?.aborted || ctx.state.aborted || ctx.state.blocked) {

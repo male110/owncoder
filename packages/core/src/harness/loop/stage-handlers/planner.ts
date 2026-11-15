@@ -3,84 +3,181 @@ import type { AgentLoopOpts } from "../types.ts";
 import { executeTool } from "../../execute.ts";
 import type { ToolCall } from "@owncoder/llm";
 import { PLANNER_SUBAGENT_TYPE } from "../../subagent/planner-subagent.ts";
-export async function requestAgentPlanApproval(
-  ctx: StageHandlerContext,
-  planText: string,
-): Promise<void> {
+import { approvePlannerPlan, readPlannerPlan, revisePlannerPlan, savePlannerPlan, validatePlannerPlan, type PlannerPlan } from "../../../plans.ts";
+
+type PlanContext = Pick<StageHandlerContext, "opts" | "state" | "history">;
+
+function failPlan(ctx: PlanContext, error: unknown): void {
+  ctx.state.planApproval = "unavailable";
+  ctx.state.approvedAgentPlan = undefined;
+  ctx.state.blocked = true;
+  ctx.state.blockedReason = `计划校验或保存失败，未授权执行：${error instanceof Error ? error.message : String(error)}`;
+  ctx.state.lastAssistant = ctx.state.blockedReason;
+  ctx.history.push({ role: "assistant", content: ctx.state.lastAssistant });
+  ctx.opts.onEvent?.({ type: "assistant_delta", text: ctx.state.lastAssistant });
+}
+
+function deliverPlan(ctx: PlanContext, plan: PlannerPlan, content: string): void {
+  ctx.state.plannerPlan = plan;
+  ctx.state.planApproval = "pending_approval";
+  ctx.state.approvedAgentPlan = undefined;
+  ctx.state.awaitingUserConfirmation = true;
+  ctx.state.lastAssistant = [
+    `计划已保存：${plan.planId}，版本 v${plan.version}，摘要 ${plan.digest}。`,
+    content.trim(),
+    ctx.opts.mode === "spec"
+      ? "请查看计划后批准；仅授权只读设计，不授权源码实施。本轮到此结束。"
+      : "请打开计划查看；下一轮明确批准执行或提出修改意见。本轮未实施计划内容。",
+  ].join("\n\n") + `\n\n<!--plan_saved:${plan.path}-->`;
+  ctx.history.push({ role: "assistant", content: ctx.state.lastAssistant });
+  ctx.opts.onEvent?.({ type: "assistant_delta", text: ctx.state.lastAssistant });
+}
+
+export async function requestAgentPlanApproval(ctx: PlanContext, planText: string): Promise<void> {
   const { opts, state } = ctx;
   if (opts.signal?.aborted) {
     state.aborted = true;
     return;
   }
-  if (!opts.askUser) {
-    state.planApproval = "unavailable";
-    state.blocked = true;
-    state.blockedReason = "复杂 Agent 任务需要计划确认，但当前宿主未提供用户确认通道";
-    return;
-  }
-
-  let answer: string;
   try {
-    answer = await opts.askUser({
-      question: `Agent 将根据以下计划分解任务并执行：\n\n${planText}\n\n请选择“批准执行”，或提出修改意见。`,
-      options: [
-        { label: "批准执行", value: "approve", description: "确认计划后开始执行工具和代码变更" },
-        { label: "拒绝计划", value: "reject", description: "停止本轮执行，返回修改方向" },
-      ],
-      allowFreeText: true,
-      placeholder: "输入修改意见，提交后本轮暂停",
-    });
+    if (opts.mode !== "agent" && opts.mode !== "spec") throw new Error("当前模式不支持计划审批");
+    const plan = await savePlannerPlan(opts.workspaceRoot, opts.sessionId, opts.mode, planText, state.plannerPlan, opts.userMessage);
+    const content = await validatePlannerPlan(opts.workspaceRoot, opts.sessionId, plan);
+    if (opts.signal?.aborted) {
+      state.aborted = true;
+      return;
+    }
+    deliverPlan(ctx, plan, content);
   } catch (error) {
-    state.planApproval = "unavailable";
-    state.blocked = true;
-    state.blockedReason = `无法完成 Agent 计划审批：${error instanceof Error ? error.message : String(error)}`;
-    return;
+    failPlan(ctx, error);
   }
-  if (opts.signal?.aborted) {
-    state.aborted = true;
-    return;
-  }
-  const normalized = answer.trim().toLowerCase();
-  if (normalized === "approve" || normalized === "approved" || normalized === "批准执行") {
-    state.planApproval = "approved";
-    opts.onEvent?.({ type: "reasoning_step", stepType: "plan_approval", content: "用户已批准 Agent 计划，将完整计划交给任务分解" });
-    return;
-  }
-  state.planApproval = normalized === "reject" || normalized === "rejected" || normalized === "拒绝计划"
-    ? "rejected"
-    : "needs_revision";
-  state.planApprovalFeedback = answer.trim() || undefined;
-  state.blocked = true;
-  state.blockedReason = state.planApproval === "rejected"
-    ? "用户拒绝了 Agent 计划，执行已暂停"
-    : `用户要求修改 Agent 计划${answer.trim() ? `：${answer.trim()}` : ""}`;
-  state.lastAssistant = ["已暂停执行，尚未调用任何执行工具。", state.blockedReason, "请修改需求后重新发送，或在确认计划后再次执行。"].join("\n\n");
-  ctx.history.push({ role: "assistant", content: state.lastAssistant });
-  opts.onEvent?.({ type: "assistant_delta", text: state.lastAssistant });
 }
 
 export function needsAgentPlanApproval(
   opts: Pick<AgentLoopOpts, "mode" | "activePlan">,
   requested: boolean | undefined,
 ): boolean {
-  return opts.mode === "agent" && !opts.activePlan && requested === true;
+  return (opts.mode === "agent" || opts.mode === "spec") && !opts.activePlan && requested === true;
 }
 
-/**
- * Enforce the approval invariant at the writable ReAct boundary. The planner
- * stage is normally reached through task_decompose, but a persisted or
- * malformed pipeline must not be able to remove that prerequisite.
- */
-export function requireAgentPlanApproval(ctx: Pick<StageHandlerContext, "opts" | "state">): boolean {
-  if (!needsAgentPlanApproval(ctx.opts, ctx.state.planRequested)) return true;
-  if (ctx.state.planApproval === "approved" && ctx.state.approvedAgentPlan?.trim()) return true;
-
-  if (ctx.state.planApproval === null || ctx.state.planApproval === undefined) {
+/** 即使流水线省略任务分解，也在进入工具循环前重新校验磁盘版本和批准。 */
+export async function requireAgentPlanApproval(ctx: Pick<StageHandlerContext, "opts" | "state">): Promise<boolean> {
+  try {
+    const current = await readPlannerPlan(ctx.opts.workspaceRoot, ctx.opts.sessionId);
+    if (ctx.state.plannerPlan && ctx.state.plannerPlan.sessionId !== ctx.opts.sessionId) throw new Error("计划不属于当前会话");
+    if (!current && !ctx.state.planRequested && !ctx.state.plannerPlan && !ctx.state.approvedAgentPlan) return true;
+    if (current && current.mode === ctx.opts.mode && ctx.state.planApproval === "approved"
+      && ctx.state.plannerPlan && ctx.state.approvedAgentPlan?.trim()) {
+      const content = await validatePlannerPlan(ctx.opts.workspaceRoot, ctx.opts.sessionId, ctx.state.plannerPlan, true);
+      if (content === ctx.state.approvedAgentPlan) return true;
+    }
+    throw new Error("复杂任务未完成当前版本的有效计划审批");
+  } catch (error) {
     ctx.state.planApproval = "unavailable";
+    ctx.state.blocked = true;
+    ctx.state.blockedReason = `执行已暂停：${error instanceof Error ? error.message : String(error)}`;
+    return false;
   }
-  ctx.state.blocked = true;
-  ctx.state.blockedReason ??= "复杂 Agent 任务未完成有效计划审批，执行已暂停";
-  return false;
+}
+
+async function generatePlanRevision(ctx: Omit<StageHandlerContext, "node">, plan: PlannerPlan, content: string, feedback: string): Promise<void> {
+  await revisePlannerPlan(ctx.opts.workspaceRoot, ctx.opts.sessionId, plan);
+  ctx.state.planApproval = "needs_revision";
+  ctx.state.approvedAgentPlan = undefined;
+  ctx.state.planApprovalFeedback = feedback;
+  await runAgentPlanner(ctx, {
+    id: `revise-${plan.planId}-${plan.version}`, type: "function",
+    function: { name: "dispatch_agent", arguments: JSON.stringify({ agent_type: PLANNER_SUBAGENT_TYPE, task: [
+      "只读修改下列完整计划，融合用户修改要求，返回完整新版而非增量。保留 ## Final Report、目标、编号步骤、相关文件与证据、风险与不确定性、验证方式。不得实施计划。",
+      `当前计划 v${plan.version}：\n${content}`, `用户修改要求：\n${feedback}`,
+    ].join("\n\n") }) },
+  });
+}
+
+/** 从既有计划目录恢复；计划生成轮不调用此处的审批分支。 */
+export async function resumeAgentPlan(ctx: Omit<StageHandlerContext, "node">): Promise<void> {
+  const { opts, state } = ctx;
+  if (opts.leanPipeline || opts.readOnly || (opts.mode !== "agent" && opts.mode !== "spec")) return;
+  try {
+    const plan = await readPlannerPlan(opts.workspaceRoot, opts.sessionId);
+    if (!plan) {
+      if (opts.history.some((turn) => turn.role === "assistant" && turn.content.includes("<!--plan_saved:.owncoder/plans/"))) {
+        throw new Error("会话存在计划引用，但当前版本元数据缺失");
+      }
+      return;
+    }
+    state.planRequested = true;
+    state.plannerPlan = plan;
+    if (plan.mode !== opts.mode) throw new Error("计划模式不匹配，请回到原模式处理；Spec 批准不授权代码实施");
+    const content = await validatePlannerPlan(opts.workspaceRoot, opts.sessionId, plan, false, true);
+    if (opts.signal?.aborted) { state.aborted = true; return; }
+    const input = opts.userMessage.trim();
+    const approve = /^(?:approve|approved|批准(?:执行|计划)?|同意(?:执行|计划)?|实施|继续|开始执行|按计划执行|执行计划)[。！!\s]*$/i.test(input);
+    const revision = /修改|调整|补充|纠正|更正|改成|改为|增加|删除|修订|revise|change|update/i.test(input);
+    if (revision) {
+      await generatePlanRevision(ctx, plan, content, input);
+      return;
+    }
+    if (!approve) {
+      if (/^(?:reject|拒绝(?:计划)?|不同意|取消)[。！!\s]*$/i.test(input)) {
+        await revisePlannerPlan(opts.workspaceRoot, opts.sessionId, plan);
+        state.planApproval = "rejected";
+        state.blocked = true;
+        state.blockedReason = "用户拒绝计划，旧批准已失效；请提出修改要求";
+        state.lastAssistant = state.blockedReason;
+        ctx.history.push({ role: "assistant", content: state.lastAssistant });
+        opts.onEvent?.({ type: "assistant_delta", text: state.lastAssistant });
+      } else {
+        deliverPlan(ctx, plan, content);
+      }
+      return;
+    }
+    const viewed = [...opts.history].reverse().find((turn) => turn.role === "assistant");
+    if (plan.status === "revising" || !viewed?.content.includes(`<!--plan_saved:${plan.path}-->`)
+      || !viewed.content.includes(plan.digest) || !viewed.content.includes(plan.planId)
+      || !viewed.content.includes(`v${plan.version}`)) throw new Error("批准未对应当前展示的计划版本，请重新查看当前计划");
+    if (!opts.askUser) throw new Error("当前宿主未提供用户确认通道");
+    const token = `approve:${encodeURIComponent(opts.sessionId)}:${plan.planId}:${plan.version}:${plan.digest}`;
+    const answer = await opts.askUser({
+      question: `${opts.mode === "spec" ? "仅批准只读设计，不修改源代码" : "批准后进入代码实施"}：${plan.path}（v${plan.version}，摘要 ${plan.digest}）。`,
+      options: [
+        { label: opts.mode === "spec" ? "批准计划" : "批准执行", value: token },
+        { label: "拒绝计划", value: "reject" },
+      ],
+      allowFreeText: true, placeholder: "输入修改意见将生成完整新版，并重新等待批准",
+    });
+    if (opts.signal?.aborted) { state.aborted = true; return; }
+    if (answer !== token) {
+      if (answer.trim() && answer !== "reject" && !/^(?:approve|approved|批准(?:执行|计划)?|同意)$/i.test(answer.trim())) {
+        await generatePlanRevision(ctx, plan, content, answer);
+        return;
+      }
+      await revisePlannerPlan(opts.workspaceRoot, opts.sessionId, plan);
+      state.planApprovalFeedback = answer;
+      state.planApproval = answer === "reject" ? "rejected" : "needs_revision";
+      state.blocked = true;
+      state.blockedReason = "未批准当前版本，已撤销旧批准；请下一轮提交修改要求";
+      state.lastAssistant = state.blockedReason;
+      ctx.history.push({ role: "assistant", content: state.lastAssistant });
+      opts.onEvent?.({ type: "assistant_delta", text: state.lastAssistant });
+      return;
+    }
+    state.approvedAgentPlan = await approvePlannerPlan(opts.workspaceRoot, opts.sessionId, plan);
+    state.planApproval = "approved";
+    state.plannerPlan = { ...plan, status: "approved", approval: { sessionId: opts.sessionId, planId: plan.planId, version: plan.version, path: plan.path, digest: plan.digest } };
+    if (opts.activePlan?.path !== plan.path) {
+      opts.activeTasks = undefined;
+      opts.currentTaskId = null;
+      opts.taskRunState = null;
+      state.taskRunState = null;
+    }
+    opts.activePlan = { path: plan.path, content: state.approvedAgentPlan };
+    opts.userMessage = opts.mode === "spec"
+      ? plan.originalRequest ?? "按已批准的只读计划继续设计，文档仍需另行批准，不实施源码变更"
+      : state.approvedAgentPlan;
+  } catch (error) {
+    failPlan(ctx, error);
+  }
 }
 
 const PLANNER_SECTIONS = [
@@ -117,10 +214,10 @@ export function validatePlannerReport(report: string): { normalized: string; mis
   return { normalized, missing };
 }
 
-export async function runAgentPlanner(ctx: StageHandlerContext, call: ToolCall): Promise<void> {
+export async function runAgentPlanner(ctx: Omit<StageHandlerContext, "node">, call: ToolCall): Promise<void> {
   const { opts, state } = ctx;
   if (state.planApproval === "approved" && state.approvedAgentPlan?.trim()) return;
-  if (!needsAgentPlanApproval(opts, state.planRequested)) return;
+  if (!state.plannerPlan && !needsAgentPlanApproval(opts, state.planRequested)) return;
   if (opts.signal?.aborted) {
     state.aborted = true;
     return;
@@ -175,5 +272,4 @@ export async function runAgentPlanner(ctx: StageHandlerContext, call: ToolCall):
   }
 
   await requestAgentPlanApproval(ctx, validation.normalized);
-  if (state.planApproval === "approved") state.approvedAgentPlan = validation.normalized;
 }

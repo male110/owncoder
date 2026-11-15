@@ -100,7 +100,8 @@ export async function runPipelineScheduler(
   }
 
   // No tool stage and no post-model stages → plain completion at the end.
-  if (!ctx.state.aborted && !ctx.opts.signal?.aborted && !ctx.hasToolStage && !plainCompletionDone && !modelCalled) {
+  if (!ctx.state.aborted && !ctx.opts.signal?.aborted && !ctx.state.blocked && !ctx.state.awaitingUserConfirmation
+    && !ctx.state.shortCircuited && !ctx.hasToolStage && !plainCompletionDone && !modelCalled) {
     if (!ctx.state.userMessageInjected) {
       await injectHistoryAndUserMessage(ctx);
       ctx.state.userMessageInjected = true;

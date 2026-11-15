@@ -81,7 +81,7 @@ export function applyLoadedSession(host: SessionLoadHost, saved: LoadedSession):
       r.currentFeature = saved.currentFeature ?? null;
       r.todoAnchor = saved.todoAnchor;
       r.lastCheckpointId = saved.lastCheckpointId;
-      r.documentWorkflow = saved.documentWorkflow ?? null;
+      r.documentWorkflow = saved.documentWorkflow?.sessionId === id ? saved.documentWorkflow : null;
       r.sessionTitle = saved.title ?? r.sessionTitle;
       r.sessionCreatedAt = saved.createdAt ?? r.sessionCreatedAt;
       // 不覆盖 history 和 terminalLog
@@ -128,7 +128,7 @@ export function applyLoadedSession(host: SessionLoadHost, saved: LoadedSession):
     r.currentFeature = saved.currentFeature ?? null;
     r.todoAnchor = saved.todoAnchor;
     r.lastCheckpointId = saved.lastCheckpointId;
-    r.documentWorkflow = saved.documentWorkflow ?? null;
+    r.documentWorkflow = saved.documentWorkflow?.sessionId === id ? saved.documentWorkflow : null;
     r.queuedMessages = sanitizeQueuedMessages(saved.queuedMessages);
     r.taskRunState = restoreTaskRunState(saved.taskRunState, id) ?? null;
     r.sessionTitle = saved.title ?? null;

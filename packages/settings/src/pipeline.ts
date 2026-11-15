@@ -4,6 +4,7 @@ import {
   BUILTIN_SPEC_PROMPT,
 } from "./builtin-prompts.js";
 import {
+  BUILTIN_SPEC_TASK_DECOMPOSE_PROMPT,
   BUILTIN_TASK_DECOMPOSE_PROMPT,
 } from "./task-decompose-prompt.js";
 
@@ -435,8 +436,7 @@ export const NODE_TYPE_LABELS: Record<PipelineNodeType, string> = Object.fromEnt
 ) as Record<PipelineNodeType, string>;
 
 /**
- * Spec = pre-model context → call model (with plan tools) → end.
- * Matches pre-orchestration single LLM+tools loop.
+ * Spec = context → dedicated decomposition (shared task JSON) → dedicated ReAct → end.
  */
 export function builtinSpecPipeline(): ModePipeline {
   return ModePipelineSchema.parse({
@@ -448,17 +448,23 @@ export function builtinSpecPipeline(): ModePipeline {
         params: { injectRules: true, injectMentions: true },
       },
       {
-        id: "llm",     type: "explore_tools",  label: "调用模型",
+        id: "decompose", type: "task_decompose", label: "理解与任务分解",
         position: { x: 300, y: 300 },
+        prompt: BUILTIN_SPEC_TASK_DECOMPOSE_PROMPT.trim(),
+      },
+      {
+        id: "llm",     type: "explore_tools",  label: "调用模型",
+        position: { x: 300, y: 430 },
         prompt: BUILTIN_SPEC_PROMPT.trim(),
         params: { maxIterations: 200, allowSpecFiles: true },
       },
-      { id: "end",     type: "end",            label: "结束",     position: { x: 300, y: 430 } },
+      { id: "end",     type: "end",            label: "结束",     position: { x: 300, y: 560 } },
     ],
     edges: [
-      { id: "e1", from: "start",   to: "context" },
-      { id: "e2", from: "context", to: "llm" },
-      { id: "e3", from: "llm",     to: "end" },
+      { id: "e1", from: "start",     to: "context" },
+      { id: "e2", from: "context",   to: "decompose" },
+      { id: "e3", from: "decompose", to: "llm" },
+      { id: "e4", from: "llm",       to: "end" },
     ],
   });
 }

@@ -57,18 +57,18 @@ export async function listSpecFeatures(
   host: SpecsHost,
   sessionId?: string,
 ): Promise<SpecFeature[]> {
-  const root = sessionId ? host.sessionWorkspaceRoot(sessionId) : host.sessionWorkspaceRoot();
-  if (!root) return [];
-  return listSpecs(root);
+  const sid = sessionId ?? host.focusSessionId();
+  if (!sid) return [];
+  return listSpecs(host.sessionWorkspaceRoot(sid), sid);
 }
 
 export async function getSpecStatus(
   host: SpecsHost,
   feature: string,
+  sessionId?: string,
 ): Promise<SpecStatus> {
-  const root = host.sessionWorkspaceRoot();
-  if (!root) throw new Error(ERR_NO_WORKSPACE);
-  return readSpecStatusFromDisk(root, feature);
+  const r = host.rt(sessionId);
+  return readSpecStatusFromDisk(host.sessionWorkspaceRoot(r.id), feature, r.id);
 }
 
 /**
@@ -86,7 +86,7 @@ export async function approveSpecPhase(
   const root = host.sessionWorkspaceRoot(r.id);
   if (!root) throw new Error(ERR_NO_WORKSPACE);
 
-  const state = await readFeatureState(root, feature);
+  const state = await readFeatureState(root, feature, r.id);
   if (!state) {
     throw new Error(`特性 ${feature} 尚未生成任何 spec 文档`);
   }
@@ -103,7 +103,8 @@ export async function approveSpecPhase(
   r.currentFeature = feature;
 
   if (phase === "spec" || phase === "design") {
-    await writeFeatureState(root, feature, phase === "spec" ? "spec_approved" : "design_approved");
+    await readSpecPhase(root, feature, phase, r.id);
+    await writeFeatureState(root, feature, phase === "spec" ? "spec_approved" : "design_approved", r.id);
     const nextDoc = phase === "spec" ? "design.md（技术设计）" : "tasks.md（任务清单）";
     r.history.push({
       role: "assistant",
@@ -119,8 +120,8 @@ export async function approveSpecPhase(
   }
 
   // tasks 审批 → 激活执行（与 approvePlan 同款机制）
-  const path = `${featureDirRel(feature)}/tasks.md`;
-  const body = await readSpecPhase(root, feature, "tasks");
+  const path = `${featureDirRel(state.feature, r.id)}/tasks.md`;
+  const body = await readSpecPhase(root, state.feature, "tasks", r.id);
   const tasks = normalizeTasks(parseTasksFromMarkdown(body));
   if (tasks.length === 0) {
     throw new Error("tasks.md 中没有解析到任务，无法执行");
@@ -150,7 +151,7 @@ export async function approveSpecPhase(
     host.setFocusMode("agent");
   }
 
-  await writeFeatureState(root, feature, "approved");
+  await writeFeatureState(root, feature, "approved", r.id);
 
   r.history.push({
     role: "assistant",
@@ -178,7 +179,7 @@ export async function rejectSpecPhase(
   const root = host.sessionWorkspaceRoot(r.id);
   if (!root) throw new Error(ERR_NO_WORKSPACE);
 
-  const state = await readFeatureState(root, feature);
+  const state = await readFeatureState(root, feature, r.id);
   if (!state) {
     throw new Error(`特性 ${feature} 尚未生成任何 spec 文档`);
   }

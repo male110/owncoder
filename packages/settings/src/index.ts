@@ -54,6 +54,7 @@ export {
 export { migratePipeline, LEGACY_PIPELINE_TYPES } from "./pipeline-migrator.js";
 export {
   BUILTIN_TASK_DECOMPOSE_PROMPT,
+  BUILTIN_SPEC_TASK_DECOMPOSE_PROMPT,
 } from "./task-decompose-prompt.js";
 
 

@@ -1,4 +1,6 @@
 import { type ParsedToolCall } from "./parser.ts";
+import { relative, resolve } from "node:path";
+import { assertSessionArtifactPath } from "../plans.ts";
 import type { ToolContext, ToolResult } from "./tools/types.ts";
 import { redactSecrets, isRedactionEnabled } from "./redact.ts";
 import { bool, fail, num, ok, str } from "./tools/shared.ts";
@@ -83,6 +85,17 @@ export async function executeTool(ctx: ToolContext, call: ParsedToolCall): Promi
 
   const name = call.name;
   const args = call.arguments;
+  const filePath = args?.file_path ?? args?.path;
+  if (typeof filePath === "string") {
+    const rel = relative(ctx.workspaceRoot, resolve(ctx.workspaceRoot, filePath)).replace(/\\/g, "/");
+    if (/^\.owncoder\/(plans|specs)(\/|$)/i.test(rel)) {
+      try {
+        assertSessionArtifactPath(rel, ctx.sessionId!);
+      } catch (error) {
+        return fail(error instanceof Error ? error.message : String(error));
+      }
+    }
+  }
   // Enforce the effective tool surface at the execution boundary as well as
   // when building the model tool list. This closes nested run_script bypasses.
   const internalNestedTool = ctx.internalToolCall && name === "list_dir";

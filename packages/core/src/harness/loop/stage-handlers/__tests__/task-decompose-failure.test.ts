@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { assertLlmAuth, chatCompletionStream } from "@owncoder/llm";
-import { BUILTIN_WORKFLOW } from "@owncoder/settings";
+import { BUILTIN_WORKFLOW, BUILTIN_SPEC_TASK_DECOMPOSE_PROMPT } from "@owncoder/settings";
 import { contextBudgets } from "../../../budget.ts";
 import { Tracer } from "../../../observability.ts";
 import { MemoryManager } from "../../../memory.ts";
@@ -43,6 +43,34 @@ async function run(content: string, signal?: AbortSignal) {
 
 describe("任务分解失败事件", () => {
   beforeEach(() => vi.resetAllMocks());
+
+  it("跨文件架构方案在不编辑代码时仍允许 Planner，普通讨论与小改不触发", async () => {
+    await run(JSON.stringify({ intent: "提供架构方案", tasks: [{ id: "t1", executionGuidance: "产出方案" }] }));
+    const messages = vi.mocked(chatCompletionStream).mock.calls[0][1];
+    const instructions = String(messages[0]?.content);
+    expect(instructions).toContain("even if the current turn delivers only a design, proposal, or execution plan and does not edit code");
+    expect(instructions).toContain("cross-file core change, architectural adjustment, complex migration, or other high-impact change");
+    expect(instructions).toContain("needs repository evidence and separate user approval before implementation");
+    expect(instructions).toContain("ordinary conceptual discussion or explanation, a small single-file change");
+    expect(instructions).toContain("already clear edit site that needs no separate approval");
+    expect(instructions).toContain("## Final Report with 目标, numbered 步骤, 相关文件 backed by actual code paths and line or symbol ranges, 风险与不确定性, 验证方式");
+    expect(instructions).toContain("never start editing before approval");
+    expect(vi.mocked(chatCompletionStream).mock.calls[0][2]?.tools).toEqual(expect.arrayContaining([expect.objectContaining({ function: expect.objectContaining({ name: "dispatch_agent" }) })]));
+  });
+
+  it("spec 跨模块设计请求使用专用分解提示词并提供原生 Planner", async () => {
+    vi.mocked(chatCompletionStream).mockResolvedValue({ choices: [{ message: { content: JSON.stringify({ intent: "设计 spec 流程改造", tasks: [{ id: "t1", executionGuidance: "给出设计方案" }] }) } }] } as never);
+    const { ctx } = context();
+    ctx.opts.mode = "spec";
+    ctx.opts.userMessage = "spec 模式怎么改成跨模块任务分解 → ReAct？先给代码库依据的设计改造方案";
+    ctx.node = { id: "decompose", type: "task_decompose", label: "理解与任务分解", prompt: BUILTIN_SPEC_TASK_DECOMPOSE_PROMPT };
+    await taskDecomposeHandler.run(ctx);
+    const [_, messages, options] = vi.mocked(chatCompletionStream).mock.calls[0];
+    expect(String(messages[0]?.content)).toContain("# Spec Mode — Task Planning Overrides");
+    expect(String(messages[0]?.content)).toContain("tracing across modules or workflow boundaries");
+    expect(options?.tools).toEqual(expect.arrayContaining([expect.objectContaining({ function: expect.objectContaining({ name: "dispatch_agent" }) })]));
+    expect(ctx.state.rawDecompose?.tasks[0]?.executionGuidance).toBe("给出设计方案");
+  });
 
   it("流式调用使用 120 秒超时并保留思考增量去重", async () => {
     const controller = new AbortController();

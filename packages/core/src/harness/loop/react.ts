@@ -136,7 +136,7 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
 
   // ── Unified task execution state ──
   let taskRunState: TaskRunState | null = null;
-  if (opts.mode === "agent") {
+  if (opts.mode === "agent" || opts.mode === "spec") {
     const restored = restoreTaskRunState(opts.taskRunState, opts.sessionId);
     taskRunState = restored
       ? { ...restored, maxRepairAttempts: autoFixMaxAttempts }
@@ -149,7 +149,7 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
   const autoFixFailureSummary: string | null = null;
 
   // ── Task-driven state (需要在 termination config 之前) ──
-  const taskDriven = opts.mode === "agent" && Array.isArray(opts.activeTasks) && opts.activeTasks.length > 0;
+  const taskDriven = (opts.mode === "agent" || opts.mode === "spec") && Array.isArray(opts.activeTasks) && opts.activeTasks.length > 0;
   let tasks: TaskItem[] = taskDriven ? opts.activeTasks!.map((t) => ({ ...t })) : [];
   /** Stable messages prefix at loop entry (system/context/decompose/user). */
   const messagePrefixLen = messages.length;

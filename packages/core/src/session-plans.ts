@@ -7,7 +7,6 @@
  * 以及计划文件列表读取。这些操作只依赖会话运行时、会话绑定的项目根、
  * 索引失效与 persist，因此通过 PlansHost 桥接，编排器方法退化为委托。
  */
-import { resolve } from "node:path";
 import { promises as fs } from "node:fs";
 import type { AgentMode } from "@owncoder/shared";
 import type { IndexClient } from "@owncoder/index";
@@ -25,12 +24,14 @@ import {
   listPlans as listPlanFiles,
   readActiveMeta,
   readPlanFile,
+  readPlannerPlan,
+  approvePlannerPlan,
   writeActiveMeta,
   writePlanFile,
   parseTasksFromMarkdown,
   normalizeTasks,
   selectNextPendingTask,
-  ACTIVE_DIR,
+  activeMetaPath,
   type ActivePlanMeta,
   type PlanInfo,
   type TaskItem,
@@ -61,20 +62,18 @@ export interface PlansHost {
  * List plan files. Plans are scoped to the chat session that saved them:
  * when `sessionId` is given only that session's plans are returned, so a
  * freshly created session no longer surfaces plans from older sessions.
- * Omitting `sessionId` (legacy callers) returns the unfiltered list.
+ * 省略 sessionId 时只查询焦点会话，不返回项目全局列表。
  */
 export async function listPlans(host: PlansHost, sessionId?: string): Promise<PlanInfo[]> {
-  const root = sessionId ? host.sessionWorkspaceRoot(sessionId) : host.workspaceRoot();
-  if (!root) return [];
-  const plans = await listPlanFiles(root);
-  if (!sessionId) return plans;
-  return plans.filter((p) => p.sessionId === sessionId);
+  const sid = sessionId ?? host.focusSessionId();
+  if (!sid) return [];
+  return listPlanFiles(host.sessionWorkspaceRoot(sid), sid);
 }
 
-export async function readPlan(host: PlansHost, relPath: string): Promise<string> {
-  const root = host.workspaceRoot();
-  if (!root) throw new Error(ERR_NO_WORKSPACE);
-  return readPlanFile(root, relPath);
+export async function readPlan(host: PlansHost, relPath: string, sessionId?: string): Promise<string> {
+  const sid = sessionId ?? host.focusSessionId();
+  if (!sid) throw new Error("没有当前会话");
+  return readPlanFile(host.sessionWorkspaceRoot(sid), relPath, sid);
 }
 
 export async function getActivePlan(host: PlansHost, sessionId?: string): Promise<ActivePlanMeta | null> {
@@ -284,7 +283,13 @@ export async function approvePlan(
     throw new Error("该计划已批准并切换到 Agent 模式，无需重复操作");
   }
 
-  const body = await readPlanFile(root, path);
+  let body = await readPlanFile(root, path, r.id);
+  const planner = await readPlannerPlan(root, r.id);
+  if (planner) {
+    if (planner.path !== path || planner.mode !== r.mode) throw new Error("批准必须对应当前会话、模式和计划版本");
+    if (planner.mode === "spec") throw new Error("Spec 计划仅授权只读设计，请在会话中批准");
+    body = await approvePlannerPlan(root, r.id, planner);
+  }
   const tasks = normalizeTasks(opts?.tasks && opts.tasks.length > 0 ? opts.tasks : parseTasksFromMarkdown(body));
   const firstPending = selectNextPendingTask(tasks);
   const meta: ActivePlanMeta = {
@@ -326,7 +331,7 @@ export async function clearActivePlan(host: PlansHost, sessionId?: string): Prom
   const root = sid ? host.sessionWorkspaceRoot(sid) : host.workspaceRoot();
   if (root && sid) {
     // 删除 session-scoped 的活动计划文件
-    const activePath = resolve(root, ACTIVE_DIR, `${sid}.json`);
+    const activePath = activeMetaPath(root, sid);
     await fs.unlink(activePath).catch(() => undefined);
   }
   const r = host.rtOpt(sessionId);

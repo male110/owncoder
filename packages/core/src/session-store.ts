@@ -550,6 +550,7 @@ function sanitizeDocumentWorkflow(value: unknown): DocumentWorkflowState | null 
   }
   
   return {
+    sessionId: state.sessionId,
     stage: state.stage,
     documentPath: state.documentPath,
     updatedAt: state.updatedAt,

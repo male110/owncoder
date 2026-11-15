@@ -2,7 +2,6 @@ import { spawn } from "node:child_process";
 
 import { platform, release } from "node:os";
 import { relative, sep } from "node:path";
-import { featureDirRel } from "../../specs.ts";
 import { toAbs } from "../writable.ts";
 import type { ToolContext, ToolResult } from "./types.ts";
 
@@ -226,7 +225,7 @@ export function assertSpecMutationAllowed(ctx: ToolContext, relPath: string): To
 
 /** True when relPath sits under `.owncoder/specs/`. */
 export function isSpecPath(relPath: string): boolean {
-  const prefix = `${featureDirRel("")}/`;
+  const prefix = ".owncoder/specs/";
   const norm = relPath.replace(/\\/g, "/");
   return norm === prefix.slice(0, -1) || norm.startsWith(prefix);
 }

@@ -221,6 +221,7 @@ export function SessionChatPanel({
             />
           ) : null}
           <ChatLog
+            sessionId={sessionId}
             turns={visible}
             liveEvents={liveEvents}
             liveStatus={liveStatus}

@@ -104,9 +104,11 @@ describe("plan 模式历史对话传递", () => {
     expect(userMessages[0].content).not.toContain("第一轮问题");
   });
 
-  it("plan pipeline 不包含 task_decompose 节点", () => {
+  it("spec pipeline 先分解任务再执行 ReAct", () => {
     const plan = builtinSpecPipeline();
-    expect(plan.nodes.some((n) => n.type === "task_decompose")).toBe(false);
+    expect(plan.nodes.findIndex((n) => n.type === "task_decompose")).toBeLessThan(
+      plan.nodes.findIndex((n) => n.type === "explore_tools"),
+    );
   });
 
   it("agent pipeline 仍保留 task_decompose 节点", () => {

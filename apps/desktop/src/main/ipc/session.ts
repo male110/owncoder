@@ -138,13 +138,13 @@ export function registerSessionHandlers(ctx: IpcContext): void {
 
   ipcMain.handle("plans:list", (_e, sessionId?: string) => session.listPlans(sessionId));
 
-  ipcMain.handle("plans:read", (_e, path: string) => session.readPlan(path));
+  ipcMain.handle("plans:read", (_e, path: string, sessionId?: string) => session.readPlan(path, sessionId));
 
   // ── Specs (Kiro 风格 spec → design → tasks 审批流) ─────────────────────────
 
   ipcMain.handle("specs:list", (_e, sessionId?: string) => session.listSpecs(sessionId));
 
-  ipcMain.handle("specs:status", (_e, feature: string) => session.getSpecStatus(feature));
+  ipcMain.handle("specs:status", (_e, feature: string, sessionId?: string) => session.getSpecStatus(feature, sessionId));
 
   ipcMain.handle("specs:approve", (_e, feature: string, sessionId?: string) =>
     session.approveSpec(feature, sessionId),

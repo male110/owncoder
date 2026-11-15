@@ -256,8 +256,9 @@ function recordResult(
       // 仅在尚未设置工作流状态时才创建新状态，避免后续阶段覆盖当前审批闸门
       if (ctx.documentWorkflowUpdate === undefined) {
         ctx.documentWorkflowUpdate = buildSpecWorkflowUpdate(
-          { feature, path: `${featureDirRel(feature)}/${phase}.md`, phase },
+          { feature, path: resultMetadata?.kind === "file_mutation" ? resultMetadata.paths[0]! : `${featureDirRel(feature, ctx.opts.sessionId)}/${phase}.md`, phase },
           ctx.opts.documentWorkflow,
+          ctx.opts.sessionId,
         );
       }
     }

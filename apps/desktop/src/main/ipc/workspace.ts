@@ -123,6 +123,8 @@ export function registerWorkspaceHandlers(ctx: IpcContext): void {
     const ws = session.getState().workspace;
     if (!ws) throw new Error("No workspace open");
     const abs = resolveWorkspacePath(ws.root, String(path || ""));
+    const rel = relative(ws.root, abs).replace(/\\/g, "/");
+    if (/^\.owncoder\/(plans|specs)(\/|$)/i.test(rel)) return session.readPlan(rel);
     return fs.readFile(abs, "utf8");
   });
 
@@ -131,6 +133,8 @@ export function registerWorkspaceHandlers(ctx: IpcContext): void {
     if (!ws) throw new Error("No workspace open");
     const relPath = String(path || "");
     const abs = resolveWorkspacePath(ws.root, relPath);
+    const canonicalPath = relative(ws.root, abs).replace(/\\/g, "/");
+    if (/^\.owncoder\/(plans|specs)(\/|$)/i.test(canonicalPath)) await session.readPlan(canonicalPath);
     await fs.mkdir(dirname(abs), { recursive: true });
     await fs.writeFile(abs, String(content ?? ""), "utf8");
     return { path: relPath };

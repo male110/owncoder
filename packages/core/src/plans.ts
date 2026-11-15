@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
+import { createHash, randomUUID } from "node:crypto";
 import upath from "upath";
-import { isAbsolute, join, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import { fromMarkdown } from "mdast-util-from-markdown";
 
 export interface PlanInfo {
@@ -144,29 +145,165 @@ export interface ActivePlanMeta {
   sessionId?: string | null;
 }
 
-const PLANS_DIR = ".owncoder/plans";
-const ACTIVE_FILE = ".owncoder/plans/.active.json";
-export const ACTIVE_DIR = ".owncoder/plans/.active";
-/** Sidecar index mapping plan filename -> owning chat session id. */
-const PLANS_INDEX_FILE = ".owncoder/plans/.index.json";
-const SESSIONS_DIR = ".owncoder/sessions";
-/** Matches the tool output emitted by save_plan ("Saved plan: .owncoder/plans/x.md"). */
-const SAVED_PLAN_RE = /Saved plan: (\.owncoder\/plans\/[^\s`"')]+)/g;
-
-interface PlansIndexFile {
-  version: 1;
-  /** plan filename -> owning chat session id (null = unknown/legacy). */
-  entries: Record<string, string | null>;
+export interface PlannerPlanRef {
+  sessionId: string;
+  planId: string;
+  version: number;
+  digest: string;
+  path: string;
 }
 
+export interface PlannerPlan extends PlannerPlanRef {
+  sessionId: string;
+  mode: "agent" | "spec";
+  createdAt: string;
+  status: "pending_approval" | "approved" | "revising";
+  originalRequest?: string;
+  approval?: PlannerPlanRef;
+}
+
+function plannerMetaPath(workspaceRoot: string, sessionId: string): string {
+  if (!sessionId) throw new Error("计划缺少会话标识");
+  return resolve(workspaceRoot, ACTIVE_DIR, `planner-${createHash("sha256").update(sessionId).digest("hex")}.json`);
+}
+
+function plannerDigest(content: string): string {
+  return createHash("sha256").update(content).digest("hex");
+}
+
+export function samePlannerPlan(a: PlannerPlanRef, b: PlannerPlanRef): boolean {
+  return !!a.sessionId && a.sessionId === b.sessionId && a.planId === b.planId && a.version === b.version && a.digest === b.digest && a.path === b.path;
+}
+
+async function withPlannerLock<T>(workspaceRoot: string, sessionId: string, operation: () => Promise<T>): Promise<T> {
+  const target = plannerMetaPath(workspaceRoot, sessionId);
+  await fs.mkdir(resolve(workspaceRoot, ACTIVE_DIR), { recursive: true });
+  const lock = `${target}.lock`;
+  try {
+    await fs.mkdir(lock);
+  } catch {
+    throw new Error("计划状态正在更新，请稍后重试；未授权执行");
+  }
+  try {
+    return await operation();
+  } finally {
+    await fs.rmdir(lock);
+  }
+}
+
+async function writePlannerMeta(workspaceRoot: string, plan: PlannerPlan): Promise<void> {
+  const target = plannerMetaPath(workspaceRoot, plan.sessionId);
+  const temp = `${target}.${randomUUID()}.tmp`;
+  try {
+    await fs.writeFile(temp, `${JSON.stringify(plan, null, 2)}\n`, "utf8");
+    await fs.rename(temp, target);
+    const saved = await readPlannerPlan(workspaceRoot, plan.sessionId);
+    if (!saved || JSON.stringify(saved) !== JSON.stringify(plan)) throw new Error("计划状态回读失败");
+  } finally {
+    await fs.unlink(temp).catch(() => undefined);
+  }
+}
+
+export async function readPlannerPlan(workspaceRoot: string, sessionId: string): Promise<PlannerPlan | null> {
+  let raw: string;
+  try {
+    raw = await fs.readFile(plannerMetaPath(workspaceRoot, sessionId), "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
+  const plan = JSON.parse(raw) as PlannerPlan;
+  if (!plan || !/^[a-f0-9-]{36}$/.test(plan.planId) || !Number.isSafeInteger(plan.version) || plan.version < 1
+    || !/^[a-f0-9]{64}$/.test(plan.digest) || plan.sessionId !== sessionId
+    || (plan.mode !== "agent" && plan.mode !== "spec") || !plan.createdAt
+    || !["pending_approval", "approved", "revising"].includes(plan.status)
+    || plan.path !== `${sessionArtifactDir("plans", sessionId)}/${plan.planId}-v${plan.version}.md`
+    || (plan.originalRequest !== undefined && typeof plan.originalRequest !== "string")
+    || (plan.status === "approved" && !plan.approval)
+    || (plan.approval && !samePlannerPlan(plan, plan.approval))) {
+    throw new Error("计划版本元数据无效，禁止执行");
+  }
+  return plan;
+}
+
+export async function validatePlannerPlan(workspaceRoot: string, sessionId: string, expected: PlannerPlanRef, approved = false, allowRevising = false): Promise<string> {
+  const current = await readPlannerPlan(workspaceRoot, sessionId);
+  if (!current || !samePlannerPlan(current, expected) || (current.status === "revising" && !allowRevising)
+    || (approved && (current.status !== "approved" || !current.approval || !samePlannerPlan(current, current.approval)))) {
+    throw new Error("计划版本或批准已失效，请查看并批准当前版本");
+  }
+  const content = await readPlanFile(workspaceRoot, current.path, sessionId);
+  if (plannerDigest(content) !== current.digest) throw new Error("计划文件内容与摘要不一致，禁止执行");
+  const latest = await readPlannerPlan(workspaceRoot, sessionId);
+  if (!latest || !samePlannerPlan(latest, current) || latest.status !== current.status
+    || (approved && (!latest.approval || !samePlannerPlan(latest, latest.approval)))) {
+    throw new Error("校验期间计划发生变化，禁止执行");
+  }
+  return content;
+}
+
+export async function revisePlannerPlan(workspaceRoot: string, sessionId: string, expected: PlannerPlanRef): Promise<void> {
+  await withPlannerLock(workspaceRoot, sessionId, async () => {
+    const current = await readPlannerPlan(workspaceRoot, sessionId);
+    if (!current || !samePlannerPlan(current, expected)) throw new Error("修改请求引用了旧版计划");
+    await writePlannerMeta(workspaceRoot, { ...current, status: "revising", approval: undefined });
+  });
+}
+
+export async function savePlannerPlan(workspaceRoot: string, sessionId: string, mode: "agent" | "spec", content: string, expected?: PlannerPlanRef, originalRequest?: string): Promise<PlannerPlan> {
+  return withPlannerLock(workspaceRoot, sessionId, async () => {
+    const current = await readPlannerPlan(workspaceRoot, sessionId);
+    if ((current && (!expected || !samePlannerPlan(current, expected))) || (!current && expected)) throw new Error("保存时计划版本已变化");
+    if (!content.trim()) throw new Error("不能保存空计划");
+    const planId = current?.planId ?? randomUUID();
+    const version = (current?.version ?? 0) + 1;
+    const body = `${content.trim()}\n`;
+    const path = await writePlanFile(workspaceRoot, body, { filename: `${planId}-v${version}.md`, sessionId });
+    const request = current?.originalRequest ?? originalRequest;
+    const plan: PlannerPlan = {
+      planId, version, path, sessionId, mode, digest: plannerDigest(body), createdAt: new Date().toISOString(), status: "pending_approval",
+      ...(request !== undefined ? { originalRequest: request } : {}),
+    };
+    if (await readPlanFile(workspaceRoot, path, sessionId) !== body) throw new Error("计划文件回读失败");
+    await writePlannerMeta(workspaceRoot, plan);
+    await validatePlannerPlan(workspaceRoot, sessionId, plan);
+    return plan;
+  });
+}
+
+export async function approvePlannerPlan(workspaceRoot: string, sessionId: string, expected: PlannerPlanRef): Promise<string> {
+  return withPlannerLock(workspaceRoot, sessionId, async () => {
+    const content = await validatePlannerPlan(workspaceRoot, sessionId, expected);
+    const current = (await readPlannerPlan(workspaceRoot, sessionId))!;
+    await writePlannerMeta(workspaceRoot, { ...current, status: "approved", approval: { sessionId, planId: current.planId, version: current.version, path: current.path, digest: current.digest } });
+    await validatePlannerPlan(workspaceRoot, sessionId, expected, true);
+    return content;
+  });
+}
+
+const PLANS_DIR = ".owncoder/plans";
+/** 会话标识摘要作为稳定目录名，避免路径穿越和命名歧义。 */
+export function sessionArtifactDir(kind: "plans" | "specs", sessionId: string): string {
+  if (!sessionId?.trim()) throw new Error("文档缺少会话标识");
+  return `.owncoder/${kind}/sessions/${createHash("sha256").update(sessionId).digest("hex")}`;
+}
+
+export function assertSessionArtifactPath(relPath: string, sessionId: string): void {
+  if (!(["plans", "specs"] as const).some((kind) => relPath.startsWith(`${sessionArtifactDir(kind, sessionId)}/`))
+    || relPath.includes("\\") || !relPath.endsWith(".md")
+    || relPath.slice(".owncoder/".length).split("/").some((part) => !part || part.startsWith("."))) {
+    throw new Error("文档不属于当前会话或路径无效");
+  }
+}
+
+export const ACTIVE_DIR = ".owncoder/plans/.active";
 
 export function plansDirAbs(workspaceRoot: string): string {
   return resolve(workspaceRoot, PLANS_DIR);
 }
 
-/** True if path is under `.owncoder/plans/` (not the index cache).
- * Also accepts `.owncoder/specs/<feature>/tasks.md` — an approved spec's task
- * list is executed by the same plan executor, so it counts as a plan path. */
+/** 按路径前缀识别 `.owncoder/plans/` 与 `.owncoder/specs/` 下的路径。
+ * 此处不区分文档种类或元数据文件；写入限制由调用方另行校验。 */
 export function isPlanPath(relPath: string): boolean {
   const norm = relPath.split(/[/\\]/).join("/").replace(/^\.\//, "");
   return (
@@ -208,12 +345,15 @@ export async function writePlanFile(
   content: string,
   opts?: { filename?: string; title?: string; sessionId?: string | null },
 ): Promise<string> {
-  await ensurePlansDir(workspaceRoot);
+  const sessionId = opts?.sessionId;
+  if (!sessionId) throw new Error("计划缺少会话标识");
+  const dir = sessionArtifactDir("plans", sessionId);
+  await fs.mkdir(resolve(workspaceRoot, dir), { recursive: true });
   let name = opts?.filename?.trim() || suggestPlanFilename(opts?.title);
   name = upath.basename(name);
   if (!name.endsWith(".md")) name += ".md";
   if (name.startsWith(".")) throw new Error("invalid plan filename");
-  const rel = `${PLANS_DIR}/${name}`;
+  const rel = `${dir}/${name}`;
   const abs = resolve(workspaceRoot, rel);
   // safety: must stay in plans dir
   if (!isPlanPath(rel)) throw new Error("invalid plan path");
@@ -221,118 +361,13 @@ export async function writePlanFile(
     ? content
     : `# ${opts?.title ?? name.replace(/\.md$/, "")}\n\n${content}`;
   await fs.writeFile(abs, body.endsWith("\n") ? body : `${body}\n`, "utf8");
-  if (opts?.sessionId) {
-    await setPlanOwner(workspaceRoot, name, opts.sessionId);
-  }
+  await fs.writeFile(`${abs}.owner.json`, JSON.stringify({ sessionId }), "utf8");
   return rel.split(/[/\\]/).join("/");
 }
 
-async function readPlansIndex(workspaceRoot: string): Promise<PlansIndexFile> {
-  try {
-    const raw = await fs.readFile(resolve(workspaceRoot, PLANS_INDEX_FILE), "utf8");
-    const data = JSON.parse(raw) as Partial<PlansIndexFile>;
-    if (data?.version !== 1 || !data.entries || typeof data.entries !== "object") {
-      return { version: 1, entries: {} };
-    }
-    const entries: Record<string, string | null> = {};
-    for (const [key, value] of Object.entries(data.entries)) {
-      entries[key] = typeof value === "string" && value.trim() ? value : null;
-    }
-    return { version: 1, entries };
-  } catch {
-    return { version: 1, entries: {} };
-  }
-}
-
-async function writePlansIndex(workspaceRoot: string, index: PlansIndexFile): Promise<void> {
-  await ensurePlansDir(workspaceRoot);
-  const target = resolve(workspaceRoot, PLANS_INDEX_FILE);
-  const temp = `${target}.${process.pid}.${Date.now()}.tmp`;
-  try {
-    await fs.writeFile(temp, JSON.stringify(index, null, 2) + "\n", "utf8");
-    // Same-directory rename keeps readers on a complete state (see writeActiveMeta).
-    await fs.rename(temp, target);
-  } catch (error) {
-    await fs.unlink(temp).catch(() => undefined);
-    throw error;
-  }
-}
-
-/** Record which chat session owns a plan file. */
-async function setPlanOwner(
-  workspaceRoot: string,
-  filename: string,
-  sessionId: string | null,
-): Promise<void> {
-  const index = await readPlansIndex(workspaceRoot);
-  index.entries[filename] = sessionId;
-  await writePlansIndex(workspaceRoot, index);
-}
-
-/**
- * Backfill ownership for plan files that predate the session-scoped index by
- * scanning persisted chat sessions: each session's `lastPlanPath` plus every
- * "Saved plan: <path>" tool output in its history identifies its plan files.
- * Sessions are visited newest-first so a plan saved by several sessions belongs
- * to the most recent one.
- */
-async function inferPlanOwnersFromSessions(
-  workspaceRoot: string,
-  missing: string[],
-): Promise<Record<string, string>> {
-  if (missing.length === 0) return {};
-  const wanted = new Set(missing);
-  const owners: Record<string, string> = {};
-  const dir = resolve(workspaceRoot, SESSIONS_DIR);
-  let files: string[];
-  try {
-    files = (await fs.readdir(dir)).filter((f) => f.endsWith(".json") && f !== "index.json");
-  } catch {
-    return {};
-  }
-  const stamped: { file: string; updatedAt: string }[] = [];
-  for (const file of files) {
-    try {
-      const st = await fs.stat(join(dir, file));
-      stamped.push({ file, updatedAt: st.mtime.toISOString() });
-    } catch {
-      /* skip unreadable */
-    }
-  }
-  stamped.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-  for (const { file } of stamped) {
-    let data: {
-      id?: string;
-      lastPlanPath?: string | null;
-      history?: Array<{ content?: unknown }>;
-    };
-    try {
-      data = JSON.parse(await fs.readFile(join(dir, file), "utf8"));
-    } catch {
-      continue;
-    }
-    if (!data || typeof data !== "object") continue;
-    const sid = typeof data.id === "string" && data.id ? data.id : file.replace(/\.json$/, "");
-    const paths = new Set<string>();
-    if (typeof data.lastPlanPath === "string") paths.add(data.lastPlanPath);
-    if (Array.isArray(data.history)) {
-      for (const turn of data.history) {
-        if (typeof turn?.content !== "string") continue;
-        for (const match of turn.content.matchAll(SAVED_PLAN_RE)) {
-          paths.add(match[1]!);
-        }
-      }
-    }
-    for (const p of paths) {
-      const name = p.split("/").pop() ?? "";
-      if (wanted.has(name) && !(name in owners)) owners[name] = sid;
-    }
-  }
-  return owners;
-}
-
-export async function listPlans(workspaceRoot: string): Promise<PlanInfo[]> {
-  const dir = plansDirAbs(workspaceRoot);
+export async function listPlans(workspaceRoot: string, sessionId?: string): Promise<PlanInfo[]> {
+  if (!sessionId) return [];
+  const dir = resolve(workspaceRoot, sessionArtifactDir("plans", sessionId));
   let entries;
   try {
     entries = await fs.readdir(dir, { withFileTypes: true });
@@ -342,25 +377,14 @@ export async function listPlans(workspaceRoot: string): Promise<PlanInfo[]> {
   const mdFiles = entries.filter(
     (ent) => ent.isFile() && ent.name.endsWith(".md") && !ent.name.startsWith("."),
   );
-  const index = await readPlansIndex(workspaceRoot);
-  const missing = mdFiles.map((ent) => ent.name).filter((name) => !(name in index.entries));
-  if (missing.length > 0) {
-    const inferred = await inferPlanOwnersFromSessions(workspaceRoot, missing);
-    for (const name of missing) {
-      index.entries[name] = inferred[name] ?? null;
-    }
-    try {
-      await writePlansIndex(workspaceRoot, index);
-    } catch {
-      /* index write failure must not break listing */
-    }
-  }
+
   const out: PlanInfo[] = [];
   for (const ent of mdFiles) {
     const abs = join(dir, ent.name);
     const st = await fs.stat(abs);
-    const rel = `${PLANS_DIR}/${ent.name}`;
-    const text = await fs.readFile(abs, "utf8").catch(() => "");
+    const rel = `${sessionArtifactDir("plans", sessionId)}/${ent.name}`;
+    const text = await readPlanFile(workspaceRoot, rel, sessionId).catch(() => null);
+    if (text === null) continue;
     const title = extractTitle(text, ent.name);
     out.push({
       path: rel,
@@ -368,27 +392,33 @@ export async function listPlans(workspaceRoot: string): Promise<PlanInfo[]> {
       mtimeMs: st.mtimeMs,
       size: st.size,
       kind: classifyPlanKind(ent.name, title),
-      sessionId: index.entries[ent.name] ?? null,
+      sessionId,
     });
   }
   out.sort((a, b) => b.mtimeMs - a.mtimeMs);
   return out;
 }
 
-export async function readPlanFile(workspaceRoot: string, relPath: string): Promise<string> {
-  assertPlanPath(relPath);
-  // 如果是绝对路径，直接使用；相对路径基于工作区解析
-  const abs = isAbsolute(relPath) ? relPath : resolve(workspaceRoot, relPath);
+export async function readPlanFile(workspaceRoot: string, relPath: string, sessionId?: string): Promise<string> {
+  if (!sessionId) throw new Error("读取文档缺少会话标识");
+  assertSessionArtifactPath(relPath, sessionId);
+  const abs = resolve(workspaceRoot, relPath);
+  const real = await fs.realpath(abs);
+  const sessionRoot = resolve(workspaceRoot, relPath.split("/").slice(0, 4).join("/"));
+  if (await fs.realpath(sessionRoot) !== sessionRoot) throw new Error("会话目录不能是链接");
+  const relativePath = relative(sessionRoot, real);
+  if (relativePath.startsWith("..") || isAbsolute(relativePath)) throw new Error("文档链接越过会话目录");
+  const owner = JSON.parse(await fs.readFile(`${abs}.owner.json`, "utf8"));
+  if (owner.sessionId !== sessionId) throw new Error("文档所属会话不匹配");
   return fs.readFile(abs, "utf8");
 }
 
 export /** Get the path for session-scoped active plan meta file. */
 function activeMetaPath(workspaceRoot: string, sessionId?: string): string {
   if (!sessionId) {
-    // 向后兼容：无 sessionId 时使用旧的全局文件
-    return resolve(workspaceRoot, ACTIVE_FILE);
+    throw new Error("活动计划缺少会话标识");
   }
-  return resolve(workspaceRoot, ACTIVE_DIR, `${sessionId}.json`);
+  return resolve(workspaceRoot, ACTIVE_DIR, `${createHash("sha256").update(sessionId).digest("hex")}.json`);
 }
 
 async function ensureActiveDir(workspaceRoot: string): Promise<void> {
@@ -400,30 +430,11 @@ export async function readActiveMeta(workspaceRoot: string, sessionId?: string):
     const path = activeMetaPath(workspaceRoot, sessionId);
     const raw = await fs.readFile(path, "utf8");
     const meta = JSON.parse(raw) as Partial<ActivePlanMeta>;
-    if (!meta?.path || !isPlanPath(meta.path)) return null;
+    if (!sessionId || meta.sessionId !== sessionId || !meta?.path) return null;
+    await readPlanFile(workspaceRoot, meta.path, sessionId);
     return normalizeActiveMeta(meta);
   } catch {
-    // 尝试读取旧的全局文件（向后兼容）
-    if (sessionId) {
-      try {
-        const raw = await fs.readFile(resolve(workspaceRoot, ACTIVE_FILE), "utf8");
-        const meta = JSON.parse(raw) as Partial<ActivePlanMeta>;
-        if (!meta?.path || !isPlanPath(meta.path)) return null;
-        const normalized = normalizeActiveMeta(meta);
-        // 如果全局文件没有 sessionId，说明是旧版本，迁移到 session-scoped 文件
-        if (!normalized.sessionId) {
-          normalized.sessionId = sessionId;
-          await writeActiveMeta(workspaceRoot, normalized, sessionId);
-          // 不删除旧文件，以防其他 session 还在使用
-        }
-        // 如果 sessionId 匹配，返回
-        if (normalized.sessionId === sessionId) {
-          return normalized;
-        }
-      } catch {
-        // 旧文件也不存在，返回 null
-      }
-    }
+    // 无归属的旧全局数据安全失败，不自动认领。
     return null;
   }
 }
@@ -436,6 +447,7 @@ export function normalizeActiveMeta(meta: Partial<ActivePlanMeta>): ActivePlanMe
     : null;
   return {
     path: meta.path ?? "",
+    sessionId: meta.sessionId,
     approvedAt: meta.approvedAt ?? new Date().toISOString(),
     title: meta.title,
     tasks,
@@ -548,6 +560,8 @@ export async function writeActiveMeta(
   meta: ActivePlanMeta,
   sessionId?: string,
 ): Promise<void> {
+  if (!sessionId || meta.sessionId !== sessionId) throw new Error("活动计划所属会话不匹配");
+  await readPlanFile(workspaceRoot, meta.path, sessionId);
   await ensurePlansDir(workspaceRoot);
   if (sessionId) {
     await ensureActiveDir(workspaceRoot);

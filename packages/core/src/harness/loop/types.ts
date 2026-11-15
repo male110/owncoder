@@ -309,6 +309,7 @@ export interface DocumentMetadata {
 
 /** Persisted state for the staged spec → design → tasks approval workflow. */
 export interface DocumentWorkflowState {
+  sessionId?: string;
   stage:
     | "awaiting_spec_confirmation"
     | "awaiting_design_confirmation"
@@ -339,11 +340,7 @@ export interface AgentLoopOpts {
   signal?: AbortSignal;
   onEvent?: (ev: TurnEventInput) => void;
   maxIterations?: number;
-  /**
-   * Optional replacement for the loop's default `persistExperiences()` call
-   * (which writes to `.owncoder/experiences/`). `SessionOrchestrator` never sets
-   * this, so its existing behavior is unchanged.
-   */
+  /** 可选的经验持久化实现；未提供时使用循环默认的 persistExperiences()。 */
   persistExperiencesOverride?: (
     workspaceRoot: string,
     report: TraceReport,

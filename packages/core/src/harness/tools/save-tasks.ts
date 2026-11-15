@@ -15,8 +15,8 @@ export async function toolSaveTasks(
   const feat = feature.trim() || ctx.currentFeature?.trim() || inferFeatureFromContent(content);
   if (!feat) return fail("save_tasks requires a feature name (pass `feature` explicitly)");
   // Gate: the tasks phase only starts after the user approved the design.
-  const state = await readFeatureState(ctx.workspaceRoot, feat);
-  if (state?.stage === "awaiting_design_approval") {
+  const state = await readFeatureState(ctx.workspaceRoot, feat, ctx.sessionId!);
+  if (!state || !["design_approved", "awaiting_tasks_approval", "approved"].includes(state.stage)) {
     return fail(
       `The design for "${feat}" is still awaiting the user's approval. Do not write tasks.md until the user approves the design.`,
     );
@@ -26,8 +26,8 @@ export async function toolSaveTasks(
       `The spec for "${feat}" is still awaiting the user's approval. Do not write tasks.md yet.`,
     );
   }
-  const rel = await saveTasks(ctx.workspaceRoot, feat, content);
-  await writeFeatureState(ctx.workspaceRoot, feat, stageForPhase("tasks"));
+  const rel = await saveTasks(ctx.workspaceRoot, feat, content, ctx.sessionId!);
+  await writeFeatureState(ctx.workspaceRoot, feat, stageForPhase("tasks"), ctx.sessionId!);
   ctx.currentFeature = feat;
   return okMutation(
     cap(

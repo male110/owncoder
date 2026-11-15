@@ -120,15 +120,15 @@ export async function executeAgentTurn(ctx: AgentTurnContext): Promise<AgentLoop
   let currentTaskId: string | null | undefined;
   if (r.mode === "agent" && r.activePlanPath) {
     try {
-      const content = await readPlanFile(workspaceRoot, r.activePlanPath);
+      const content = await readPlanFile(workspaceRoot, r.activePlanPath, sessionId);
       activePlan = { path: r.activePlanPath, content };
-      const meta = await readActiveMeta(workspaceRoot);
+      const meta = await readActiveMeta(workspaceRoot, sessionId);
       if (meta && meta.tasks.length > 0) {
         activeTasks = meta.tasks;
         currentTaskId = meta.currentTaskId;
       }
-    } catch {
-      activePlan = null;
+    } catch (error) {
+      throw new Error(`活动计划归属或文件校验失败，执行已暂停：${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -138,14 +138,14 @@ export async function executeAgentTurn(ctx: AgentTurnContext): Promise<AgentLoop
     // 有批准计划：写回 .owncoder/plans/.active/<sid>.json（线程安全队列）。
     if (activePlanPath) {
       await ctx.enqueueActivePlanUpdate(async () => {
-        const meta = await readActiveMeta(workspaceRoot);
+        const meta = await readActiveMeta(workspaceRoot, sessionId);
         if (!meta) throw new Error("活动计划在任务执行期间丢失");
         if (meta.path !== activePlanPath) {
           throw new Error("活动计划已切换，拒绝写入过期的任务状态");
         }
         meta.tasks = snapshot;
         meta.currentTaskId = nextId;
-        await writeActiveMeta(workspaceRoot, meta);
+        await writeActiveMeta(workspaceRoot, meta, sessionId);
       });
     }
     // 无论有无计划都下发 task_update，DecomposeCard 靠它实时显示顺序任务状态。

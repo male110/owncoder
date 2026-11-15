@@ -57,7 +57,9 @@ export function documentIntentContext(state: DocumentWorkflowState): string {
 export function buildSpecWorkflowUpdate(
   document: { feature: string; path: string; phase: DocumentType },
   existing: DocumentWorkflowState | null | undefined,
+  sessionId: string,
 ): DocumentWorkflowState {
+  if (existing?.sessionId !== sessionId) existing = null;
   const stage: DocumentWorkflowState["stage"] =
     document.phase === "spec"
       ? "awaiting_spec_confirmation"
@@ -108,6 +110,7 @@ export function buildSpecWorkflowUpdate(
   }
 
   return {
+    sessionId,
     stage,
     documentPath: document.path,
     updatedAt: new Date().toISOString(),

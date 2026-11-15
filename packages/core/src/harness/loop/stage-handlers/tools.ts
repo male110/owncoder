@@ -51,7 +51,7 @@ async function runToolLoop(ctx: StageHandlerContext): Promise<void> {
     reasoningTrace, state, node, taskClassification,
   } = ctx;
 
-  if (opts.mode === "agent" && !requireAgentPlanApproval(ctx)) return;
+  if ((opts.mode === "agent" || state.plannerPlan) && !(opts.leanPipeline && opts.readOnly) && !await requireAgentPlanApproval(ctx)) return;
 
   // 使用分阶段模型配置（如果启用）
   const stageModel = resolveStageModel(opts.workflow, opts.mode, node, "react");

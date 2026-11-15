@@ -17,6 +17,7 @@ import { allEnhancedTools } from "./enhanced-tools.ts";
 import { OS_LOCALE } from "./tools/shared.ts";
 import { BudgetLedger } from "./budget-ledger.ts";
 import { EvidenceStore } from "./evidence-store.ts";
+import { assertSessionArtifactPath, readPlanFile } from "../plans.ts";
 
 // ── Language directive: single source of truth for reply-language instruction ──
 // All LLM calls within one task (main agent loop AND pre-loop stages such as
@@ -80,6 +81,7 @@ import { stampTurnEvent, type AgentLoopOpts, type AgentLoopResult, type TurnEven
 
 import { resolveMidStages, resolveStageModel } from "./loop/stages.ts";
 import { runPipelineScheduler, type SchedulerContext, type SchedulerState } from "./loop/pipeline-scheduler.ts";
+import { resumeAgentPlan } from "./loop/stage-handlers/planner.ts";
 import { runVerifyReport, mergeVerificationIntoAssistant } from "./loop/react-verify.ts";
 
 export type { TurnEvent, TurnEventInput, ChatTurn, DocumentWorkflowState, AgentLoopOpts, AgentLoopResult, ReactDecisionSummary } from "./loop/types.ts";
@@ -116,6 +118,23 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
   if (!sessionId) {
     throw new Error("runAgentLoop requires a non-empty sessionId");
   }
+  if (opts.documentWorkflow?.sessionId !== sessionId) opts = { ...opts, documentWorkflow: null };
+  if (opts.documentWorkflow) {
+    try {
+      for (const path of [opts.documentWorkflow.documentPath, ...(opts.documentWorkflow.allDocuments ?? []), ...(opts.documentWorkflow.documents ?? []).map((d) => d.path)]) {
+        await readPlanFile(opts.workspaceRoot, path, sessionId);
+      }
+    } catch {
+      opts = { ...opts, documentWorkflow: null };
+    }
+  }
+  if (opts.activePlan) await readPlanFile(opts.workspaceRoot, opts.activePlan.path, sessionId);
+  opts = { ...opts, history: opts.history.filter((turn) => {
+    const references = [...turn.content.matchAll(/<!--plan_saved:([^>]+)-->/g)];
+    return references.every((match) => {
+      try { assertSessionArtifactPath(match[1]!.trim(), sessionId); return true; } catch { return false; }
+    });
+  }) };
   const innerOnEvent = opts.onEvent;
   if (innerOnEvent) {
     opts = {
@@ -270,7 +289,7 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
     memoryStore: opts.memoryStore,
     projectMemoryStore: opts.projectMemoryStore,
     sessionChanges: opts.sessionChanges,
-    // 子智能体派发：dispatch_agent 工具通过这里运行隔离的 Explore 子循环。
+    // 子智能体派发：按请求角色运行隔离子循环（包括 Explore 与 Planner）。
     // 动态导入 run-subagent，避免 subagent ↔ loop 的静态导入环。
     dispatchSubagent: async (request) => {
       const { runExploreSubagent } = await import("./subagent/run-subagent.ts");
@@ -551,7 +570,10 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
 
   console.log(ts(`scheduler start stages=${midStages.map((n: PipelineNode) => n.type).join(",")}`));
   try {
-    await runPipelineScheduler(midStages, schedulerCtx);
+    await resumeAgentPlan(schedulerCtx);
+    if (!state.aborted && !state.blocked && !state.awaitingUserConfirmation) {
+      await runPipelineScheduler(midStages, schedulerCtx);
+    }
     console.log(ts(`scheduler done`));
   } catch (stageError) {
     // A stage handler (verify, post_verify, etc.) threw unexpectedly after the

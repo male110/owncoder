@@ -751,7 +751,7 @@ export class SessionOrchestrator {
         this.applyLoadedSession(created.session);
       }
     }
-    const active = await readActiveMeta(root);
+    const active = await readActiveMeta(root, this.state.activeSessionId ?? undefined);
     const r = this.rtOpt();
     if (r) r.activePlanPath = active?.path ?? null;
   }
@@ -797,8 +797,7 @@ export class SessionOrchestrator {
     // trigger a second full-workspace build in this process.
 
     this.setProjectMemoriesDir(root);
-    const active = await readActiveMeta(root);
-    const activePlanPath = active?.path ?? null;
+
     await this.reloadProjectRules();
     await this.reloadProjectSkills();
 
@@ -817,7 +816,7 @@ export class SessionOrchestrator {
       this.state.sessionTitle = existing.sessionTitle;
       await setActiveSessionId(root, id);
       const r = this.rtOpt();
-      if (r) r.activePlanPath = activePlanPath;
+      if (r) r.activePlanPath = (await readActiveMeta(root, r.id))?.path ?? null;
       return;
     }
     const saved = await loadSessionById(root, id);
@@ -829,7 +828,7 @@ export class SessionOrchestrator {
     }
     // Apply the workspace-level active plan path to the focus runtime.
     const r = this.rtOpt();
-    if (r) r.activePlanPath = activePlanPath;
+    if (r) r.activePlanPath = (await readActiveMeta(root, r.id))?.path ?? null;
   }
 
   /**
@@ -1336,14 +1335,14 @@ export class SessionOrchestrator {
    * List plan files. Plans are scoped to the chat session that saved them:
    * when `sessionId` is given only that session's plans are returned, so a
    * freshly created session no longer surfaces plans from older sessions.
-   * Omitting `sessionId` (legacy callers) returns the unfiltered list.
+   * 省略 sessionId 时只查询焦点会话。
    */
   async listPlans(sessionId?: string): Promise<PlanInfo[]> {
     return listPlans(this.plansHost, sessionId);
   }
 
-  async readPlan(relPath: string): Promise<string> {
-    return readPlan(this.plansHost, relPath);
+  async readPlan(relPath: string, sessionId?: string): Promise<string> {
+    return readPlan(this.plansHost, relPath, sessionId);
   }
 
   async getActivePlan(sessionId?: string): Promise<ActivePlanMeta | null> {
@@ -1416,8 +1415,8 @@ export class SessionOrchestrator {
     return listSpecFeatures(this.specsHost, sessionId);
   }
 
-  async getSpecStatus(feature: string): Promise<SpecStatusDto> {
-    return getSpecFeatureStatus(this.specsHost, feature);
+  async getSpecStatus(feature: string, sessionId?: string): Promise<SpecStatusDto> {
+    return getSpecFeatureStatus(this.specsHost, feature, sessionId);
   }
 
   async approveSpec(feature: string, sessionId?: string): Promise<SessionState> {

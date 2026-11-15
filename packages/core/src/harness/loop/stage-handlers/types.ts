@@ -54,11 +54,13 @@ export interface SchedulerState {
   blockedReason?: string;
   /** Native dispatch_agent tool call requested by the decomposition model. */
   planRequested?: boolean;
-  /** Agent plan approval gate result for this turn. */
-  planApproval?: "approved" | "rejected" | "needs_revision" | "unavailable" | null;
+  /** 本轮计划审批结果；保存成功后等待下一轮批准。 */
+  planApproval?: "pending_approval" | "approved" | "rejected" | "needs_revision" | "unavailable" | null;
+  /** 已保存并回读验证的当前计划版本。 */
+  plannerPlan?: import("../../../plans.ts").PlannerPlan;
   /** User feedback returned while revising or rejecting the generated plan. */
   planApprovalFeedback?: string;
-  /** Read-only Planner output, set only after a validated plan is produced. */
+  /** 仅在具体文件版本获批后设置的完整正文；执行前须再次校验。 */
   approvedAgentPlan?: string;
   /** 本轮统一任务运行状态（由 ReAct 回写）。 */
   taskRunState?: import("../../../task-run.ts").TaskRunState | null;

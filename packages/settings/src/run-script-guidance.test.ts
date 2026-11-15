@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { BUILTIN_AGENT_PROMPT, BUILTIN_SPEC_PROMPT } from "./builtin-prompts.js";
-import { BUILTIN_TASK_DECOMPOSE_PROMPT } from "./task-decompose-prompt.js";
+import { BUILTIN_SPEC_TASK_DECOMPOSE_PROMPT, BUILTIN_TASK_DECOMPOSE_PROMPT } from "./task-decompose-prompt.js";
 
 // run_script 的工具选择规则已从项目上下文片段提升到内置系统提示词（spec/agent）：
 // 单次 grep/glob/read_file 直接作为顶层工具调用，run_script 只用于实质过滤/聚合/解析/交叉比对
@@ -42,6 +42,41 @@ for (const [mode, prompt] of [["agent", BUILTIN_AGENT_PROMPT], ["spec", BUILTIN_
     });
   });
 }
+
+describe("spec-mode Planner eligibility", () => {
+  it("plans cross-file architecture before approval without escalating simple requests", () => {
+    expect(BUILTIN_SPEC_PROMPT).toContain("use dispatch_agent with agent_type=\"Planner\" first");
+    expect(BUILTIN_SPEC_PROMPT).toContain("crosses modules or workflow boundaries");
+    expect(BUILTIN_SPEC_PROMPT).toContain("even when the current deliverable is only a design");
+    expect(BUILTIN_SPEC_PROMPT).toContain("## Final Report");
+    expect(BUILTIN_SPEC_PROMPT).toContain("相关文件 backed by actual code paths and line or symbol ranges");
+    expect(BUILTIN_SPEC_PROMPT).toContain("Do not call Planner merely because a request mentions design");
+    expect(BUILTIN_SPEC_PROMPT).toContain("explanations of an already-known single file");
+    expect(BUILTIN_SPEC_PROMPT).toContain("do not edit source code before approval");
+    expect(BUILTIN_SPEC_PROMPT).toContain("Present its plan via ask_user for explicit approval");
+    expect(BUILTIN_SPEC_PROMPT).toContain("if approval is unavailable, rejected, or requests revision, pause without saving the next document");
+  });
+});
+
+describe("task-decompose Planner classification", () => {
+  it("keeps design deliverables separate from Planner eligibility and code edits", () => {
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain("Deliverable classification is separate from Planner eligibility");
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain("even when the current deliverable is only a design or plan");
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain("tracing cross-module workflows");
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain("an ordinary conceptual proposal or explanation of a known single file does not qualify");
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain("Generate code-change tasks only when");
+  });
+});
+
+describe("dedicated spec task decomposition", () => {
+  it("uses the Agent JSON fields but prohibits code implementation", () => {
+    expect(BUILTIN_SPEC_TASK_DECOMPOSE_PROMPT).toContain("# Output requirements");
+    expect(BUILTIN_SPEC_TASK_DECOMPOSE_PROMPT).toContain('\"relevantHistory\"');
+    expect(BUILTIN_SPEC_TASK_DECOMPOSE_PROMPT).toContain("never create implementation tasks that edit source code");
+    expect(BUILTIN_SPEC_TASK_DECOMPOSE_PROMPT).toContain("crossing modules or workflows");
+    expect(BUILTIN_SPEC_TASK_DECOMPOSE_PROMPT).toContain("ordinary conceptual requests or explanations of a known single file");
+  });
+});
 
 describe("task-decompose run_script guidance", () => {
   it("no longer steers task executors toward run_script", () => {

@@ -18,8 +18,8 @@ export async function toolSaveSpec(
   // same feature.
   const feat = feature.trim() || ctx.currentFeature?.trim() || inferFeatureFromContent(content);
   if (!feat) return fail("save_spec requires a feature name (pass `feature` explicitly)");
-  const rel = await saveSpec(ctx.workspaceRoot, feat, content);
-  await writeFeatureState(ctx.workspaceRoot, feat, stageForPhase("spec"));
+  const rel = await saveSpec(ctx.workspaceRoot, feat, content, ctx.sessionId!);
+  await writeFeatureState(ctx.workspaceRoot, feat, stageForPhase("spec"), ctx.sessionId!);
   ctx.currentFeature = feat;
   return okMutation(
     cap(
