@@ -27,6 +27,7 @@ import {
 } from "./queue-controller";
 import type { ChatTurnDto, TaskStatusDto } from "../../../preload/index";
 import { t } from "../../../shared/i18n/core";
+import { extractPlanPath } from "../components/chat-log/plan-marker";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -754,15 +755,26 @@ export function useChatActions(deps: {
 
       // 追加而非替换：用后端最新历史合并，保留 injectPlanNotification 注入的前端专属消息。
       // 策略：取后端历史，但保留前端中含 <!--plan_saved:--> 标记的通知消息（仅存在于前端）。
+      // 去重用 extractPlanPath 精确匹配计划路径，避免 content.includes 的脆弱性
+      // （如正文偶然包含标记字符串、或不同计划共享相同文本前缀）。
       const backendHistory = await window.owncoder.getChatHistory(sid);
+      const backendPlanPaths = new Set<string>();
+      for (const turn of backendHistory) {
+        if (turn.role === "assistant") {
+          const p = extractPlanPath(turn.content);
+          if (p) backendPlanPaths.add(p);
+        }
+      }
       chat.setHistory((frontHistory) => {
         const planNotices = frontHistory.filter(
-          (t) => t.role === "assistant" && t.content.includes("<!--plan_saved:"),
+          (turn) => turn.role === "assistant" && extractPlanPath(turn.content) !== null,
         );
-        // 后端历史里已有的内容不重复添加
         const merged = [...backendHistory];
         for (const notice of planNotices) {
-          if (!merged.some((t) => t.content === notice.content)) {
+          const noticePlanPath = extractPlanPath(notice.content);
+          // 后端历史中已包含相同计划路径的通知则跳过，避免重复
+          if (noticePlanPath && backendPlanPaths.has(noticePlanPath)) continue;
+          if (!merged.some((turn) => turn.content === notice.content)) {
             merged.push(notice);
           }
         }

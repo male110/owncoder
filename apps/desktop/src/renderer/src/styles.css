@@ -2488,6 +2488,59 @@ button.ghost.accent {
   color: #fff;
 }
 
+/* 复制路径按钮：ghost 风格，复制后切换为 ✓（借鉴 ZCode switch-mode.tsx header 复制按钮）。 */
+.plan-card-copy {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.plan-card-copy:hover {
+  color: var(--text);
+  border-color: var(--border);
+}
+
+/* 限高 + mask 渐隐必须作用于同一节点，分层会导致渐隐失效。 */
+.plan-preview-body--masked {
+  max-height: 220px;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 30%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 0%, #000 30%, transparent 100%);
+}
+
+/* 悬浮式主 CTA：rounded-full，居中悬浮在预览底部渐隐之上。 */
+.plan-approve-cta {
+  display: block;
+  margin: -34px auto 8px;
+  position: relative;
+  z-index: 1;
+  padding: 8px 20px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff;
+  background: var(--accent, #4a9eff);
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  transition: opacity 0.15s;
+}
+
+.plan-approve-cta:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 /* Markdown */
 .md-body {
   font-size: 14px;

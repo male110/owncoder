@@ -31,7 +31,7 @@ import { AgentSidebar } from "./components/AgentSidebar";
 import { SessionChatPanel } from "./components/SessionChatPanel";
 import { Composer } from "./components/Composer";
 import { ChangesBar } from "./components/ChangesBar";
-import { PlansBar } from "./components/PlansBar";
+import { PlanActionsContext } from "./components/chat-log/AssistantBubble";
 import { TaskListBar } from "./components/TaskListBar";
 import { TerminalDock } from "./components/TerminalDock";
 import { CommandPalette } from "./components/CommandPalette";
@@ -71,9 +71,6 @@ export function App() {
   const sessionActivePlanMeta = activeSessionId
     ? (activePlanMetaBySession[activeSessionId] ?? null)
     : null;
-  const sessionActivePlanPath = activeSessionId
-    ? (activePlanPathBySession[activeSessionId] ?? null)
-    : null;
   const sessionPlans = activeSessionId
     ? (plansBySession[activeSessionId] ?? []).filter((plan) => plan.sessionId === activeSessionId)
     : [];
@@ -92,6 +89,13 @@ export function App() {
   } = useUiStore();
 
   // ── Layout refs ─────────────────────────────────────────────────────────────
+
+  /** 共享的 per-plan 批准飞行锁：key = sessionId → 正在批准中的 planPath 集合。
+   *  PlanCard 与 PlansBar 两个入口共用，避免同一计划被并发重复批准。 */
+  const [approvingPlanPathsBySession, setApprovingPlanPathsBySession] = useState<Record<string, Set<string>>>({});
+
+  /** 空集合常量：无批准飞行锁时复用同一引用，避免 PlanActionsContext value 每次重建。 */
+  const EMPTY_PLAN_PATH_SET = useRef<Set<string>>(new Set()).current;
 
   /** 危险 bash 自动批准开关（settings modes.agent.autoApproveBash）。
    *  本地镜像：挂载时与设置面板保存后从 settings 刷新，变更后 debounce 自动保存，
@@ -162,7 +166,6 @@ export function App() {
 
   useChatEvents();
 
-
   const {
     onSend, onRegenerate,
     onApprovePlan, onUpdateTask, onExecuteTasks,
@@ -180,6 +183,33 @@ export function App() {
     createPendingSession,
     onNewSession,
   });
+
+  /** 批准计划包装：进入时登记 per-plan 飞行锁，结束后清除。
+   *  与 PlanCard / PlansBar 共享同一把锁，杜绝双入口并发批准。 */
+  const handleApprovePlan = useCallback((path?: string) => {
+    const sid = useSessionStore.getState().activeSessionId;
+    if (!sid || !path) return;
+    setApprovingPlanPathsBySession((prev) => {
+      const current = prev[sid];
+      if (current?.has(path)) return prev;
+      const next = new Set(current ?? []);
+      next.add(path);
+      return { ...prev, [sid]: next };
+    });
+    void (async () => {
+      try {
+        await onApprovePlan(path);
+      } finally {
+        setApprovingPlanPathsBySession((prev) => {
+          const current = prev[sid];
+          if (!current?.has(path)) return prev;
+          const next = new Set(current);
+          next.delete(path);
+          return { ...prev, [sid]: next };
+        });
+      }
+    })();
+  }, [onApprovePlan]);
 
   // pending 新会话时即使 activeSessionId 尚未清空，也必须读写 PENDING 键，
   // 与 onSend / resolveComposerDraftText 保持一致，否则会出现「有字点发送无反应」。
@@ -462,8 +492,14 @@ export function App() {
   const chatPanel = (
     <>
       {!showBlank && panelSessions.map((sid) => (
+        <PlanActionsContext.Provider key={sid} value={{
+          plans: sid === activeSessionId ? sessionPlans : (plansBySession[sid] ?? []),
+          activePlanPath: activePlanPathBySession[sid] ?? null,
+          busy: busy || sending || sid !== activeSessionId,
+          onApprovePlan: (path) => { if (sid === useSessionStore.getState().activeSessionId) handleApprovePlan(path); },
+          approvingPlanPaths: approvingPlanPathsBySession[sid] ?? EMPTY_PLAN_PATH_SET,
+        }}>
         <SessionChatPanel
-          key={sid}
           sessionId={sid}
           isActive={sid === activeSessionId}
           llmConfigured={llmConfigured}
@@ -473,6 +509,7 @@ export function App() {
           onOpenSettings={openSettings}
           onSendQueuedMessage={(index) => sendQueued(sid, index)}
         />
+        </PlanActionsContext.Provider>
       ))}
 
       {!showBlank && (
@@ -486,15 +523,6 @@ export function App() {
             onKeepFile={(p) => void onKeepFile(p)}
             onUndoFile={(p) => void onUndoFile(p)}
             onViewDiff={openEditorDiff}
-            onOpenFile={openEditorFile}
-          />
-          <PlansBar
-            key={activeSessionId}
-            plans={sessionPlans}
-            activePlanPath={sessionActivePlanPath}
-            busy={busy || sending}
-            onApprovePlan={(p) => void onApprovePlan(p)}
-            onReadPlan={(p) => window.owncoder.readPlan(p, activeSessionId ?? undefined)}
             onOpenFile={openEditorFile}
           />
           {sessionActivePlanMeta && sessionActivePlanMeta.tasks.length > 0 && sessionActivePlanMeta.path ? (

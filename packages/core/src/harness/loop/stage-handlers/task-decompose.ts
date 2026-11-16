@@ -38,7 +38,28 @@ import type { StageHandler } from "./types.ts";
 import { DISPATCH_AGENT_TOOL_DEF } from "../../enhanced-tools/subagent.ts";
 import { PLANNER_SUBAGENT_TYPE } from "../../subagent/planner-subagent.ts";
 import { runAgentPlanner } from "./planner.ts";
-import type { ToolCall } from "@owncoder/llm";
+import type { ToolCall, ToolDef } from "@owncoder/llm";
+
+/** 任务分解只提供 Planner；其他阶段仍可使用 Explore。 */
+export const DECOMPOSE_PLANNER_TOOL_DEF: ToolDef = {
+  ...DISPATCH_AGENT_TOOL_DEF,
+  function: {
+    ...DISPATCH_AGENT_TOOL_DEF.function,
+    description: "Only for high-impact, cross-file codebase changes needing repository-grounded planning and separate user approval. The Planner researches the repository in its own isolated read-only context and returns a structured plan. Never dispatch Explore in task decomposition; return task JSON for local or already-located work.",
+    parameters: {
+      ...(DISPATCH_AGENT_TOOL_DEF.function.parameters as Record<string, unknown>),
+      properties: {
+        ...((DISPATCH_AGENT_TOOL_DEF.function.parameters as Record<string, any>).properties as Record<string, unknown>),
+        agent_type: {
+          type: "string",
+          enum: [PLANNER_SUBAGENT_TYPE],
+          description: "Planner only; repository research is performed by the Planner itself.",
+        },
+      },
+      required: ["agent_type", "task"],
+    },
+  },
+};
 import {
   collectToolCallsFromTurns,
   persistDecomposeRound,
@@ -79,6 +100,19 @@ export {
 /** 兼容旧返回结构；当前分解不再生成独立的 turnInformationTask。 */
 function buildTurnInformationTask(): TaskItem | null {
   return null;
+}
+
+export function isDecomposePlannerCall(call: ToolCall | undefined, plannerAvailable: boolean): boolean {
+  if (!plannerAvailable || call?.type !== "function" || call.function.name !== "dispatch_agent") return false;
+  try {
+    const args: unknown = JSON.parse(call.function.arguments);
+    return !!args && typeof args === "object" && !Array.isArray(args)
+      && (args as Record<string, unknown>).agent_type === PLANNER_SUBAGENT_TYPE
+      && typeof (args as Record<string, unknown>).task === "string"
+      && !!(args as Record<string, string>).task.trim();
+  } catch {
+    return false;
+  }
 }
 
 // ── Main Task Decompose Function ───────────────────────────────────
@@ -130,11 +164,11 @@ export async function runTaskDecompose(
     const plannerAvailable = allowPlanner && (opts.mode === "agent" || opts.mode === "spec") && !opts.activePlan && !opts.readOnly
       && (!opts.allowedTools || opts.allowedTools.includes("dispatch_agent"));
     const plannerCriteria = opts.mode === "spec"
-      ? `when the user asks how to change or design an existing codebase and the answer needs tracing across modules or workflow boundaries, repository evidence to select an approach, or a separately approved plan for later implementation`
-      : `when the user requests a codebase-grounded implementation approach for a cross-file core change, architectural adjustment, complex migration, or other high-impact change, and that approach needs repository evidence and separate user approval before implementation`;
+      ? `only when the user requests a codebase-grounded plan for a cross-file core change, architectural adjustment, complex migration, or other high-impact change requiring tracing across modules or workflow boundaries, and the approach needs repository evidence and separate user approval before implementation`
+      : `only when the user requests a codebase-grounded plan for a cross-file core change, architectural adjustment, complex migration, or other high-impact change, and that approach needs repository evidence and separate user approval before implementation`;
     const decomposeMessages: ChatMessage[] = [
       { role: "system", content: systemPrompt + (plannerAvailable
-        ? `\n\nException to the JSON-only output rule: ${plannerCriteria}, invoke dispatch_agent as a native API tool call INSTEAD of emitting JSON, with agent_type="${PLANNER_SUBAGENT_TYPE}" (the planning subagent; do NOT use "Explore" or any other agent_type in this stage). This applies even if the current turn delivers only a design, proposal, or execution plan and does not edit code; do not infer a code-changing implementation task from that deliverable. ${opts.mode === "spec" ? `Do not invoke Planner solely for the word design: ordinary conceptual answers, explanations of a known single file, and obvious local edits with no separate repository-grounded plan return the usual task JSON instead. An explicit request to implement with a clear edit site proceeds as an implementation task only in Agent mode; Spec mode never edits source code.` : `Do not invoke Planner for an ordinary conceptual discussion or explanation, a small single-file change, or a task with an already clear edit site that needs no separate approval; return the usual task JSON directly instead.`} Only you decide whether to call it; never encode this decision as a JSON field. Give the subagent the user's actual intent, constraints, and relevant prior context; require ## Final Report with 目标, numbered 步骤, 相关文件 backed by actual code paths and line or symbol ranges, 风险与不确定性, 验证方式. The subagent is strictly read-only; never start editing before approval.`
+        ? `\n\nException to the JSON-only output rule: ${plannerCriteria}, invoke dispatch_agent as a native API tool call INSTEAD of emitting JSON, with agent_type="${PLANNER_SUBAGENT_TYPE}" (the planning subagent; do NOT use "Explore" or any other agent_type in this stage). This applies even if the current turn delivers only a design, proposal, or execution plan and does not edit code; do not infer a code-changing implementation task from that deliverable. ${opts.mode === "spec" ? `Do not invoke Planner solely for the word design: ordinary conceptual answers, explanations of a known single file, and obvious local edits with no separate repository-grounded plan return the usual task JSON instead. An explicit request to implement with a clear edit site proceeds as an implementation task only in Agent mode; Spec mode never edits source code.` : `Do not invoke Planner for an ordinary conceptual discussion or explanation, a small single-file change, or a task with an already clear edit site that needs no separate approval; return the usual task JSON directly instead.`} Only you decide whether to call it; never encode this decision as a JSON field. Give the subagent the user's actual intent, constraints, and relevant prior context; the Planner must perform any necessary read-only repository exploration itself in its isolated context, never delegate preliminary Explore research from this stage; require ## Final Report with 目标, numbered 步骤, 相关文件 backed by actual code paths and line or symbol ranges, 风险与不确定性, 验证方式. The subagent is strictly read-only; never start editing before approval.`
         : "") },
       {
         role: "user",
@@ -159,7 +193,7 @@ export async function runTaskDecompose(
     let lastThinkingDelta = "";
     const planResult = await withRetry(
       () => chatCompletionStream(model, decomposeMessages, {
-        ...(plannerAvailable ? { tools: [DISPATCH_AGENT_TOOL_DEF] } : {}),
+        ...(plannerAvailable ? { tools: [DECOMPOSE_PLANNER_TOOL_DEF] } : {}),
         signal: opts.signal,
         apiKey: opts.llmApiKey,
         purpose: "task_decompose",
@@ -200,33 +234,10 @@ export async function runTaskDecompose(
     if (toolCalls.length > 0) {
       const planToolCall = toolCalls.length === 1 && toolCalls[0]?.type === "function"
         && toolCalls[0].function.name === "dispatch_agent" ? toolCalls[0] : undefined;
-      // 阶段级约束：任务分解阶段只接受计划子代理（Planner）。
-      // 模型误传 Explore 等其他类型时，不进入只读 Planner 校验分支，
-      // 而是直接改写为 Planner 调度（runAgentPlanner 内部还会再校验一次）。
-      let normalizedPlanToolCall = planToolCall;
-      if (planToolCall) {
-        try {
-          const parsed = JSON.parse(planToolCall.function.arguments) as Record<string, unknown>;
-          if (parsed && typeof parsed === "object" && !Array.isArray(parsed)
-            && parsed.agent_type !== undefined && parsed.agent_type !== PLANNER_SUBAGENT_TYPE) {
-            opts.onEvent?.({
-              type: "warning",
-              message: `任务分解阶段不允许调用 "${String(parsed.agent_type)}" 子代理，已改写为计划子代理 ${PLANNER_SUBAGENT_TYPE}`,
-            });
-            normalizedPlanToolCall = {
-              ...planToolCall,
-              function: {
-                ...planToolCall.function,
-                arguments: JSON.stringify({ ...parsed, agent_type: PLANNER_SUBAGENT_TYPE }),
-              },
-            };
-          }
-        } catch {
-          // 参数解析失败交给 runAgentPlanner 的既有校验报错处理。
-        }
-      }
+      // 不把 Explore 调研请求改写成待审批的计划；无效调用在子代理执行前阻断。
+      const validPlannerCall = isDecomposePlannerCall(planToolCall, plannerAvailable);
       tracer.endSpan(planSpanId, "ok");
-      return { task: null, decomposeTokens: 0, planToolCall: normalizedPlanToolCall, invalidToolCall: !planToolCall, fallback: false };
+      return { task: null, decomposeTokens: 0, planToolCall: validPlannerCall ? planToolCall : undefined, invalidToolCall: !validPlannerCall, fallback: false };
     }
     const planText = content;
 

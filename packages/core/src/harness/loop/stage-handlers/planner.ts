@@ -181,37 +181,106 @@ export async function resumeAgentPlan(ctx: Omit<StageHandlerContext, "node">): P
 }
 
 const PLANNER_SECTIONS = [
-  { label: "目标", aliases: ["目标"] },
-  { label: "步骤", aliases: ["步骤"] },
-  { label: "相关文件", aliases: ["相关文件", "文件"] },
-  { label: "风险与不确定性", aliases: ["风险与不确定性", "风险"] },
-  { label: "验证方式", aliases: ["验证方式", "验证"] },
+  { label: "目标", aliases: ["目标", "goal", "goals", "objective"] },
+  { label: "步骤", aliases: ["步骤", "steps", "step"] },
+  { label: "相关文件", aliases: ["相关文件", "related files", "files", "file"] },
+  { label: "风险与不确定性", aliases: ["风险与不确定性", "风险", "risks and uncertainties", "risks", "risk", "uncertainties"] },
+  { label: "验证方式", aliases: ["验证方式", "验证", "verification", "validation", "verify", "how to verify"] },
 ] as const;
 
-function normalizePlannerReport(report: string): string {
+/** Final Report 总标题：任意标题层级、大小写不敏感、允许短后缀。 */
+const FINAL_REPORT_HEADING = /^#{1,6}[ \t]*(?:\d+[.)、．][ \t]*)?final[ \t]+report\b.*$/i;
+/** 识别常见 Markdown 列表与中文序号，不把代码围栏里的示例当作步骤。 */
+const NUMBERED_STEP = /^[ \t]*(?:#{1,6}[ \t]+)?(?:[-*+][ \t]+)?(?:[（(]\d+[)）]|\d+[.)、．:：）])[ \t]*\S/;
+
+interface HeadingInfo {
+  level: number;
+  text: string;
+}
+
+/** 解析一行 Markdown 标题（#~###### 任意层级）或加粗伪标题（**目标**）。 */
+function parseHeading(line: string): HeadingInfo | null {
+  const trimmed = line.trim();
+  const md = /^(#{1,6})[ \t]*(.+?)[ \t]*$/.exec(trimmed);
+  if (md) return { level: md[1].length, text: md[2].replace(/[ \t]+#+[ \t]*$/, "").trim() };
+  const bold = /^\*\*(.+?)\*\*[ \t]*$/.exec(trimmed);
+  if (bold) return { level: 3, text: bold[1].trim() };
+  return null;
+}
+
+/** 标题文本命中别名：允许编号前缀（“## 1. 目标”）与别名前缀（“## 相关文件与证据”）。 */
+function headingMatches(text: string, aliases: readonly string[]): boolean {
+  const stripped = text.replace(/^(?:[（(]?\d+[.)、．）])[ \t]*/, "").replace(/^\*\*(.*?)\*\*$/, "$1").trim().toLowerCase();
+  return aliases.some((alias) => {
+    const name = alias.toLowerCase();
+    return stripped === name || stripped.startsWith(`${name}:`) || stripped.startsWith(`${name}：`)
+      || (stripped.startsWith(`${name} `) && /^(?:and |with |— |– |- )/.test(stripped.slice(name.length + 1)))
+      || (/[^a-z]$/i.test(name) && (stripped.startsWith(`${name}与`) || stripped.startsWith(`${name}（`)));
+  });
+}
+
+function normalizePlannerReport(report: string): { body: string; hasFinalReportHeading: boolean } {
   const trimmed = report.trim();
-  const reportStart = trimmed.indexOf("## Final Report");
-  return reportStart >= 0 ? trimmed.slice(reportStart).trim() : trimmed;
+  const lines = trimmed.split(/\r?\n/);
+  let inFence = false;
+  const index = lines.findIndex((line) => {
+    if (/^\s*(```|~~~)/.test(line)) { inFence = !inFence; return false; }
+    return !inFence && FINAL_REPORT_HEADING.test(line.trim());
+  });
+  return index >= 0
+    ? { body: lines.slice(index).join("\n").trim(), hasFinalReportHeading: true }
+    : { body: trimmed, hasFinalReportHeading: false };
 }
 
 function sectionContent(report: string, aliases: readonly string[]): string {
   const lines = report.split(/\r?\n/);
-  const heading = new RegExp(`^#{2,6}[ \\t]*(?:${aliases.join("|")})[ \\t]*$`);
-  const start = lines.findIndex((line) => heading.test(line.trim()));
-  if (start < 0) return "";
-  const end = lines.slice(start + 1).findIndex((line) => /^#{2,6}[ \\t]+\S/.test(line.trim()));
-  return lines.slice(start + 1, end < 0 ? lines.length : start + 1 + end).join("\n").trim();
+  let inFence = false;
+  let start = -1;
+  let startLevel = 0;
+  for (let index = 0; index < lines.length; index++) {
+    // 代码围栏内的 # 注释与 ** 强调不是标题，跳过以免截断章节内容。
+    if (/^\s*(```|~~~)/.test(lines[index])) {
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence) continue;
+    const heading = parseHeading(lines[index]);
+    if (!heading) continue;
+    if (start < 0) {
+      if (headingMatches(heading.text, aliases)) {
+        start = index;
+        startLevel = heading.level;
+      }
+      continue;
+    }
+    // 章节在下一个不深于起始标题的标题处结束；更深层级视为章节内小节。
+    if (heading.level <= startLevel || PLANNER_SECTIONS.some(({ aliases: names }) => headingMatches(heading.text, names))) {
+      return lines.slice(start + 1, index).join("\n").trim();
+    }
+  }
+  return start < 0 ? "" : lines.slice(start + 1).join("\n").trim();
+}
+
+function meaningfulSectionLines(content: string): string[] {
+  let inFence = false;
+  return content.split(/\r?\n/).filter((line) => {
+    if (/^\s*(```|~~~)/.test(line)) { inFence = !inFence; return false; }
+    return !inFence && !!line.trim() && !parseHeading(line);
+  });
 }
 
 export function validatePlannerReport(report: string): { normalized: string; missing: string[] } {
-  const normalized = normalizePlannerReport(report);
-  const missing = normalized.startsWith("## Final Report")
-    ? PLANNER_SECTIONS
-        .filter(({ aliases }) => !sectionContent(normalized, aliases))
-        .map(({ label }) => label)
-    : ["## Final Report", ...PLANNER_SECTIONS.map(({ label }) => label)];
-  if (!/^\s*\d+[.)]\s+\S/m.test(sectionContent(normalized, ["步骤"]))) missing.push("编号步骤");
-  return { normalized, missing };
+  const { body, hasFinalReportHeading } = normalizePlannerReport(report);
+  const missing = PLANNER_SECTIONS
+    .filter(({ aliases }) => meaningfulSectionLines(sectionContent(body, aliases)).length === 0)
+    .map(({ label }) => label);
+  const steps = meaningfulSectionLines(sectionContent(body, ["步骤", "steps", "step"]));
+  if (steps.length > 0 && !steps.some((line) => NUMBERED_STEP.test(line))) missing.push("编号步骤");
+  if (hasFinalReportHeading || missing.length > 0) {
+    return { normalized: body, missing: hasFinalReportHeading ? missing : ["## Final Report", ...missing] };
+  }
+  // 五段齐全但缺少 Final Report 总标题：补齐结构标题，不因纯格式差异暂停。
+  return { normalized: `## Final Report\n\n${body}`, missing: [] };
 }
 
 export async function runAgentPlanner(ctx: Omit<StageHandlerContext, "node">, call: ToolCall): Promise<void> {
@@ -229,13 +298,13 @@ export async function runAgentPlanner(ctx: Omit<StageHandlerContext, "node">, ca
     if (!args || typeof args !== "object" || Array.isArray(args)) throw new Error("无效工具参数");
     // 任务分解阶段只允许计划子代理（Planner）；Explore 等其他类型直接拒绝，
     // 避免误调度只读调研代理导致计划结构校验失败后暂停执行。
-    if (args.agent_type !== undefined && args.agent_type !== PLANNER_SUBAGENT_TYPE) {
+    if (args.agent_type !== PLANNER_SUBAGENT_TYPE) {
       throw new Error(`任务分解阶段只允许调用计划子代理（agent_type="${PLANNER_SUBAGENT_TYPE}"），不允许调用 "${String(args.agent_type)}"`);
     }
     if (typeof args.task !== "string" || !args.task.trim()) throw new Error("缺少计划任务");
     if (args.thoroughness !== undefined && args.thoroughness !== "medium" && args.thoroughness !== "very thorough") throw new Error("无效搜索广度");
     const result = await executeTool(ctx.toolCtx, {
-      id: call.id, name: call.function.name, arguments: { ...args, agent_type: PLANNER_SUBAGENT_TYPE }, rawArguments: call.function.arguments,
+      id: call.id, name: call.function.name, arguments: args, rawArguments: call.function.arguments,
     });
     if (!result.ok) throw new Error(result.output);
     report = result.output;
@@ -254,9 +323,10 @@ export async function runAgentPlanner(ctx: Omit<StageHandlerContext, "node">, ca
     return;
   }
   if (report.startsWith("[Explore partial result") || report.startsWith("[Planner partial result")) {
+    const detail = /^\[(?:Planner|Explore) partial result:[^\]]*\]/.exec(report.trim())?.[0] ?? "";
     state.planApproval = "unavailable";
     state.blocked = true;
-    state.blockedReason = "只读 Planner 未完成计划，执行已暂停";
+    state.blockedReason = `只读 Planner 未完成计划，执行已暂停${detail ? `（${detail.slice(1, -1)}）` : ""}`;
     return;
   }
   const validation = validatePlannerReport(report);

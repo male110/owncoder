@@ -81,7 +81,15 @@ export async function runExploreSubagent(
   const isPlanner = request.agentType === PLANNER_SUBAGENT_TYPE;
   if (deps.budget) {
     const reservation = deps.budget.charge("subagents");
-    if (!reservation.ok) return `## Final Report\n\n${isPlanner ? "Planner" : "Explore"} suppressed: ${reservation.reason ?? "subagent budget exhausted"}.`;
+    if (!reservation.ok) {
+      // Planner 的产出要过计划结构校验；占位报告会让父级报出
+      // “缺少全部章节”的误导性错误。改用 partial-result 前缀，
+      // 让父级直接以“未完成计划”的明确原因暂停。
+      const reason = reservation.reason ?? "subagent budget exhausted";
+      return isPlanner
+        ? `[Planner partial result: ${reason}; no plan was produced]`
+        : `## Final Report\n\nExplore suppressed: ${reason}.`;
+    }
   }
   const thoroughness = request.thoroughness === "very thorough" ? "very thorough" : "medium";
   const maxIterations =
@@ -167,7 +175,9 @@ export async function runExploreSubagent(
 
     const report = result.assistantText?.trim();
     if (!report) {
-      return `## Final Report\n\n${isPlanner ? "Planner" : "Explore"} subagent finished without producing a report.`;
+      return isPlanner
+        ? "[Planner partial result: subagent finished without producing a report]"
+        : "## Final Report\n\nExplore subagent finished without producing a report.";
     }
     // 硬限制终态：显式标注为部分结果，让父智能体知道发现可能不完整，
     // 而不是把它误当成完整结论。

@@ -48,6 +48,19 @@ beforeEach(() => {
   } as AgentLoopResult);
 });
 
+describe("runExploreSubagent — Planner 部分结果", () => {
+  it.each([
+    { assistantText: "", blocked: false, marker: "without producing a report" },
+    { assistantText: "## Final Report\n### 目标\n未完成", blocked: true, marker: "reached the iteration limit" },
+  ])("不会把未完成的报告伪装为完整计划：$marker", async ({ assistantText, blocked, marker }) => {
+    mockedRunAgentLoop.mockResolvedValueOnce({ assistantText, blocked, blockedReason: blocked ? marker : undefined } as AgentLoopResult);
+    const result = await runExploreSubagent({ agentType: "Planner", task: "计划跨文件改动" }, baseDeps(fakeIndex([])));
+    expect(result).toMatch(/^\[Planner partial result:/);
+    expect(result).toContain(marker);
+    expect(mockedRunAgentLoop.mock.calls[0]![0].allowedTools).not.toContain("dispatch_agent");
+  });
+});
+
 describe("runExploreSubagent — 索引导航引导块", () => {
   it("ftsSearch 有命中 → systemPromptOverride 含引导块与命中符号", async () => {
     const index = fakeIndex([sym("src/auth.ts", "validateToken", 42), sym("src/auth.ts", "login", 88)]);

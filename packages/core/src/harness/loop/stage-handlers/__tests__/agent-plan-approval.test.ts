@@ -205,6 +205,10 @@ describe("版本化计划保存与审批", () => {
     await runAgentPlanner(failed, call); expect(failed.state.blocked).toBe(true);
     const invalid = makeContext(); await runAgentPlanner(invalid, { ...call, function: { ...call.function, arguments: "{}" } });
     expect(invalid.toolCtx.dispatchSubagent).not.toHaveBeenCalled();
+    const missingType = makeContext();
+    await runAgentPlanner(missingType, { ...call, function: { ...call.function, arguments: JSON.stringify({ task: "调研" }) } });
+    expect(missingType.state.blockedReason).toContain("只允许调用计划子代理");
+    expect(missingType.toolCtx.dispatchSubagent).not.toHaveBeenCalled();
     const bad = makeContext(); vi.mocked(bad.toolCtx.dispatchSubagent!).mockResolvedValue("## Final Report\n### 目标\n无步骤");
     await runAgentPlanner(bad, call); expect(bad.state.blocked).toBe(true);
     expect(validatePlannerReport("## Final Report\n### 目标\n无步骤").missing).toContain("步骤");
@@ -241,5 +245,117 @@ describe("版本化计划保存与审批", () => {
     expect(ctx.toolCtx.dispatchSubagent).not.toHaveBeenCalled();
     const aborted = makeContext(); aborted.opts.signal = AbortSignal.abort(); await runAgentPlanner(aborted, call);
     expect(aborted.state.aborted).toBe(true); expect(aborted.toolCtx.dispatchSubagent).not.toHaveBeenCalled();
+  });
+});
+
+describe("validatePlannerReport — 格式兼容与真实缺失", () => {
+  const fullBody = [
+    "### 目标", "实现登录重试",
+    "### 步骤", "1. 检查认证边界", "2. 修复登录重试并测试",
+    "### 相关文件", "packages/auth/src/login.ts: 检索到入口",
+    "### 风险与不确定性", "重试语义需要核对",
+    "### 验证方式", "运行相关测试",
+  ].join("\n");
+
+  it("标准五段式计划通过校验", () => {
+    const { normalized, missing } = validatePlannerReport(`## Final Report\n${fullBody}`);
+    expect(missing).toEqual([]);
+    expect(normalized).toContain("### 目标");
+  });
+
+  it("英文标题、h1 总标题、编号前缀标题均通过", () => {
+    const english = [
+      "# Final Report",
+      "## Goal", "Implement login retry.",
+      "## Steps", "1. Inspect auth boundary", "2) Fix retry and test",
+      "## Related Files", "packages/auth/src/login.ts: entry",
+      "## Risks and Uncertainties", "Retry semantics need review",
+      "## Verification", "Run related tests",
+    ].join("\n");
+    expect(validatePlannerReport(english).missing).toEqual([]);
+    const numbered = `## Final Report\n${fullBody.replace("### 目标", "## 1. 目标").replace("### 相关文件", "#### 相关文件与证据")}`;
+    expect(validatePlannerReport(numbered).missing).toEqual([]);
+    const deepEnglish = english.replace("## Related Files", "##### 3. Related Files and Evidence")
+      .replace("## Steps", "#### (2) Steps").replace("## Verification", "###### Verification:");
+    expect(validatePlannerReport(deepEnglish).missing).toEqual([]);
+  });
+
+  it("中文编号变体（1、与（1））与加粗伪标题通过", () => {
+    const variant = [
+      "## Final Report",
+      "**目标**", "实现登录重试",
+      "**步骤**", "1、检查认证边界", "（2）修复登录重试并测试",
+      "**相关文件**", "packages/auth/src/login.ts: 检索到入口",
+      "**风险与不确定性**", "重试语义需要核对",
+      "**验证方式**", "运行相关测试",
+    ].join("\n");
+    expect(validatePlannerReport(variant).missing).toEqual([]);
+  });
+
+  it("章节内更深层小节与代码围栏中的 # 不截断章节", () => {
+    const nested = [
+      "## Final Report",
+      "## 目标", "实现登录重试",
+      "## 步骤", "1. 检查认证边界", "#### 阶段一：定位", "继续属于步骤章节的内容",
+      "## 相关文件", "示例：", "```ts", "# 注释不是标题", "const x = 1;", "```", "packages/auth/src/login.ts: 入口",
+      "## 风险与不确定性", "重试语义需要核对",
+      "## 验证方式", "运行相关测试",
+    ].join("\n");
+    const { missing } = validatePlannerReport(nested);
+    expect(missing).toEqual([]);
+  });
+
+  it("五段齐全但缺 Final Report 总标题：补齐标题而非判缺失", () => {
+    const { normalized, missing } = validatePlannerReport(fullBody);
+    expect(missing).toEqual([]);
+    expect(normalized.startsWith("## Final Report")).toBe(true);
+    expect(normalized).toContain("### 目标");
+  });
+
+  it("真实缺失章节仍判缺失", () => {
+    const noRisk = fullBody.replace("### 风险与不确定性\n重试语义需要核对\n", "");
+    expect(validatePlannerReport(`## Final Report\n${noRisk}`).missing).toContain("风险与不确定性");
+    const emptySection = fullBody.replace("### 验证方式\n运行相关测试", "### 验证方式");
+    expect(validatePlannerReport(`## Final Report\n${emptySection}`).missing).toContain("验证方式");
+  });
+
+  it("步骤存在但无编号仍判缺失编号步骤", () => {
+    const unnumbered = fullBody.replace("1. 检查认证边界", "- 检查认证边界").replace("2. 修复登录重试并测试", "- 修复登录重试并测试");
+    expect(validatePlannerReport(`## Final Report\n${unnumbered}`).missing).toContain("编号步骤");
+  });
+
+  it("标题层级交错时空章节不能借用下一章节的正文", () => {
+    const mixed = [
+      "## Final Report", "#### 目标", "### 步骤", "1. 检查登录边界",
+      "#### 相关文件", "### 风险与不确定性", "存在竞争条件",
+      "#### 验证方式", "运行测试",
+    ].join("\n");
+    expect(validatePlannerReport(mixed).missing).toEqual(["目标", "相关文件"]);
+  });
+
+  it("仅有嵌套标题或围栏示例不构成有效章节及编号步骤", () => {
+    const empty = `## Final Report\n### 目标\n#### 子标题\n### 步骤\n\`\`\`md\n1. 示例\n\`\`\`\n### 相关文件\n文件见下文\n### 风险与不确定性\n有风险\n### 验证方式\n运行测试`;
+    expect(validatePlannerReport(empty).missing).toEqual(expect.arrayContaining(["目标", "步骤"]));
+    const fakeSteps = empty.replace("### 步骤\n\`\`\`md", "### 步骤\n需要检查\n\`\`\`md");
+    expect(validatePlannerReport(fakeSteps).missing).toContain("编号步骤");
+  });
+
+  it("完全无结构的报告列出全部缺失项", () => {
+    const { missing } = validatePlannerReport("随便一段文字");
+    expect(missing).toEqual(["## Final Report", "目标", "步骤", "相关文件", "风险与不确定性", "验证方式"]);
+  });
+
+  it.each([
+    "[Planner partial result: subagent budget exhausted; no plan was produced]",
+    `[Planner partial result: reached the iteration limit; findings below may be incomplete]\n\n${report}`,
+    "[Planner partial result: subagent finished without producing a report]",
+  ])("Planner 不完整结果明确暂停：%s", async (partial) => {
+    const ctx = makeContext();
+    vi.mocked(ctx.toolCtx.dispatchSubagent!).mockResolvedValue(partial);
+    await runAgentPlanner(ctx, call);
+    expect(ctx.state.blocked).toBe(true);
+    expect(ctx.state.blockedReason).toContain("只读 Planner 未完成计划");
+    expect(ctx.state.blockedReason).not.toContain("缺少");
+    expect(await readPlannerPlan(root, "session-a")).toBeNull();
   });
 });

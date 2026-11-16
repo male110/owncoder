@@ -69,6 +69,23 @@ export function useApplySession(ctx: SessionSyncContext, refreshers: SyncRefresh
         session.setActivePlanPath(state.activePlanPath, state.activeSessionId);
       }
 
+      // 历史重载持久化：后端 getSessionState 返回 lastPlanPath（最近一次保存的计划文件）。
+      // 若该计划尚未在前端 plansBySession 缓存中（injectPlanNotification 注入的是临时消息，
+      // 重载后丢失），则用 lastPlanPath 补登记一条最小 PlanInfoDto，
+      // 使所属助手轮次的 PlanCard 重新匹配到计划元数据并恢复批准按钮。
+      const persistedPlanPath = state.lastPlanPath;
+      const persistedSid = state.activeSessionId;
+      if (persistedPlanPath && persistedSid) {
+        const existing = session.getPlansForSession(persistedSid);
+        if (!existing.some((p) => p.path === persistedPlanPath)) {
+          const fileName = persistedPlanPath.split("/").pop() ?? persistedPlanPath;
+          session.setPlans(
+            [...existing, { path: persistedPlanPath, title: fileName, kind: "plan", sessionId: persistedSid, mtimeMs: 0, size: 0 }],
+            persistedSid,
+          );
+        }
+      }
+
       const snap = await window.owncoder.getSettings();
       if (navigationVersion !== undefined && !isNavigationCurrent(navigationVersion)) return null;
       setLocalePref((snap.effective.harness.locale ?? "system") as LocalePref);
