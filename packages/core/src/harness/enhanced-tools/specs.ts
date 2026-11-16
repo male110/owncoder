@@ -7,7 +7,7 @@ export const SAVE_SPEC_TOOL_DEF: ToolDef = {
   function: {
     name: "save_spec",
     description:
-      "Save the requirements spec (WHAT to build) to .owncoder/specs/<feature>/spec.md and PAUSE for the user's approval. " +
+      "Save the requirements document (WHAT to build) to .owncoder/specs/<feature>/spec.md and PAUSE for the user's approval. " +
       "Use first in the spec → design → tasks chain. Do not write design.md or tasks.md in the same turn.",
     parameters: {
       type: "object",
@@ -16,7 +16,8 @@ export const SAVE_SPEC_TOOL_DEF: ToolDef = {
         content: {
           type: "string",
           description:
-            "Spec markdown: problem statement, requirements in EARS format (WHEN <trigger> THE SYSTEM SHALL <response>), user stories, acceptance criteria",
+            "Requirements markdown ONLY: goals, scope, user stories, numbered requirements (R1, R2, … in EARS format: WHEN <trigger> THE SYSTEM SHALL <response>), acceptance criteria, constraints. " +
+            "NO technical design — architecture, interfaces, data models, file layouts and task lists belong in design.md/tasks.md and will be rejected",
         },
       },
       required: ["feature", "content"],
@@ -38,7 +39,8 @@ export const SAVE_DESIGN_TOOL_DEF: ToolDef = {
         content: {
           type: "string",
           description:
-            "Design markdown: context, goals & non-goals, data models, API, components, error handling, testing",
+            "Design markdown: context, goals & non-goals, architecture, components, interfaces, data models, flows, error handling, testing strategy, " +
+            "PLUS a requirements traceability matrix that references and covers every R number from the approved spec (unknown or missing R references are rejected)",
         },
       },
       required: ["feature", "content"],
@@ -60,7 +62,9 @@ export const SAVE_TASKS_TOOL_DEF: ToolDef = {
         content: {
           type: "string",
           description:
-            "Tasks markdown: numbered checkbox list, ordered by dependency, each task with verification steps",
+            "Kiro-style tasks markdown: checkbox list (\"- [ ]\" or \"N. [ ]\"), ordered by dependency. " +
+            "Each task must include: 依赖: (dependencies), 文件: (files/modules), 实现: (implementation requirements), 验收: (verification), 需求: R… (requirement references). " +
+            "Tasks must cover every requirement traced in the approved design; unknown R references are rejected",
         },
       },
       required: ["feature", "content"],

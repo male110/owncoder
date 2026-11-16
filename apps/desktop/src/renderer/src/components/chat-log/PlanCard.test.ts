@@ -47,7 +47,7 @@ vi.mock("react", async (importOriginal) => ({
 
 // ── 其他依赖 mock ──────────────────────────────────────────────────────────────────
 // AssistantBubble.tsx 在 chat-log/ 下，导入 i18n 用 ../../i18n，Markdown 用 ../Markdown
-vi.mock("../../i18n", () => ({ useI18n: () => ({ t: (text: string) => text }) }));
+vi.mock("../../i18n", () => ({ useI18n: () => ({ t: (text: string, params?: { name?: string }) => text.replace("{{name}}", params?.name ?? "{{name}}") }) }));
 vi.mock("../Markdown", () => ({ Markdown: "mock-markdown" }));
 
 // ── 被测组件 ──────────────────────────────────────────────────────────────────────
@@ -131,45 +131,29 @@ function renderCard(actions: ReturnType<typeof makePlanActions>, sessionId = "s1
   return (PlanCard as any)({ planPath: "/plans/test.md", sessionId, onOpen: vi.fn() });
 }
 
-/** 模拟 open 按钮点击后重新渲染（useState 更新 preview 状态）。
- *  由于 hooks mock 的 useState 直接写入 hooks.states，
- *  需要手动把 preview 状态设为非 null 来模拟 open 完成。 */
-function renderCardWithPreview(actions: ReturnType<typeof makePlanActions>, sessionId = "s1") {
-  hooks.states = [];
-  hooks.stateIndex = 0;
-  hooks.effects = [];
-  hooks.effectDeps = [];
-  hooks.refs = [];
-  hooks.refIndex = 0;
-  hooks.memos = [];
-  hooks.memoIndex = 0;
-  (PlanActionsContext as any)._currentValue = actions;
-  // 预置 preview 状态：useState 的初始值为 null，索引 0 = preview, 1 = opening, 2 = copied
-  hooks.states[0] = "# 计划内容"; // preview
-  hooks.states[1] = false;       // opening
-  hooks.states[2] = false;       // copied
-  hooks.stateIndex = 3;          // 跳过已预置的三个 useState
-  return (PlanCard as any)({ planPath: "/plans/test.md", sessionId, onOpen: vi.fn() });
-}
-
 // ── 测试用例 ──────────────────────────────────────────────────────────────────────
 describe("PlanCard", () => {
   beforeEach(() => {
+    hooks.states = [];
+    hooks.stateIndex = 0;
     // 重置全局 window.owncoder mock
     (globalThis as any).window = {
       owncoder: {
         readPlan: vi.fn(async () => "# 计划内容\n步骤 1\n步骤 2"),
+        openPlanWindow: vi.fn(async () => undefined),
       },
     };
   });
 
-  it("renders plan card header with icon, title, filename and path", () => {
-    const tree = renderCard(makePlanActions());
-    expect(findByClass(tree, "plan-card")).toBeDefined();
-    expect(findByClass(tree, "plan-card-icon")).toBeDefined();
-    expect(findByClass(tree, "plan-card-title")).toBeDefined();
-    expect(findByClass(tree, "plan-card-filename")).toBeDefined();
-    expect(findByClass(tree, "plan-card-path")).toBeDefined();
+  it("shows a readable plan title without exposing file path", () => {
+    const tree = renderCard(makePlanActions({ plans: [{ path: "/plans/test.md", title: "发布方案", kind: "plan", sessionId: "s1", mtimeMs: 0, size: 100 }] }));
+    expect(findByClass(tree, "plan-card-title")?.props.children).toBe("计划已生成：发布方案");
+    expect(findByClass(tree, "plan-card-path")).toBeUndefined();
+  });
+
+  it("uses localized fallback for UUID-only plan titles", () => {
+    const tree = renderCard(makePlanActions({ plans: [{ path: "/plans/test.md", title: "123e4567-e89b-12d3-a456-426614174000", kind: "plan", sessionId: "s1", mtimeMs: 0, size: 100 }] }));
+    expect(findByClass(tree, "plan-card-title")?.props.children).toBe("已生成计划");
   });
 
   it("shows copy button", () => {
@@ -187,155 +171,36 @@ describe("PlanCard", () => {
     expect(findByClass(tree, "plan-preview")).toBeUndefined();
   });
 
-  it("shows approve CTA after preview is opened and plan is pending", async () => {
-    const actions = makePlanActions();
-    const tree = renderCard(actions);
-    // 模拟点击 open 按钮
-    const openBtn = findByClass(tree, "plan-card-open")!;
-    await openBtn.props.onClick();
-    // 重新渲染（useState 更新后）
-    const tree2 = renderCard(actions);
-    const cta = findByClass(tree2, "plan-approve-cta");
-    expect(cta).toBeDefined();
-    expect(cta!.props.disabled).toBe(false);
+  it("opens an independent window, not an inline toolbar", async () => {
+    const tree = renderCard(makePlanActions());
+    await findByClass(tree, "plan-card-open")!.props.onClick();
+    expect(window.owncoder.openPlanWindow).toHaveBeenCalledWith("/plans/test.md", "s1");
+    expect(findByClass(tree, "prompt-toolbar")).toBeUndefined();
+    expect(findByClass(tree, "plan-preview-actions")).toBeUndefined();
+    expect(findByClass(tree, "plan-preview-body--masked")).toBeUndefined();
   });
 
-  it("approve CTA calls onApprovePlan with planPath", async () => {
-    const actions = makePlanActions();
-    const tree = renderCard(actions);
-    const openBtn = findByClass(tree, "plan-card-open")!;
-    await openBtn.props.onClick();
-    const tree2 = renderCard(actions);
-    const cta = findByClass(tree2, "plan-approve-cta")!;
-    cta.props.onClick();
-    expect(actions.onApprovePlan).toHaveBeenCalledWith("/plans/test.md");
+  it("reports a failed window open without inline preview", async () => {
+    vi.mocked(window.owncoder.openPlanWindow).mockRejectedValueOnce(new Error("read failed"));
+    await findByClass(renderCard(makePlanActions()), "plan-card-open")!.props.onClick();
+    const tree = renderCard(makePlanActions());
+    expect(findByClass(tree, "plan-window-error")?.props.children).toBe("read failed");
+    expect(findByClass(tree, "plan-preview")).toBeUndefined();
   });
 
-  it("approve CTA is disabled when busy", async () => {
-    const actions = makePlanActions({ busy: true });
-    const tree = renderCard(actions);
-    const openBtn = findByClass(tree, "plan-card-open")!;
-    await openBtn.props.onClick();
-    const tree2 = renderCard(actions);
-    const cta = findByClass(tree2, "plan-approve-cta")!;
-    expect(cta.props.disabled).toBe(true);
+  it("keeps the plan path available to copy", async () => {
+    const writeText = vi.fn(async () => undefined);
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+    await findByClass(renderCard(makePlanActions()), "plan-card-copy")!.props.onClick();
+    expect(writeText).toHaveBeenCalledWith("/plans/test.md");
   });
 
-  it("approve CTA is disabled when plan is already in approvingPlanPaths (shared lock)", async () => {
-    const actions = makePlanActions({ approvingPlanPaths: new Set(["/plans/test.md"]) });
-    const tree = renderCard(actions);
-    const openBtn = findByClass(tree, "plan-card-open")!;
-    await openBtn.props.onClick();
-    const tree2 = renderCard(actions);
-    const cta = findByClass(tree2, "plan-approve-cta")!;
-    expect(cta.props.disabled).toBe(true);
-  });
-
-  it("approve CTA does not fire when already approved", async () => {
-    const actions = makePlanActions({ activePlanPath: "/plans/test.md" });
-    const tree = renderCard(actions);
-    const openBtn = findByClass(tree, "plan-card-open")!;
-    await openBtn.props.onClick();
-    const tree2 = renderCard(actions);
-    // 已批准时显示文字提示而非 CTA
-    const cta = findByClass(tree2, "plan-approve-cta");
-    expect(cta).toBeUndefined();
-  });
-
-  it("shows '已批准' note when plan is approved", async () => {
-    const actions = makePlanActions({ activePlanPath: "/plans/test.md" });
-    const tree = renderCard(actions);
-    const openBtn = findByClass(tree, "plan-card-open")!;
-    await openBtn.props.onClick();
-    const tree2 = renderCard(actions);
-    const note = findAllByClass(tree2, "plan-kind-note").find(
-      (el) => el.props.children === "已批准",
-    );
-    expect(note).toBeDefined();
-  });
-
-  it("shows document note for document-kind plans (no approve button)", async () => {
-    const actions = makePlanActions({
-      plans: [{ path: "/plans/test.md", title: "test.md", kind: "document", sessionId: "s1", mtimeMs: 0, size: 100 }],
-    });
-    const tree = renderCard(actions);
-    const openBtn = findByClass(tree, "plan-card-open")!;
-    await openBtn.props.onClick();
-    const tree2 = renderCard(actions);
-    expect(findByClass(tree2, "plan-approve-cta")).toBeUndefined();
-    const note = findAllByClass(tree2, "plan-kind-note").find(
-      (el) => typeof el.props.children === "string" && el.props.children.includes("文档交付物"),
-    );
-    expect(note).toBeDefined();
-  });
-
-  it("preview body has masked class for CSS mask-image", async () => {
-    const actions = makePlanActions();
-    const tree = renderCard(actions);
-    const openBtn = findByClass(tree, "plan-card-open")!;
-    await openBtn.props.onClick();
-    const tree2 = renderCard(actions);
-    const body = findByClass(tree2, "plan-preview-body--masked");
-    expect(body).toBeDefined();
-  });
-
-  it("does not show approve CTA when plan is not in plans list (unknown plan)", async () => {
-    const actions = makePlanActions({ plans: [] });
-    const tree = renderCard(actions);
-    const openBtn = findByClass(tree, "plan-card-open")!;
-    await openBtn.props.onClick();
-    const tree2 = renderCard(actions);
-    expect(findByClass(tree2, "plan-approve-cta")).toBeUndefined();
-  });
-
-  it("approve CTA shows '批准中…' when approving", async () => {
-    const actions = makePlanActions({ approvingPlanPaths: new Set(["/plans/test.md"]) });
-    const tree = renderCard(actions);
-    const openBtn = findByClass(tree, "plan-card-open")!;
-    await openBtn.props.onClick();
-    const tree2 = renderCard(actions);
-    const cta = findByClass(tree2, "plan-approve-cta")!;
-    expect(cta.props.children).toBe("批准中…");
-  });
-
-  it("ignoring plan (not clicking approve) does not block other actions", () => {
-    // 计划卡片仅渲染展示，不阻塞任何交互；用户可忽略并继续发送其他指令。
-    // 此测试验证 PlanCard 不持有任何全局状态或副作用会阻塞其他操作。
-    const actions = makePlanActions();
-    const tree = renderCard(actions);
-    // 卡片正常渲染，没有 error / loading 遮罩
-    expect(findByClass(tree, "plan-card")).toBeDefined();
-    // onApprovePlan 未被调用（用户未点击）
-    expect(actions.onApprovePlan).not.toHaveBeenCalled();
+  it("does not open a window without an owning session", async () => {
+    const tree = renderCard(makePlanActions(), "");
+    await findByClass(tree, "plan-card-open")!.props.onClick();
+    expect(window.owncoder.openPlanWindow).not.toHaveBeenCalled();
   });
 });
-
-describe("PlanActionsContext shared approval lock", () => {
-  it("two PlanCard instances share the same approvingPlanPaths set", async () => {
-    (globalThis as any).window = {
-      owncoder: { readPlan: vi.fn(async () => "plan body") },
-    };
-    const sharedSet = new Set<string>();
-    const onApprovePlan = vi.fn();
-    const actions = makePlanActions({ approvingPlanPaths: sharedSet, onApprovePlan });
-
-    // 两个卡片共享同一把锁
-    const tree1 = renderCard(actions);
-    const tree2 = renderCard(actions);
-
-    // 模拟第一个卡片触发批准
-    sharedSet.add("/plans/test.md");
-
-    // 第二个卡片应看到锁已关闭
-    const tree3 = renderCard(actions);
-    const openBtn = findByClass(tree3, "plan-card-open")!;
-    await openBtn.props.onClick();
-    const tree4 = renderCard(actions);
-    const cta = findByClass(tree4, "plan-approve-cta")!;
-    expect(cta.props.disabled).toBe(true);
-  });
-});
-
 describe("plan-marker history reload persistence", () => {
   it("extractPlanPath returns path from plan_saved marker", async () => {
     const { extractPlanPath } = await import("./plan-marker");

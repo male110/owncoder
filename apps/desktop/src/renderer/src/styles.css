@@ -2451,20 +2451,9 @@ button.ghost.accent {
 }
 
 .plan-card-title {
-  font-size: 12px;
-  color: var(--muted);
-  margin-bottom: 2px;
-}
-
-.plan-card-filename {
   font-weight: 600;
   color: var(--text);
   font-size: 14px;
-}
-
-.plan-card-path {
-  font-size: 11px;
-  color: var(--muted);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2510,20 +2499,10 @@ button.ghost.accent {
   border-color: var(--border);
 }
 
-/* 限高 + mask 渐隐必须作用于同一节点，分层会导致渐隐失效。 */
-.plan-preview-body--masked {
-  max-height: 220px;
-  overflow: hidden;
-  -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 30%, transparent 100%);
-  mask-image: linear-gradient(to bottom, #000 0%, #000 30%, transparent 100%);
-}
-
-/* 悬浮式主 CTA：rounded-full，居中悬浮在预览底部渐隐之上。 */
+/* 独立窗口的批准操作。 */
 .plan-approve-cta {
   display: block;
-  margin: -34px auto 8px;
-  position: relative;
-  z-index: 1;
+  margin: 8px 0;
   padding: 8px 20px;
   font-size: 13px;
   font-weight: 600;
@@ -5564,8 +5543,7 @@ button.ghost {
   flex-shrink: 0;
 }
 
-.change-diff,
-.plan-preview-body {
+.change-diff {
   margin: 0;
   padding: 8px 10px 10px;
   border-top: 1px solid var(--border);
@@ -5606,12 +5584,31 @@ button.ghost {
   color: var(--muted);
 }
 
-.plan-preview {
-  margin-top: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+.plan-window {
+  max-width: 960px;
+  min-height: 100vh;
+  margin: 0 auto;
+  padding: 24px 36px 48px;
+  color: var(--text);
+  overflow-wrap: anywhere;
 }
+
+.plan-window-header {
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 24px;
+}
+
+.plan-window-content {
+  width: 100%;
+}
+
+.plan-window-footer {
+  border-top: 1px solid var(--border);
+  margin-top: 24px;
+  padding-top: 12px;
+}
+
+.plan-window-error { color: var(--error); }
 
 /* ── Spec 工作流审批条（spec → design → tasks）────────────────────────────── */
 
@@ -6186,17 +6183,6 @@ button.ghost {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 10px;
-}
-
-.prompt-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.plan-preview-actions {
-  display: flex;
-  gap: 6px;
 }
 
 .prompt-lang-bar {

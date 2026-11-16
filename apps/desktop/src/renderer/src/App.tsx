@@ -14,7 +14,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 
 // ── Stores ────────────────────────────────────────────────────────────────────
 import { useSessionStore } from "./store/session-store";
-import type { ActivePlanMetaDto, ChatAttachmentDto } from "../../preload/index";
+import type { ChatAttachmentDto } from "../../preload/index";
 import { useChatStore } from "./store/chat-store";
 import { getComposerDraftKey, useUiStore } from "./store/ui-store";
 import { customConfirm } from "./utils/customConfirm";
@@ -32,7 +32,6 @@ import { SessionChatPanel } from "./components/SessionChatPanel";
 import { Composer } from "./components/Composer";
 import { ChangesBar } from "./components/ChangesBar";
 import { PlanActionsContext } from "./components/chat-log/AssistantBubble";
-import { TaskListBar } from "./components/TaskListBar";
 import { TerminalDock } from "./components/TerminalDock";
 import { CommandPalette } from "./components/CommandPalette";
 import { EditorPane } from "./components/EditorPane";
@@ -93,6 +92,7 @@ export function App() {
   /** 共享的 per-plan 批准飞行锁：key = sessionId → 正在批准中的 planPath 集合。
    *  PlanCard 与 PlansBar 两个入口共用，避免同一计划被并发重复批准。 */
   const [approvingPlanPathsBySession, setApprovingPlanPathsBySession] = useState<Record<string, Set<string>>>({});
+  const approvingPlanLocks = useRef(new Set<string>());
 
   /** 空集合常量：无批准飞行锁时复用同一引用，避免 PlanActionsContext value 每次重建。 */
   const EMPTY_PLAN_PATH_SET = useRef<Set<string>>(new Set()).current;
@@ -168,7 +168,7 @@ export function App() {
 
   const {
     onSend, onRegenerate,
-    onApprovePlan, onUpdateTask, onExecuteTasks,
+    onApprovePlan, onExecuteTasks,
     onRollback, onKeepAll, onKeepFile, onUndoFile,
     onSelectModel, onMode, onSelectThinkingEffort, onSelectReactThinkingEffort, sendQueued,
   } = useChatActions({
@@ -186,30 +186,33 @@ export function App() {
 
   /** 批准计划包装：进入时登记 per-plan 飞行锁，结束后清除。
    *  与 PlanCard / PlansBar 共享同一把锁，杜绝双入口并发批准。 */
-  const handleApprovePlan = useCallback((path?: string) => {
-    const sid = useSessionStore.getState().activeSessionId;
-    if (!sid || !path) return;
-    setApprovingPlanPathsBySession((prev) => {
-      const current = prev[sid];
-      if (current?.has(path)) return prev;
-      const next = new Set(current ?? []);
-      next.add(path);
-      return { ...prev, [sid]: next };
-    });
-    void (async () => {
-      try {
-        await onApprovePlan(path);
-      } finally {
-        setApprovingPlanPathsBySession((prev) => {
-          const current = prev[sid];
-          if (!current?.has(path)) return prev;
-          const next = new Set(current);
-          next.delete(path);
-          return { ...prev, [sid]: next };
-        });
-      }
-    })();
+  const handleApprovePlan = useCallback(async (path: string, sid = useSessionStore.getState().activeSessionId) => {
+    if (!sid || sid !== useSessionStore.getState().activeSessionId) throw new Error("请切换至计划所属会话");
+    if (useSessionStore.getState().activePlanPathBySession[sid] === path) throw new Error("计划已批准");
+    const key = JSON.stringify([sid, path]);
+    if (approvingPlanLocks.current.has(key)) throw new Error("计划正在批准");
+    approvingPlanLocks.current.add(key);
+    setApprovingPlanPathsBySession((prev) => ({
+      ...prev, [sid]: new Set([...(prev[sid] ?? []), path]),
+    }));
+    try {
+      await onApprovePlan(path);
+    } finally {
+      approvingPlanLocks.current.delete(key);
+      setApprovingPlanPathsBySession((prev) => {
+        const next = new Set(prev[sid] ?? []);
+        next.delete(path);
+        return { ...prev, [sid]: next };
+      });
+    }
   }, [onApprovePlan]);
+
+  useEffect(() => window.owncoder.onPlanApprovalRequest((requestId, path, sid) => {
+    void handleApprovePlan(path, sid).then(
+      () => window.owncoder.respondPlanApproval(requestId),
+      (error) => window.owncoder.respondPlanApproval(requestId, error instanceof Error ? error.message : String(error)),
+    );
+  }), [handleApprovePlan]);
 
   // pending 新会话时即使 activeSessionId 尚未清空，也必须读写 PENDING 键，
   // 与 onSend / resolveComposerDraftText 保持一致，否则会出现「有字点发送无反应」。
@@ -496,7 +499,7 @@ export function App() {
           plans: sid === activeSessionId ? sessionPlans : (plansBySession[sid] ?? []),
           activePlanPath: activePlanPathBySession[sid] ?? null,
           busy: busy || sending || sid !== activeSessionId,
-          onApprovePlan: (path) => { if (sid === useSessionStore.getState().activeSessionId) handleApprovePlan(path); },
+          onApprovePlan: (path) => { if (sid === useSessionStore.getState().activeSessionId) void handleApprovePlan(path).catch(() => {}); },
           approvingPlanPaths: approvingPlanPathsBySession[sid] ?? EMPTY_PLAN_PATH_SET,
         }}>
         <SessionChatPanel
@@ -525,13 +528,10 @@ export function App() {
             onViewDiff={openEditorDiff}
             onOpenFile={openEditorFile}
           />
-          {sessionActivePlanMeta && sessionActivePlanMeta.tasks.length > 0 && sessionActivePlanMeta.path ? (
-            <TaskListBar
-              meta={sessionActivePlanMeta as ActivePlanMetaDto}
-              busy={busy || sending}
-              onExecute={() => void onExecuteTasks()}
-              onUpdateTask={(id, s) => void onUpdateTask(id, s)}
-            />
+          {sessionActivePlanMeta && sessionActivePlanMeta.tasks.length > 0 && sessionActivePlanMeta.path && !busy && !sending ? (
+            <button type="button" onClick={() => void onExecuteTasks()}>
+              执行任务
+            </button>
           ) : null}
           <DangerousCommandBar
             autoApproveBash={autoApproveBash}

@@ -239,6 +239,42 @@ describe("版本化计划保存与审批", () => {
     expect(await requireAgentPlanApproval(cached)).toBe(false);
   });
 
+  it("UI 批准按钮路径：磁盘已批准即采信，完整计划作为用户输入进入任务分解", async () => {
+    const first = makeContext(); await runAgentPlanner(first, call);
+    const plan = first.state.plannerPlan!;
+    // 模拟 session-plans.approvePlan：在锁内写入磁盘批准，并追加批准确认消息。
+    await approvePlannerPlan(root, "session-a", plan);
+    const uiHistory: StageHandlerContext["history"] = [
+      ...first.history,
+      { role: "user", content: "开始执行" },
+      { role: "assistant", content: "✅ 计划已批准 → 已切换到 Agent 模式。" },
+    ];
+    const ctx = makeContext(uiHistory, "开始执行");
+    await resumeAgentPlan(ctx);
+    expect(ctx.state.blocked).toBe(false);
+    expect(ctx.state.planApproval).toBe("approved");
+    expect(ctx.state.approvedAgentPlan).toBe(`${report}\n`);
+    // 既定契约：任务分解收到的用户输入是获批计划的完整内容。
+    expect(ctx.opts.userMessage).toBe(`${report}\n`);
+    expect(ctx.opts.activePlan).toEqual({ path: plan.path, content: `${report}\n` });
+    expect(ctx.opts.askUser).not.toHaveBeenCalled();
+    expect(await requireAgentPlanApproval(ctx)).toBe(true);
+  });
+
+  it("UI 批准按钮路径：磁盘批准过期或被替换时仍拒绝", async () => {
+    const first = makeContext(); await runAgentPlanner(first, call);
+    const plan = first.state.plannerPlan!;
+    await approvePlannerPlan(root, "session-a", plan);
+    // 批准后生成新版：旧批准失效，UI 旧界面提交旧版本必须被拒绝。
+    await revisePlannerPlan(root, "session-a", plan);
+    await savePlannerPlan(root, "session-a", "agent", `${report}\n新版`, plan);
+    const ctx = makeContext(first.history, "开始执行");
+    await resumeAgentPlan(ctx);
+    expect(ctx.state.blocked).toBe(true);
+    expect(ctx.state.planApproval).toBe("unavailable");
+    expect(ctx.opts.askUser).not.toHaveBeenCalled();
+  });
+
   it("拒绝非 Planner 代理，中止时不派发", async () => {
     const ctx = makeContext();
     await runAgentPlanner(ctx, { ...call, function: { ...call.function, arguments: JSON.stringify({ agent_type: "Explore", task: "调研" }) } });

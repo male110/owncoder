@@ -7,7 +7,6 @@ import { removeMessage } from "../hooks/queue-controller";
 import type { TabId } from "../SettingsPanel";
 import { ChatLog } from "./ChatLog";
 import { ErrorBanner } from "./ErrorBanner";
-import { LlmRetryNotice } from "./chat-log/LlmRetryNotice";
 import { useI18n } from "../i18n";
 
 
@@ -200,20 +199,17 @@ export function SessionChatPanel({
               onDismiss={() => useChatStore.getState().setErrorAlert(null, sessionId)}
               onOpenSettings={() => onOpenSettings("models")}
             />
-          ) : errorAlert ? (
+          ) : !sending && errorAlert ? (
             <ErrorBanner
               error={errorAlert}
               onDismiss={() => useChatStore.getState().setErrorAlert(null, sessionId)}
               onOpenSettings={() => { onOpenSettings("models"); useChatStore.getState().setErrorAlert(null, sessionId); }}
             />
-          ) : liveStatus ? (
-            <p className="live-status hero-status">{liveStatus}</p>
           ) : null}
-          {llmRetry ? <LlmRetryNotice retry={llmRetry} /> : null}
         </div>
           ) : (
         <>
-          {errorAlert ? (
+          {!sending && errorAlert ? (
             <ErrorBanner
               error={errorAlert}
               onDismiss={() => useChatStore.getState().setErrorAlert(null, sessionId)}

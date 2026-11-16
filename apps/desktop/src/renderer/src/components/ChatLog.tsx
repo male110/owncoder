@@ -7,7 +7,6 @@ import { useI18n } from "../i18n";
 import {
   buildChatItems,
   buildLogBlocks,
-  deriveLiveStatus,
   isActivationEdge,
   isInitialScrollReady,
   lastAssistantBlockIndex,
@@ -16,10 +15,6 @@ import {
   type LogBlock,
 } from "./chat-log-model";
 import { AssistantBubble } from "./chat-log/AssistantBubble";
-import { DecomposeCard } from "./chat-log/DecomposeCard";
-import { LiveEventStream } from "./chat-log/LiveEventStream";
-import { LlmRetryNotice } from "./chat-log/LlmRetryNotice";
-import { ProcessSteps } from "./chat-log/ProcessSteps";
 import { UserBubble } from "./chat-log/UserBubble";
 import { useCopyMenu } from "./chat-log/useCopyMenu";
 
@@ -85,8 +80,6 @@ export function ChatLog({
   onStartReached,
   scrollerRef,
   active = true,
-  planTasks,
-  llmRetry = null,
 }: Props) {
   const { t } = useI18n();
   const blocks = useMemo(
@@ -137,29 +130,11 @@ export function ChatLog({
     return () => cancelAnimationFrame(raf);
   }, [liveEvents, liveStatus, sending, scrollToTrueBottom]);
 
-  const lastAssistantIdx = useMemo(() => lastAssistantBlockIndex(blocks), [blocks]);
-
-  const derivedStatus = useMemo(
-    () => deriveLiveStatus(sending, liveStatus, liveEvents),
-    [sending, liveStatus, liveEvents],
+  const items = useMemo(() => buildChatItems(blocks), [blocks]);
+  const lastAssistantIdx = useMemo(
+    () => lastAssistantBlockIndex(items.map((item) => item.block)),
+    [items],
   );
-
-  // Decomposition cards belong to the current turn.
-  // They must render BEFORE the in-progress assistant reply so the plan is
-  // visible ahead of the LLM response.
-  const decompositionCards = useMemo(
-    () => liveEvents.filter((e): e is Extract<LiveEvent, { kind: "decompose" }> => e.kind === "decompose"),
-    [liveEvents],
-  );
-  const nonDecomposeLiveEvents = useMemo(
-    () => liveEvents.filter((e) => e.kind !== "decompose"),
-    [liveEvents],
-  );
-  const showLiveFooter =
-    Boolean(derivedStatus) ||
-    llmRetry !== null ||
-    decompositionCards.length > 0 ||
-    nonDecomposeLiveEvents.length > 0;
 
   const renderBlock = useCallback((b: LogBlock, i: number) => {
     if (b.kind === "user")
@@ -185,15 +160,8 @@ export function ChatLog({
         />
       );
     }
-    // 已完成轮次的过程步骤 → 可展开的折叠控件（默认收起）。
-    if (b.kind === "process") return <ProcessSteps items={b.items} />;
-    // 进行中轮次的工具链由 LiveToolCard / liveStatus 展示，不在列表里重复。
     return null;
   }, [sessionId, workspaceRoot, lastAssistantIdx, sending, stopping, liveEvents.length, onRegenerate, onDeleteTurn, onDiscardInflight, onOpenFile]);
-
-  // History rows only — live status/stream render after Virtuoso inside the
-  // shared scroller so streaming updates don't depend on Footer remounts.
-  const items = useMemo(() => buildChatItems(blocks), [blocks]);
 
   // 初始贴底 effect 的稳定触发信号：只关心「从空到有内容」的翻转，
   // 不把 liveEvents.length / sending 这类流式高频值放进 deps，
@@ -432,33 +400,6 @@ export function ChatLog({
           }}
           itemContent={(index, item) => renderBlock(item.block, index - firstItemIndex)}
         />
-        {showLiveFooter ? (
-          <div className="chat-log-live-footer">
-            {llmRetry ? <LlmRetryNotice retry={llmRetry} /> : null}
-            {derivedStatus ? (
-              <div className={`chat-log-status${sending ? " sending" : ""}`}>
-                {sending ? <span className="tool-spinner" aria-hidden /> : null}
-                <span className="chat-log-status-text">{derivedStatus}</span>
-              </div>
-            ) : null}
-            {decompositionCards.length > 0 || nonDecomposeLiveEvents.length > 0 ? (
-              <div className="current-turn-bubble">
-                {decompositionCards.length > 0 ? (
-                  <div className="chat-log-decomposition">
-                    {decompositionCards.map((ev) => (
-                      <DecomposeCard
-                        key={ev.id}
-                        decomposition={ev.decomposition}
-                        planTasks={planTasks}
-                      />
-                    ))}
-                  </div>
-                ) : null}
-                <LiveEventStream events={nonDecomposeLiveEvents} />
-              </div>
-            ) : null}
-          </div>
-        ) : null}
         {copyMenu ? (
           <div
             ref={copyMenuRef}

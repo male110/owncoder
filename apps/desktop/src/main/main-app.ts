@@ -1,5 +1,6 @@
 import { app, BrowserWindow, ipcMain, Menu, Notification } from "electron";
 import { existsSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { basename, isAbsolute, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createCompatibilityAdapter } from "@owncoder/core";
@@ -14,6 +15,7 @@ import { mt } from "./i18n";
 import { indexHost } from "./index-host";
 import { disposeWebFetchRenderer, renderPage } from "./web-fetch-render";
 import { registerExternalLinks } from "./external-links";
+import { focusExistingPlanWindow } from "./plan-window-registry";
 import * as sqliteVec from "sqlite-vec";
 import {
   configureEmbeddingCacheDir,
@@ -406,6 +408,112 @@ function scheduleRendererReload(win: BrowserWindow | null): void {
 
 // ── Window ────────────────────────────────────────────────────────────────────
 
+const planWindows = new Map<string, BrowserWindow>();
+const planWindowKeys = new Map<number, { path: string; sessionId: string }>();
+const pendingPlanApprovals = new Map<string, { resolve: (error?: string) => void; timer: ReturnType<typeof setTimeout>; senderId: number }>();
+const planApprovalLocks = new Set<string>();
+const pendingPlanOpens = new Map<string, Promise<void>>();
+
+function planWindowKey(path: string, sessionId: string): string {
+  return JSON.stringify([sessionId, path]);
+}
+
+async function planWindowData(path: string, sessionId: string) {
+  const plan = (await session.listPlans(sessionId)).find((item) => item.path === path && item.sessionId === sessionId);
+  if (!plan) throw new Error("计划不存在");
+  const content = await session.readPlan(path, sessionId);
+  const active = await session.getActivePlan(sessionId);
+  return { plan, content, approved: active?.path === path };
+}
+
+function registerPlanWindowHandlers(): void {
+  ipcMain.handle("plans:openWindow", async (event, path: unknown, sessionId: unknown) => {
+    if (event.sender !== mainWindow?.webContents || !rendererReady) throw new Error("无权打开计划窗口");
+    if (typeof path !== "string" || typeof sessionId !== "string") throw new Error("无效计划");
+    const key = planWindowKey(path, sessionId);
+    if (pendingPlanOpens.has(key)) {
+      await pendingPlanOpens.get(key);
+      focusExistingPlanWindow(planWindows, key);
+      return;
+    }
+    const pending = (async () => {
+      await planWindowData(path, sessionId);
+      if (focusExistingPlanWindow(planWindows, key)) return;
+      const win = new BrowserWindow({
+        width: 900, height: 760, minWidth: 560, minHeight: 400, title: "OwnCoder",
+        backgroundColor: "#0c0d0f", autoHideMenuBar: true,
+        webPreferences: { preload: preloadScriptPath(), contextIsolation: true, nodeIntegration: false, sandbox: false },
+      });
+      planWindows.set(key, win);
+      planWindowKeys.set(win.webContents.id, { path, sessionId });
+      registerExternalLinks(win.webContents);
+      win.webContents.on("will-navigate", (navigationEvent) => navigationEvent.preventDefault());
+      const senderId = win.webContents.id;
+      win.on("closed", () => {
+        planWindows.delete(key);
+        planWindowKeys.delete(senderId);
+        for (const [id, pending] of pendingPlanApprovals) {
+          if (pending.senderId !== senderId) continue;
+          clearTimeout(pending.timer);
+          pending.resolve("计划窗口已关闭");
+          pendingPlanApprovals.delete(id);
+        }
+      });
+      const url = process.env.ELECTRON_RENDERER_URL
+        ? new URL(process.env.ELECTRON_RENDERER_URL)
+        : pathToFileURL(rendererIndexPath());
+      url.searchParams.set("view", "plan");
+      await win.loadURL(url.toString()).catch((error) => { if (!win.isDestroyed()) win.close(); throw error; });
+    })();
+    pendingPlanOpens.set(key, pending);
+    try { await pending; } finally { pendingPlanOpens.delete(key); }
+  });
+  ipcMain.handle("plans:windowData", (event) => {
+    const identity = planWindowKeys.get(event.sender.id);
+    if (!identity) throw new Error("无效计划窗口");
+    return planWindowData(identity.path, identity.sessionId);
+  });
+  ipcMain.handle("plans:approveInWindow", async (event) => {
+    const identity = planWindowKeys.get(event.sender.id);
+    if (!identity || !mainWindow || mainWindow.isDestroyed() || !rendererReady) throw new Error("主窗口不可用");
+    const { plan, approved } = await planWindowData(identity.path, identity.sessionId);
+    if (session.getState().activeSessionId !== identity.sessionId) throw new Error("请切换至计划所属会话");
+    if (plan.kind !== "plan" || approved) throw new Error("计划无法批准或已批准");
+    const key = planWindowKey(identity.path, identity.sessionId);
+    if (planApprovalLocks.has(key)) throw new Error("计划正在批准");
+    planApprovalLocks.add(key);
+    try {
+      const error = await new Promise<string | undefined>((resolve) => {
+        const requestId = randomUUID();
+        const timer = setTimeout(() => {
+          pendingPlanApprovals.delete(requestId);
+          resolve("批准超时");
+        }, 120_000);
+        pendingPlanApprovals.set(requestId, { resolve, timer, senderId: event.sender.id });
+        try {
+          mainWindow!.webContents.send("plans:approvalRequest", requestId, identity.path, identity.sessionId);
+        } catch {
+          pendingPlanApprovals.delete(requestId);
+          clearTimeout(timer);
+          resolve("主窗口不可用");
+        }
+      });
+      if (error) throw new Error(error);
+      if (!(await planWindowData(identity.path, identity.sessionId)).approved) throw new Error("批准状态未更新");
+    } finally {
+      planApprovalLocks.delete(key);
+    }
+  });
+  ipcMain.on("plans:approvalResponse", (event, requestId: unknown, error: unknown) => {
+    if (event.sender !== mainWindow?.webContents || typeof requestId !== "string") return;
+    const pending = pendingPlanApprovals.get(requestId);
+    if (!pending) return;
+    pendingPlanApprovals.delete(requestId);
+    clearTimeout(pending.timer);
+    pending.resolve(typeof error === "string" ? error : undefined);
+  });
+}
+
 function createWindow(): void {
   rendererReady = false;
   loadRetries = 0;
@@ -502,6 +610,12 @@ function createWindow(): void {
   });
 
   mainWindow.on("closed", () => {
+    for (const [id, pending] of pendingPlanApprovals) {
+      clearTimeout(pending.timer);
+      pending.resolve("主窗口已关闭");
+      pendingPlanApprovals.delete(id);
+    }
+    for (const win of planWindows.values()) if (!win.isDestroyed()) win.close();
     // The renderer can no longer receive events. Stop every in-flight agent
     // turn so streaming deltas stop firing emitChat into a disposed frame.
     rendererReady = false;
@@ -551,6 +665,7 @@ app.whenReady().then(async () => {
     chatBufferRef,
   };
   registerAllHandlers(ipcCtx);
+  registerPlanWindowHandlers();
 
   ipcMain.on("security:dangerousCommandResponse", (event, requestId: unknown, allowed: unknown) => {
     if (event.sender !== mainWindow?.webContents) return;

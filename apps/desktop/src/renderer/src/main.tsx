@@ -1,6 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
+import { PlanWindow } from "./components/PlanWindow";
 import { RenderErrorBoundary } from "./components/RenderErrorBoundary";
 import { applyThemeToDocument, readStoredTheme, syncNativeChrome } from "./theme";
 import { initLocale, setLocalePref } from "./i18n";
@@ -43,7 +44,7 @@ createRoot(root).render(
         </main>
       )}
     >
-      <App />
+      {new URLSearchParams(window.location.search).get("view") === "plan" ? <PlanWindow /> : <App />}
     </RenderErrorBoundary>
   </StrictMode>,
 );

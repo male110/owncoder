@@ -330,7 +330,9 @@ export function useChatActions(deps: {
   const injectPlanNotification = useCallback(async (planPath: string, sid: string) => {
     try {
       const content = await window.owncoder.readPlan(planPath, sid);
-      const fileName = planPath.split("/").pop() ?? planPath;
+      const plan = (await window.owncoder.listPlans(sid)).find((item) => item.path === planPath);
+      const fileName = plan?.title && !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}(?:\.md)?$/i.test(plan.title)
+        ? plan.title : t("已生成计划");
       const preview = content.slice(0, 300).trim();
       const summary = preview.length < content.length ? `${preview}…` : preview;
       chat.setHistory((h) => [
@@ -798,6 +800,7 @@ export function useChatActions(deps: {
       }
     } catch (e) {
       showError(e, sid);
+      throw e;
     } finally {
       ui.setBusy(false);
     }

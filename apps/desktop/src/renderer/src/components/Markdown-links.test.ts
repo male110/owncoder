@@ -29,6 +29,11 @@ function linkFor(href: string, onOpenFile = vi.fn()) {
 afterEach(() => vi.clearAllMocks());
 
 describe("超链接点击", () => {
+  it("不会将不安全协议渲染为可点击链接", () => {
+    const element = Markdown({ content: "[危险](javascript:alert)" });
+    const render = element.type as (props: typeof element.props) => Element;
+    expect(findLink(render(element.props))).toBeUndefined();
+  });
   it.each(["src/main.ts", "C:/project/src/main.ts", "file:///C:/project/src/main.ts"])(
     "保留本地文件打开行为：%s", (href) => {
       const { link, onOpenFile } = linkFor(href);

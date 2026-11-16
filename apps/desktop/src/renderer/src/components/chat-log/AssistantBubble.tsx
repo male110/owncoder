@@ -16,29 +16,26 @@ export const PlanActionsContext = createContext<{
   approvingPlanPaths?: Set<string>;
 } | null>(null);
 
-export function PlanCard({ planPath, sessionId, onOpen }: { planPath: string; sessionId?: string; onOpen: (path: string) => void }) {
+export function PlanCard({ planPath, sessionId }: { planPath: string; sessionId?: string }) {
   const actions = useContext(PlanActionsContext);
-  const [preview, setPreview] = useState<string | null>(null);
   const [opening, setOpening] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [openError, setOpenError] = useState("");
   const plan = actions?.plans.find((p) => p.path === planPath && p.sessionId === sessionId);
-  const approved = actions?.activePlanPath === planPath;
-  // 批准去重锁来自共享层（PlanActionsContext），与 PlansBar 共用同一把 per-plan 飞行锁。
-  const approving = actions?.approvingPlanPaths?.has(planPath) ?? false;
+  const { t } = useI18n();
+  const title = plan?.title && !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}(?:\.md)?$/i.test(plan.title)
+    ? t("计划已生成：{{name}}", { name: plan.title }) : t("已生成计划");
   const open = async () => {
     if (!sessionId || opening) return;
     setOpening(true);
     try {
-      setPreview(await window.owncoder.readPlan(planPath, sessionId));
-    } catch {
-      setPreview(null);
+      await window.owncoder.openPlanWindow(planPath, sessionId);
+      setOpenError("");
+    } catch (reason) {
+      setOpenError(reason instanceof Error ? reason.message : String(reason));
     } finally {
       setOpening(false);
     }
-  };
-  const approve = () => {
-    if (!plan || plan.kind === "document" || approved || approving || actions?.busy) return;
-    actions?.onApprovePlan(planPath);
   };
   const copyPath = async () => {
     try {
@@ -47,56 +44,22 @@ export function PlanCard({ planPath, sessionId, onOpen }: { planPath: string; se
       setTimeout(() => setCopied(false), 1500);
     } catch { /* ignore */ }
   };
-  const fileName = planPath.split("/").pop() ?? planPath;
-  const { t } = useI18n();
   return (
     <div>
     <div className="plan-card">
       <div className="plan-card-icon">📋</div>
       <div className="plan-card-body">
-        <div className="plan-card-title">{t("已生成计划")}</div>
-        <div className="plan-card-filename">{fileName}</div>
-        <div className="plan-card-path">{planPath}</div>
+        <div className="plan-card-title">{title}</div>
       </div>
-      <button
-        type="button"
-        className="plan-card-copy"
-        onClick={() => void copyPath()}
-        title={copied ? t("已复制") : t("复制路径")}
-      >
+      <button type="button" className="plan-card-copy" onClick={() => void copyPath()}
+        title={copied ? t("已复制") : t("复制路径")}>
         {copied ? "✓" : "⧉"}
       </button>
-      <button type="button" className="plan-card-open" onClick={() => void open()} disabled={opening}>
+      <button type="button" className="plan-card-open" onClick={() => void open()} disabled={opening || !sessionId}>
         {t("打开 →")}
       </button>
     </div>
-      {preview !== null ? (
-        <div className="plan-preview">
-          <div className="prompt-toolbar">
-            <strong>{planPath}</strong>
-            <div className="plan-preview-actions">
-              <button type="button" className="ghost tiny" onClick={() => onOpen(planPath)}>{t("在编辑器中打开")}</button>
-              <button type="button" className="ghost tiny" onClick={() => setPreview(null)}>{t("关闭预览")}</button>
-            </div>
-          </div>
-          {/* 限高 + mask 渐隐必须落在同一节点，分层会导致渐隐失效（借鉴 ZCode switch-mode.tsx L113-114）。 */}
-          <pre className="plan-preview-body plan-preview-body--masked">{preview}</pre>
-          {plan?.kind === "document" ? (
-            <span className="plan-kind-note">{t("文档交付物 · 无需批准（如需执行请生成实施计划）")}</span>
-          ) : approved ? (
-            <span className="plan-kind-note">{t("已批准")}</span>
-          ) : plan ? (
-            <button
-              type="button"
-              className="plan-approve-cta"
-              disabled={actions?.busy || approving}
-              onClick={approve}
-            >
-              {approving ? t("批准中…") : t("批准此计划并自动执行")}
-            </button>
-          ) : null}
-        </div>
-      ) : null}
+    {openError && <p role="alert" className="plan-window-error">{openError}</p>}
     </div>
   );
 }
@@ -190,7 +153,7 @@ function AssistantBubbleImpl({
         </div>
       )}
       <Markdown content={displayContent} onOpenFile={onOpenFile} workspaceRoot={workspaceRoot} />
-      {planPath ? <PlanCard planPath={planPath} sessionId={sessionId} onOpen={(p) => onOpenFile?.(p)} /> : null}
+      {planPath ? <PlanCard planPath={planPath} sessionId={sessionId} /> : null}
       <div className="msg-actions">
         <button type="button" className="msg-action-btn" onClick={() => void onCopy()} title={t("复制")}>
           {copied ? t("已复制") : t("复制")}

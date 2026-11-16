@@ -132,6 +132,30 @@ export async function resumeAgentPlan(ctx: Omit<StageHandlerContext, "node">): P
       }
       return;
     }
+    // UI 批准按钮路径：session-plans.approvePlan 已通过 approvePlannerPlan 在锁内
+    // 把当前版本的有效批准写入磁盘（版本、摘要、批准引用一致）。此时会话里最后
+    // 一条助手消息是「✅ 计划已批准…」确认而非计划卡片，不能再用 plan_saved 标记
+    // 判定“用户看过该版本”；直接采信磁盘批准。过期或被替换的版本仍会被
+    // validatePlannerPlan(approved=true) 拒绝，不绕过版本校验。
+    if (plan.status === "approved") {
+      const approvedContent = await validatePlannerPlan(opts.workspaceRoot, opts.sessionId, plan, true);
+      if (opts.signal?.aborted) { state.aborted = true; return; }
+      state.approvedAgentPlan = approvedContent;
+      state.planApproval = "approved";
+      state.plannerPlan = plan;
+      if (opts.activePlan?.path !== plan.path) {
+        opts.activeTasks = undefined;
+        opts.currentTaskId = null;
+        opts.taskRunState = null;
+        state.taskRunState = null;
+      }
+      opts.activePlan = { path: plan.path, content: approvedContent };
+      // 既定契约：批准后把获批计划的完整内容作为用户输入送入任务分解。
+      opts.userMessage = opts.mode === "spec"
+        ? plan.originalRequest ?? "按已批准的只读计划继续设计，文档仍需另行批准，不实施源码变更"
+        : approvedContent;
+      return;
+    }
     const viewed = [...opts.history].reverse().find((turn) => turn.role === "assistant");
     if (plan.status === "revising" || !viewed?.content.includes(`<!--plan_saved:${plan.path}-->`)
       || !viewed.content.includes(plan.digest) || !viewed.content.includes(plan.planId)
@@ -271,7 +295,7 @@ function meaningfulSectionLines(content: string): string[] {
 
 export function validatePlannerReport(report: string): { normalized: string; missing: string[] } {
   const { body, hasFinalReportHeading } = normalizePlannerReport(report);
-  const missing = PLANNER_SECTIONS
+  const missing: Array<(typeof PLANNER_SECTIONS)[number]["label"] | "编号步骤"> = PLANNER_SECTIONS
     .filter(({ aliases }) => meaningfulSectionLines(sectionContent(body, aliases)).length === 0)
     .map(({ label }) => label);
   const steps = meaningfulSectionLines(sectionContent(body, ["步骤", "steps", "step"]));

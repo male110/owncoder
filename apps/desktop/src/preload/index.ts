@@ -538,6 +538,11 @@ export interface DesktopApi {
   listMcpTools: () => Promise<McpToolDto[]>;
   listPlans: (sessionId?: string) => Promise<PlanInfoDto[]>;
   readPlan: (path: string, sessionId?: string) => Promise<string>;
+  openPlanWindow: (path: string, sessionId: string) => Promise<void>;
+  getPlanWindowData: () => Promise<{ plan: PlanInfoDto; content: string; approved: boolean }>;
+  approvePlanInWindow: () => Promise<void>;
+  onPlanApprovalRequest: (handler: (requestId: string, path: string, sessionId: string) => void) => () => void;
+  respondPlanApproval: (requestId: string, error?: string) => void;
   listRules: () => Promise<RuleFileDto[]>;
   readRule: (name: string) => Promise<string>;
   writeRule: (name: string, content: string) => Promise<RuleFileDto>;
@@ -726,6 +731,15 @@ const api: DesktopApi = {
   listMcpTools: () => ipcRenderer.invoke("mcp:listTools"),
   listPlans: (sessionId?: string) => ipcRenderer.invoke("plans:list", sessionId),
   readPlan: (path, sessionId) => ipcRenderer.invoke("plans:read", path, sessionId),
+  openPlanWindow: (path, sessionId) => ipcRenderer.invoke("plans:openWindow", path, sessionId),
+  getPlanWindowData: () => ipcRenderer.invoke("plans:windowData"),
+  approvePlanInWindow: () => ipcRenderer.invoke("plans:approveInWindow"),
+  onPlanApprovalRequest: (handler) => {
+    const listener = (_: Electron.IpcRendererEvent, requestId: string, path: string, sessionId: string) => handler(requestId, path, sessionId);
+    ipcRenderer.on("plans:approvalRequest", listener);
+    return () => ipcRenderer.removeListener("plans:approvalRequest", listener);
+  },
+  respondPlanApproval: (requestId, error) => ipcRenderer.send("plans:approvalResponse", requestId, error),
   listSpecs: (sessionId?: string) => ipcRenderer.invoke("specs:list", sessionId),
   getSpecStatus: (feature, sessionId) => ipcRenderer.invoke("specs:status", feature, sessionId),
   approveSpec: (feature, sessionId) => ipcRenderer.invoke("specs:approve", feature, sessionId),

@@ -164,17 +164,16 @@ export function buildLogBlocks(
 
     if (active || finalIdx < 0) {
       for (const t of round) {
-        if (t.role === "user") {
-          out.push({ kind: "user", turn: withOwner(t) });
-        } else if (t.role === "assistant") {
-          if (t.content.startsWith("Error:")) continue;
-          if (!t.content.trim()) continue;
-          out.push({ kind: "assistant", turn: withOwner(t) });
-        } else if (t.role === "tool") {
+        if (t.role === "user") out.push({ kind: "user", turn: withOwner(t) });
+        if (t.role === "tool") {
           const last = out[out.length - 1];
           if (last?.kind === "tools") last.items.push(t);
           else out.push({ kind: "tools", items: [t] });
         }
+      }
+      if (!active) {
+        const error = [...round].reverse().find((t) => t.role === "assistant" && t.content.startsWith("Error:"));
+        if (error) out.push({ kind: "assistant", turn: withOwner(error) });
       }
       return;
     }
@@ -249,20 +248,14 @@ export function lastAssistantBlockIndex(blocks: LogBlock[]): number {
   return -1;
 }
 
-/** Compose Virtuoso items from committed history blocks only.
- * Live status + thinking/text/tools render outside Virtuoso (shared scroller)
- * so streaming height changes refresh in place (no remount / no stale row).
- * tools（进行中轮次的工具链）不进列表，避免与 LiveToolCard/liveStatus 重复；
- * process（已完成轮次的过程步骤）以可展开的折叠控件进入列表，供用户回看过程。 */
+/** Only user turns and final assistant replies/errors enter the visible list. */
 export function buildChatItems(blocks: LogBlock[]): ChatItem[] {
   const items: ChatItem[] = [];
   for (let i = 0; i < blocks.length; i++) {
     const b = blocks[i]!;
-    if (b.kind === "tools") continue;
-    const key =
-      b.kind === "process"
-        ? `b-process-${i}-${b.items[0]?.id ?? b.items.length}`
-        : b.turn.id ?? `b-${b.kind}-${i}-${b.turn.content.slice(0, 24)}`;
+    if (b.kind !== "user" && b.kind !== "assistant") continue;
+    if (b.kind === "assistant" && b.turn.content.includes("<!--plan_saved:")) continue;
+    const key = b.turn.id ?? `b-${b.kind}-${i}-${b.turn.content.slice(0, 24)}`;
     items.push({ kind: "block", block: b, key });
   }
   return items;

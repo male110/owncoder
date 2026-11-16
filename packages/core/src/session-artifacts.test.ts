@@ -78,7 +78,7 @@ describe("会话产物隔离", () => {
 
   it("需求、设计和任务仅在所属会话创建、恢复、展示和审批", async () => {
     const a = context("a"); const b = context("b");
-    const specPath = await saveSpec(root, "login", "# A 需求", "a");
+    const specPath = await saveSpec(root, "login", "# A 需求\n\nR1: WHEN 用户提交凭证 THE SYSTEM SHALL 完成登录", "a");
     await writeFeatureState(root, "login", "awaiting_spec_approval", "a");
     expect(await listSpecs(root, "b")).toEqual([]);
     expect((await getSpecStatus(root, "login", "b")).phase).toBe("empty");
@@ -92,23 +92,23 @@ describe("会话产物隔离", () => {
     const host = { rt: () => r, sessionWorkspaceRoot: () => root, focusSessionId: () => "b", persist: vi.fn(), getState: vi.fn(), setFocusMode: vi.fn() };
     await expect(approveSpecPhase(host, "login", "b")).rejects.toThrow();
     await writeFeatureState(root, "login", "spec_approved", "a");
-    expect((await toolSaveDesign(a, "login", "# A 设计")).ok).toBe(true);
+    expect((await toolSaveDesign(a, "login", "# A 设计\n\n## 需求追踪矩阵\n\n- R1: 登录流程")).ok).toBe(true);
     await writeFeatureState(root, "login", "design_approved", "a");
-    expect((await toolSaveTasks(a, "login", "# A 任务\n- [ ] 实施登录")).ok).toBe(true);
+    expect((await toolSaveTasks(a, "login", "# A 任务\n\n- [ ] 实施登录\n  - 依赖: 无\n  - 文件: src/login.ts\n  - 实现: 登录流程\n  - 验收: 登录成功\n  - 需求: R1")).ok).toBe(true);
     expect((await listSpecs(root, "a"))[0]?.phases).toEqual(["spec", "design", "tasks"]);
     for (const phase of ["spec", "design", "tasks"] as const) {
       expect(await readSpecPhase(root, "login", phase, "a")).toContain("A");
       await expect(readPlanFile(root, `${featureDirRel("login", "a")}/${phase}.md`, "b")).rejects.toThrow();
     }
     expect(await readPlanFile(root, specPath, "a")).toContain("A 需求");
-    await saveSpec(root, "login", "# B 需求", "b");
+    await saveSpec(root, "login", "# B 需求\n\nR1: WHEN 用户提交凭证 THE SYSTEM SHALL 完成 B 登录", "b");
     await writeFeatureState(root, "login", "awaiting_spec_approval", "b");
     expect((await listSpecs(root, "b"))[0]?.title).toBe("B 需求");
     expect(await readSpecPhase(root, "login", "spec", "a")).toContain("A 需求");
     await writeFeatureState(root, "login", "spec_approved", "b");
-    expect((await toolSaveDesign(b, "login", "# B 设计")).ok).toBe(true);
+    expect((await toolSaveDesign(b, "login", "# B 设计\n\n## 需求追踪矩阵\n\n- R1: B 登录流程")).ok).toBe(true);
     await writeFeatureState(root, "login", "design_approved", "b");
-    expect((await toolSaveTasks(b, "login", "# B 任务\n- [ ] 实施 B")).ok).toBe(true);
+    expect((await toolSaveTasks(b, "login", "# B 任务\n\n- [ ] 实施 B\n  - 依赖: 无\n  - 文件: src/b.ts\n  - 实现: B 登录流程\n  - 验收: B 登录成功\n  - 需求: R1")).ok).toBe(true);
     await approveSpecPhase(host, "login", "b");
     expect(r.activePlanPath).toBe(`${featureDirRel("login", "b")}/tasks.md`);
     expect((await readFeatureState(root, "login", "a"))?.stage).toBe("awaiting_tasks_approval");

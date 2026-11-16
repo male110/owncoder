@@ -45,6 +45,27 @@ describe("任务上下文：短硬执行纪律", () => {
     expect(text).toContain("Simple answers may stay brief without extra sections");
   });
 
+  it("requires a detailed Explore brief and rejects broad delegation", () => {
+    const text = formatCurrentTaskContext(makeTask({
+      executionGuidance: "在已确认的 react-prompt.ts 中调整 Explore 任务描述，并验证提示词测试。",
+    }));
+    expect(text).toContain('Before dispatch_agent with agent_type="Explore"');
+    expect(text).toContain("self-contained exploration brief");
+    expect(text).toContain("confirmed file paths and classes/methods/fields or line ranges");
+    expect(text).toContain("conclusions and their evidence");
+    expect(text).toContain("the specific unknowns to resolve");
+    expect(text).toContain("preferred entry points");
+    expect(text).toContain("the limited call chains to trace");
+    expect(text).toContain("areas and anchors that must not be read or explored again");
+    expect(text).toContain("relevant boundaries and failure paths");
+    expect(text).toContain("the file paths, symbols, and line ranges the Explore report must return");
+    expect(text).toContain("If only a module-level entry is known");
+    expect(text).toContain("if no repository evidence exists");
+    expect(text).toContain("without guessing paths or method names");
+    expect(text).toContain('Never send only broad requests such as "explore the relevant code"');
+    expect(text).toContain("never ask Explore to relocate anchors already confirmed in history");
+  });
+
   it("先复用分解阶段历史，历史为空时不注入该引导", () => {
     const withHistory = formatCurrentTaskContext(makeTask({
       relevantHistory: "packages/core/src/example.ts 中的 updateTask 函数负责更新任务。",

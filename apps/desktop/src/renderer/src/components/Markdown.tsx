@@ -73,10 +73,13 @@ function renderLink(
   onOpenFile?: (path: string, line?: number, column?: number) => void,
   workspaceRoot?: string,
 ): ReactNode {
+  const safeHref = href.trim();
+  if (/^[a-z][a-z\d+.-]*:/i.test(safeHref) && !/^(https?:|file:|[a-z]:[\\/])/i.test(safeHref)
+      && !/\.[^/:]+:[1-9]\d*(?::[1-9]\d*)?$/.test(safeHref)) return label;
   return (
     <a
       key={key}
-      href={href}
+      href={safeHref}
       target="_blank"
       rel="noreferrer"
       onClick={(event) => {

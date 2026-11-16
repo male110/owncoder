@@ -77,33 +77,16 @@ describe("buildChatItems", () => {
     expect(items[0]?.key).toContain("u1");
   });
 
-  it("includes process steps (collapsible) but omits live tools blocks", () => {
+  it("omits process, tools, and saved plans while preserving final replies", () => {
     const items = buildChatItems([
       { kind: "user", turn: userTurn("修 bug") },
-      {
-        kind: "process",
-        items: [
-          { id: "t1", role: "tool", toolName: "read_file", content: "ok" },
-          { id: "t2", role: "tool", toolName: "grep", content: "ok" },
-        ],
-      },
+      { kind: "process", items: [{ id: "t1", role: "tool", content: "ok" }] },
+      { kind: "tools", items: [{ id: "t2", role: "tool", content: "ok" }] },
+      { kind: "assistant", turn: { id: "p1", role: "assistant", content: "<!--plan_saved:plan.md-->" } },
       { kind: "assistant", turn: { id: "a1", role: "assistant", content: "已修好" } },
-      {
-        kind: "tools",
-        items: [{ id: "t3", role: "tool", toolName: "bash", content: "ok" }],
-      },
     ]);
-    expect(items.map((it) => (it.kind === "block" ? it.block.kind : it.kind))).toEqual([
-      "user",
-      "process",
-      "assistant",
-    ]);
-    const process = items[1];
-    if (process?.kind === "block" && process.block.kind === "process") {
-      expect(process.block.items).toHaveLength(2);
-    } else {
-      throw new Error("expected process block");
-    }
+    expect(items.map((it) => it.block.kind)).toEqual(["user", "assistant"]);
+    expect(items[1]?.block).toMatchObject({ turn: { content: "已修好" } });
   });
 
   it("does not inject status/current rows into the virtual list", () => {
@@ -180,6 +163,25 @@ describe("buildLogBlocks process panel", () => {
         { question: "继续？" },
       ]);
     }
+  });
+});
+
+describe("conversation visibility", () => {
+  it("hides in-progress thoughts, plans and tools until a final reply", () => {
+    const turns: ChatTurnDto[] = [
+      userTurn("修复问题"),
+      { id: "a1", role: "assistant", content: "思考及执行进度" },
+      { id: "p1", role: "assistant", content: "<!--plan_saved:plan.md-->" },
+      { id: "t1", role: "tool", content: "工具结果" },
+    ];
+    expect(buildChatItems(buildLogBlocks(turns, true, 4)).map((item) => item.block.kind)).toEqual(["user"]);
+    turns.push({ id: "a2", role: "assistant", content: "最终答复" });
+    expect(buildChatItems(buildLogBlocks(turns, false, 0)).map((item) => item.block.kind)).toEqual(["user", "assistant"]);
+  });
+
+  it("keeps a terminal error when no final reply is available", () => {
+    const turns: ChatTurnDto[] = [userTurn("修复问题"), { id: "e1", role: "assistant", content: "Error: execution failed" }];
+    expect(buildChatItems(buildLogBlocks(turns, false, 0))[1]?.block).toMatchObject({ turn: { content: "Error: execution failed" } });
   });
 });
 
