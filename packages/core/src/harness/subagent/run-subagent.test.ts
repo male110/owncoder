@@ -48,6 +48,27 @@ beforeEach(() => {
   } as AgentLoopResult);
 });
 
+describe("runExploreSubagent — Planner 输入可见", () => {
+  it.each([
+    { assistantText: "## Final Report\n\n计划", partial: false },
+    { assistantText: "", partial: true },
+  ])("在子代理返回前发送实际输入，失败时仍保留：$partial", async ({ assistantText, partial }) => {
+    mockedRunAgentLoop.mockResolvedValueOnce({ assistantText } as AgentLoopResult);
+    const onEvent = vi.fn();
+    const task = "跨文件计划\n第二行 ghp_abcdefghijklmnopqrstuvwxyz0123456789\n" + "后续信息".repeat(2000);
+    const result = await runExploreSubagent({ agentType: "Planner", task }, { ...baseDeps(fakeIndex([])), onEvent });
+    const opts = mockedRunAgentLoop.mock.calls[0]![0];
+    const start = onEvent.mock.calls.find(([event]) => event.type === "stage_start")![0];
+    expect(start.subagentInput.userMessage).toBe(task.replace(/ghp_[A-Za-z0-9]{36}/, "***"));
+    expect(start.subagentInput.systemPromptOverride).toBe(opts.systemPromptOverride);
+    expect(start.subagentInput.thoroughness).toBe("medium");
+    expect(opts.userMessage).toBe(task);
+    expect(onEvent.mock.invocationCallOrder[0]).toBeLessThan(mockedRunAgentLoop.mock.invocationCallOrder[0]);
+    expect(result.startsWith("[Planner partial result")).toBe(partial);
+    expect(onEvent.mock.calls.at(-1)![0]).toMatchObject({ type: "stage_done", ok: !partial });
+  });
+});
+
 describe("runExploreSubagent — Planner 部分结果", () => {
   it.each([
     { assistantText: "", blocked: false, marker: "without producing a report" },

@@ -26,8 +26,8 @@ const user: ChatTurnDto = { id: "u1", role: "user", content: "用户提问" };
 const liveEvents = [
   { kind: "thinking", id: "think", text: "思考过程", streaming: true },
   { kind: "decompose", id: "plan", decomposition: { title: "任务计划" } },
-  { kind: "tool", id: "tool", tool: { id: "tool", name: "read_file", status: "running" } },
-  { kind: "subagent", id: "sub", group: { id: "sub", status: "running" } },
+  { kind: "tool", id: "tool", tool: { id: "tool", name: "read_file", status: "running", args: {} } },
+  { kind: "subagent", id: "sub", group: { id: "sub", status: "running", agentType: "Explore", task: "探索", tools: [] } },
   { kind: "text", id: "text", text: "阶段更新", streaming: true },
 ] as LiveEvent[];
 
@@ -36,11 +36,23 @@ function render(turns: ChatTurnDto[], sending: boolean) {
 }
 
 describe("ChatLog visible conversation", () => {
-  it("excludes plan, progress, tools, thoughts, subagent stages and streamed text", () => {
-    const html = render([user, { id: "interim", role: "assistant", content: "中间答复" }], true);
+  it("shows live progress and streamed output while sending", () => {
+    const html = render([user], true);
     expect(html).toContain("用户提问");
-    for (const hidden of ["中间答复", "思考过程", "任务计划", "执行进度", "read_file", "阶段更新", "sub"]) {
-      expect(html).not.toContain(hidden);
+    expect(html).toContain("执行进度");
+    expect(html).toContain("思考过程");
+    expect(html).toContain("阶段更新");
+    expect(html).toMatch(/class="chat-log-live-footer"[^>]*>.*class="chat-log-status sending"/s);
+    expect(html).toMatch(/class="current-turn-bubble"[^>]*>\s*<div class="live-event-stream"/s);
+    expect(html).not.toContain('class="live-status"');
+  });
+
+  it("keeps completed and failed tool cards inside the same live footer", () => {
+    for (const status of ["done", "error"] as const) {
+      const events: LiveEvent[] = [{ kind: "tool", id: "tool", tool: { id: "tool", name: "read_file", status, args: {} } }];
+      const html = renderToStaticMarkup(createElement(ChatLog, { turns: [user], liveEvents: events, sending: false }));
+      expect(html).toMatch(/class="chat-log-live-footer"[^>]*>.*class="current-turn-bubble"/s);
+      expect(html).toContain(`tool-card live ${status}`);
     }
   });
 

@@ -173,6 +173,13 @@ export function applyChatEvent(
 
   // ── stage_start / stage_done ──────────────────────────────────────────
   if (ev.type === "stage_start") {
+    if (ev.nodeType === "subagent" && ev.subagentInput) {
+      chat.patchLiveState((rt) => ({
+        liveEvents: ensureSubagentGroupFn(rt.liveEvents, {
+          id: ev.id, agentType: "Planner", task: ev.subagentInput!.userMessage.slice(0, 80), input: ev.subagentInput,
+        }),
+      }), sid);
+    }
     const stage = ev.nodeType === "task_decompose" ? "decompose" : "react";
     if (ev.nodeType === "task_decompose") {
       chat.patchLiveState(() => ({ decomposeFailureNotified: false }), sid);

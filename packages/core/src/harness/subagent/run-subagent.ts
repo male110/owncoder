@@ -28,6 +28,7 @@ import {
   PLANNER_SUBAGENT_TYPE,
 } from "./planner-subagent.ts";
 import { queryIndexNavigation, renderNavigationBlock } from "../index-navigation.ts";
+import { isRedactionEnabled, redactPromptSecrets } from "../redact.ts";
 
 export interface DispatchSubagentRequest {
   /** 支持 "Explore"（通用只读调研）与 "Planner"（任务分解阶段计划子代理）；其他值由调用方提前拒绝。 */
@@ -106,13 +107,6 @@ export async function runExploreSubagent(
     platform: process.platform,
   };
 
-  deps.onEvent?.({
-    type: "stage_start",
-    id: stageId,
-    nodeType: "subagent",
-    label: `${isPlanner ? "Planner" : "Explore"}: ${request.task.slice(0, 60)}`,
-  });
-
   // 检索优先的探索起点（Cursor 式 auto-context）：任务文本 → 索引符号
   // 召回 → 引导块拼进子代理 system prompt，替掉"冷启动先 grep 找入口"的
   // 头几轮。best-effort——索引不可用 / 空结果时 prompt 与现状逐字一致。
@@ -126,6 +120,20 @@ export async function runExploreSubagent(
       )
     : "";
 
+  const userMessage = request.task;
+  const systemPromptOverride = (isPlanner ? buildPlannerSubagentPrompt(env) : buildExploreSubagentPrompt(thoroughness, env)) + navBlock;
+  const redact = (text: string) => isRedactionEnabled(deps.workflow)
+    ? redactPromptSecrets(text, deps.workflow.secrets?.patterns)
+    : text;
+  deps.onEvent?.({
+    type: "stage_start",
+    id: stageId,
+    nodeType: "subagent",
+    label: `${isPlanner ? "Planner" : "Explore"}: ${redact(userMessage).slice(0, 60)}`,
+    ...(isPlanner ? { subagentInput: { userMessage: redact(userMessage), systemPromptOverride: redact(systemPromptOverride), thoroughness } } : {}),
+  });
+
+  let plannerSucceeded = false;
   try {
     const result = await runAgentLoop({
       mode: deps.mode === "spec" ? "spec" : "agent",
@@ -136,7 +144,7 @@ export async function runExploreSubagent(
       codemap: deps.codemap,
       // 隔离的关键：空历史 + 不注入父级计划/任务/记忆。
       history: [],
-      userMessage: request.task,
+      userMessage,
       signal: deps.signal,
       llmApiKey: deps.llmApiKey ?? null,
       renderPage: deps.renderPage,
@@ -146,7 +154,7 @@ export async function runExploreSubagent(
       // 机制层只读沙箱：白名单之外的工具全部不可用。
       allowedTools: [...(isPlanner ? PLANNER_SUBAGENT_ALLOWED_TOOLS : EXPLORE_SUBAGENT_ALLOWED_TOOLS)],
       readOnly: true,
-      systemPromptOverride: (isPlanner ? buildPlannerSubagentPrompt(env) : buildExploreSubagentPrompt(thoroughness, env)) + navBlock,
+      systemPromptOverride,
       // 预算耗尽时追加一次无工具强制总结，保证父智能体拿到已收集的发现。
       forcedFinalReportOnLimit: true,
       budget: deps.budget,
@@ -161,7 +169,7 @@ export async function runExploreSubagent(
           const provenance: SubagentProvenance = {
             agentType: isPlanner ? PLANNER_SUBAGENT_TYPE : EXPLORE_SUBAGENT_TYPE,
             id: stageId,
-            task: request.task.slice(0, 80),
+            task: redact(userMessage).slice(0, 80),
           };
           ev = {
             ...ev,
@@ -179,6 +187,7 @@ export async function runExploreSubagent(
         ? "[Planner partial result: subagent finished without producing a report]"
         : "## Final Report\n\nExplore subagent finished without producing a report.";
     }
+    plannerSucceeded = !result.blocked && !report.startsWith("[Planner partial result");
     // 硬限制终态：显式标注为部分结果，让父智能体知道发现可能不完整，
     // 而不是把它误当成完整结论。
     if (result.blocked) {
@@ -198,6 +207,7 @@ export async function runExploreSubagent(
       id: stageId,
       nodeType: "subagent",
       label: `${isPlanner ? "Planner" : "Explore"} finished`,
+      ...(isPlanner ? { ok: plannerSucceeded } : {}),
     });
   }
 }

@@ -65,6 +65,16 @@ function SubagentGroupCardImpl({ group }: { group: SubagentGroup }) {
       </button>
       {open ? (
         <div className={`subagent-card-body${showAll ? " show-all" : ""}`} ref={bodyRef} onScroll={onScroll}>
+          {group.input ? (
+            <div className="subagent-report">
+              <div className="subagent-report-label">{t("发送给 Planner 的输入（按设置遮盖敏感值）")}</div>
+              <div className="subagent-report-label">{t("搜索广度")}：{group.input.thoroughness}</div>
+              <div className="subagent-report-label">{t("用户任务")}</div>
+              <pre>{group.input.userMessage}</pre>
+              <div className="subagent-report-label">{t("系统提示词（含索引导航）")}</div>
+              <pre>{group.input.systemPromptOverride}</pre>
+            </div>
+          ) : null}
           {group.report ? (
             <div className="subagent-report">
               <div className="subagent-report-label">{t("节点报告")}</div>

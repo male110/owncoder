@@ -306,7 +306,16 @@ export function redactSecrets(
   if (!isSensitiveFile(filePath, BUILTIN_VALUE_REDACTION_FILES)) {
     return { text, redacted: false, reasons };
   }
-  const allPatterns = buildSecretPatterns(BUILTIN_SECRET_PATTERN_DESCRIPTORS, options?.patterns ?? []);
+  return redactPatternValues(text, options?.patterns ?? [], reasons);
+}
+
+/** 对无来源路径的提示词应用同一套值级规则；不使用整文件遮盖。 */
+export function redactPromptSecrets(text: string, patterns: readonly string[] = []): string {
+  return redactPatternValues(text, patterns, []).text;
+}
+
+function redactPatternValues(text: string, patterns: readonly string[], reasons: string[]): { text: string; redacted: boolean; reasons: string[] } {
+  const allPatterns = buildSecretPatterns(BUILTIN_SECRET_PATTERN_DESCRIPTORS, patterns);
   let result = text;
 
   for (const { name, pattern } of allPatterns) {

@@ -277,6 +277,19 @@ describe("applyChatEvent streaming / turn_complete", () => {
 describe("applyChatEvent subagent grouping", () => {
   beforeEach(() => resetChat());
 
+  it.each(["Planner finished", "Planner partial result: subagent finished without producing a report"])(
+    "保留 Planner 输入，即使没有工具或报告：%s", (report) => {
+      const input = { userMessage: "完整任务\n第二行", systemPromptOverride: "系统提示词\n索引导航", thoroughness: "medium" };
+      apply({ type: "stage_start", sessionId: "s1", id: "planner-1", nodeType: "subagent", label: "Planner", subagentInput: input });
+      expect(useChatStore.getState().liveEvents[0]).toMatchObject({ kind: "subagent", group: { input, status: "running" } });
+      const ok = report === "Planner finished";
+      apply({ type: "stage_done", sessionId: "s1", id: "planner-1", nodeType: "subagent", label: "Planner finished", ok });
+      expect(useChatStore.getState().liveEvents[0]).toMatchObject({ kind: "subagent", group: { input, status: ok ? "done" : "error" } });
+      apply({ type: "turn_complete", sessionId: "s1", parts: [], metadata: {} } as ChatEventDto);
+      expect(useChatStore.getState().liveEvents[0]).toMatchObject({ kind: "subagent", group: { input } });
+    },
+  );
+
   it("routes Explore tool events into a grouped card", () => {
     const subagent = { id: "sub-1", agentType: "Explore", task: "find the loop" };
     apply({

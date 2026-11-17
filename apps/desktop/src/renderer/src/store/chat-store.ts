@@ -74,6 +74,8 @@ export interface SubagentGroup {
   id: string;
   agentType: string;
   task: string;
+  /** 发送给 Planner 的完整提示词（仅展示副本经过敏感值遮盖，不裁剪）。 */
+  input?: { userMessage: string; systemPromptOverride: string; thoroughness: string };
   tools: PendingTool[];
   status: "running" | "done" | "error";
   /** stage_done 带回的节点文字报告（完成/失败摘要），展开卡片时展示。 */
@@ -277,14 +279,14 @@ export function updateToolFn(events: LiveEvent[], id: string, patch: Partial<Pen
 /** 若对应分组尚不存在则创建（空工具、运行中）。 */
 export function ensureSubagentGroupFn(
   events: LiveEvent[],
-  input: { id: string; agentType: string; task: string },
+  input: { id: string; agentType: string; task: string; input?: SubagentGroup["input"] },
 ): LiveEvent[] {
   if (events.some((e) => e.kind === "subagent" && e.group.id === input.id)) return events;
   return [
     ...events,
     {
       kind: "subagent",
-      group: { id: input.id, agentType: input.agentType, task: input.task, tools: [], status: "running" },
+      group: { id: input.id, agentType: input.agentType, task: input.task, input: input.input, tools: [], status: "running" },
     },
   ];
 }

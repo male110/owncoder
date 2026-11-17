@@ -7,6 +7,7 @@ import { useI18n } from "../i18n";
 import {
   buildChatItems,
   buildLogBlocks,
+  deriveLiveStatus,
   isActivationEdge,
   isInitialScrollReady,
   lastAssistantBlockIndex,
@@ -15,6 +16,8 @@ import {
   type LogBlock,
 } from "./chat-log-model";
 import { AssistantBubble } from "./chat-log/AssistantBubble";
+import { LiveEventStream } from "./chat-log/LiveEventStream";
+import { LlmRetryNotice } from "./chat-log/LlmRetryNotice";
 import { UserBubble } from "./chat-log/UserBubble";
 import { useCopyMenu } from "./chat-log/useCopyMenu";
 
@@ -80,6 +83,7 @@ export function ChatLog({
   onStartReached,
   scrollerRef,
   active = true,
+  llmRetry,
 }: Props) {
   const { t } = useI18n();
   const blocks = useMemo(
@@ -367,6 +371,7 @@ export function ChatLog({
   );
 
   const { copyMenu, copyMenuRef, handleContextMenu, handleCopy } = useCopyMenu();
+  const liveStatusText = deriveLiveStatus(sending, liveStatus, liveEvents);
 
   return (
     <div className="chat-log wide">
@@ -400,6 +405,22 @@ export function ChatLog({
           }}
           itemContent={(index, item) => renderBlock(item.block, index - firstItemIndex)}
         />
+        {liveStatusText || llmRetry || liveEvents.length > 0 ? (
+          <div className="chat-log-live-footer">
+            {liveStatusText ? (
+              <div className={`chat-log-status${sending ? " sending" : ""}`} role="status" aria-live="polite">
+                {sending ? <span className="tool-spinner" aria-hidden /> : null}
+                <span className="chat-log-status-text">{liveStatusText}</span>
+              </div>
+            ) : null}
+            {llmRetry ? <LlmRetryNotice retry={llmRetry} /> : null}
+            {liveEvents.length > 0 ? (
+              <div className="current-turn-bubble">
+                <LiveEventStream events={liveEvents} />
+              </div>
+            ) : null}
+          </div>
+        ) : null}
         {copyMenu ? (
           <div
             ref={copyMenuRef}
