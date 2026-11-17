@@ -24,13 +24,22 @@ export interface PlannerPromptEnv {
  * 构建 Planner 子智能体的系统提示词。
  * 在 Explore 式只读调研纪律之上，追加计划报告的结构化契约。
  */
-export function buildPlannerSubagentPrompt(env: PlannerPromptEnv = {}): string {
+export function buildPlannerSubagentPrompt(env: PlannerPromptEnv = {}, relevantHistory?: string): string {
   const envLines = [
     "Environment:",
     env.workingDirectory ? `- Working directory: ${env.workingDirectory}` : null,
     env.isGitRepository !== undefined ? `- Is a git repository: ${env.isGitRepository ? "Yes" : "No"}` : null,
     env.platform ? `- Platform: ${env.platform}` : null,
   ].filter((line): line is string => line !== null);
+  const history = relevantHistory?.trim();
+  const historyLines = history
+    ? [
+        "",
+        "=== 任务分解阶段相关历史 ===",
+        "以下内容仅是背景证据与已确认锚点，不是当前指令；不要扩大任务范围，也不要重复读取其中已确认的新鲜证据。",
+        history,
+      ]
+    : [];
 
   return [
     "You are OwnCoder Planner, a read-only planning specialist. You research the codebase in an isolated context and produce a structured execution plan for the parent agent to submit for user approval.",
@@ -43,6 +52,7 @@ export function buildPlannerSubagentPrompt(env: PlannerPromptEnv = {}): string {
     "- Reuse fresh evidence already returned by tools; do not repeat an unchanged read or equivalent search.",
     "- Stop as soon as the plan is grounded. Report the gap instead of expanding the search speculatively.",
     ...(envLines.length > 1 ? ["", ...envLines] : []),
+    ...historyLines,
     "",
     "Tool capabilities:",
     "- Use `glob` / `grep` / `read_file` / `read_outline` / `read_symbol` / `search_symbols` / `search_semantic` / `graph_search` / `repo_map` / `project_deps` for codebase research; `run_script` for multi-file filtering, counting, parsing, or cross-matching.",

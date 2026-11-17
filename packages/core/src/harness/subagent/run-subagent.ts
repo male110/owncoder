@@ -37,6 +37,8 @@ export interface DispatchSubagentRequest {
   task: string;
   /** 搜索广度："medium"（默认）或 "very thorough"。 */
   thoroughness?: string;
+  /** 任务分解阶段提取的背景证据；仅注入提示词，不作为子代理指令。 */
+  relevantHistory?: string;
 }
 
 export interface DispatchSubagentDeps {
@@ -64,6 +66,12 @@ export interface DispatchSubagentDeps {
  */
 const EXPLORE_MEDIUM_MAX_ITERATIONS = 40;
 const EXPLORE_VERY_THOROUGH_MAX_ITERATIONS = 70;
+/**
+ * Planner 产出的是结构化执行计划，需要比 Explore 更多的往返才能收口；
+ * 40 次会让它频繁以 partial result 提前返回。单独给 Planner 更高的预算，
+ * 不影响 Explore 的分级限额。
+ */
+const PLANNER_MAX_ITERATIONS = 100;
 
 /** 转发给父回合的事件：工具执行流（用于状态展示）与 warning/error。 */
 const FORWARDED_EVENT_TYPES = new Set(["tool_start", "tool_end", "warning", "error"]);
@@ -93,8 +101,9 @@ export async function runExploreSubagent(
     }
   }
   const thoroughness = request.thoroughness === "very thorough" ? "very thorough" : "medium";
-  const maxIterations =
-    thoroughness === "very thorough"
+  const maxIterations = isPlanner
+    ? PLANNER_MAX_ITERATIONS
+    : thoroughness === "very thorough"
       ? EXPLORE_VERY_THOROUGH_MAX_ITERATIONS
       : EXPLORE_MEDIUM_MAX_ITERATIONS;
 
@@ -121,7 +130,9 @@ export async function runExploreSubagent(
     : "";
 
   const userMessage = request.task;
-  const systemPromptOverride = (isPlanner ? buildPlannerSubagentPrompt(env) : buildExploreSubagentPrompt(thoroughness, env)) + navBlock;
+  const systemPromptOverride = (isPlanner
+    ? buildPlannerSubagentPrompt(env, request.relevantHistory)
+    : buildExploreSubagentPrompt(thoroughness, env, request.relevantHistory)) + navBlock;
   const redact = (text: string) => isRedactionEnabled(deps.workflow)
     ? redactPromptSecrets(text, deps.workflow.secrets?.patterns)
     : text;
@@ -183,9 +194,13 @@ export async function runExploreSubagent(
 
     const report = result.assistantText?.trim();
     if (!report) {
+      // 空报告时优先透传子循环的真实失败原因（如 LLM HTTP 429 配额耗尽），
+      // 而不是一句无信息量的占位语——用户此前只能看到"未产出报告"，
+      // 无法定位是配额/网络问题还是模型行为问题。
+      const failureReason = result.blockedReason?.trim();
       return isPlanner
-        ? "[Planner partial result: subagent finished without producing a report]"
-        : "## Final Report\n\nExplore subagent finished without producing a report.";
+        ? `[Planner partial result: ${failureReason ?? "subagent finished without producing a report"}]`
+        : `## Final Report\n\nExplore subagent finished without producing a report${failureReason ? ` (${failureReason})` : ""}.`;
     }
     plannerSucceeded = !result.blocked && !report.startsWith("[Planner partial result");
     // 硬限制终态：显式标注为部分结果，让父智能体知道发现可能不完整，

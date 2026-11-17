@@ -8,7 +8,8 @@ import { useI18n } from "../../i18n";
 // （图标 + 灯点轨道 + 当前任务一句话 + n/m），点击展开精简卡片
 // （意图一行 + 任务行：状态灯 + 标题/描述）。任务依赖 / 相关历史等
 // 次级信息收入任务行下的 <details>，不再平铺。
-// 仅在 pnpm dev（import.meta.env.DEV）时由 ChatLog footer 渲染。
+// 由 ChatLog 在本轮实时区最上方渲染（先于 LiveEventStream），
+// 因为 LiveEventStream 会跳过 decompose 事件。
 // 节点式分解：节点含 title/executionGuidance/kind/dependsOn，
 // executionGuidance 是指导下属如何完成任务的执行指引；
 // 任务相关历史与节点同级（顶层）。

@@ -25,7 +25,7 @@ vi.mock("./chat-log/AssistantBubble", async () => {
 const user: ChatTurnDto = { id: "u1", role: "user", content: "用户提问" };
 const liveEvents = [
   { kind: "thinking", id: "think", text: "思考过程", streaming: true },
-  { kind: "decompose", id: "plan", decomposition: { title: "任务计划" } },
+  { kind: "decompose", id: "plan", decomposition: { intent: "修复登录", userConstraints: [], relevantHistory: "", tasks: [{ id: "t1", title: "修复登录流程", executionGuidance: "改 login.ts" }], fallback: false } },
   { kind: "tool", id: "tool", tool: { id: "tool", name: "read_file", status: "running", args: {} } },
   { kind: "subagent", id: "sub", group: { id: "sub", status: "running", agentType: "Explore", task: "探索", tools: [] } },
   { kind: "text", id: "text", text: "阶段更新", streaming: true },
@@ -43,8 +43,40 @@ describe("ChatLog visible conversation", () => {
     expect(html).toContain("思考过程");
     expect(html).toContain("阶段更新");
     expect(html).toMatch(/class="chat-log-live-footer"[^>]*>.*class="chat-log-status sending"/s);
-    expect(html).toMatch(/class="current-turn-bubble"[^>]*>\s*<div class="live-event-stream"/s);
+    expect(html).toMatch(/class="current-turn-bubble"[^>]*>.*class="live-event-stream"/s);
     expect(html).not.toContain('class="live-status"');
+  });
+
+  it("在回复最上方渲染任务分解折叠块，内容紧跟其后", () => {
+    const html = render([user], true);
+    expect(html).toContain('class="chat-log-decomposition"');
+    expect(html).toContain("修复登录流程");
+    expect(html).toContain("任务分解：{{count}} 个任务");
+    // 分解块必须排在本轮实时事件流之前（聊天正文最上方）。
+    const decomposeAt = html.indexOf('class="chat-log-decomposition"');
+    const streamAt = html.indexOf('class="live-event-stream"');
+    expect(decomposeAt).toBeGreaterThan(-1);
+    expect(streamAt).toBeGreaterThan(decomposeAt);
+  });
+
+  it("仅有分解结果时折叠块照常渲染，不出现空壳", () => {
+    const onlyDecompose = liveEvents.filter((e) => e.kind === "decompose");
+    const html = renderToStaticMarkup(
+      createElement(ChatLog, { turns: [user], liveEvents: onlyDecompose, sending: false }),
+    );
+    expect(html).toContain('class="chat-log-decomposition"');
+    expect(html).toContain("修复登录流程");
+    expect(html).not.toContain('class="live-event-stream"');
+  });
+
+  it("Planner 分支没有分解 payload 时仍渲染本轮内容且不出空分解壳", () => {
+    const plannerEvents = liveEvents.filter((e) => e.kind !== "decompose");
+    const html = renderToStaticMarkup(
+      createElement(ChatLog, { turns: [user], liveEvents: plannerEvents, sending: true }),
+    );
+    expect(html).not.toContain('class="chat-log-decomposition"');
+    expect(html).toContain('class="live-event-stream"');
+    expect(html).toContain("探索");
   });
 
   it("keeps completed and failed tool cards inside the same live footer", () => {

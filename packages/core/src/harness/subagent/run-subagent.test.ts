@@ -69,6 +69,28 @@ describe("runExploreSubagent — Planner 输入可见", () => {
   });
 });
 
+describe("runExploreSubagent — 分解历史注入", () => {
+  it.each(["Planner", "Explore"])("向 %s 提示词注入背景证据", async (agentType) => {
+    await runExploreSubagent(
+      { agentType, task: "检查实现", relevantHistory: "src/auth.ts:42 已确认 validateToken 入口" },
+      baseDeps(fakeIndex([])),
+    );
+    const prompt = mockedRunAgentLoop.mock.calls[0]![0].systemPromptOverride as string;
+    expect(prompt).toContain("任务分解阶段相关历史");
+    expect(prompt).toContain("src/auth.ts:42 已确认 validateToken 入口");
+    expect(prompt).toContain("不是当前指令");
+  });
+
+  it.each([undefined, "", "   "])("空历史不产生占位段落：%s", async (relevantHistory) => {
+    await runExploreSubagent(
+      { agentType: "Explore", task: "检查实现", relevantHistory },
+      baseDeps(fakeIndex([])),
+    );
+    const prompt = mockedRunAgentLoop.mock.calls[0]![0].systemPromptOverride as string;
+    expect(prompt).not.toContain("任务分解阶段相关历史");
+  });
+});
+
 describe("runExploreSubagent — Planner 部分结果", () => {
   it.each([
     { assistantText: "", blocked: false, marker: "without producing a report" },

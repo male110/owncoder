@@ -42,6 +42,24 @@ export function summarizeToolActionForUser(
   return null;
 }
 
+/**
+ * 每轮注入给模型的迭代预算提示（current 从 1 开始，与 termination 的
+ * `state.iteration >= maxIterations` 判定同源）。
+ *
+ * 剩余 0 表示本次迭代结束后循环即达上限：此时不再给工具调用引导，而是
+ * 注入强制性收尾指令——本轮不得再调用工具，必须直接输出最终计划/结论
+ * 文本，避免模型把最后一轮也花在工具调用上、随后被上限截断成 partial
+ * result。措辞不重复 react.ts 终态用的“已达到最大迭代限制”，避免两处
+ * 文案互相矛盾。
+ */
+export function formatIterationBudgetHint(current: number, max: number): string {
+  const remaining = Math.max(0, max - current);
+  const tail = remaining === 0
+    ? "这是最后一次迭代：本轮不得再调用任何工具，必须直接输出最终计划/结论文本（含已完成工作、证据与剩余风险），不要再发起工具调用。"
+    : "请据此安排工具调用预算，优先完成核心改动与验证。";
+  return `当前第 ${current} 次迭代，上限 ${max} 次，剩余 ${remaining} 次。${tail}`;
+}
+
 function formatPackedHistory(task: TaskItem): string {
   const text = task.relevantHistory?.trim() ?? "";
   return text

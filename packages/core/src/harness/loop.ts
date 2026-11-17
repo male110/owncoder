@@ -293,7 +293,10 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
     // 动态导入 run-subagent，避免 subagent ↔ loop 的静态导入环。
     dispatchSubagent: async (request) => {
       const { runExploreSubagent } = await import("./subagent/run-subagent.ts");
-      return runExploreSubagent(request, {
+      const relevantHistory = request.relevantHistory?.trim()
+        ? request.relevantHistory
+        : opts.activeTasks?.find((task) => task.relevantHistory?.trim())?.relevantHistory;
+      return runExploreSubagent({ ...request, relevantHistory }, {
         workspaceRoot: opts.workspaceRoot,
         sessionId: opts.sessionId,
         workflow: opts.workflow,

@@ -8,6 +8,62 @@ import { LiveToolCard } from "./LiveToolCard";
 /** 工具超过此数量时收起旧的，只留最近的（避免几十张卡片堆成一堵墙）。 */
 const VISIBLE_TOOL_LIMIT = 8;
 
+/** Planner 输入预览的截断长度：仅影响渲染，不改写 store 中的原始输入。 */
+const INPUT_PREVIEW_LIMIT = 200;
+
+/** 渲染时截断长文本并附「...」按钮；点击按钮切换完整/截断内容。 */
+function InputPreview({ text }: { text: string }) {
+  const { t } = useI18n();
+  const [expanded, setExpanded] = useState(false);
+  const truncated = text.length > INPUT_PREVIEW_LIMIT;
+  const shown = truncated && !expanded ? text.slice(0, INPUT_PREVIEW_LIMIT) : text;
+  return (
+    <pre>
+      {shown}
+      {truncated ? (
+        <button
+          type="button"
+          className="subagent-input-toggle"
+          onClick={() => setExpanded((v) => !v)}
+        >
+          {expanded ? t("收起") : "..."}
+        </button>
+      ) : null}
+    </pre>
+  );
+}
+
+/** 分组条头部的 prompt 预览：默认单行截断，点击「...」展开完整文本。
+ *  文本与「...」是并列的兄弟节点：滚动区域只作用于文本，
+ *  展开后「收起」按钮始终留在可见区域；外层头部是 div[role=button]，
+ *  不再是 <button>，因此「...」这个真按钮能独立接收点击而不被吞掉。 */
+function HeadPrompt({ text }: { text: string }) {
+  const { t } = useI18n();
+  const [expanded, setExpanded] = useState(false);
+  const truncated = text.length > INPUT_PREVIEW_LIMIT;
+  const shown = truncated && !expanded ? text.slice(0, INPUT_PREVIEW_LIMIT) : text;
+  return (
+    <span className={`subagent-card-prompt${expanded ? " expanded" : ""}`}>
+      <span className="subagent-card-prompt-text">{shown}</span>
+      {truncated ? (
+        <button
+          type="button"
+          className="subagent-input-toggle"
+          aria-expanded={expanded}
+          onClick={(e) => {
+            e.stopPropagation();
+            setExpanded((v) => !v);
+          }}
+          // 键盘回车/空格会冒泡到头部容器，这里一并拦住，避免顺带切换执行过程
+          onKeyDown={(e) => e.stopPropagation()}
+        >
+          {expanded ? t("收起") : "..."}
+        </button>
+      ) : null}
+    </span>
+  );
+}
+
 function SubagentGroupCardImpl({ group }: { group: SubagentGroup }) {
   const running = group.status === "running";
   const [open, setOpen] = useState(false);
@@ -54,15 +110,28 @@ function SubagentGroupCardImpl({ group }: { group: SubagentGroup }) {
 
   return (
     <div className={`subagent-card ${group.status}`}>
-      <button type="button" className="subagent-card-head" onClick={() => setOpen((v) => !v)}>
+      {/* 头部用 div[role=button] 而非 <button>：button 内不允许嵌入另一个 button，
+          会把「...」的点击并入头部点击，导致它无法独立展开 prompt。 */}
+      <div
+        role="button"
+        tabIndex={0}
+        aria-expanded={open}
+        className="subagent-card-head"
+        onClick={() => setOpen((v) => !v)}
+        onKeyDown={(e) => {
+          if (e.key !== "Enter" && e.key !== " ") return;
+          e.preventDefault();
+          setOpen((v) => !v);
+        }}
+      >
         <span className="subagent-card-icon">{running ? <span className="tool-spinner" /> : "🔍"}</span>
         <span className="subagent-card-title">{group.agentType}</span>
-        <span className="subagent-card-prompt">{group.task}</span>
+        <HeadPrompt text={group.task} />
         <span className={`subagent-card-status ${group.status}`}>
           {statusText} · {group.tools.length}
         </span>
         <span className="activity-chev">{open ? "▾" : "▸"}</span>
-      </button>
+      </div>
       {open ? (
         <div className={`subagent-card-body${showAll ? " show-all" : ""}`} ref={bodyRef} onScroll={onScroll}>
           {group.input ? (
@@ -70,9 +139,9 @@ function SubagentGroupCardImpl({ group }: { group: SubagentGroup }) {
               <div className="subagent-report-label">{t("发送给 Planner 的输入（按设置遮盖敏感值）")}</div>
               <div className="subagent-report-label">{t("搜索广度")}：{group.input.thoroughness}</div>
               <div className="subagent-report-label">{t("用户任务")}</div>
-              <pre>{group.input.userMessage}</pre>
+              <InputPreview text={group.input.userMessage} />
               <div className="subagent-report-label">{t("系统提示词（含索引导航）")}</div>
-              <pre>{group.input.systemPromptOverride}</pre>
+              <InputPreview text={group.input.systemPromptOverride} />
             </div>
           ) : null}
           {group.report ? (

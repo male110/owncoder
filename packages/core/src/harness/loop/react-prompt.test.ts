@@ -3,7 +3,7 @@
  * evidence-first without reintroducing the old long routing essay.
  */
 import { describe, expect, it } from "vitest";
-import { formatCurrentTaskContext } from "./react-prompt.ts";
+import { formatCurrentTaskContext, formatIterationBudgetHint } from "./react-prompt.ts";
 import type { TaskItem } from "../../plans.ts";
 
 function makeTask(overrides: Partial<TaskItem> = {}): TaskItem {
@@ -93,5 +93,23 @@ describe("任务上下文：短硬执行纪律", () => {
     expect(text.indexOf("## **Current Task")).toBeLessThan(
       text.indexOf("Execution guidance (how to carry out this task): 修改示例文件"),
     );
+  });
+
+  it("迭代预算提示给出当前序号、上限与剩余次数，剩余 0 时改为强制收尾指令", () => {
+    expect(formatIterationBudgetHint(1, 39)).toContain("当前第 1 次迭代，上限 39 次，剩余 38 次");
+    expect(formatIterationBudgetHint(1, 39)).toContain("请据此安排工具调用预算");
+
+    const last = formatIterationBudgetHint(39, 39);
+    expect(last).toContain("当前第 39 次迭代，上限 39 次，剩余 0 次");
+    // 最后一轮：强制收尾——不得再调用工具，必须直接输出最终计划/结论文本。
+    expect(last).toContain("这是最后一次迭代");
+    expect(last).toContain("不得再调用任何工具");
+    expect(last).toContain("必须直接输出最终计划/结论文本");
+    // 不再出现工具调用引导，且不与终态文案“已达到最大迭代限制”重复。
+    expect(last).not.toContain("请据此安排工具调用预算");
+    expect(last).not.toContain("已达到最大迭代限制");
+    // 上限被调小到当前序号之后也按 0 兜底，不出现负数剩余
+    expect(formatIterationBudgetHint(5, 3)).toContain("剩余 0 次");
+    expect(formatIterationBudgetHint(5, 3)).toContain("不得再调用任何工具");
   });
 });

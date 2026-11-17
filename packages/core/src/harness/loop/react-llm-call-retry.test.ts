@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { chatCompletionStream } from "@owncoder/llm";
 import { callModelForIteration } from "./react-llm-call.ts";
+import { createLoopState, createTerminationConfig } from "./termination.ts";
 import type { ReActLoopContext } from "./react-loop-context.ts";
 
 vi.mock("@owncoder/llm", async (importOriginal) => ({
@@ -23,6 +24,8 @@ function makeCtx(onEvent: ReturnType<typeof vi.fn>, llmMaxRetries = 1): ReActLoo
     tracer: { startSpan: vi.fn(() => "span-1"), endSpan: vi.fn(), recordTokenUsage: vi.fn(), addEvent: vi.fn(), recordError: vi.fn() },
     history: [],
     lastAssistant: "",
+    loopState: createLoopState(),
+    terminationConfig: createTerminationConfig({ maxIterations: 39 }),
   } as unknown as ReActLoopContext;
 }
 

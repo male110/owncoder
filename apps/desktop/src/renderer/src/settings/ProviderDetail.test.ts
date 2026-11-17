@@ -42,10 +42,10 @@ vi.mock("../i18n", () => ({
 
 import { ProviderDetail } from "./ProviderDetail";
 
-// useState 调用序号：name…browseModels 之后依次是 editingId / editingName / copiedId。
-const EDITING_ID = 11;
-const EDITING_NAME = 12;
-const COPIED_ID = 13;
+// useState 调用序号：name…modelSearchQuery 之后依次是 editingId / editingName / copiedId。
+const EDITING_ID = 10;
+const EDITING_NAME = 11;
+const COPIED_ID = 12;
 
 interface Props {
   className?: string;

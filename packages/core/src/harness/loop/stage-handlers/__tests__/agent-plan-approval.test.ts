@@ -210,9 +210,13 @@ describe("版本化计划保存与审批", () => {
     expect(missingType.state.blockedReason).toContain("只允许调用计划子代理");
     expect(missingType.toolCtx.dispatchSubagent).not.toHaveBeenCalled();
     const bad = makeContext(); vi.mocked(bad.toolCtx.dispatchSubagent!).mockResolvedValue("## Final Report\n### 目标\n无步骤");
-    await runAgentPlanner(bad, call); expect(bad.state.blocked).toBe(true);
-    expect(validatePlannerReport("## Final Report\n### 目标\n无步骤").missing).toContain("步骤");
-    expect(await readPlannerPlan(root, "session-a")).toBeNull();
+    await runAgentPlanner(bad, call); expect(bad.state.blocked).toBe(false);
+    expect(validatePlannerReport("## Final Report\n### 目标\n无步骤").missing).toEqual([]);
+    expect(await readPlannerPlan(root, "session-a")).not.toBeNull();
+    const empty = makeContext(); vi.mocked(empty.toolCtx.dispatchSubagent!).mockResolvedValue("   ");
+    await runAgentPlanner(empty, call); expect(empty.state.blocked).toBe(true);
+    expect(empty.state.blockedReason).toContain("只读 Planner 未返回有效计划");
+    expect(await readPlannerPlan(root, "session-b")).toBeNull();
   });
 
   it("跨会话卡片、批准令牌和缓存执行状态不能复用", async () => {
@@ -284,7 +288,7 @@ describe("版本化计划保存与审批", () => {
   });
 });
 
-describe("validatePlannerReport — 格式兼容与真实缺失", () => {
+describe("validatePlannerReport — 内容非空即有效", () => {
   const fullBody = [
     "### 目标", "实现登录重试",
     "### 步骤", "1. 检查认证边界", "2. 修复登录重试并测试",
@@ -341,44 +345,48 @@ describe("validatePlannerReport — 格式兼容与真实缺失", () => {
     expect(missing).toEqual([]);
   });
 
-  it("五段齐全但缺 Final Report 总标题：补齐标题而非判缺失", () => {
+  it("缺 Final Report 总标题或部分章节：内容非空即通过，不再补标题", () => {
     const { normalized, missing } = validatePlannerReport(fullBody);
     expect(missing).toEqual([]);
-    expect(normalized.startsWith("## Final Report")).toBe(true);
-    expect(normalized).toContain("### 目标");
-  });
-
-  it("真实缺失章节仍判缺失", () => {
+    expect(normalized).toBe(fullBody);
     const noRisk = fullBody.replace("### 风险与不确定性\n重试语义需要核对\n", "");
-    expect(validatePlannerReport(`## Final Report\n${noRisk}`).missing).toContain("风险与不确定性");
-    const emptySection = fullBody.replace("### 验证方式\n运行相关测试", "### 验证方式");
-    expect(validatePlannerReport(`## Final Report\n${emptySection}`).missing).toContain("验证方式");
-  });
-
-  it("步骤存在但无编号仍判缺失编号步骤", () => {
+    expect(validatePlannerReport(`## Final Report\n${noRisk}`).missing).toEqual([]);
     const unnumbered = fullBody.replace("1. 检查认证边界", "- 检查认证边界").replace("2. 修复登录重试并测试", "- 修复登录重试并测试");
-    expect(validatePlannerReport(`## Final Report\n${unnumbered}`).missing).toContain("编号步骤");
+    expect(validatePlannerReport(`## Final Report\n${unnumbered}`).missing).toEqual([]);
   });
 
-  it("标题层级交错时空章节不能借用下一章节的正文", () => {
-    const mixed = [
-      "## Final Report", "#### 目标", "### 步骤", "1. 检查登录边界",
-      "#### 相关文件", "### 风险与不确定性", "存在竞争条件",
-      "#### 验证方式", "运行测试",
-    ].join("\n");
-    expect(validatePlannerReport(mixed).missing).toEqual(["目标", "相关文件"]);
+  it("完全无结构的报告只要非空即通过", () => {
+    const { normalized, missing } = validatePlannerReport("随便一段文字");
+    expect(missing).toEqual([]);
+    expect(normalized).toBe("随便一段文字");
   });
 
-  it("仅有嵌套标题或围栏示例不构成有效章节及编号步骤", () => {
-    const empty = `## Final Report\n### 目标\n#### 子标题\n### 步骤\n\`\`\`md\n1. 示例\n\`\`\`\n### 相关文件\n文件见下文\n### 风险与不确定性\n有风险\n### 验证方式\n运行测试`;
-    expect(validatePlannerReport(empty).missing).toEqual(expect.arrayContaining(["目标", "步骤"]));
-    const fakeSteps = empty.replace("### 步骤\n\`\`\`md", "### 步骤\n需要检查\n\`\`\`md");
-    expect(validatePlannerReport(fakeSteps).missing).toContain("编号步骤");
+  it("空字符串与纯空白仍判无效", () => {
+    expect(validatePlannerReport("").missing).toEqual(["计划内容为空"]);
+    expect(validatePlannerReport("   \n\t  ").missing).toEqual(["计划内容为空"]);
   });
 
-  it("完全无结构的报告列出全部缺失项", () => {
-    const { missing } = validatePlannerReport("随便一段文字");
-    expect(missing).toEqual(["## Final Report", "目标", "步骤", "相关文件", "风险与不确定性", "验证方式"]);
+  it("向 Planner 调用转发分解阶段相关历史", async () => {
+    const ctx = makeContext();
+    ctx.state.rawDecompose = {
+      intent: "规划认证改动",
+      relevantHistory: "packages/auth/src/login.ts:12 已确认入口",
+      tasks: [],
+    };
+    await runAgentPlanner(ctx, call);
+    expect(ctx.toolCtx.dispatchSubagent).toHaveBeenCalledWith(expect.objectContaining({
+      agentType: "Planner",
+      relevantHistory: "packages/auth/src/login.ts:12 已确认入口",
+    }));
+  });
+
+  it("空分解历史不向 Planner 添加占位值", async () => {
+    const ctx = makeContext();
+    await runAgentPlanner(ctx, call);
+    expect(ctx.toolCtx.dispatchSubagent).toHaveBeenCalledWith(expect.objectContaining({
+      agentType: "Planner",
+      relevantHistory: undefined,
+    }));
   });
 
   it.each([

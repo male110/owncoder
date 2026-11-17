@@ -9,7 +9,7 @@
 import { chatCompletionStream, writeEventLog, type ChatMessage } from "@owncoder/llm";
 import { withRetry } from "../model-coordinator.ts";
 import { normalizeUsage, type NormalizedUsage } from "../observability.ts";
-import { formatCurrentTaskContext } from "./react-prompt.ts";
+import { formatCurrentTaskContext, formatIterationBudgetHint } from "./react-prompt.ts";
 import { applyStreamSnapshot } from "./streaming-snapshot.ts";
 import { applyRunEvent, finalizeTerminal } from "./react-finalize.ts";
 import type { ReActLoopContext, ReActReturn } from "./react-loop-context.ts";
@@ -52,9 +52,25 @@ export async function callModelForIteration(
     ? ctx.messages.findIndex((message) => message.role !== "system")
     : 0;
   const insertionIndex = systemPrefixLen === -1 ? ctx.messages.length : systemPrefixLen;
-  const messagesForCall = currentTaskMsg
+  const baseMessages = currentTaskMsg
     ? [...ctx.messages.slice(0, insertionIndex), currentTaskMsg, ...ctx.messages.slice(insertionIndex)]
     : ctx.messages;
+
+  // 每轮把迭代预算告诉模型，让它自己安排剩余工具调用。
+  // 计数取 termination 同源的 ctx.loopState.iteration（每个任务独立计数、
+  // 任务切换时归零），与真正触发上限的判定一致；current 用 1 基展示。
+  // 剩余 0（最后一轮）时 formatIterationBudgetHint 会输出强制性收尾指令
+  // （本轮不得再调用工具、必须直接给出最终计划/结论），由这里原样送达，
+  // 不需要额外分支。提示只拼进本次调用的 messages（追加在末尾以保住前缀
+  // 缓存），不写入 ctx.messages / ctx.history，避免逐轮累加。
+  const iterationHintMsg: ChatMessage = {
+    role: "system",
+    content: formatIterationBudgetHint(
+      ctx.loopState.iteration + 1,
+      ctx.terminationConfig.maxIterations,
+    ),
+  };
+  const messagesForCall = [...baseMessages, iterationHintMsg];
 
   if (ctx.opts.budget) {
     const modelCharge = ctx.opts.budget.charge("modelCalls");
@@ -161,7 +177,17 @@ export async function callModelForIteration(
     ctx.opts.onEvent?.({ type: "error", message: msg });
     return {
       kind: "exit",
-      result: finalizeTerminal(ctx, { lastAssistant: ctx.lastAssistant, aborted: true, correctionCount: ctx.correctionCount }, "interrupted"),
+      // LLM 调用失败不是用户中止，但沿用 interrupted 终态。必须带上
+      // blocked + blockedReason：子代理调度方（run-subagent）依赖这两个
+      // 字段把真实原因（如 LLM HTTP 429 配额耗尽）透传给父级，否则
+      // 父级只能看到"未产出报告"的误导性占位，用户无从排查。
+      result: finalizeTerminal(ctx, {
+        lastAssistant: ctx.lastAssistant,
+        aborted: true,
+        blocked: true,
+        blockedReason: `LLM 调用失败：${msg}`,
+        correctionCount: ctx.correctionCount,
+      }, "interrupted"),
     };
   }
 

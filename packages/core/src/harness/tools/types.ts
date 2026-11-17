@@ -162,6 +162,7 @@ export interface ToolContext {
     agentType: string;
     task: string;
     thoroughness?: string;
+    relevantHistory?: string;
   }) => Promise<string>;
   /** Bounded fresh-read cache shared by the active sequential turn. */
   evidenceStore?: import("../evidence-store.ts").EvidenceStore;

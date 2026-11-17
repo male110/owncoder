@@ -66,6 +66,7 @@ export const en = {
   "用户任务": "User task",
   "搜索广度": "Search breadth",
   "系统提示词（含索引导航）": "System prompt (including index navigation)",
+  "收起": "Collapse",
   "项目": "Projects",
   "会话": "Session",
   "新会话": "New session",
@@ -644,7 +645,6 @@ export const en = {
   "获取并添加": "Fetch & add",
   "直接添加": "Add directly",
   "获取所有模型": "Fetch all models",
-  "浏览模型目录": "Browse model catalog",
   "已接入模型": "Connected models",
   "点击「获取所有模型」浏览目录，用 + 加入已接入列表，或在上方手动输入模型 ID":
     "Click \u201cFetch all models\u201d to browse the catalog and add entries with +, or type a model ID above",

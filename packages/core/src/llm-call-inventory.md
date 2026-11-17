@@ -64,6 +64,7 @@
 | 行号 | 用途 |
 |------|------|
 | L47 | `{ role: "system", content: tagCurrentTask(formatCurrentTaskContext(ctx.currentTask)) }` — 当前任务 system 消息 |
+| L64–71 | `{ role: "system", content: formatIterationBudgetHint(...) }` — 每轮迭代预算提示（第 N 次 / 上限 M / 剩余 R），只挂在本次请求的 messages 末尾，不写回持久消息 |
 | ~~L49~~ | ~~`{ role: "system", content: tagCurrentTask(formatTurnInformationContext(informationTask)) }`~~ — 已删除（死代码分支，2026-11-01） |
 
 ### 3. `harness/loop/react-extract.ts`（已删除：工具结果提取功能整体移除，2026-11-01）

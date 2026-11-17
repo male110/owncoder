@@ -326,7 +326,7 @@ describe("applyChatEvent subagent grouping", () => {
     });
   });
 
-  it("marks the group error when a tool fails", () => {
+  it("单个工具失败不把分组标 error，终态由 stage_done 成败决定", () => {
     const subagent = { id: "sub-1", agentType: "Explore", task: "find" };
     apply({
       type: "tool_start",
@@ -346,10 +346,22 @@ describe("applyChatEvent subagent grouping", () => {
       subagent,
     });
 
+    // 工具自身标 error，但组保持 running（LLM 可能下一步自行修正重试）
     const group = useChatStore.getState().liveEvents.find((e) => e.kind === "subagent");
     expect(group).toMatchObject({
-      group: { status: "error", tools: [{ status: "error" }] },
+      group: { status: "running", tools: [{ status: "error" }] },
     });
+
+    // 节点结束时按 stage_done 的 ok 收口为 error
+    apply({
+      type: "stage_done",
+      sessionId: "s1",
+      id: "sub-1",
+      nodeType: "subagent",
+      label: "Explore failed",
+      ok: false,
+    });
+    expect(useChatStore.getState().liveEvents[0]).toMatchObject({ group: { status: "error" } });
   });
 
   it("closes the group on the matching subagent stage_done", () => {

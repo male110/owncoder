@@ -16,6 +16,7 @@ import {
   type LogBlock,
 } from "./chat-log-model";
 import { AssistantBubble } from "./chat-log/AssistantBubble";
+import { DecomposeCard } from "./chat-log/DecomposeCard";
 import { LiveEventStream } from "./chat-log/LiveEventStream";
 import { LlmRetryNotice } from "./chat-log/LlmRetryNotice";
 import { UserBubble } from "./chat-log/UserBubble";
@@ -83,6 +84,7 @@ export function ChatLog({
   onStartReached,
   scrollerRef,
   active = true,
+  planTasks,
   llmRetry,
 }: Props) {
   const { t } = useI18n();
@@ -372,6 +374,16 @@ export function ChatLog({
 
   const { copyMenu, copyMenuRef, handleContextMenu, handleCopy } = useCopyMenu();
   const liveStatusText = deriveLiveStatus(sending, liveStatus, liveEvents);
+  // 本轮的分解结果卡片必须渲染在本轮回复之前：
+  // LiveEventStream 会跳过 decompose 事件，由这里负责出块。
+  const decompositionCards = useMemo(
+    () => liveEvents.filter((e): e is Extract<LiveEvent, { kind: "decompose" }> => e.kind === "decompose"),
+    [liveEvents],
+  );
+  const nonDecomposeLiveEvents = useMemo(
+    () => liveEvents.filter((e) => e.kind !== "decompose"),
+    [liveEvents],
+  );
 
   return (
     <div className="chat-log wide">
@@ -414,9 +426,20 @@ export function ChatLog({
               </div>
             ) : null}
             {llmRetry ? <LlmRetryNotice retry={llmRetry} /> : null}
-            {liveEvents.length > 0 ? (
+            {decompositionCards.length > 0 || nonDecomposeLiveEvents.length > 0 ? (
               <div className="current-turn-bubble">
-                <LiveEventStream events={liveEvents} />
+                {decompositionCards.length > 0 ? (
+                  <div className="chat-log-decomposition">
+                    {decompositionCards.map((ev) => (
+                      <DecomposeCard
+                        key={ev.id}
+                        decomposition={ev.decomposition}
+                        planTasks={planTasks}
+                      />
+                    ))}
+                  </div>
+                ) : null}
+                <LiveEventStream events={nonDecomposeLiveEvents} />
               </div>
             ) : null}
           </div>

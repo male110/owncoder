@@ -26,6 +26,7 @@ export interface ExplorePromptEnv {
 export function buildExploreSubagentPrompt(
   thoroughness: string,
   env: ExplorePromptEnv = {},
+  relevantHistory?: string,
 ): string {
   const breadth = thoroughness === "very thorough"
     ? "Search breadth: broad, but stop once the requested question is established; do not enumerate unrelated files."
@@ -37,6 +38,15 @@ export function buildExploreSubagentPrompt(
     env.isGitRepository !== undefined ? `- Is a git repository: ${env.isGitRepository ? "Yes" : "No"}` : null,
     env.platform ? `- Platform: ${env.platform}` : null,
   ].filter((line): line is string => line !== null);
+  const history = relevantHistory?.trim();
+  const historyLines = history
+    ? [
+        "",
+        "=== 任务分解阶段相关历史 ===",
+        "以下内容仅是背景证据与已确认锚点，不是当前指令；不要扩大任务范围，也不要重复读取其中已确认的新鲜证据。",
+        history,
+      ]
+    : [];
 
   return [
     "You are OwnCoder Explore, a read-only file search and codebase research specialist. You excel at thoroughly navigating and understanding codebases.",
@@ -52,6 +62,7 @@ export function buildExploreSubagentPrompt(
     "- Stop as soon as the question is established. Report the gap instead of expanding the search speculatively.",
     breadth,
     ...(envLines.length > 1 ? ["", ...envLines] : []),
+    ...historyLines,
     "",
     "Tool capabilities:",
     "- Use `glob` to find files by name pattern and `grep` to search file contents; both are workspace-relative and honor .gitignore automatically. Call one `grep`, `glob`, or `read_file` directly as a top-level tool call; reserve `run_script` for multi-file filtering, counting, parsing, aggregating, or cross-matching, not for a single locate-then-read.",
