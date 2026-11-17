@@ -16,15 +16,15 @@ export const DISPATCH_AGENT_TOOL_DEF: ToolDef = {
       "Dispatch a read-only research task to a subagent that runs in an isolated context. " +
       "The subagent runs in an isolated context: its search hits and full-file reads stay there, and only its final report returns to this context. " +
       "The subagent is read-only: implementation work cannot be delegated. " +
-      "Use \"Explore\" for general read-only codebase research; use \"Planner\" only in the task-decompose stage to produce a structured execution plan (## Final Report with 目标, numbered 步骤, 相关文件, 风险与不确定性, 验证方式). " +
+      "Use \"Explore\" for general read-only codebase research. " +
       "Do not dispatch a subagent for a request resolvable with <=2 targeted reads, and never as a pre-flight before an edit whose site is already known.",
     parameters: {
       type: "object",
       properties: {
         agent_type: {
           type: "string",
-          enum: ["Explore", "Planner"],
-          description: 'Subagent type. "Explore" (read-only codebase research) or "Planner" (read-only planning subagent for the task-decompose stage). Default "Explore".',
+          enum: ["Explore"],
+          description: 'Subagent type. "Explore" (read-only codebase research). Default "Explore". "Planner" is unavailable here — it is only invoked by the task-decompose stage.',
         },
         task: {
           type: "string",
@@ -35,6 +35,13 @@ export const DISPATCH_AGENT_TOOL_DEF: ToolDef = {
           type: "string",
           enum: ["medium", "very thorough"],
           description: 'Search breadth. "medium" for likely-location-first exploration (default); "very thorough" only for cross-cutting questions whose answer genuinely spans multiple directories or naming conventions.',
+        },
+        relevantHistory: {
+          type: "string",
+          description:
+            "Optional. The relevant history produced by the task-decompose step (the decompose output's relevantHistory field). " +
+            "It is passed to the subagent as background evidence only; never substitute other content. " +
+            "Omit it when the task-decompose step produced none — the existing automatic injection and fallback stay unchanged.",
         },
       },
       required: ["task"],

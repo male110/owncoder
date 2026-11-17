@@ -29,7 +29,7 @@ import {
   summarizeToolResultForHistory,
 } from "./react-prompt.ts";
 import { buildSpecWorkflowUpdate, specPhaseOfTool } from "./document-workflow.ts";
-import { featureDirRel } from "../../specs.ts";
+import { featureDirRel, phaseFileName } from "../../specs.ts";
 import { updateStateAfterResponse } from "./termination.ts";
 import { activeInformationTask, applyRunEvent, recordDecision } from "./react-finalize.ts";
 import { type FreshnessFollowUp } from "./context-control.ts";
@@ -62,8 +62,8 @@ function readPathKey(ctx: ReActLoopContext, rawPath: string): string {
  * 写操作使该文件计数归零（写后重读是合法需求）。
  */
 function recordSameFileCapSkippedCall(ctx: ReActLoopContext, call: ParsedToolCall, id: string, pathKey: string): void {
-  const output = `Skipped: ${pathKey} has already been read ${ctx.maxSameFileReads} times in this task; its content is in the context above. ` +
-    "Do not read it again. Use the content already in context to apply the edit, or explain what is still missing.";
+  const output = `Skipped: ${pathKey} has already been read ${ctx.maxSameFileReads} times in this task. ` +
+    "Use the portions already read to apply the edit, or explain which unobserved range is still needed; this read cap prevents further reads of this file.";
   ctx.opts.onEvent?.({ type: "tool_start", id, name: call.name, args: call.arguments });
   ctx.messages.push({ role: "tool", tool_call_id: id, name: call.name, content: output });
   ctx.history.push({ role: "tool", id, content: output, toolName: call.name, toolArgs: call.arguments });
@@ -107,7 +107,16 @@ async function runOne(
   });
   ctx.opts.onEvent?.({ type: "tool_start", id, name: call.name, args: call.arguments });
   let result: Awaited<ReturnType<typeof executeTool>>;
-  if (call.name === "ask_user") {
+  // 硬拦截：ReAct 执行阶段禁止派发 Planner 子代理（不能只靠提示词软约束）。
+  // Planner 的唯一合法派发入口是任务分解阶段的 runAgentPlanner（planner.ts → executeTool），
+  // 不经过本执行路径；此处拒绝产生工具级错误交回 LLM 纠错，不打断循环。
+  if (call.name === "dispatch_agent" && (call.arguments as Record<string, unknown> | undefined)?.agent_type === "Planner") {
+    result = {
+      ok: false,
+      output:
+        'Error: dispatch_agent 禁止在执行阶段派发 "Planner" 子代理：Planner 只能由任务分解阶段（task-decompose）的计划流程调用。请改用 "Explore" 完成只读调研。',
+    };
+  } else if (call.name === "ask_user") {
     if (exec.askUserExecutedInBatch) {
       result = {
         ok: true,
@@ -237,7 +246,29 @@ function recordResult(
     const readKey = readPathKey(ctx, String(
       r.call.arguments?.file_path ?? r.call.arguments?.path ?? resultMetadata.path ?? "",
     ));
-    if (readKey) ctx.sameFileReads.set(readKey, (ctx.sameFileReads.get(readKey) ?? 0) + 1);
+    if (readKey) {
+      const readCount = (ctx.sameFileReads.get(readKey) ?? 0) + 1;
+      ctx.sameFileReads.set(readKey, readCount);
+      const limit = r.call.arguments?.limit;
+      if (
+        ctx.maxSameFileReads <= 0 &&
+        readCount === 4 &&
+        resultMetadata.kind === "read_file" &&
+        resultMetadata.hasMore &&
+        typeof limit === "number" &&
+        Number.isInteger(limit) && limit > 0 && limit <= 20 &&
+        typeof resultMetadata.nextOffset === "number" &&
+        typeof resultMetadata.totalLines === "number"
+      ) {
+        const remaining = resultMetadata.totalLines - resultMetadata.nextOffset + 1;
+        if (remaining > 0) {
+          ctx.messages.push({
+            role: "system",
+            content: `You have read ${readKey} in ${readCount} separate calls. Unread lines ${resultMetadata.nextOffset}-${resultMetadata.totalLines} remain. If you need them, read the remaining range in ONE read_file call with offset=${resultMetadata.nextOffset} and limit=${remaining}; otherwise stop reading this file and proceed with the task.`,
+          });
+        }
+      }
+    }
   }
 
   // 文件修改类工具执行后，向对话流推一条 assistant 总结，让用户看到行动反馈（解决静默执行）。
@@ -252,11 +283,11 @@ function recordResult(
     const feature = String(r.call.arguments?.feature ?? "").trim();
     if (phase && feature) {
       ctx.documentDelivered = true;
-      ctx.deliveredDocName = `${phase}.md`;
+      ctx.deliveredDocName = phaseFileName(phase);
       // 仅在尚未设置工作流状态时才创建新状态，避免后续阶段覆盖当前审批闸门
       if (ctx.documentWorkflowUpdate === undefined) {
         ctx.documentWorkflowUpdate = buildSpecWorkflowUpdate(
-          { feature, path: resultMetadata?.kind === "file_mutation" ? resultMetadata.paths[0]! : `${featureDirRel(feature, ctx.opts.sessionId)}/${phase}.md`, phase },
+          { feature, path: resultMetadata?.kind === "file_mutation" ? resultMetadata.paths[0]! : `${featureDirRel(feature, ctx.opts.sessionId)}/${phaseFileName(phase)}`, phase },
           ctx.opts.documentWorkflow,
           ctx.opts.sessionId,
         );

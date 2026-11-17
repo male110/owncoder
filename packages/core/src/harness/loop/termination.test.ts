@@ -201,6 +201,53 @@ describe("Termination Logic", () => {
       const result = checkTermination(state, DEFAULT_TERMINATION_CONFIG);
       expect(result.shouldTerminate).toBe(false);
     });
+    it("terminates six contiguous five-line reads of the same file", () => {
+      const state = createLoopState();
+      for (let i = 0; i < 5; i++) {
+        state.toolCallHistory.push({
+          name: "read_file",
+          arguments: { file_path: "src/plans.ts", offset: 712 + i * 5, limit: 5 },
+          result: `lines ${712 + i * 5}-${716 + i * 5}`,
+          iteration: i,
+        });
+      }
+      expect(checkTermination(state).shouldTerminate).toBe(false);
+      state.toolCallHistory.push({
+        name: "read_file",
+        arguments: { file_path: "src/plans.ts", offset: 737, limit: 5 },
+        result: "lines 737-741",
+        iteration: 5,
+      });
+      const result = checkTermination(state);
+      assertTerminated(result);
+      expect(result.reason).toContain("Tool loop detected");
+      expect(result.metadata?.noProgress).toBe(true);
+    });
+    it("does not confuse invalid, unrelated, or large pagination with tiny-read loops", () => {
+      const cases: Array<[string, (args: Array<Record<string, unknown>>) => void]> = [
+        ["missing offset", (args) => { delete args[2].offset; }],
+        ["fractional offset", (args) => { args[2].offset = 722.5; }],
+        ["negative offset", (args) => { args[2].offset = -1; }],
+        ["missing limit", (args) => { delete args[2].limit; }],
+        ["zero limit", (args) => { args[2].limit = 0; }],
+        ["oversized limit", (args) => { args[2].limit = 21; }],
+        ["gap", (args) => { args[2].offset = 723; }],
+        ["backwards", (args) => { args[2].offset = 715; }],
+        ["another file", (args) => { args[2].file_path = "src/other.ts"; }],
+        ["large steps", (args) => { args.forEach((arg, i) => { arg.offset = i * 100; }); }],
+      ];
+      for (const [label, mutate] of cases) {
+        const args: Array<Record<string, unknown>> = Array.from({ length: 6 }, (_, i) => ({
+          file_path: "src/plans.ts", offset: 712 + i * 5, limit: 5,
+        }));
+        mutate(args);
+        const state = createLoopState();
+        state.toolCallHistory.push(...args.map((callArgs, i) => ({
+          name: "read_file", arguments: callArgs, result: `page ${i}`, iteration: i,
+        })));
+        expect(checkTermination(state).shouldTerminate, label).toBe(false);
+      }
+    });
     it("should NOT detect loop for different files (same tool)", () => {
       const state = createLoopState();
       state.toolCallHistory.push(

@@ -645,6 +645,12 @@ export const en = {
   "获取并添加": "Fetch & add",
   "直接添加": "Add directly",
   "获取所有模型": "Fetch all models",
+  "模型目录为空": "The model catalog is empty",
+  "尚未获取模型目录，点击「获取所有模型」拉取":
+    "No model catalog yet; click \u201cFetch all models\u201d to pull it",
+  "请先填写服务地址（Base URL）": "Please enter the service address (Base URL) first",
+  "请先填写服务地址（Base URL）和 API Key":
+    "Please enter the service address (Base URL) and API key first",
   "已接入模型": "Connected models",
   "点击「获取所有模型」浏览目录，用 + 加入已接入列表，或在上方手动输入模型 ID":
     "Click \u201cFetch all models\u201d to browse the catalog and add entries with +, or type a model ID above",

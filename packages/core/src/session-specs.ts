@@ -22,6 +22,7 @@ import {
   featureDirRel,
   getSpecStatus as readSpecStatusFromDisk,
   listSpecs,
+  phaseFileName,
   phaseUnderReview,
   readFeatureState,
   readSpecPhase,
@@ -109,7 +110,7 @@ export async function approveSpecPhase(
     r.history.push({
       role: "assistant",
       content:
-        `✅ ${feature} 的 ${phase}.md 已批准。\n\n` +
+        `✅ ${feature} 的 ${phaseFileName(phase)} 已批准。\n\n` +
         `📋 **下一步**：生成 ${nextDoc}。` +
         (phase === "spec"
           ? "请基于已批准的 spec 探索代码库，产出 design.md。"
@@ -192,7 +193,7 @@ export async function rejectSpecPhase(
   r.history.push({
     role: "user",
     content:
-      `↩️ ${feature} 的 ${phase}.md 未通过审批。请修改后重新保存。\n\n` +
+      `↩️ ${feature} 的 ${phaseFileName(phase)} 未通过审批。请修改后重新保存。\n\n` +
       `**用户反馈**：${feedback.trim() || "（未填写具体意见，请重新审视该文档）"}`,
   });
 

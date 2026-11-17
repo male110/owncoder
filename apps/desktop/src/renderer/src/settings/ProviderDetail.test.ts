@@ -41,11 +41,14 @@ vi.mock("../i18n", () => ({
 }));
 
 import { ProviderDetail } from "./ProviderDetail";
+import { ModelBrowserModal } from "./ModelBrowserModal";
 
 // useState 调用序号：name…modelSearchQuery 之后依次是 editingId / editingName / copiedId。
 const EDITING_ID = 10;
 const EDITING_NAME = 11;
 const COPIED_ID = 12;
+// 弹窗数据源 browseModels 追加在 catalogNotice（13 号槽位）之后。
+const BROWSE_MODELS = 14;
 
 interface Props {
   className?: string;
@@ -97,18 +100,27 @@ interface Draft {
 
 const MODEL_IDS = ["gpt-4o", "gpt-4o-mini"];
 
-function setup(ids: string[] = ["gpt-4o"]) {
+function setup(
+  ids: string[] = ["gpt-4o"],
+  overrides: {
+    baseUrl?: string;
+    apiKey?: string;
+    models?: { id: string; name: string; displayName?: string }[];
+    selectedModels?: { id: string; name: string; providerId: string; displayName?: string }[];
+  } = {},
+) {
+  const models = overrides.models ?? ids.map((id) => ({ id, name: id }));
   const provider = {
     id: "p1",
     name: "P1",
-    baseUrl: "https://api.example.com",
-    apiKey: "k",
+    baseUrl: overrides.baseUrl ?? "https://api.example.com",
+    apiKey: overrides.apiKey ?? "k",
     apiFormat: "openai-chat",
-    models: ids.map((id) => ({ id, name: id })),
+    models,
   };
   const draft: Draft = {
-    providers: [{ id: "p1", models: ids.map((id) => ({ id, name: id })) }],
-    selectedModels: ids.map((id) => ({ id, name: id, providerId: "p1" })),
+    providers: [{ id: "p1", models }],
+    selectedModels: overrides.selectedModels ?? ids.map((id) => ({ id, name: id, providerId: "p1" })),
   };
   const patch = vi.fn((fn: (d: Draft) => void) => {
     const next = structuredClone(draft);
@@ -118,6 +130,8 @@ function setup(ids: string[] = ["gpt-4o"]) {
   const render = () => {
     cursor = 0;
     refCursor = 0;
+    // 模拟真实链路：patch 写入配置后父组件以最新 provider 重新传参。
+    provider.models = draft.providers[0]!.models;
     return ProviderDetail({
       provider: provider as never,
       selectedModels: draft.selectedModels,
@@ -324,7 +338,9 @@ describe("已接入模型行内编辑展示名", () => {
     fire(editInput(render()).props.onBlur);
     expect(patch).toHaveBeenCalledTimes(1);
 
-    click(byClass(render(), "model-detail-row")[1]!);
+    // 分组渲染下改名后的模型（无拉丁字母系列词）排入空系列组末尾，
+    // 「另一行」（gpt-4o-mini）在前，点击第一行完成切换。
+    click(byClass(render(), "model-detail-row")[0]!);
 
     expect(patch).toHaveBeenCalledTimes(1);
     expect(draft.selectedModels[0]!.displayName).toBe("切换前名称");
@@ -470,5 +486,214 @@ describe("模型 name 复制按钮", () => {
     expect(after[0]!.props.className).not.toContain("copied");
     expect(after[1]!.props.className).toContain("copied");
     expect(after[1]!.props.children).toBe("✓");
+  });
+});
+
+describe("获取所有模型弹窗", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+  });
+
+  const flush = () => new Promise((r) => setTimeout(r, 0));
+  const fetchButton = (tree: ReactElement) => byClass(tree, "primary")[0]!;
+
+  function stubFetch(
+    impl: (...args: unknown[]) => Promise<{ ok: boolean; models?: unknown[]; error?: string }>,
+  ) {
+    const fetchModelList = vi.fn(impl);
+    vi.stubGlobal("window", { owncoder: { fetchModelList } });
+    return fetchModelList;
+  }
+
+  /** 弹窗渲染为独立组件元素；fake React 不展开子组件，按 type 定位元素。 */
+  function modalOf(tree: ReactElement): ReactElement<Props> | null {
+    let el: ReactElement<Props> | null = null;
+    walk(tree, (node) => {
+      if ((node as { type?: unknown }).type === ModelBrowserModal) el = node;
+    });
+    return el;
+  }
+
+  /** 手动调用弹窗组件函数，得到弹窗内部元素树（分组列表、添加按钮等）。 */
+  function modalTree(tree: ReactElement): ReactElement {
+    const el = modalOf(tree);
+    expect(el).not.toBeNull();
+    return ModelBrowserModal((el as ReactElement<Props>).props as never) as ReactElement;
+  }
+
+  /** 弹窗内某个模型条目（按展示名定位，避免依赖分组排序）。 */
+  function itemByName(body: ReactElement, name: string): ReactElement<Props> {
+    const hit = byClass(body, "model-browser-item").find((li) => {
+      const names = byClass(li, "model-browser-item-name");
+      return names.length === 1 && names[0]!.props.children === name;
+    });
+    expect(hit).toBeTruthy();
+    return hit!;
+  }
+
+  it("点击「获取所有模型」拉取成功后打开弹窗，关闭后可再次点击重新拉取打开", async () => {
+    const fetchModelList = stubFetch(async () => ({
+      ok: true,
+      models: [{ id: "o3", name: "o3" }],
+    }));
+    const { render, fire } = setup([]);
+
+    fire(fetchButton(render()).props.onClick);
+    await flush();
+
+    let tree = render();
+    expect(fetchModelList).toHaveBeenCalledOnce();
+    expect(modalOf(tree)).not.toBeNull();
+
+    // 关闭弹窗后页面回到常态。
+    (modalOf(tree)!.props.onClose as () => void)();
+    tree = render();
+    expect(modalOf(tree)).toBeNull();
+
+    // 再次点击「获取所有模型」重新拉取并重开弹窗。
+    fire(fetchButton(tree).props.onClick);
+    await flush();
+    tree = render();
+    expect(modalOf(tree)).not.toBeNull();
+    expect(fetchModelList).toHaveBeenCalledTimes(2);
+  });
+
+  it("弹窗成功展示平台目录：展示名、补显原始 name 与逐条添加状态", async () => {
+    stubFetch(async () => ({
+      ok: true,
+      models: [
+        { id: "model_p1_gpt4o", name: "gpt-4o", display_name: "GPT-4o 最佳" },
+        { id: "o3", name: "o3" },
+      ],
+    }));
+    const { draft, render, fire } = setup([]);
+
+    fire(fetchButton(render()).props.onClick);
+    await flush();
+
+    const tree = render();
+    expect(draft.providers[0]!.models.map((m) => m.id)).toEqual(["model_p1_gpt4o", "o3"]);
+    const body = modalTree(tree);
+    expect(byClass(body, "model-browser-item")).toHaveLength(2);
+
+    const custom = itemByName(body, "GPT-4o 最佳");
+    // 有自定义展示名时补显原始 name（请求标识），其后是模型 id。
+    expect(byClass(custom, "model-browser-item-id").map((n) => n.props.children)).toEqual([
+      "gpt-4o",
+      "model_p1_gpt4o",
+    ]);
+    const plain = itemByName(body, "o3");
+    expect(byClass(plain, "model-browser-item-id").map((n) => n.props.children)).toEqual(["o3"]);
+
+    const addBtn = byClass(plain, "model-browser-add")[0]!;
+    expect(addBtn.props.title).toBe("添加到已接入列表");
+    expect(addBtn.props.disabled).toBe(false);
+
+    (addBtn.props.onClick as () => void)();
+
+    expect(draft.selectedModels).toEqual([{ id: "o3", name: "o3", providerId: "p1" }]);
+    const after = byClass(itemByName(modalTree(render()), "o3"), "model-browser-add")[0]!;
+    expect(after.props.disabled).toBe(true);
+    expect(after.props.title).toBe("已添加");
+    expect(after.props.children).toBe("✓");
+  });
+
+  it("获取成功但目录为空时给出明确提示而非空白", async () => {
+    stubFetch(async () => ({ ok: true, models: [] }));
+    const { render, fire } = setup([]);
+
+    fire(fetchButton(render()).props.onClick);
+    await flush();
+
+    const tree = render();
+    const hints = byClass(tree, "hint").map((n) => n.props.children);
+    expect(hints).toContain("模型目录为空");
+    expect(modalOf(tree)).toBeNull();
+  });
+
+  it("接口报错时展示可见错误且按钮恢复可用，重试成功后打开弹窗", async () => {
+    const fetchModelList = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: false, error: "HTTP 401: unauthorized" })
+      .mockResolvedValueOnce({ ok: true, models: [{ id: "m1", name: "m1" }] });
+    vi.stubGlobal("window", { owncoder: { fetchModelList } });
+    const { render, fire } = setup([]);
+
+    fire(fetchButton(render()).props.onClick);
+    await flush();
+
+    let tree = render();
+    expect(byClass(tree, "error-text")[0]!.props.children).toBe("HTTP 401: unauthorized");
+    expect(fetchButton(tree).props.disabled).toBe(false);
+    expect(modalOf(tree)).toBeNull();
+
+    fire(fetchButton(tree).props.onClick);
+    await flush();
+
+    tree = render();
+    expect(fetchModelList).toHaveBeenCalledTimes(2);
+    expect(byClass(modalTree(tree), "model-browser-item")).toHaveLength(1);
+  });
+
+  it("加载中重复点击只发起一次请求，完成后恢复可用", async () => {
+    const fetchModelList = stubFetch(async () => ({ ok: true, models: [{ id: "m1", name: "m1" }] }));
+    const { render, fire } = setup([]);
+    const btn = fetchButton(render());
+
+    fire(btn.props.onClick);
+    fire(btn.props.onClick);
+    await flush();
+
+    expect(fetchModelList).toHaveBeenCalledOnce();
+    const tree = render();
+    expect(fetchButton(tree).props.disabled).toBe(false);
+    expect(modalOf(tree)).not.toBeNull();
+  });
+
+  it("缺少服务地址且缺少密钥时点击给出可见错误而不是无响应", async () => {
+    const fetchModelList = stubFetch(async () => ({ ok: true, models: [] }));
+
+    const { render, fire } = setup([], { baseUrl: "", apiKey: "" });
+    expect(fetchButton(render()).props.disabled).toBe(false);
+    fire(fetchButton(render()).props.onClick);
+
+    expect(byClass(render(), "error-text")[0]!.props.children).toBe(
+      "请先填写服务地址（Base URL）和 API Key",
+    );
+    expect(fetchModelList).not.toHaveBeenCalled();
+  });
+
+  it("仅缺少服务地址时点击提示补填 Base URL", async () => {
+    const fetchModelList = stubFetch(async () => ({ ok: true, models: [] }));
+
+    const { render, fire } = setup([], { baseUrl: "", apiKey: "k" });
+    fire(fetchButton(render()).props.onClick);
+
+    expect(byClass(render(), "error-text")[0]!.props.children).toBe(
+      "请先填写服务地址（Base URL）",
+    );
+    expect(fetchModelList).not.toHaveBeenCalled();
+  });
+
+  it("弹窗内添加不覆盖已有同名模型配置（含自定义展示名）", () => {
+    const { draft, render } = setup([], {
+      models: [{ id: "gpt-4o", name: "gpt-4o" }],
+      selectedModels: [{ id: "legacy-1", name: "gpt-4o", providerId: "p1", displayName: "我的模型" }],
+    });
+    render();
+    // 直接预置弹窗数据源（「获取所有模型」打开的即这份目录数据）。
+    states[BROWSE_MODELS]![0] = [{ id: "gpt-4o", name: "gpt-4o" }];
+
+    const addBtn = byClass(modalTree(render()), "model-browser-add")[0]!;
+    expect(addBtn.props.disabled).toBe(true);
+    expect(addBtn.props.title).toBe("已添加");
+
+    // 即使直接调用处理器，防重判据也应阻止覆盖既有条目。
+    (addBtn.props.onClick as () => void)();
+
+    expect(draft.selectedModels).toHaveLength(1);
+    expect(draft.selectedModels[0]!.id).toBe("legacy-1");
+    expect(draft.selectedModels[0]!.displayName).toBe("我的模型");
   });
 });

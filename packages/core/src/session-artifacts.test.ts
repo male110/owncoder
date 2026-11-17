@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { BUILTIN_WORKFLOW } from "@owncoder/settings";
 import { activeMetaPath, approvePlannerPlan, listPlans, readActiveMeta, readPlanFile, readPlannerPlan, savePlannerPlan, samePlannerPlan, sessionArtifactDir, validatePlannerPlan, writeActiveMeta, writePlanFile } from "./plans.ts";
-import { featureDirRel, getSpecStatus, listSpecs, readFeatureState, readSpecPhase, saveSpec, writeFeatureState } from "./specs.ts";
+import { featureDirRel, getSpecStatus, listSpecs, phaseFileName, readFeatureState, readSpecPhase, saveSpec, writeFeatureState } from "./specs.ts";
 import { toolSaveDesign } from "./harness/tools/save-design.ts";
 import { toolSaveTasks } from "./harness/tools/save-tasks.ts";
 import { executeTool } from "./harness/execute.ts";
@@ -53,7 +53,7 @@ describe("会话产物隔离", () => {
     expect(await readActiveMeta(root, "b")).toBeNull();
     expect(await listPlans(root, "a")).toEqual([]);
     await fs.mkdir(join(root, ".owncoder/specs/legacy"), { recursive: true });
-    await fs.writeFile(join(root, ".owncoder/specs/legacy/spec.md"), "旧需求");
+    await fs.writeFile(join(root, ".owncoder/specs/legacy/requirement.md"), "旧需求");
     await fs.writeFile(join(root, ".owncoder/specs/legacy/.state.json"), JSON.stringify({ feature: "legacy", stage: "approved" }));
     expect(await listSpecs(root, "a")).toEqual([]);
     expect(await readFeatureState(root, "legacy", "a")).toBeNull();
@@ -98,7 +98,7 @@ describe("会话产物隔离", () => {
     expect((await listSpecs(root, "a"))[0]?.phases).toEqual(["spec", "design", "tasks"]);
     for (const phase of ["spec", "design", "tasks"] as const) {
       expect(await readSpecPhase(root, "login", phase, "a")).toContain("A");
-      await expect(readPlanFile(root, `${featureDirRel("login", "a")}/${phase}.md`, "b")).rejects.toThrow();
+      await expect(readPlanFile(root, `${featureDirRel("login", "a")}/${phaseFileName(phase)}`, "b")).rejects.toThrow();
     }
     expect(await readPlanFile(root, specPath, "a")).toContain("A 需求");
     await saveSpec(root, "login", "# B 需求\n\nR1: WHEN 用户提交凭证 THE SYSTEM SHALL 完成 B 登录", "b");
@@ -115,8 +115,8 @@ describe("会话产物隔离", () => {
   });
 
   it("Spec 当前阶段缓存不能继承外国会话的文档历史", () => {
-    const aPath = `${featureDirRel("login", "a")}/spec.md`;
-    const bPath = `${featureDirRel("login", "b")}/spec.md`;
+    const aPath = `${featureDirRel("login", "a")}/requirement.md`;
+    const bPath = `${featureDirRel("login", "b")}/requirement.md`;
     const a = buildSpecWorkflowUpdate({ feature: "login", path: aPath, phase: "spec" }, null, "a");
     const b = buildSpecWorkflowUpdate({ feature: "login", path: bPath, phase: "spec" }, a, "b");
     expect(b.sessionId).toBe("b");

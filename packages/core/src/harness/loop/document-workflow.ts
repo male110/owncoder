@@ -25,7 +25,7 @@ export function specPhaseOfTool(toolName: string): DocumentType | undefined {
 export function documentIntentContext(state: DocumentWorkflowState): string {
   const next =
     state.stage === "awaiting_spec_confirmation"
-      ? "design.md (technical design — only after the user approves spec.md)"
+      ? "design.md (technical design — only after the user approves requirement.md)"
       : state.stage === "awaiting_design_confirmation"
         ? "tasks.md (implementation task list — only after the user approves design.md)"
         : state.stage === "awaiting_tasks_confirmation"

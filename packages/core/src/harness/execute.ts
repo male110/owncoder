@@ -309,10 +309,18 @@ async function runTool(ctx: ToolContext, call: ParsedToolCall): Promise<ToolResu
           return fail("dispatch_agent 当前不可用：宿主未提供子智能体运行环境。");
         }
         const thoroughness = str(args.thoroughness ?? "medium");
+        // "Planner" 仅由任务分解阶段的 runAgentPlanner（planner.ts）经本分支派发；
+        // ReAct 执行入口（react-tool-exec.ts runOne）在调用本函数前已硬拒 Planner。
         if (agentType !== "Explore" && agentType !== "Planner") {
           return fail(`dispatch_agent 暂不支持 agent_type="${agentType}"，目前只支持 "Explore"（只读代码调研）与 "Planner"（只读计划子代理）。`);
         }
-        const report = await ctx.dispatchSubagent({ agentType, task, thoroughness });
+        const report = await ctx.dispatchSubagent({
+          agentType,
+          task,
+          thoroughness,
+          // 任务分解步骤产出的相关历史；缺失/空白时不传，保持既有自动注入与兜底行为。
+          relevantHistory: str(args.relevantHistory ?? "").trim() || undefined,
+        });
         return ok(report);
       }
       case "add_tasks":

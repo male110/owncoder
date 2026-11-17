@@ -810,22 +810,6 @@ export function useChatActions(deps: {
 
   // ── Spec 工作流（spec → design → tasks 审批）────────────────────────────
 
-  const onExecuteTasks = useCallback(async () => {
-    const sid = getFocusSessionId();
-    if (!sid) return;
-    const currentSession = useSessionStore.getState();
-    const meta = currentSession.getActivePlanMetaForSession(sid);
-    if (!meta || meta.tasks.length === 0) return;
-    if (!currentSession.workspace || !currentSession.llmConfigured) {
-      chat.setLiveStatus(t("任务已准备好。请先配置 LLM，再发送消息开始执行。"), sid);
-      return;
-    }
-    enqueueMessage(sid, t("开始执行"));
-    clearStopRequest(sid);
-    chat.setLiveStatus(t("开始执行 {{count}} 个任务…", { count: meta.tasks.length }), sid);
-    void runQueue(sid);
-  }, [runQueue]); // eslint-disable-line react-hooks/exhaustive-deps
-
   const onUpdateTask = useCallback(async (taskId: string, status: TaskStatusDto) => {
     const sid = getFocusSessionId();
     if (!sid) return;
@@ -936,8 +920,6 @@ export function useChatActions(deps: {
     onSend,
     onRegenerate,
     onApprovePlan,
-    onExecuteTasks,
-
     onUpdateTask,
     onRollback,
     onKeepAll,

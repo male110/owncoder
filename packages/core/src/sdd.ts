@@ -2,7 +2,7 @@
  * Spec-Driven Development (SDD) — spec → design → tasks
  *
  * Three-layer document chain under `.owncoder/sdd/<feature>/`:
- *   - spec.md   — WHAT to build (problem, requirements, acceptance)
+ *   - requirement.md   — WHAT to build (problem, requirements, acceptance)
  *   - design.md — HOW to build (approach, components, trade-offs)
  *   - tasks.md  — execution checklist (parsed by plans.ts)
  *
@@ -14,6 +14,7 @@ import { promises as fs } from "node:fs";
 import { join, resolve } from "node:path";
 import { fromMarkdown } from "mdast-util-from-markdown";
 import { parseTasksFromMarkdown, type TaskItem } from "./plans.ts";
+import { phaseFileName } from "./specs.ts";
 
 const SDD_DIR = ".owncoder/sdd";
 
@@ -61,7 +62,7 @@ export async function saveSpec(
   feature: string,
   content: string,
 ): Promise<string> {
-  return savePhase(workspaceRoot, feature, "spec.md", content);
+  return savePhase(workspaceRoot, feature, "requirement.md", content);
 }
 
 export async function saveDesign(
@@ -110,7 +111,7 @@ export async function listFeatures(workspaceRoot: string): Promise<SddFeature[]>
     let mtimeMs = 0;
     let title = ent.name;
     for (const p of ["spec", "design", "tasks"] as SddPhase[]) {
-      const pFile = join(fdir, `${p}.md`);
+      const pFile = join(fdir, phaseFileName(p));
       if (await fileExists(pFile)) {
         phases.push(p);
         const st = await fs.stat(pFile);
@@ -133,7 +134,7 @@ export async function listFeatures(workspaceRoot: string): Promise<SddFeature[]>
             const m = text.match(/^#\s+(.+)$/m);
             if (m) heading = m[1];
           }
-          if (heading) title = heading.replace(/^Spec:\s*/i, "").trim();
+          if (heading) title = heading.replace(/^(Spec|Requirement):\s*/i, "").trim();
         }
       }
     }
@@ -148,7 +149,7 @@ export async function getFeatureStatus(
 ): Promise<SddStatus> {
   const slug = assertFeatureName(feature);
   const dir = featureDirAbs(workspaceRoot, slug);
-  const hasSpec = await fileExists(join(dir, "spec.md"));
+  const hasSpec = await fileExists(join(dir, "requirement.md"));
   const hasDesign = await fileExists(join(dir, "design.md"));
   const hasTasks = await fileExists(join(dir, "tasks.md"));
   let tasks: TaskItem[] = [];

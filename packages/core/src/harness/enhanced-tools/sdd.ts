@@ -7,7 +7,7 @@ export const SAVE_SPEC_TOOL_DEF: ToolDef = {
   function: {
     name: "save_spec",
     description:
-      "Save a spec document (WHAT to build) to .owncoder/sdd/<feature>/spec.md. Creates the feature dir if needed. Use first in the spec→design→tasks chain.",
+      "Save a spec document (WHAT to build) to .owncoder/sdd/<feature>/requirement.md. Creates the feature dir if needed. Use first in the spec→design→tasks chain.",
     parameters: {
       type: "object",
       properties: {

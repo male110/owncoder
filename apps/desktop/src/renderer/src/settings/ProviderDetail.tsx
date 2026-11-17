@@ -5,11 +5,13 @@ import {
   modelDisplayName,
   type ApiFormat,
   type AvailableModel,
+  type ListedModel,
   type Provider,
   type SystemWorkflowConfig,
 } from "@owncoder/settings";
 import { useI18n } from "../i18n";
 import { fuzzyMatchModel } from "./model-match";
+import { ModelBrowserModal } from "./ModelBrowserModal";
 
 export function ProviderDetail({
   provider,
@@ -41,11 +43,17 @@ export function ProviderDetail({
   const [editingName, setEditingName] = useState("");
   // 刚复制过原始 name 的模型 id（对应按钮短暂显示 ✓）；null = 无复制反馈。
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  // 「获取所有模型」拉取到的平台目录为空时的空态提示；空串 = 未拉取或拉取到条目。
+  const [catalogNotice, setCatalogNotice] = useState("");
+  // 「获取所有模型」结果弹窗的数据源；null = 未打开。
+  const [browseModels, setBrowseModels] = useState<ListedModel[] | null>(null);
   // 当前编辑会话是否已提交，保证同一次编辑只保存一次（blur 不重复提交）。
   const editCommittedRef = useRef(false);
   const modelListInputRef = useRef<HTMLInputElement>(null);
   // 复制反馈的恢复定时器；新复制 / 切换平台 / 卸载时清掉，避免旧定时器提前复位。
   const copyFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 获取请求进行中标记：拦截同一 tick 内的重复点击，避免并发请求互相覆盖状态。
+  const fetchInFlightRef = useRef(false);
   const { t: tr } = useI18n();
 
   useEffect(() => {
@@ -64,6 +72,9 @@ export function ProviderDetail({
     setManualModelId("");
     setEditingId(null);
     setCopiedId(null);
+    setFetchError("");
+    setCatalogNotice("");
+    setBrowseModels(null);
     if (copyFeedbackTimerRef.current) {
       clearTimeout(copyFeedbackTimerRef.current);
       copyFeedbackTimerRef.current = null;
@@ -95,9 +106,32 @@ export function ProviderDetail({
     [patch, provider.id],
   );
 
+  /** 已接入模型标识集合（弹窗中据此显示 ✓/禁用添加）。
+   *  同时收录 id 与 name：name 才是发给服务端的请求标识，历史数据里存在
+   *  `model_<providerId>_<raw>` 形式的 id，其 name 为裸 raw，只比 id 会漏判为已添加。 */
+  const addedIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const m of selectedModels) {
+      if (m.providerId !== provider.id) continue;
+      ids.add(m.id);
+      if (m.name) ids.add(m.name);
+    }
+    return ids;
+  }, [selectedModels, provider.id]);
+
   const fetchModels = useCallback(async () => {
+    if (fetchInFlightRef.current) return;
+    if (!baseUrl.trim()) {
+      // 缺少服务地址（及密钥）时给出可见错误，而不是按钮静默禁用导致点击无反应。
+      setFetchError(
+        tr(apiKey.trim() ? "请先填写服务地址（Base URL）" : "请先填写服务地址（Base URL）和 API Key"),
+      );
+      return;
+    }
+    fetchInFlightRef.current = true;
     setFetching(true);
     setFetchError("");
+    setCatalogNotice("");
     try {
       const result = await window.owncoder.fetchModelList(baseUrl, apiKey || undefined, apiFormat);
       if (!result.ok) {
@@ -124,9 +158,15 @@ export function ProviderDetail({
           return custom ? { ...entry, displayName: custom } : entry;
         });
       });
+      if (listed.length === 0) {
+        setCatalogNotice(tr("模型目录为空"));
+      } else {
+        setBrowseModels(listed);
+      }
     } catch (e) {
       setFetchError(e instanceof Error ? e.message : String(e));
     } finally {
+      fetchInFlightRef.current = false;
       setFetching(false);
     }
   }, [baseUrl, apiKey, apiFormat, provider.id, patch, tr]);
@@ -170,6 +210,27 @@ export function ProviderDetail({
     });
     setManualModelId("");
   }, [manualModelId, provider.id, patch]);
+
+  /** 从平台目录添加为已接入模型：同 id 或同 name 已存在时不重复添加，
+   *  也不覆盖既有条目的配置（含自定义展示名）。 */
+  const addCatalogModel = useCallback(
+    (model: { id: string; name: string; displayName?: string }) => {
+      patch((d) => {
+        const same = (m: { id: string; name: string }) => m.id === model.id || m.name === model.name;
+        if ((d.selectedModels ?? []).some((s) => s.providerId === provider.id && same(s))) return;
+        d.selectedModels = [
+          ...(d.selectedModels ?? []),
+          {
+            id: model.id,
+            name: model.name,
+            providerId: provider.id,
+            ...(model.displayName ? { displayName: model.displayName } : {}),
+          },
+        ];
+      });
+    },
+    [patch, provider.id],
+  );
 
   const removeModel = useCallback(
     (modelId: string) => {
@@ -350,7 +411,7 @@ export function ProviderDetail({
         <button
           type="button"
           className="primary small"
-          disabled={fetching || !baseUrl.trim()}
+          disabled={fetching}
           onClick={() => void fetchModels()}
         >
           {fetching ? tr("获取中...") : tr("获取所有模型")}
@@ -358,6 +419,7 @@ export function ProviderDetail({
       </div>
 
       {fetchError && <p className="error-text">{fetchError}</p>}
+      {catalogNotice && <p className="hint">{catalogNotice}</p>}
 
       <div
         className="model-detail-list"
@@ -518,6 +580,22 @@ export function ProviderDetail({
           ))
         )}
       </div>
+
+      {browseModels && (
+        <ModelBrowserModal
+          providerName={name || provider.baseUrl}
+          models={browseModels}
+          addedIds={addedIds}
+          onAdd={(m) =>
+            addCatalogModel({
+              id: m.id,
+              name: m.name,
+              ...(m.display_name ? { displayName: m.display_name } : {}),
+            })
+          }
+          onClose={() => setBrowseModels(null)}
+        />
+      )}
     </div>
   );
 }

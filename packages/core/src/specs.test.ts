@@ -151,14 +151,14 @@ describe("三阶段落盘校验", () => {
     await saveDesign(root, "login", validDesign, SID);
     await saveTasks(root, "login", validTasks, SID);
     const dir = join(root, featureDirRel("login", SID));
-    for (const f of ["spec.md", "design.md", "tasks.md"]) {
+    for (const f of ["requirement.md", "design.md", "tasks.md"]) {
       expect(await fs.readFile(join(dir, f), "utf8")).toBeTruthy();
     }
   });
 
   it("需求阶段拒绝技术内容，不落盘", async () => {
     await expect(saveSpec(root, "login", `${validSpec}\n\n## 架构\n分层。\n`, SID)).rejects.toThrow(/pure requirements/i);
-    await expect(fs.access(join(root, featureDirRel("login", SID), "spec.md"))).rejects.toThrow();
+    await expect(fs.access(join(root, featureDirRel("login", SID), "requirement.md"))).rejects.toThrow();
   });
 
   it("设计阶段拒绝缺失追踪，不落盘", async () => {

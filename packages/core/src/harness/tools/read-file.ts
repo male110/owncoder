@@ -7,7 +7,8 @@ import { assertInside, fail, formatWithLines, normalizeRel, toAbs } from "./shar
 function readRangeHeader(startLine: number, endLine: number, totalLines: number): string {
   const parts = [`[lines ${startLine}-${endLine} of ${totalLines}]`];
   if (endLine < totalLines) {
-    parts.push(`file continues, call read_file with offset=${endLine + 1} to read more`);
+    const remaining = totalLines - endLine;
+    parts.push(`file continues (${remaining} more lines); read the remaining range in ONE call with read_file offset=${endLine + 1} and limit=${remaining}`);
   }
   return parts.join(" — ");
 }
@@ -54,11 +55,10 @@ export async function toolRead(
       for await (const line of input) {
         lineNumber++;
         if (lineNumber >= startLine && lineNumber <= endLine) lines.push(line);
-        if (lineNumber >= endLine) break;
       }
       input.close();
       text = lines.join("\n");
-      rangedTotalLines = lineNumber + (lineNumber >= endLine ? 1 : 0);
+      rangedTotalLines = lineNumber;
     } else {
       text = await fs.readFile(abs, "utf8");
     }

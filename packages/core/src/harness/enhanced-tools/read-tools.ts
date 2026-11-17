@@ -59,7 +59,7 @@ export const READ_TOOL_DEFS: ToolDef[] = [
     readOnly: true,
     function: {
       name: "read_file",
-      description: "Read a text file at a known path and return its full content with line numbers, or a specified line range. offset is the starting line number (1-based) and limit is the number of lines to read (not the ending line number); a line range requires both, otherwise the entire file is read. Returns an error when the file does not exist or the path is inaccessible.",
+      description: "Read a text file at a known path and return its full content with line numbers, or a specified line range. offset is the starting line number (1-based) and limit is the number of lines to read (not the ending line number); a line range requires both, otherwise the entire file is read. When you need more than a small window, request a large limit in one call rather than repeatedly reading tiny increments of the same file. Returns an error when the file does not exist or the path is inaccessible.",
       parameters: {
         type: "object",
         properties: {

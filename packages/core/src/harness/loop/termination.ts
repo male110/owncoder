@@ -217,7 +217,9 @@ export function checkTermination(
     if (loopDetection.isLoop) {
       return {
         shouldTerminate: true,
-        reason: `Tool loop detected without progress: ${loopDetection.toolName} called ${loopDetection.count} times with the same result`,
+        reason: loopDetection.paginationLoop
+          ? `Tool loop detected without progress: ${loopDetection.toolName} paginated the same file ${loopDetection.count} times in tiny consecutive ranges`
+          : `Tool loop detected without progress: ${loopDetection.toolName} called ${loopDetection.count} times with the same result`,
         lastAssistant: state.lastContent || synthesizeFallbackResponse(state),
         aborted: true,
         metadata: { loopDetection, noProgress: true },
@@ -397,7 +399,24 @@ function isActionAnnouncement(text: string): boolean {
 function detectToolLoop(
   history: ToolCallRecord[],
   maxRepeat: number,
-): { isLoop: boolean; toolName?: string; count?: number } {
+): { isLoop: boolean; toolName?: string; count?: number; paginationLoop?: boolean } {
+  // Six consecutive tiny reads of contiguous ranges in one file indicate stalled pagination.
+  const tinyReads = history.slice(-6);
+  if (tinyReads.length === 6) {
+    const ranges = tinyReads.map((call) => {
+      const { file_path, offset, limit } = call.arguments;
+      if (call.name !== "read_file" || typeof file_path !== "string" || !file_path.trim() ||
+          !Number.isSafeInteger(offset) || (offset as number) < 0 ||
+          !Number.isSafeInteger(limit) || (limit as number) < 1 || (limit as number) > 20) return null;
+      return { path: file_path.replace(/\\/g, "/"), offset: offset as number, limit: limit as number };
+    });
+    if (ranges.every((range) => range !== null) && ranges.slice(1).every((range, i) =>
+      range!.path === ranges[0]!.path && range!.offset === ranges[i]!.offset + ranges[i]!.limit
+    )) {
+      return { isLoop: true, toolName: "read_file", count: tinyReads.length, paginationLoop: true };
+    }
+  }
+
   // Need at least maxRepeat + 1 calls to detect a loop
   // E.g., maxRepeat=2 requires 3 calls (first + 2 repeats)
   const minCallsForDetection = maxRepeat + 1;

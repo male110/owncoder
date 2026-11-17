@@ -216,6 +216,28 @@ test("whole-file read is allowed under 10KB", async () => {
   );
 });
 
+test("read_file suggests reading the exact remainder in one call", async () => {
+  await withWorkspace(
+    async (root) => { await writeFile(join(root, "pages.ts"), "one\ntwo\nthree\nfour\nfive"); },
+    async (root) => {
+      const ctx = ctxFor(root);
+      const page = await toolRead(ctx, "pages.ts", 2, 2);
+      assert.equal(page.ok, true);
+      assert.match(page.output, /\[lines 2-3 of 5\]/);
+      assert.match(page.output, /2 more lines.*ONE call.*offset=4 and limit=2/);
+      assert.doesNotMatch(page.output, /four|five/);
+      const last = await toolRead(ctx, "pages.ts", 4, 2);
+      assert.equal(last.ok, true);
+      assert.match(last.output, /\[lines 4-5 of 5\]/);
+      assert.doesNotMatch(last.output, /file continues/);
+      assert.equal(last.metadata?.kind, "read_file");
+      if (last.metadata?.kind === "read_file") {
+        assert.equal(last.metadata.hasMore, false);
+      }
+    },
+  );
+});
+
 test("read_outline returns structured metadata without a symbol cap", async () => {
   await withWorkspace(
     async (root) => {

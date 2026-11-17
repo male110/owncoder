@@ -247,7 +247,6 @@ export async function runAgentPlanner(ctx: Omit<StageHandlerContext, "node">, ca
       throw new Error(`任务分解阶段只允许调用计划子代理（agent_type="${PLANNER_SUBAGENT_TYPE}"），不允许调用 "${String(args.agent_type)}"`);
     }
     if (typeof args.task !== "string" || !args.task.trim()) throw new Error("缺少计划任务");
-    if (args.thoroughness !== undefined && args.thoroughness !== "medium" && args.thoroughness !== "very thorough") throw new Error("无效搜索广度");
     const result = await executeTool({
       ...ctx.toolCtx,
       dispatchSubagent: ctx.toolCtx.dispatchSubagent

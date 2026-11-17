@@ -55,7 +55,7 @@ function task(id: string, description: string, status: "in_progress" | "complete
 
 function plan(id: string, title: string): ActivePlanMetaDto {
   return {
-    path: `.owncoder/sdd/${id}/spec.md`,
+    path: `.owncoder/sdd/${id}/requirement.md`,
     approvedAt: "2026-01-01T00:00:00.000Z",
     title,
     tasks: [task(`${id}-t1`, `${title}-task`)],
@@ -66,7 +66,7 @@ function plan(id: string, title: string): ActivePlanMetaDto {
 
 function pendingPlan(id: string, title: string): PlanInfoDto {
   return {
-    path: `.owncoder/sdd/${id}/spec.md`,
+    path: `.owncoder/sdd/${id}/requirement.md`,
     title,
     mtimeMs: 1,
     size: 10,
@@ -143,14 +143,14 @@ describe("session-store plan isolation", () => {
     const store = useSessionStore.getState();
     store.setActiveSessionId("A");
     store.setPlans([pendingPlan("A", "plan-A")], "A");
-    store.setActivePlanPath(".owncoder/sdd/A/spec.md", "A");
+    store.setActivePlanPath(".owncoder/sdd/A/requirement.md", "A");
 
     store.setPlans([pendingPlan("B", "plan-B")], "B");
     store.setActiveSessionId("B");
 
     expect(useSessionStore.getState().activePlanPath).toBeNull();
     expect(store.getActivePlanPathForSession("B")).toBeNull();
-    expect(store.getActivePlanPathForSession("A")).toBe(".owncoder/sdd/A/spec.md");
+    expect(store.getActivePlanPathForSession("A")).toBe(".owncoder/sdd/A/requirement.md");
     expect(useSessionStore.getState().plans.map((p) => p.title)).toEqual(["plan-B"]);
     expect(store.getPlansForSession("B").map((p) => p.title)).toEqual(["plan-B"]);
   });
@@ -161,12 +161,12 @@ describe("session-store plan isolation", () => {
     store.setPlans([pendingPlan("A", "plan-A")], "A");
     store.setActivePlanPath(null, "A");
 
-    store.setActivePlanPath(".owncoder/sdd/B/spec.md", "B");
+    store.setActivePlanPath(".owncoder/sdd/B/requirement.md", "B");
     store.setPlans([pendingPlan("B", "plan-B")], "B");
 
     expect(useSessionStore.getState().activePlanPath).toBeNull();
     expect(useSessionStore.getState().plans.map((p) => p.title)).toEqual(["plan-A"]);
-    expect(store.getActivePlanPathForSession("B")).toBe(".owncoder/sdd/B/spec.md");
+    expect(store.getActivePlanPathForSession("B")).toBe(".owncoder/sdd/B/requirement.md");
     expect(store.getPlansForSession("B").map((p) => p.title)).toEqual(["plan-B"]);
   });
 });

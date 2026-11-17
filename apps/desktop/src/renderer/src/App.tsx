@@ -57,7 +57,7 @@ export function App() {
   const {
     workspace, projects, sessions, sessionsByProject, activeSessionId, sessionTitle,
     expanded, mode, modelLabel, availableModels, providers, llmConfigured,
-    activePlanPathBySession, activePlanMetaBySession, plansBySession,
+    activePlanPathBySession, plansBySession,
     gitStatus, changesBySession, thinkingEffort,
     separateStageModels, reactModelId, reactProviderId, reactThinkingEffort,
   } = useSessionStore();
@@ -67,9 +67,6 @@ export function App() {
 
   // 只读当前会话自己的计划缓存。禁止回退到全局字段：
   // 那些字段可能仍是上一个会话的任务/已批准路径，切过去会把别人的计划当成当前会话的。
-  const sessionActivePlanMeta = activeSessionId
-    ? (activePlanMetaBySession[activeSessionId] ?? null)
-    : null;
   const sessionPlans = activeSessionId
     ? (plansBySession[activeSessionId] ?? []).filter((plan) => plan.sessionId === activeSessionId)
     : [];
@@ -168,7 +165,7 @@ export function App() {
 
   const {
     onSend, onRegenerate,
-    onApprovePlan, onExecuteTasks,
+    onApprovePlan,
     onRollback, onKeepAll, onKeepFile, onUndoFile,
     onSelectModel, onMode, onSelectThinkingEffort, onSelectReactThinkingEffort, sendQueued,
   } = useChatActions({
@@ -528,11 +525,6 @@ export function App() {
             onViewDiff={openEditorDiff}
             onOpenFile={openEditorFile}
           />
-          {sessionActivePlanMeta && sessionActivePlanMeta.tasks.length > 0 && sessionActivePlanMeta.path && !busy && !sending ? (
-            <button type="button" onClick={() => void onExecuteTasks()}>
-              执行任务
-            </button>
-          ) : null}
           <DangerousCommandBar
             autoApproveBash={autoApproveBash}
             onAutoApproveBashChange={handleAutoApproveBashChange}

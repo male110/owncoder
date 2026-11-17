@@ -2,7 +2,7 @@
  * Spec-Driven Development — requirements → design → tasks (Kiro 风格).
  *
  * Three-layer document chain under `.owncoder/specs/<feature>/`:
- *   - spec.md   — requirements document (WHAT to build: goals, scope, user
+ *   - requirement.md   — requirements document (WHAT to build: goals, scope, user
  *                 stories, numbered R1/R2 requirements, acceptance criteria,
  *                 constraints — no technical design content)
  *   - design.md — HOW to build (architecture, components, interfaces, data
@@ -35,6 +35,11 @@ import { parseTasksFromMarkdown, readPlanFile, sessionArtifactDir, type TaskItem
 const STATE_FILE = ".state.json";
 
 export type SpecPhase = "spec" | "design" | "tasks";
+
+/** Phase name → on-disk document filename (the spec phase lives in requirement.md). */
+export function phaseFileName(phase: string): string {
+  return phase === "spec" ? "requirement.md" : `${phase}.md`;
+}
 
 /** Gate state of the spec → design → tasks chain. */
 export type SpecStage =
@@ -110,7 +115,7 @@ async function resolveFeatureSlug(workspaceRoot: string, feature: string, sessio
   if (names.length === 0) return slug;
   const candidates = await Promise.all(names.map(async (name) => {
     let mtimeMs = 0;
-    for (const file of ["spec.md", "design.md", "tasks.md", STATE_FILE]) {
+    for (const file of ["requirement.md", "design.md", "tasks.md", STATE_FILE]) {
       try {
         mtimeMs = Math.max(mtimeMs, (await fs.stat(join(resolve(workspaceRoot, sessionArtifactDir("specs", sessionId)), name, file))).mtimeMs);
       } catch {
@@ -126,7 +131,7 @@ async function resolveFeatureSlug(workspaceRoot: string, feature: string, sessio
 // ── Content contracts ──────────────────────────────────────
 //
 // Each phase document is validated BEFORE anything is written to disk. The
-// contracts keep the three-layer chain honest: spec.md stays a pure
+// contracts keep the three-layer chain honest: requirement.md stays a pure
 // requirements document, design.md traces every requirement, and tasks.md
 // stays an executable Kiro-style checklist that covers the design.
 
@@ -178,7 +183,7 @@ const TECH_SNIPPET_PATTERNS: RegExp[] = [
 ];
 
 /**
- * Validate the phase-1 requirements document (spec.md).
+ * Validate the phase-1 requirements document (requirement.md).
  *
  * Must be a pure requirements doc: numbered R1/R2… requirements (unique),
  * goals/scope/user stories/acceptance criteria/constraints. Rejects empty
@@ -187,17 +192,17 @@ const TECH_SNIPPET_PATTERNS: RegExp[] = [
  */
 export function validateSpecContent(content: string): void {
   const text = content.trim();
-  if (!text) throw new Error("spec.md must not be empty");
+  if (!text) throw new Error("requirement.md must not be empty");
 
   const ids = extractReqIds(text);
   if (ids.length === 0) {
     throw new Error(
-      "spec.md must contain numbered requirements (R1, R2, …) — e.g. a line like \"R1: WHEN … THE SYSTEM SHALL …\"",
+      "requirement.md must contain numbered requirements (R1, R2, …) — e.g. a line like \"R1: WHEN … THE SYSTEM SHALL …\"",
     );
   }
   const dup = duplicates(ids);
   if (dup.length > 0) {
-    throw new Error(`spec.md has duplicated requirement ids: ${dup.join(", ")} — each R number must be unique`);
+    throw new Error(`requirement.md has duplicated requirement ids: ${dup.join(", ")} — each R number must be unique`);
   }
 
   const lines = text.split(/\r?\n/);
@@ -205,7 +210,7 @@ export function validateSpecContent(content: string): void {
     for (const { re, label } of TECH_CONTENT_PATTERNS) {
       if (re.test(line)) {
         throw new Error(
-          `spec.md must be a pure requirements document — found a "${label}" heading. ` +
+          `requirement.md must be a pure requirements document — found a "${label}" heading. ` +
             "Move architecture, interfaces, data models and file layouts to design.md (phase 2).",
         );
       }
@@ -214,8 +219,8 @@ export function validateSpecContent(content: string): void {
   for (const re of TECH_SNIPPET_PATTERNS) {
     if (re.test(text)) {
       throw new Error(
-        "spec.md must not contain technical design content (interface signatures, type/class/function definitions, or file implementation lists). " +
-          "Keep spec.md to goals, scope, user stories, numbered requirements, acceptance criteria and constraints; put the technical design in design.md.",
+        "requirement.md must not contain technical design content (interface signatures, type/class/function definitions, or file implementation lists). " +
+          "Keep requirement.md to goals, scope, user stories, numbered requirements, acceptance criteria and constraints; put the technical design in design.md.",
       );
     }
   }
@@ -251,7 +256,7 @@ export function validateDesignContent(content: string, specContent?: string): vo
       const unknown = uniqueSorted(ids).filter((id) => !specIds.includes(id));
       if (unknown.length > 0) {
         throw new Error(
-          `design.md references unknown requirement ids: ${unknown.join(", ")} — only ids from the approved spec.md (${specIds.join(", ")}) are valid`,
+          `design.md references unknown requirement ids: ${unknown.join(", ")} — only ids from the approved requirement.md (${specIds.join(", ")}) are valid`,
         );
       }
       const missing = specIds.filter((id) => !designIds.has(id));
@@ -356,7 +361,7 @@ export async function saveSpec(
   sessionId: string,
 ): Promise<string> {
   validateSpecContent(content);
-  return savePhase(workspaceRoot, feature, "spec.md", content, sessionId);
+  return savePhase(workspaceRoot, feature, "requirement.md", content, sessionId);
 }
 
 export async function saveDesign(
@@ -410,9 +415,9 @@ export async function readSpecPhase(
 ): Promise<string> {
   const slug = await resolveFeatureSlug(workspaceRoot, feature, sessionId);
   try {
-    return await readPlanFile(workspaceRoot, `${featureDirRel(slug, sessionId)}/${phase}.md`, sessionId);
+    return await readPlanFile(workspaceRoot, `${featureDirRel(slug, sessionId)}/${phaseFileName(phase)}`, sessionId);
   } catch {
-    throw new Error(`${phase}.md not found for feature ${slug}`);
+    throw new Error(`${phaseFileName(phase)} not found for feature ${slug}`);
   }
 }
 
@@ -493,8 +498,8 @@ export async function listSpecs(workspaceRoot: string, sessionId: string): Promi
     let mtimeMs = 0;
     let title = ent.name;
     for (const p of ["spec", "design", "tasks"] as SpecPhase[]) {
-      const pFile = join(fdir, `${p}.md`);
-      if (await readPlanFile(workspaceRoot, `${featureDirRel(ent.name, sessionId)}/${p}.md`, sessionId).then(() => true, () => false)) {
+      const pFile = join(fdir, phaseFileName(p));
+      if (await readPlanFile(workspaceRoot, `${featureDirRel(ent.name, sessionId)}/${phaseFileName(p)}`, sessionId).then(() => true, () => false)) {
         phases.push(p);
         const st = await fs.stat(pFile);
         if (st.mtimeMs > mtimeMs) mtimeMs = st.mtimeMs;
@@ -516,7 +521,7 @@ export async function listSpecs(workspaceRoot: string, sessionId: string): Promi
             const m = text.match(/^#\s+(.+)$/m);
             if (m) heading = m[1]!;
           }
-          if (heading) title = heading.replace(/^Spec:\s*/i, "").trim();
+          if (heading) title = heading.replace(/^(Spec|Requirement):\s*/i, "").trim();
         }
       }
     }
