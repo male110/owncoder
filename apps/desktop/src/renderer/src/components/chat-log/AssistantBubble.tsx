@@ -21,10 +21,25 @@ export function PlanCard({ planPath, sessionId }: { planPath: string; sessionId?
   const [opening, setOpening] = useState(false);
   const [copied, setCopied] = useState(false);
   const [openError, setOpenError] = useState("");
+  /** 部分内容：随卡片直接展示（对齐 ZCode 计划卡片），完整内容由「打开」窗口查看。 */
+  const [content, setContent] = useState<string | null>(null);
   const plan = actions?.plans.find((p) => p.path === planPath && p.sessionId === sessionId);
   const { t } = useI18n();
   const title = plan?.title && !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}(?:\.md)?$/i.test(plan.title)
     ? t("计划已生成：{{name}}", { name: plan.title }) : t("已生成计划");
+  const approved = actions?.activePlanPath === planPath;
+  // 批准去重锁来自共享层（PlanActionsContext），与 PlansBar 共用同一把 per-plan 飞行锁。
+  const approving = actions?.approvingPlanPaths?.has(planPath) ?? false;
+  useEffect(() => {
+    let cancelled = false;
+    setContent(null);
+    if (sessionId) {
+      void window.owncoder.readPlan(planPath, sessionId).then((text) => {
+        if (!cancelled) setContent(text);
+      }, () => {});
+    }
+    return () => { cancelled = true; };
+  }, [planPath, sessionId]);
   const open = async () => {
     if (!sessionId || opening) return;
     setOpening(true);
@@ -36,6 +51,10 @@ export function PlanCard({ planPath, sessionId }: { planPath: string; sessionId?
     } finally {
       setOpening(false);
     }
+  };
+  const approve = () => {
+    if (!plan || plan.kind === "document" || approved || approving || actions?.busy) return;
+    actions?.onApprovePlan(planPath);
   };
   const copyPath = async () => {
     try {
@@ -59,6 +78,24 @@ export function PlanCard({ planPath, sessionId }: { planPath: string; sessionId?
         {t("打开 →")}
       </button>
     </div>
+    {/* 审批入口在部分内容上方：计划名称 → 批准计划 → 部分内容（对齐 ZCode plan_approval 布局）。 */}
+    {plan?.kind === "document" ? (
+      <span className="plan-kind-note">{t("文档交付物 · 无需批准（如需执行请生成实施计划）")}</span>
+    ) : approved ? (
+      <span className="plan-kind-note">{t("已批准")}</span>
+    ) : plan ? (
+      <button
+        type="button"
+        className="plan-approve-cta"
+        disabled={actions?.busy || approving}
+        onClick={approve}
+      >
+        {approving ? t("批准中…") : t("批准计划")}
+      </button>
+    ) : null}
+    {content !== null ? (
+      <pre className="plan-preview-body plan-preview-body--masked">{content}</pre>
+    ) : null}
     {openError && <p role="alert" className="plan-window-error">{openError}</p>}
     </div>
   );
@@ -152,8 +189,11 @@ function AssistantBubbleImpl({
           )}
         </div>
       )}
-      <Markdown content={displayContent} onOpenFile={onOpenFile} workspaceRoot={workspaceRoot} />
-      {planPath ? <PlanCard planPath={planPath} sessionId={sessionId} /> : null}
+      {/* 计划通知：正文（「计划已保存：…/请查看计划…」）对用户无信息量，卡片
+          已承载计划名称、部分内容、批准入口与完整查看，整块替换为 PlanCard。 */}
+      {planPath ? <PlanCard planPath={planPath} sessionId={sessionId} /> : (
+        <Markdown content={displayContent} onOpenFile={onOpenFile} workspaceRoot={workspaceRoot} />
+      )}
       <div className="msg-actions">
         <button type="button" className="msg-action-btn" onClick={() => void onCopy()} title={t("复制")}>
           {copied ? t("已复制") : t("复制")}

@@ -17,7 +17,7 @@ import {
   TYPE_CHECK_TOOL_DEF,
   ANALYZE_ISSUE_TOOL_DEF,
 } from "./enhanced-tools/analysis.ts";
-import { REPORT_BLOCKER_TOOL_DEF, ASK_USER_TOOL_DEF } from "./enhanced-tools/interaction.ts";
+import { REPORT_BLOCKER_TOOL_DEF, ASK_USER_TOOL_DEF, SUBMIT_PLAN_TOOL_DEF, SUBMIT_REPORT_TOOL_DEF } from "./enhanced-tools/interaction.ts";
 import {
   SAVE_MEMORY_TOOL_DEF,
   UPDATE_MEMORY_TOOL_DEF,
@@ -59,6 +59,8 @@ export {
 export {
   REPORT_BLOCKER_TOOL_DEF,
   ASK_USER_TOOL_DEF,
+  SUBMIT_PLAN_TOOL_DEF,
+  SUBMIT_REPORT_TOOL_DEF,
 } from "./enhanced-tools/interaction.ts";
 export {
   SAVE_MEMORY_TOOL_DEF,
@@ -78,6 +80,12 @@ export {
  * side effects. Everything else (writes, bash, memory mutations, MCP tools)
  * runs sequentially to avoid ordering hazards. Shared by `scheduleToolCalls`
  * and the ReAct loop's batch executor.
+ *
+ * `dispatch_agent` is parallel-safe: a child Explore loop is an independent
+ * read-only runAgentLoop (isolated history, own stageId-prefixed events, and
+ * the budget ledger charges synchronously), so several dispatches in one model
+ * batch can run concurrently — the delegation-era replacement for batching
+ * inline searches.
  */
 export const PARALLEL_SAFE_TOOLS: ReadonlySet<string> = new Set([
   "read_file",
@@ -96,6 +104,7 @@ export const PARALLEL_SAFE_TOOLS: ReadonlySet<string> = new Set([
   "list_memories",
   "list_session_changes",
   "use_skill",
+  "dispatch_agent",
 ]);
 
 /**
@@ -143,12 +152,27 @@ export function allEnhancedTools(opts?: {
   enableLsp?: boolean;
   enableWebSearch?: boolean;
   enableVerification?: boolean;
+  /** Planner 子代理循环：追加 submit_plan 结构性收口工具（主循环不可见）。 */
+  plannerLoop?: boolean;
+  /** Explore 子代理循环：追加 submit_report 结构性收口工具（主循环不可见）。 */
+  exploreLoop?: boolean;
+  /**
+   * 主 executor 循环（agent 模式）专用：探索外包给 Explore 子代理后，
+   * 不注册任何发现类搜索工具（glob、grep、search_、read_outline、read_symbol、
+   * repo_map、graph_search、project_deps、web_、lsp_ 各前缀工具）。模型要找任何东西都
+   * 必须走 dispatch_agent；read_file 保留用于读取已确定路径的编辑目标。
+   * 子代理循环（exploreLoop/plannerLoop）与 readOnly 分析型循环不设此项，
+   * 白名单照常解析。
+   */
+  delegateExploration?: boolean;
 }): ToolDef[] {
   const agent = opts?.mode === "agent";
   const spec = opts?.mode === "spec";
   const agentBash = agent && opts?.allowBash !== false;
   const planBash = spec && opts?.planBashReadonly === true;
   const specFiles = spec && opts?.allowSpecFiles !== false;
+  // 探索外包（仅主 executor 循环）：发现类工具整体不注册。
+  const noDiscovery = opts?.delegateExploration === true;
 
   const tools: ToolDef[] = [];
   const registeredNames = new Set<string>();
@@ -167,7 +191,10 @@ export function allEnhancedTools(opts?: {
   };
 
   // 1) Controlled search first: no shell syntax or platform path guessing.
-  push(read("glob"), read("grep"), read("search_semantic"), read("search_symbols"));
+  //    探索外包时全部不注册：定位类需求必须走 dispatch_agent（Explore）。
+  if (!noDiscovery) {
+    push(read("glob"), read("grep"), read("search_semantic"), read("search_symbols"));
+  }
 
   // 2) Script orchestration and known-path reads.
   push(RUN_SCRIPT_TOOL_DEF, read("read_file"));
@@ -179,8 +206,11 @@ export function allEnhancedTools(opts?: {
     agent ? AGENT_APPLY_PATCH_TOOL_DEF : specFiles ? PLAN_APPLY_PATCH_TOOL_DEF : undefined,
   );
 
-  // 4) 次高频读：read_outline / read_symbol。
-  push(read("read_outline"), read("read_symbol"));
+  // 4) 次高频读：read_outline / read_symbol（探索外包时不注册——结构/符号
+  //    定位属于发现类，由 Explore 报告携带行号区间，read_file 直接读区间）。
+  if (!noDiscovery) {
+    push(read("read_outline"), read("read_symbol"));
+  }
 
   // 5) 写文件 1.0%
   push(agent ? AGENT_WRITE_FILE_TOOL_DEF : specFiles ? PLAN_WRITE_FILE_TOOL_DEF : undefined);
@@ -192,20 +222,28 @@ export function allEnhancedTools(opts?: {
 
   // 7) 检索与导航：web_search 0.6% / recall_history 0.4% / repo_map 0.3% /
   //    semantic_diff 0.3% / graph_search 0.14% / web_fetch 0.14%
-  if (opts?.enableWebSearch !== false) {
+  //    探索外包时只保留 recall_history（会话历史回忆，非代码探索）与
+  //    semantic_diff（审查本会话自有改动）；web 检索与仓库导航归 Explore。
+  if (!noDiscovery && opts?.enableWebSearch !== false) {
     push(WEB_SEARCH_TOOL_DEF);
   }
-  push(read("recall_history"), read("repo_map"), SEMANTIC_DIFF_TOOL_DEF, read("graph_search"));
-  if (opts?.enableWebSearch !== false) {
+  push(read("recall_history"), SEMANTIC_DIFF_TOOL_DEF);
+  if (!noDiscovery) {
+    push(read("repo_map"), read("graph_search"));
+  }
+  if (!noDiscovery && opts?.enableWebSearch !== false) {
     push(WEB_FETCH_TOOL_DEF);
   }
 
   // 8) 交互与变更台账：ask_user 0.14% / list_session_changes 0.1% /
-  //    project_deps 0.1%
-  push(ASK_USER_TOOL_DEF, LIST_SESSION_CHANGES_TOOL_DEF, read("project_deps"));
+  //     project_deps 0.1%（project_deps 为发现类，探索外包时不注册）
+  push(ASK_USER_TOOL_DEF, LIST_SESSION_CHANGES_TOOL_DEF);
+  if (!noDiscovery) {
+    push(read("project_deps"));
+  }
 
-  // 9) LSP 诊断（合计约 0.4%）
-  if (opts?.enableLsp !== false) {
+  // 9) LSP 诊断（合计约 0.4%；发现类，探索外包时不注册，Explore 白名单里有）
+  if (!noDiscovery && opts?.enableLsp !== false) {
     push(...LSP_TOOL_DEFS);
   }
 
@@ -213,6 +251,15 @@ export function allEnhancedTools(opts?: {
   //     report_blocker 0.04%
   if (agent) {
     push(ANALYZE_ISSUE_TOOL_DEF, UNDO_SESSION_CHANGE_TOOL_DEF, REPORT_BLOCKER_TOOL_DEF);
+  }
+
+  // 10.5) 子代理结构性收口：只读控制流工具，提交即结束循环。
+  //      门控注册——主循环永远看不到它们，防止误用。
+  if (opts?.plannerLoop) {
+    push(SUBMIT_PLAN_TOOL_DEF);
+  }
+  if (opts?.exploreLoop) {
+    push(SUBMIT_REPORT_TOOL_DEF);
   }
 
   // 11) 追加写：append_file 0.04%

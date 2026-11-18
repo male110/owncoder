@@ -39,9 +39,21 @@ export async function toolRead(
   ctx.readSet.add(rel);
   // Current-turn evidence cache: unchanged file fingerprints allow replaying a
   // bounded range without another disk read or redaction pass.
+  // 对齐 ZCode read.ts 的 file_unchanged 护栏：同一路径同一视图且文件指纹
+  // 未变 → 只回一行 wasted-call 提示，不再把同一份正文第二次灌进上下文
+  // （同一轮内该 tool_result 已在消息历史里）。readSet 已在上面更新，
+  // 先读后写约束不受影响。
   if (ctx.evidenceStore) {
     const cached = ctx.evidenceStore.lookupRead(rel, offset, limit, `${stat.size}:${stat.mtimeMs}`);
-    if (cached) return cached;
+    if (cached) {
+      return {
+        ok: true,
+        output:
+          `Wasted call — ${rel} is unchanged since your last read of this exact range. ` +
+          `Refer to that earlier read_file result instead.`,
+        metadata: cached.result.metadata ? { ...cached.result.metadata } : undefined,
+      };
+    }
   }
   let text: string;
   let rangedTotalLines: number | undefined;

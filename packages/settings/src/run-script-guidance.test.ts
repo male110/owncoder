@@ -14,7 +14,6 @@ describe("Agent evidence-first discipline", () => {
     expect(BUILTIN_AGENT_PROMPT).toMatch(/analyze from it instead of re-reading/i);
     expect(BUILTIN_AGENT_PROMPT).toMatch(/Tool responses confirm edits/i);
     expect(BUILTIN_AGENT_PROMPT).toMatch(/do not re-read the file to verify your own change/i);
-    expect(BUILTIN_AGENT_PROMPT).toMatch(/read_outline/i);
     expect(BUILTIN_AGENT_PROMPT).toMatch(/follow the current codebase's existing code style/i);
     expect(BUILTIN_AGENT_PROMPT).toMatch(/single responsibility/i);
     expect(BUILTIN_AGENT_PROMPT).toMatch(/Prefer reusing existing code or mature third-party solutions/i);
@@ -28,12 +27,40 @@ describe("Agent evidence-first discipline", () => {
     expect(BUILTIN_AGENT_PROMPT).not.toContain("## Evidence-first execution discipline");
     expect(BUILTIN_AGENT_PROMPT).not.toContain("## Output format (Markdown)");
   });
+
+  it("delegates exploration to Explore subagents instead of inline search tools", () => {
+    // 探索外包契约：executor 没有搜索工具，调研全部走 dispatch_agent。
+    expect(BUILTIN_AGENT_PROMPT).toMatch(/No inline exploration/i);
+    expect(BUILTIN_AGENT_PROMPT).toMatch(/no search tools/i);
+    expect(BUILTIN_AGENT_PROMPT).toMatch(/dispatch_agent/);
+    // 单一交付的调研/审查只发一个综合 Explore 简报，不得为并行而拆分。
+    expect(BUILTIN_AGENT_PROMPT).toMatch(/One assignment, one dispatch/i);
+    expect(BUILTIN_AGENT_PROMPT).toMatch(/never a split of one assignment just to parallelize/);
+    expect(BUILTIN_AGENT_PROMPT).toMatch(/read_file` is only for paths already established/);
+    expect(BUILTIN_AGENT_PROMPT).toMatch(/Explore reports are evidence/i);
+    // 报告即证据：按引用区间（offset/limit）读取并动手，不整文件重读。
+    expect(BUILTIN_AGENT_PROMPT).toMatch(/read the cited range \(offset\/limit\), not the whole file/);
+    // 顺序依赖的后续派发：先前 Explore 报告的锚点蒸馏进新简报（标记为背景、
+    // 禁止重定位）；不逐字转发报告，也不走 relevantHistory 参数。
+    expect(BUILTIN_AGENT_PROMPT).toMatch(/fold that report's confirmed paths, symbols, and conclusions into the new brief/i);
+    expect(BUILTIN_AGENT_PROMPT).toMatch(/forward distilled anchors — never the report verbatim/);
+    expect(BUILTIN_AGENT_PROMPT).toMatch(/never via the relevantHistory parameter/);
+    // 续接优先：报告尾注里的 agent id 用于 continueAgentId 续接，保留完整上下文。
+    expect(BUILTIN_AGENT_PROMPT).toMatch(/continueAgentId/);
+    expect(BUILTIN_AGENT_PROMPT).toMatch(/dispatch again with that id as `continueAgentId`/i);
+    // 内联搜索教学不得回潮（read_outline/grep/glob 直调规则已被删除）
+    expect(BUILTIN_AGENT_PROMPT).not.toMatch(/read_outline/i);
+    expect(BUILTIN_AGENT_PROMPT).not.toContain("Call a single `grep`, `glob`, or `read_file` directly as a top-level tool call");
+  });
 });
 
 for (const [mode, prompt] of [["agent", BUILTIN_AGENT_PROMPT], ["spec", BUILTIN_SPEC_PROMPT]] as const) {
   describe(`${mode} run_script guidance`, () => {
     it("carries the promoted tool-selection rule", () => {
-      expect(prompt).toContain("Call a single `grep`, `glob`, or `read_file` directly as a top-level tool call");
+      if (mode === "spec") {
+        // spec 模式保留内联搜索：直调规则只锁 spec 侧。
+        expect(prompt).toContain("Call a single `grep`, `glob`, or `read_file` directly as a top-level tool call");
+      }
       expect(prompt).toMatch(/Use `run_script` when JavaScript will materially filter, aggregate, parse, or cross-match/);
       expect(prompt).toMatch(/consumes a nested-call budget/);
       expect(prompt).not.toContain("Investigation Routing");

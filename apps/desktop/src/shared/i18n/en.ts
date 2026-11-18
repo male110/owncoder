@@ -258,6 +258,7 @@ export const en = {
   "文档交付物 · 无需批准（如需执行请生成实施计划）":
     "Document deliverable \u00b7 no approval needed (generate an implementation plan to execute)",
   "批准此计划并自动执行": "Approve this plan and run it automatically",
+  "批准计划": "Approve plan",
   "批准中…": "Approving…",
   "已批准": "Approved",
   "复制路径": "Copy path",

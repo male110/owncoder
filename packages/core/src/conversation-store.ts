@@ -80,10 +80,15 @@ export function slimTurnFinal(result: unknown): unknown {
   if (typeof result !== "object") return result;
 
   const row = result as Record<string, unknown>;
-  if ("error" in row || "aborted" in row) {
+  // 成功轮的 AgentLoopResult 也会恒带 aborted: false / error: ""（ReAct
+  // 收尾总是 stamp 这两个字段）。只有真正的错误或中止才走错误存根，
+  // 否则成功轮的 assistant 回复会被整个丢弃，界面看不到 LLM 的回答。
+  const hasError = row.error !== undefined && row.error !== null && row.error !== "";
+  const wasAborted = row.aborted === true;
+  if (hasError || wasAborted) {
     return {
       error: typeof row.error === "string" ? row.error : String(row.error ?? ""),
-      aborted: row.aborted === true,
+      aborted: wasAborted,
     };
   }
 

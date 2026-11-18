@@ -88,7 +88,7 @@ async function generatePlanRevision(ctx: Omit<StageHandlerContext, "node">, plan
   await runAgentPlanner(ctx, {
     id: `revise-${plan.planId}-${plan.version}`, type: "function",
     function: { name: "dispatch_agent", arguments: JSON.stringify({ agent_type: PLANNER_SUBAGENT_TYPE, task: [
-      "只读修改下列完整计划，融合用户修改要求，返回完整新版而非增量。保留 ## Final Report、目标、编号步骤、相关文件与证据、风险与不确定性、验证方式。不得实施计划。",
+      "只读修改下列完整计划，融合用户修改要求，返回完整新版而非增量。保留目标、编号步骤、相关文件与证据、风险与不确定性、验证方式五段结构。不得实施计划。",
       `当前计划 v${plan.version}：\n${content}`, `用户修改要求：\n${feedback}`,
     ].join("\n\n") }) },
   });

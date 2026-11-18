@@ -416,7 +416,7 @@ export async function executeAgentTurn(ctx: AgentTurnContext): Promise<AgentLoop
       sessionId: r.id ?? null,
     };
     const checkpointStarted = performance.now();
-    await timed("checkpoint", () => persistCheckpoint(workspaceRoot, cp));
+    await timed("checkpoint", () => persistCheckpoint(workspaceRoot, cp, result.snapshotRef ?? undefined));
     checkpointMs = Math.round(performance.now() - checkpointStarted);
     r.lastCheckpointId = cp.id;
     r.keptPaths.clear();

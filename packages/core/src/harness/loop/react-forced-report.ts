@@ -16,6 +16,17 @@ const FORCED_REPORT_INSTRUCTION = [
   "Format the report with headings: `## Searched` (paths and patterns), `## Findings` (confirmed results with workspace-relative paths and line numbers as bullets), `## Gaps` (what remains unverified or could not be found). Partial findings are acceptable; returning no report is not.",
 ].join(" ");
 
+/**
+ * Planner 子代理的强制总结指令：按计划报告契约收口（五段结构），
+ * 未知点显式写入风险段，而不是继续猜测或搜索。
+ */
+export const PLANNER_FORCED_REPORT_INSTRUCTION = [
+  "Your planning budget is exhausted. Stop researching now.",
+  "Write the complete execution plan immediately in Markdown based ONLY on the evidence already gathered above. Do not call any tools. Do not create files.",
+  "The plan must contain these five sections, each as its own markdown heading: `目标` (the goal, one or two sentences), `编号步骤` (numbered steps — each naming which file, which symbol, and what change to make), `相关文件` (workspace-relative paths with line or symbol evidence, one line of reason each), `风险与不确定性` (unknowns, assumptions, and anything that could not be verified — state them explicitly instead of guessing), `验证方式` (how to verify the change works).",
+  "Partial evidence is acceptable: unresolved points belong under 风险与不确定性. Returning no plan is not acceptable.",
+].join(" ");
+
 /** 收集历史中已有的 assistant 文本（去重、限量），作为无文本时的兜底。 */
 function collectAssistantNotes(ctx: ReActLoopContext): string {
   const notes: string[] = [];
@@ -32,16 +43,32 @@ function collectAssistantNotes(ctx: ReActLoopContext): string {
 
 /**
  * 发起一次无工具的强制总结调用并返回报告文本。任何失败都降级为已有文本，
- * 绝不抛出——调用方处于终态路径，不能再因报告失败而丢失全部结果。
+ * 绝不抛错——调用方处于终态路径，不能再因报告失败而丢失全部结果。
+ * instruction 允许调用方按循环类型覆盖收口契约（Planner 用计划报告契约）。
  */
 export async function forcedFinalReport(
   ctx: ReActLoopContext,
   reason: string,
+  instruction: string = FORCED_REPORT_INSTRUCTION,
 ): Promise<string> {
+  const { text } = await forcedFinalReportWithStatus(ctx, reason, instruction);
+  return text;
+}
+
+/**
+ * 带产出状态的强制总结：fromModel=true 表示模型真的按指令生成了新文本，
+ * 而不是失败后回退到历史过渡文本。Planner 循环据此决定打满上限时
+ * 是否以"已降级的完整计划"成功收口，还是维持 blocked 终态。
+ */
+export async function forcedFinalReportWithStatus(
+  ctx: ReActLoopContext,
+  reason: string,
+  instruction: string = FORCED_REPORT_INSTRUCTION,
+): Promise<{ text: string; fromModel: boolean }> {
   const existing = ctx.lastAssistant.trim() || collectAssistantNotes(ctx);
   const callMessages: ChatMessage[] = [
     ...ctx.messages,
-    { role: "user", content: FORCED_REPORT_INSTRUCTION },
+    { role: "user", content: instruction },
   ];
 
   try {
@@ -56,15 +83,18 @@ export async function forcedFinalReport(
       onThinkingDelta: (text: string) => ctx.opts.onEvent?.({ type: "thinking_delta", text }),
     });
     const text = result.choices[0]?.message?.content?.trim() ?? "";
-    if (text) return text;
+    if (text) return { text, fromModel: true };
   } catch (error) {
     if (ctx.opts.signal?.aborted) {
       // 中止：保留已收集到的文本，不强行总结。
-      return existing;
+      return { text: existing, fromModel: false };
     }
     const message = error instanceof Error ? error.message : String(error);
     ctx.opts.onEvent?.({ type: "warning", message: `强制最终报告调用失败，已回退到已有文本：${message}` });
   }
 
-  return existing || `Explore reached the iteration limit (${reason}); no report text was produced.`;
+  return {
+    text: existing || `Explore reached the iteration limit (${reason}); no report text was produced.`,
+    fromModel: false,
+  };
 }

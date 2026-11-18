@@ -64,7 +64,7 @@ describe("runExploreSubagent — Planner 输入可见", () => {
     expect(start.subagentInput.thoroughness).toBe("medium");
     expect(opts.userMessage).toBe(task);
     expect(onEvent.mock.invocationCallOrder[0]).toBeLessThan(mockedRunAgentLoop.mock.invocationCallOrder[0]);
-    expect(result.startsWith("[Planner partial result")).toBe(partial);
+    expect(result.report.startsWith("[Planner partial result")).toBe(partial);
     expect(onEvent.mock.calls.at(-1)![0]).toMatchObject({ type: "stage_done", ok: !partial });
   });
 });
@@ -91,6 +91,55 @@ describe("runExploreSubagent — 分解历史注入", () => {
   });
 });
 
+describe("runExploreSubagent — Planner 循环配置", () => {
+  it("Planner：plannerLoop 标志 + submit_plan 白名单 + 小预算（25）", async () => {
+    await runExploreSubagent({ agentType: "Planner", task: "制定跨文件改动计划" }, baseDeps(fakeIndex([])));
+    const opts = mockedRunAgentLoop.mock.calls[0]![0];
+    expect(opts.plannerLoop).toBe(true);
+    expect(opts.exploreLoop).toBeUndefined();
+    expect(opts.allowedTools).toContain("submit_plan");
+    expect(opts.allowedTools).not.toContain("submit_report");
+    expect(opts.maxIterations).toBe(25);
+    expect(opts.forcedFinalReportOnLimit).toBe(true);
+  });
+
+  it("Explore：exploreLoop 标志 + submit_report 白名单，预算仍按广度分级（medium=40）", async () => {
+    await runExploreSubagent({ agentType: "Explore", task: "调研入口" }, baseDeps(fakeIndex([])));
+    const opts = mockedRunAgentLoop.mock.calls[0]![0];
+    expect(opts.exploreLoop).toBe(true);
+    expect(opts.plannerLoop).toBeUndefined();
+    expect(opts.allowedTools).toContain("submit_report");
+    expect(opts.allowedTools).not.toContain("submit_plan");
+    expect(opts.maxIterations).toBe(40);
+    expect(opts.forcedFinalReportOnLimit).toBe(true);
+  });
+});
+
+describe("runExploreSubagent — 假成功修复（aborted 终态）", () => {
+  it("工具循环检测中止（aborted 且无 blocked）：标 partial 而非完整报告", async () => {
+    // 历史 bug：detectToolLoop 终止只带 aborted 不带 blocked，过渡文本被
+    // 当成完整 ## Final Report 交付且无任何未完成标注。
+    mockedRunAgentLoop.mockResolvedValueOnce({
+      assistantText: "现在读取下一个文件…",
+      aborted: true,
+    } as AgentLoopResult);
+    const result = await runExploreSubagent({ agentType: "Explore", task: "调研入口" }, baseDeps(fakeIndex([])));
+    expect(result.report).toMatch(/^\[Explore partial result: loop terminated early;/);
+    expect(result.report).toContain("现在读取下一个文件");
+  });
+
+  it("Planner 同样：aborted 终态不再被当作完整计划", async () => {
+    mockedRunAgentLoop.mockResolvedValueOnce({
+      assistantText: "## Final Report\n### 目标\n未完成",
+      aborted: true,
+    } as AgentLoopResult);
+    const onEvent = vi.fn();
+    const result = await runExploreSubagent({ agentType: "Planner", task: "制定计划" }, { ...baseDeps(fakeIndex([])), onEvent });
+    expect(result.report).toMatch(/^\[Planner partial result: loop terminated early;/);
+    expect(onEvent.mock.calls.at(-1)![0]).toMatchObject({ type: "stage_done", ok: false });
+  });
+});
+
 describe("runExploreSubagent — Planner 部分结果", () => {
   it.each([
     { assistantText: "", blocked: false, marker: "without producing a report" },
@@ -98,8 +147,8 @@ describe("runExploreSubagent — Planner 部分结果", () => {
   ])("不会把未完成的报告伪装为完整计划：$marker", async ({ assistantText, blocked, marker }) => {
     mockedRunAgentLoop.mockResolvedValueOnce({ assistantText, blocked, blockedReason: blocked ? marker : undefined } as AgentLoopResult);
     const result = await runExploreSubagent({ agentType: "Planner", task: "计划跨文件改动" }, baseDeps(fakeIndex([])));
-    expect(result).toMatch(/^\[Planner partial result:/);
-    expect(result).toContain(marker);
+    expect(result.report).toMatch(/^\[Planner partial result:/);
+    expect(result.report).toContain(marker);
     expect(mockedRunAgentLoop.mock.calls[0]![0].allowedTools).not.toContain("dispatch_agent");
   });
 });
@@ -142,11 +191,11 @@ describe("runExploreSubagent — 索引导航引导块", () => {
 
   it("ftsSearch 抛错 → 降级不注入，子代理仍正常运行", async () => {
     const index = { ftsSearch: vi.fn(async () => { throw new Error("index corrupt"); }) } as unknown as IndexClient;
-    const report = await runExploreSubagent(
+    const run = await runExploreSubagent(
       { agentType: "Explore", task: "排查 validateToken", thoroughness: "medium" },
       baseDeps(index),
     );
-    expect(typeof report).toBe("string");
+    expect(typeof run.report).toBe("string");
     const prompt = mockedRunAgentLoop.mock.calls[0]![0].systemPromptOverride as string;
     expect(prompt).not.toContain("Starting points from the index");
   });

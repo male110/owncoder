@@ -374,7 +374,7 @@ async function writeLlmResponseLog(entry: {
   if (consoleLogEnabled) {
     const status = entry.error ? "❌ ERROR" : "✓ OK";
     const summary = `[${category}] #${entry.seq} ${status} | ${entry.model.model} ${entry.durationMs}ms`;
-    if (entry.error) console.error(summary + ` | ${entry.error.slice(0, 150)}`);
+    if (entry.error) console.error(summary + ` | ${entry.error}`);
     else console.log(summary);
   }
 }
@@ -649,7 +649,9 @@ function httpError(ref: ModelRef, status: number, text: string, apiKey?: string 
       "LLM 认证失败（401）：未提供 API Key。请在「设置 → 模型」填写 Key，或设置 AGNES_API_KEY / OPENAI_API_KEY 环境变量。",
     );
   }
-  return new Error(`LLM HTTP ${status}: ${text.slice(0, 500)}`);
+  // 完整保留响应体：网关 400/422 的 InvalidParameter 错误 JSON 通常只有
+  // 几百字节，截断会把关键的非法参数名切掉，导致无法定位根因。
+  return new Error(`LLM HTTP ${status}: ${text}`);
 }
 
 /**

@@ -432,6 +432,29 @@ describe("conversation store", () => {
     ]);
   });
 
+  it("slimTurnFinal keeps the reply when a successful result carries aborted: false / empty error", async () => {
+    // React 收尾在成功轮也恒带 aborted: false；旧 guard 只看字段是否存在，
+    // 会把整轮 assistant 回复丢弃成 {error:"",aborted:false}，界面看不到答案。
+    const stored = slimTurnFinal({
+      history: [user("hello"), assistant("final answer")],
+      assistantText: "final answer",
+      aborted: false,
+    });
+    expect(stored).toMatchObject({ role: "assistant", content: "final answer" });
+    expect(stored).not.toMatchObject({ aborted: false });
+  });
+
+  it("slimTurnFinal still stores an error stub for genuine failures", async () => {
+    expect(slimTurnFinal({ error: "LLM failed", aborted: false })).toEqual({
+      error: "LLM failed",
+      aborted: false,
+    });
+    expect(slimTurnFinal({ error: "", aborted: true })).toEqual({
+      error: "",
+      aborted: true,
+    });
+  });
+
   it("skips and sanitizes oversized legacy final_json without crashing pagination", async () => {
     const r = await root();
     const turn = await beginTurn(r, "s", user("hello"));

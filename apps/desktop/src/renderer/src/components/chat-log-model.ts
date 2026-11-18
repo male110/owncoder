@@ -163,6 +163,9 @@ export function buildLogBlocks(
     }
 
     if (active || finalIdx < 0) {
+      // 计划通知（plan_saved 标记）是计划轮唯一的助手回复：轮次结束后必须
+      // 可见，否则「计划已保存」在会话里什么都不显示。
+      const planNotices: ChatTurnDto[] = [];
       for (const t of round) {
         if (t.role === "user") out.push({ kind: "user", turn: withOwner(t) });
         if (t.role === "tool") {
@@ -170,10 +173,12 @@ export function buildLogBlocks(
           if (last?.kind === "tools") last.items.push(t);
           else out.push({ kind: "tools", items: [t] });
         }
+        if (!active && isPlanNotice(t)) planNotices.push(t);
       }
       if (!active) {
         const error = [...round].reverse().find((t) => t.role === "assistant" && t.content.startsWith("Error:"));
         if (error) out.push({ kind: "assistant", turn: withOwner(error) });
+        for (const p of planNotices) out.push({ kind: "assistant", turn: withOwner(p) });
       }
       return;
     }
@@ -248,13 +253,14 @@ export function lastAssistantBlockIndex(blocks: LogBlock[]): number {
   return -1;
 }
 
-/** Only user turns and final assistant replies/errors enter the visible list. */
+/** Only user turns and final assistant replies/errors enter the visible list.
+ * 计划通知（plan_saved 标记）不在此过滤：它由 AssistantBubble 渲染成
+ * 计划卡片（正文裁剪预览 + PlanCard），是计划轮的正式回复。 */
 export function buildChatItems(blocks: LogBlock[]): ChatItem[] {
   const items: ChatItem[] = [];
   for (let i = 0; i < blocks.length; i++) {
     const b = blocks[i]!;
     if (b.kind !== "user" && b.kind !== "assistant") continue;
-    if (b.kind === "assistant" && b.turn.content.includes("<!--plan_saved:")) continue;
     const key = b.turn.id ?? `b-${b.kind}-${i}-${b.turn.content.slice(0, 24)}`;
     items.push({ kind: "block", block: b, key });
   }

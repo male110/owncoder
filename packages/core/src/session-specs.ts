@@ -10,6 +10,7 @@
  */
 import type { AgentMode } from "@owncoder/shared";
 import type { SessionRuntime, SessionState } from "./session-runtime.ts";
+import { deleteCheckpoint } from "./harness/checkpoint.ts";
 import {
   extractTitle,
   normalizeTasks,
@@ -141,6 +142,9 @@ export async function approveSpecPhase(
 
   // 清除 checkpoint 引用：生成的 spec 文档以 existed=false 记录在 checkpoint 中，
   // 若不清除，后续 rollback 会将其删除。批准即视为用户确认所有生成产物。
+  if (r.lastCheckpointId) {
+    await deleteCheckpoint(root, r.id, r.lastCheckpointId).catch(() => undefined);
+  }
   r.keptPaths.clear();
   r.lastCheckpointId = null;
 

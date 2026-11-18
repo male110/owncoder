@@ -36,7 +36,9 @@ export interface BudgetCharge {
 const DEFAULT_LIMITS: BudgetLimits = {
   toolCalls: 600,
   nestedCalls: 300,
-  subagents: 16,
+  // 探索外包给 Explore 子代理后，调研全部走 dispatch：多任务流水线的
+  // 派发量比"探索可选"时代大约翻倍，16 会在任务中途触发 Explore suppressed。
+  subagents: 32,
   taskNodes: 32,
   modelCalls: 300,
 };

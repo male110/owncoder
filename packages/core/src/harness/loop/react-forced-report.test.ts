@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { chatCompletionStream } from "@owncoder/llm";
-import { forcedFinalReport } from "./react-forced-report.ts";
+import {
+  forcedFinalReport,
+  forcedFinalReportWithStatus,
+  PLANNER_FORCED_REPORT_INSTRUCTION,
+} from "./react-forced-report.ts";
 import type { ReActLoopContext } from "./react-loop-context.ts";
 
 vi.mock("@owncoder/llm", async (importOriginal) => ({
@@ -90,5 +94,39 @@ describe("forcedFinalReport", () => {
     });
     const out = await forcedFinalReport(ctx, "cap");
     expect(out).toBe("中断前文本");
+  });
+});
+
+describe("forcedFinalReportWithStatus — Planner 契约强制收口", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("Planner 指令要求五段计划结构，模型产出计划时 fromModel=true", async () => {
+    const plan = [
+      "目标",
+      "### 目标", "优化 Planner 收口。",
+      "### 编号步骤", "1. 修改 `react.ts` 的终态分支。",
+      "### 相关文件", "- `packages/core/src/harness/loop/react.ts`",
+      "### 风险与不确定性", "- 下游调用未确认。",
+      "### 验证方式", "- 运行 vitest。",
+    ].join("\n");
+    mockResponse(plan);
+    const ctx = makeCtx({ lastAssistant: "现在读取下一个文件…" });
+    const out = await forcedFinalReportWithStatus(ctx, "iteration cap", PLANNER_FORCED_REPORT_INSTRUCTION);
+    expect(out.fromModel).toBe(true);
+    expect(out.text).toBe(plan);
+    const instruction = (vi.mocked(chatCompletionStream).mock.calls[0]![1] as { content: string }[]).at(-1)!;
+    for (const section of ["目标", "编号步骤", "相关文件", "风险与不确定性", "验证方式"]) {
+      expect(instruction.content).toContain(section);
+    }
+  });
+
+  it("强制调用失败回退到历史文本时 fromModel=false（维持 blocked 终态）", async () => {
+    vi.mocked(chatCompletionStream).mockRejectedValueOnce(new Error("network down"));
+    const ctx = makeCtx({ lastAssistant: "现在读取下一个文件…" });
+    const out = await forcedFinalReportWithStatus(ctx, "iteration cap", PLANNER_FORCED_REPORT_INSTRUCTION);
+    expect(out.fromModel).toBe(false);
+    expect(out.text).toBe("现在读取下一个文件…");
   });
 });

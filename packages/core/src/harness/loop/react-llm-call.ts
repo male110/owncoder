@@ -68,6 +68,11 @@ export async function callModelForIteration(
     content: formatIterationBudgetHint(
       ctx.loopState.iteration + 1,
       ctx.terminationConfig.maxIterations,
+      ctx.opts.plannerLoop === true
+        ? "planner"
+        : ctx.opts.exploreLoop === true
+          ? "explore"
+          : "executor",
     ),
   };
   const messagesForCall = [...baseMessages, iterationHintMsg];

@@ -26,7 +26,8 @@ describe("任务上下文：短硬执行纪律", () => {
     expect(text).toMatch(/Execution discipline \(mandatory\)/);
     expect(text).toMatch(/exact file\/range/i);
     expect(text).toMatch(/fresh evidence/i);
-    expect(text).toMatch(/stop exploring/i);
+    expect(text).toMatch(/You have no search tools/i);
+    expect(text).toMatch(/stop dispatching explorations/i);
   });
 
   it.each([
@@ -111,5 +112,55 @@ describe("任务上下文：短硬执行纪律", () => {
     // 上限被调小到当前序号之后也按 0 兜底，不出现负数剩余
     expect(formatIterationBudgetHint(5, 3)).toContain("剩余 0 次");
     expect(formatIterationBudgetHint(5, 3)).toContain("不得再调用任何工具");
+  });
+
+  it("planner 模式：常规轮引导高效调研与 submit_plan 出口，收尾区注入递进收口压力", () => {
+    // 常规轮（剩余 > PLANNER_WRAP_UP_TURNS）：提示高效调研 + submit_plan 出口，
+    // 不出现执行循环的“核心改动与验证”措辞（只读规划循环不可执行）。
+    const normal = formatIterationBudgetHint(3, 25, "planner");
+    expect(normal).toContain("当前第 3 次迭代，上限 25 次，剩余 22 次");
+    expect(normal).toContain("submit_plan");
+    expect(normal).toContain("高效调研");
+    expect(normal).not.toContain("核心改动与验证");
+
+    // 收尾区（剩余 ≤ PLANNER_WRAP_UP_TURNS）：停止调研、基于已有证据写计划并立即提交。
+    const wrapUp = formatIterationBudgetHint(20, 25, "planner");
+    expect(wrapUp).toContain("仅剩 5 次迭代");
+    expect(wrapUp).toContain("停止进一步调研");
+    expect(wrapUp).toContain("立即调用 submit_plan");
+    expect(wrapUp).toContain("风险与不确定性");
+
+    // 边界：剩余恰好等于 PLANNER_WRAP_UP_TURNS 时已进入收尾区。
+    expect(formatIterationBudgetHint(19, 25, "planner")).toContain("停止进一步调研");
+
+    // 最后一轮与 executor 共用强制收尾指令。
+    const last = formatIterationBudgetHint(25, 25, "planner");
+    expect(last).toContain("这是最后一次迭代");
+    expect(last).toContain("不得再调用任何工具");
+
+    // executor 模式不受 planner 措辞影响（默认模式仍引导工具调用预算）。
+    expect(formatIterationBudgetHint(20, 25)).toContain("请据此安排工具调用预算");
+    expect(formatIterationBudgetHint(20, 25)).not.toContain("submit_plan");
+  });
+
+  it("explore 模式：常规轮引导高效调研与 submit_report 出口，收尾区注入递进收口压力", () => {
+    const normal = formatIterationBudgetHint(3, 40, "explore");
+    expect(normal).toContain("当前第 3 次迭代，上限 40 次，剩余 37 次");
+    expect(normal).toContain("submit_report");
+    expect(normal).toContain("高效调研");
+    expect(normal).not.toContain("核心改动与验证");
+
+    const wrapUp = formatIterationBudgetHint(35, 40, "explore");
+    expect(wrapUp).toContain("仅剩 5 次迭代");
+    expect(wrapUp).toContain("停止进一步调研");
+    expect(wrapUp).toContain("立即调用 submit_report");
+    expect(wrapUp).toContain("未确认缺口");
+
+    // 最后一轮与 executor 共用强制收尾指令。
+    expect(formatIterationBudgetHint(40, 40, "explore")).toContain("不得再调用任何工具");
+
+    // explore 与 planner 的出口措辞互不串扰。
+    expect(formatIterationBudgetHint(35, 40, "explore")).not.toContain("submit_plan");
+    expect(formatIterationBudgetHint(20, 25, "planner")).not.toContain("submit_report");
   });
 });

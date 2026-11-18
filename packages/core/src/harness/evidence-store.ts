@@ -2,7 +2,9 @@
  * 单个顺序轮次内、面向最新源码读取的有界证据缓存。
  *
  * 按内容指纹（大小 / 修改时间）记账，保存在进程内存中：成功的读取按
- * 路径与范围缓存，只要文件指纹未变即可直接复用；写入会使相关条目失效。
+ * 路径与范围登记；只要文件指纹未变，同视图复读即命中并返回缓存条目
+ * （调用方据此回一条 wasted-call 提示，不再重放正文——对齐 ZCode
+ * read.ts 的 file_unchanged 护栏）；写入会使相关条目失效。
  * 缓存同时受条目数量与输出总字节数上限约束。
  */
 
@@ -45,19 +47,14 @@ export class EvidenceStore {
   }
 
   /**
-   * 查找缓存读取。命中且新鲜度事实一致时返回带重放标注的 ToolResult；
-   * 未命中或文件已被修改（hash 不等）返回 null，调用方走正常磁盘读。
+   * 查找缓存读取。命中且新鲜度事实一致时返回缓存条目，供调用方生成
+   * 「重复读取」提示；未命中或文件已被修改（hash 不等）返回 null，
+   * 调用方走正常磁盘读。不再把缓存正文重放给模型。
    */
-  lookupRead(path: string, offset: number, limit: number, contentHash: string): ToolResult | null {
+  lookupRead(path: string, offset: number, limit: number, contentHash: string): EvidenceReadEntry | null {
     const entry = this.reads.get(evidenceRangeKey(path, offset, limit));
     if (!entry || entry.contentHash !== contentHash) return null;
-    return {
-      ok: true,
-      output:
-        `[replayed from the current-turn evidence store — this range is unchanged; not re-read from disk]\n` +
-        entry.result.output,
-      metadata: entry.result.metadata ? { ...entry.result.metadata } : undefined,
-    };
+    return entry;
   }
 
   /** 记录一次成功读取（调用方在脱敏之后调用，缓存的是最终给模型的输出）。 */

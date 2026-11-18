@@ -416,9 +416,13 @@ async function deleteSessionFileLocked(workspaceRoot: string, id: string): Promi
 export async function deleteSessionSidecars(workspaceRoot: string, id: string): Promise<void> {
   const { deleteSessionRounds } = await import("./turn-rounds.ts");
   const { deleteConversationStore } = await import("./conversation-store.ts");
+  const { deleteSessionCheckpoints } = await import("./harness/checkpoint.ts");
   await Promise.all([
     deleteSessionRounds(workspaceRoot, id),
     deleteConversationStore(workspaceRoot, id),
+    // 删除该会话的检查点（元数据 + git 快照 ref），否则 .owncoder/checkpoints/
+    // 目录及其快照引用会随会话删除永久残留。
+    deleteSessionCheckpoints(workspaceRoot, id),
   ]);
 }
 export async function clearPersistedSession(workspaceRoot: string): Promise<void> {

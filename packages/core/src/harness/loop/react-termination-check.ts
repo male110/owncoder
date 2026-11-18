@@ -11,7 +11,11 @@ import { logReasoningStep } from "../agent-reasoning.ts";
 import { checkTermination } from "./termination.ts";
 import { getGlobalMetricsCollector } from "./termination-metrics.ts";
 import { finalizeSuccess, finalizeTerminal } from "./react-finalize.ts";
-import { forcedFinalReport } from "./react-forced-report.ts";
+import {
+  forcedFinalReport,
+  forcedFinalReportWithStatus,
+  PLANNER_FORCED_REPORT_INSTRUCTION,
+} from "./react-forced-report.ts";
 import type { ReActLoopContext, ReActReturn } from "./react-loop-context.ts";
 
 /** 迭代开始时检查终止条件；首轮（i === 0）跳过。 */
@@ -83,12 +87,26 @@ export async function handleTerminationCheck(ctx: ReActLoopContext, i: number): 
 
   // 硬限制（迭代/工具调用/成本上限）且无任何文本：做一次无工具强制总结，
   // 保证父智能体拿到已收集的发现。中止（aborted）路径不强行总结。
-  if (
-    ctx.opts.forcedFinalReportOnLimit &&
-    terminationResult.limitReached &&
-    !finalResponse.trim()
-  ) {
-    finalResponse = await forcedFinalReport(ctx, terminationResult.reason);
+  // 子代理调研循环（Planner/Explore）：过渡性文本不算报告，一律按报告契约
+  // 强制收口。Planner 且模型真的产出计划（fromModel）时以成功降级收尾——
+  // partial 前缀会让父级整轮作废；Explore 维持 blocked → partial 标注
+  // （发现可能不完整是事实），但交付的已是强制总结的真发现。
+  let reportRecovered = false;
+  const isPlannerLoop = ctx.opts.plannerLoop === true;
+  const isExploreLoop = ctx.opts.exploreLoop === true;
+  if (ctx.opts.forcedFinalReportOnLimit && terminationResult.limitReached) {
+    if (isPlannerLoop || isExploreLoop) {
+      const forced = await forcedFinalReportWithStatus(
+        ctx,
+        terminationResult.reason,
+        isPlannerLoop ? PLANNER_FORCED_REPORT_INSTRUCTION : undefined,
+      );
+      finalResponse = forced.text;
+      reportRecovered =
+        isPlannerLoop && forced.fromModel && forced.text.trim().length > 0;
+    } else if (!finalResponse.trim()) {
+      finalResponse = await forcedFinalReport(ctx, terminationResult.reason);
+    }
   }
 
   // 根据终止原因设置不同的事件类型
@@ -128,6 +146,25 @@ export async function handleTerminationCheck(ctx: ReActLoopContext, i: number): 
       correctionCount: ctx.correctionCount,
       documentWorkflow: ctx.documentWorkflowUpdate,
     }, "interrupted");
+  }
+
+  // Planner 打满硬上限但强制收口产出了计划：成功降级（计划带声明的未知点），
+  // 不再标记 blocked。Explore 不走此分支——partial 标注保持诚实。
+  if (reportRecovered) {
+    if (finalResponse.trim()) {
+      const lastHist = ctx.history[ctx.history.length - 1];
+      const lastIsSameReport =
+        lastHist?.role === "assistant" && lastHist.content === finalResponse;
+      if (!lastIsSameReport) {
+        ctx.history.push({ role: "assistant", content: finalResponse });
+      }
+    }
+    return finalizeSuccess(ctx, {
+      lastAssistant: finalResponse,
+      aborted,
+      correctionCount: ctx.correctionCount,
+      documentWorkflow: ctx.documentWorkflowUpdate,
+    });
   }
 
   // 硬限制（迭代/工具调用/成本上限）不是成功：标记 blocked 并带上原因，

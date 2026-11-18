@@ -448,7 +448,12 @@ export function useChatActions(deps: {
           if (getFocusSessionId() === sid) {
             depsRef.current.refreshGit().catch(() => {});
           }
-          if (res.ok && res.lastPlanPath) void injectPlanNotification(res.lastPlanPath, sid);
+          // 后端 history 已含同路径的 plan_saved 消息（planner 流程）时跳过注入，
+          // 否则会话里会出现两张同路径计划卡片；save_plan 等无标记消息的流程仍注入。
+          if (
+            res.ok && res.lastPlanPath &&
+            !res.history.some((turn) => turn.role === "assistant" && extractPlanPath(turn.content) === res.lastPlanPath)
+          ) void injectPlanNotification(res.lastPlanPath, sid);
         } catch (e) {
           showError(e, sid);
           chat.setSending(false, sid);
@@ -732,7 +737,11 @@ export function useChatActions(deps: {
       await applyChatResult(res, sid);
       chat.setSending(false, sid);
       depsRef.current.refreshGit().catch(() => {});
-      if (res.ok && res.lastPlanPath) void injectPlanNotification(res.lastPlanPath, sid);
+      // 同 runQueue：后端已有同路径计划标记时不再注入前端通知，避免双卡片。
+      if (
+        res.ok && res.lastPlanPath &&
+        !res.history.some((turn) => turn.role === "assistant" && extractPlanPath(turn.content) === res.lastPlanPath)
+      ) void injectPlanNotification(res.lastPlanPath, sid);
     } catch (e) {
       showError(e, sid);
       chat.setSending(false, sid);

@@ -166,9 +166,9 @@ describe("PlanCard", () => {
     expect(findByClass(tree, "plan-card-open")).toBeDefined();
   });
 
-  it("does not show preview initially", () => {
+  it("does not show partial content before readPlan resolves", () => {
     const tree = renderCard(makePlanActions());
-    expect(findByClass(tree, "plan-preview")).toBeUndefined();
+    expect(findByClass(tree, "plan-preview-body")).toBeUndefined();
   });
 
   it("opens an independent window, not an inline toolbar", async () => {
@@ -177,7 +177,53 @@ describe("PlanCard", () => {
     expect(window.owncoder.openPlanWindow).toHaveBeenCalledWith("/plans/test.md", "s1");
     expect(findByClass(tree, "prompt-toolbar")).toBeUndefined();
     expect(findByClass(tree, "plan-preview-actions")).toBeUndefined();
-    expect(findByClass(tree, "plan-preview-body--masked")).toBeUndefined();
+  });
+
+  it("loads partial plan content into the masked preview", async () => {
+    const actions = makePlanActions();
+    renderCard(actions);
+    // hooks mock 只收集 useEffect；手动执行以驱动 readPlan → setContent。
+    for (const effect of [...hooks.effects]) void effect();
+    await Promise.resolve();
+    const tree = renderCard(actions);
+    const preview = findByClass(tree, "plan-preview-body");
+    expect(preview).toBeDefined();
+    expect(preview?.props.className).toContain("plan-preview-body--masked");
+    expect(preview?.props.children).toBe("# 计划内容\n步骤 1\n步骤 2");
+  });
+
+  it("shows the approve CTA above the partial content and wires it to onApprovePlan", () => {
+    const actions = makePlanActions();
+    const tree = renderCard(actions);
+    const cta = findByClass(tree, "plan-approve-cta");
+    expect(cta).toBeDefined();
+    expect(cta?.props.children).toBe("批准计划");
+    cta!.props.onClick();
+    expect(actions.onApprovePlan).toHaveBeenCalledWith("/plans/test.md");
+  });
+
+  it("marks the CTA busy while approval is in flight", () => {
+    const actions = makePlanActions({ approvingPlanPaths: new Set(["/plans/test.md"]) });
+    const tree = renderCard(actions);
+    const cta = findByClass(tree, "plan-approve-cta")!;
+    expect(cta.props.disabled).toBe(true);
+    expect(cta.props.children).toBe("批准中…");
+    cta.props.onClick();
+    expect(actions.onApprovePlan).not.toHaveBeenCalled();
+  });
+
+  it("shows approved state instead of the CTA when the plan is active", () => {
+    const tree = renderCard(makePlanActions({ activePlanPath: "/plans/test.md" }));
+    expect(findByClass(tree, "plan-kind-note")?.props.children).toBe("已批准");
+    expect(findByClass(tree, "plan-approve-cta")).toBeUndefined();
+  });
+
+  it("shows a document note without approve CTA for document deliverables", () => {
+    const tree = renderCard(makePlanActions({ plans: [{
+      path: "/plans/test.md", title: "发布方案", kind: "document" as const, sessionId: "s1", mtimeMs: 0, size: 100,
+    }] }));
+    expect(findByClass(tree, "plan-kind-note")?.props.children).toBe("文档交付物 · 无需批准（如需执行请生成实施计划）");
+    expect(findByClass(tree, "plan-approve-cta")).toBeUndefined();
   });
 
   it("reports a failed window open without inline preview", async () => {

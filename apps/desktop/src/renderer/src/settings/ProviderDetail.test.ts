@@ -107,6 +107,7 @@ function setup(
     apiKey?: string;
     models?: { id: string; name: string; displayName?: string }[];
     selectedModels?: { id: string; name: string; providerId: string; displayName?: string }[];
+    autoOpenCatalog?: boolean;
   } = {},
 ) {
   const models = overrides.models ?? ids.map((id) => ({ id, name: id }));
@@ -136,6 +137,7 @@ function setup(
       provider: provider as never,
       selectedModels: draft.selectedModels,
       patch: patch as never,
+      autoOpenCatalog: overrides.autoOpenCatalog ?? false,
     });
   };
   /** 进入编辑态：置 editingId 后重新渲染，返回携带最新闭包的输入框。 */
@@ -557,6 +559,39 @@ describe("获取所有模型弹窗", () => {
     tree = render();
     expect(modalOf(tree)).not.toBeNull();
     expect(fetchModelList).toHaveBeenCalledTimes(2);
+  });
+
+  it("autoOpenCatalog（「获取并添加」完成）：挂载即展示目录弹窗，无需再次点击", async () => {
+    const fetchModelList = vi.fn();
+    vi.stubGlobal("window", { owncoder: { fetchModelList } });
+    const { render } = setup([], {
+      autoOpenCatalog: true,
+      models: [{ id: "o3", name: "o3", displayName: "O3 旗舰" }],
+    });
+
+    const tree = render();
+    // 「获取并添加」已在表单里拉取过：详情挂载直接展示目录，不再发起请求。
+    expect(modalOf(tree)).not.toBeNull();
+    expect(fetchModelList).not.toHaveBeenCalled();
+
+    // 弹窗内容来自 provider.models 目录（含自定义展示名）。
+    const body = modalTree(tree);
+    expect(byClass(body, "model-browser-item")).toHaveLength(1);
+    expect(byClass(body, "model-browser-item-name")[0]!.props.children).toBe("O3 旗舰");
+  });
+
+  it("autoOpenCatalog 但目录为空：不弹空弹窗", () => {
+    vi.stubGlobal("window", { owncoder: { fetchModelList: vi.fn() } });
+    const { render } = setup([], { autoOpenCatalog: true, models: [] });
+
+    expect(modalOf(render())).toBeNull();
+  });
+
+  it("默认（非「获取并添加」进入）：挂载不自动弹窗", () => {
+    vi.stubGlobal("window", { owncoder: { fetchModelList: vi.fn() } });
+    const { render } = setup([], { models: [{ id: "o3", name: "o3" }] });
+
+    expect(modalOf(render())).toBeNull();
   });
 
   it("弹窗成功展示平台目录：展示名、补显原始 name 与逐条添加状态", async () => {

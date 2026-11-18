@@ -3,7 +3,7 @@ import type { ModelRef, SystemWorkflowConfig } from "@owncoder/settings";
 import type { AgentMode, TaskDecompositionDto } from "@owncoder/shared";
 import type { IndexClient } from "@owncoder/index";
 import type { TerminalEntry } from "../terminal.ts";
-import type { FileSnapshot } from "../checkpoint.ts";
+import type { FileSnapshot, GitSnapshotAnchor } from "../checkpoint.ts";
 import type { McpManager } from "../../mcp/client.ts";
 import type { ToolContext } from "../execute.ts";
 import type { ToolResultMetadata, AskUserRequest } from "../tools/types.ts";
@@ -337,6 +337,12 @@ export interface AgentLoopOpts {
   history: ChatTurn[];
   userMessage: string;
   attachments?: ChatAttachment[];
+  /**
+   * 续接种子：预置完整 LLM 消息转录（含系统提示与历史工具往返），跳过从零
+   * 构建消息与调度器的用户消息注入；userMessage 作为新的 user 消息追加到
+   * 转录末尾。Explore 子代理续接（continueAgentId）专用。
+   */
+  initialMessages?: ChatMessage[];
   signal?: AbortSignal;
   onEvent?: (ev: TurnEventInput) => void;
   maxIterations?: number;
@@ -467,6 +473,22 @@ export interface AgentLoopOpts {
   leanPipeline?: boolean;
 
   /**
+   * Planner subagent loop: registers the submit_plan structural terminal
+   * tool, switches the per-iteration budget hint to planner wrap-up pressure,
+   * and makes the limit-exit forced summary follow the plan report contract.
+   * Set by run-subagent for agent_type="Planner" only.
+   */
+  plannerLoop?: boolean;
+
+  /**
+   * Explore subagent loop: registers the submit_report structural terminal
+   * tool, switches the per-iteration budget hint to exploration wrap-up
+   * pressure, and lets the limit-exit forced summary fire on transitional
+   * text (not just empty text). Set by run-subagent for agent_type="Explore".
+   */
+  exploreLoop?: boolean;
+
+  /**
    * When the iteration budget is exhausted without a report, issue one
    * tool-free model call that forces a write-up of the evidence gathered so
    * far, instead of returning an empty/placeholder result. Used by Explore so
@@ -481,11 +503,22 @@ export interface AgentLoopOpts {
 export interface AgentLoopResult {
   history: ChatTurn[];
   assistantText: string;
+  /**
+   * 本轮结束时的完整 LLM 消息转录（系统提示 → 用户消息 → 工具往返 → …）。
+   * 供父循环为 Explore 子代理注册续接线程：后续 dispatch_agent 带
+   * continueAgentId 时以其为 initialMessages，子代理上下文完整保留。
+   */
+  agentMessages?: ChatMessage[];
   lastPlanPath?: string;
   /** Spec feature most recently saved this turn (spec workflow tracking). */
   currentFeature?: string;
   /** Undefined = unchanged; null = implementation plan saved and the flow completed. */
   documentWorkflow?: DocumentWorkflowState | null;
+  /**
+   * 本轮首个文件修改工具执行前所建 git 快照的锚点（refs/owncoder-checkpoint/…）。
+   * checkpoint 持久化引用它而非复制文件；非 git 工作区为 undefined。
+   */
+  snapshotRef?: GitSnapshotAnchor;
   /** Public bounded summaries of ReAct choices. */
   decisionSummaries?: ReactDecisionSummary[];
   presentChanges?: boolean;
@@ -503,6 +536,12 @@ export interface AgentLoopResult {
   blocked?: boolean;
   /** blocked 为 true 时的人类可读原因（如"已达到最大迭代限制（40 次）"）。 */
   blockedReason?: string;
+  /**
+   * 循环被提前终止（用户中止 / 工具循环检测 no-progress / LLM 调用失败）。
+   * 与 blocked 一样意味着产出可能不完整：子代理调度方据此标注部分结果，
+   * 避免把过渡文本当成完整报告交付（假成功）。
+   */
+  aborted?: boolean;
 }
 
 export interface ReActLoopArgs {

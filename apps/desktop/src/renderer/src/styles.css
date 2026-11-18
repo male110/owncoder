@@ -2494,15 +2494,38 @@ button.ghost.accent {
   transition: all 0.15s;
 }
 
+/* 计划卡片的部分内容预览（等宽、限高、底部渐隐）；完整内容由「打开」窗口查看。 */
+.plan-preview-body {
+  margin: 8px 0 0;
+  padding: 8px 10px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* 限高 + mask 渐隐必须落在同一节点，分层会导致渐隐按完整内容高度计算而失效
+   （借鉴 ZCode switch-mode.tsx 卡片预览）。 */
+.plan-preview-body--masked {
+  max-height: 220px;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 30%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 0%, #000 30%, transparent 100%);
+}
+
 .plan-card-copy:hover {
   color: var(--text);
   border-color: var(--border);
 }
 
-/* 独立窗口的批准操作。 */
+/* 批准操作：计划卡片内（部分内容上方）与独立计划窗口共用。 */
 .plan-approve-cta {
   display: block;
-  margin: 8px 0;
+  margin: 8px 0 0;
   padding: 8px 20px;
   font-size: 13px;
   font-weight: 600;

@@ -78,6 +78,10 @@ function withRunState(ctx: ReActLoopContext, result: Omit<ReActReturn, "taskRunS
   if (ctx.autoFixFailureSummary && out.lastAssistant) {
     out = { ...out, lastAssistant: `${out.lastAssistant}\n\n> ⚠️ ${ctx.autoFixFailureSummary}` };
   }
+  // turn 的 git 快照锚点：ctx 优先（loop 内建立），调用方传入的次之。
+  if (ctx.turnSnapshot) {
+    out.snapshotRef = ctx.turnSnapshot;
+  }
   return out;
 }
 

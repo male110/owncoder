@@ -304,13 +304,28 @@ function recordResult(
       String(r.call.arguments?.completed ?? ""),
     );
   }
+  // ── 结构性收口检测：子代理调用 submit_plan / submit_report 成功即收尾。 ──
+  // 交付文本在工具参数里（plan / report），由 react.ts 的终态分支读取；
+  // 工具结果本身只是确认句。
+  if (
+    !ctx.submittedToolName &&
+    r.result.ok &&
+    (r.call.name === "submit_plan" || r.call.name === "submit_report")
+  ) {
+    ctx.submittedToolName = r.call.name;
+    ctx.submittedText = String(
+      r.call.arguments?.plan ?? r.call.arguments?.report ?? "",
+    );
+  }
 }
 
-/** 为跳过未执行的调用记录占位 tool result（handoff / 文档交付后由编排层补记）。 */
+/** 为跳过未执行的调用记录占位 tool result（handoff / 结构性收口提交 / 文档交付后由编排层补记）。 */
 export function recordSkippedCall(ctx: ReActLoopContext, call: ParsedToolCall, id: string): void {
   const output = ctx.handoffRequested
     ? "Skipped: control was handed back to the user by report_blocker."
-    : `Skipped: document ${ctx.deliveredDocName} is awaiting user confirmation.`;
+    : ctx.submittedToolName
+      ? `Skipped: the final deliverable was submitted via ${ctx.submittedToolName}; the loop ends here.`
+      : `Skipped: document ${ctx.deliveredDocName} is awaiting user confirmation.`;
   ctx.opts.onEvent?.({ type: "tool_start", id, name: call.name, args: call.arguments });
   ctx.messages.push({ role: "tool", tool_call_id: id, name: call.name, content: output });
   ctx.history.push({ role: "tool", id, content: output, toolName: call.name, toolArgs: call.arguments });
@@ -451,13 +466,18 @@ export async function executeIterationTools(
   // Surface genuine failures: the tools below will happily report success
   // whether or not the safety net actually got created, so a silent failure
   // leaves the user believing they can roll back when they cannot.
+  // 每轮只建一次：快照取的是"首个写操作之前"的状态，后续迭代再建只是
+  // 重复同一锚点，还会把 turn 级检查点挤出 prune 上限。
   const hasFileModifyingTool = calls.some((c) => FILE_MODIFYING_TOOLS.has(c.name));
-  if (ctx.gitSnapshotEnabled && hasFileModifyingTool && ctx.opts.mode !== "spec") {
+  if (ctx.gitSnapshotEnabled && hasFileModifyingTool && ctx.opts.mode !== "spec" && !ctx.gitSnapshotTaken) {
     const snapshot = await gitAutoSnapshot(
       ctx.toolCtx.workspaceRoot,
       `before-${ctx.stageId ?? "execute"}`,
     );
-    if (!snapshot.ok && snapshot.reason === "failed" && !ctx.gitSnapshotWarned) {
+    if (snapshot.ok) {
+      ctx.gitSnapshotTaken = true;
+      ctx.turnSnapshot = { ref: snapshot.snapshot.ref, commit: snapshot.snapshot.commit };
+    } else if (snapshot.reason === "failed" && !ctx.gitSnapshotWarned) {
       ctx.gitSnapshotWarned = true; // once per turn — don't spam every iteration
       ctx.opts.onEvent?.({
         type: "warning",
@@ -479,7 +499,7 @@ export async function executeIterationTools(
   let skippedReadonlyCap = false;
   let ti = 0;
   while (ti < calls.length) {
-    if (ctx.documentDelivered || ctx.handoffRequested) break;
+    if (ctx.documentDelivered || ctx.handoffRequested || ctx.submittedToolName) break;
     // 连续只读硬上限：maxConsecutiveReadonlyIters <= 0 表示「不限制」（默认）。
     // 只有显式配置正整数时才机械拦截，避免把正常的多轮证据收集误判为失控。
     if (

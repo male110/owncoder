@@ -33,7 +33,7 @@ import {
 
 import { toolLspDiagnostics } from "./tools/lsp.ts";
 import { toolTypeCheck } from "./tools/verify.ts";
-import { toolAskUser, toolReportBlocker, toolSemanticDiff, toolWebFetch, toolWebSearch } from "./tools/misc.ts";
+import { toolAskUser, toolReportBlocker, toolSemanticDiff, toolSubmitPlan, toolSubmitReport, toolWebFetch, toolWebSearch } from "./tools/misc.ts";
 import {
   toolForgetMemory,
   toolListMemories,
@@ -320,6 +320,8 @@ async function runTool(ctx: ToolContext, call: ParsedToolCall): Promise<ToolResu
           thoroughness,
           // 任务分解步骤产出的相关历史；缺失/空白时不传，保持既有自动注入与兜底行为。
           relevantHistory: str(args.relevantHistory ?? "").trim() || undefined,
+          // 续接：Explore 报告尾注里的 agent id，带上即在该代理完整上下文里追问。
+          continueAgentId: str(args.continue_agent_id ?? args.continueAgentId ?? "").trim() || undefined,
         });
         return ok(report);
       }
@@ -390,6 +392,14 @@ async function runTool(ctx: ToolContext, call: ParsedToolCall): Promise<ToolResu
           str(args.userAction ?? ""),
           str(args.completed ?? ""),
         );
+
+      // ── Planner subagent: submit the finished plan and end the loop ──
+      case "submit_plan":
+        return await toolSubmitPlan(ctx, str(args.plan ?? ""));
+
+      // ── Explore subagent: submit the finished report and end the loop ──
+      case "submit_report":
+        return await toolSubmitReport(ctx, str(args.report ?? ""));
 
       // ── Ask the user a blocking question (options or free text) ──
       case "ask_user": {

@@ -468,6 +468,33 @@ export function formatBlockerReport(
   return parts.join("\n");
 }
 
+// ── Plan Submission Tool ──────────────────────────────────
+
+/**
+ * submit_plan — pure control-flow tool for the Planner subagent. It performs
+ * no side effect; the plan text travels in the `plan` argument and is read by
+ * the ReAct loop when it intercepts the call. The returned output is only
+ * ever seen if interception is bypassed.
+ */
+export async function toolSubmitPlan(_ctx: ToolContext, plan: string): Promise<ToolResult> {
+  if (!plan.trim()) {
+    return fail("plan required: pass the complete plan text (five sections: 目标 / 编号步骤 / 相关文件 / 风险与不确定性 / 验证方式)");
+  }
+  return ok("Plan submitted. The planning loop ends here; do not call any further tools.");
+}
+
+/**
+ * submit_report — pure control-flow tool for the Explore subagent. Same
+ * interception pattern as submit_plan: the report text travels in the `report`
+ * argument and is read by the ReAct loop when it ends the exploration.
+ */
+export async function toolSubmitReport(_ctx: ToolContext, report: string): Promise<ToolResult> {
+  if (!report.trim()) {
+    return fail("report required: pass the complete report text (findings with evidence)");
+  }
+  return ok("Report submitted. The exploration loop ends here; do not call any further tools.");
+}
+
 // ── Ask User Tool ─────────────────────────────────────────
 
 /**

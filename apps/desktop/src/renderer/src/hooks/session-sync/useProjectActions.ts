@@ -49,7 +49,10 @@ export function useProjectActions(
         // Still mirror the target project's cached session list into `sessions`
         // so AgentSidebar (which reads `sessions` for the current project) does
         // not keep showing the previous project's rows / duplicate titles.
-        if (pendingNewSessionRef.current) {
+        // 但这只适用于「点项目行」。「点具体会话」带 focusSessionId，必须立即切换
+        // 到该会话——否则点击被吞掉：侧栏切到目标项目，右侧却仍停在新会话草稿上，
+        // 用户只能再点一次才生效。
+        if (pendingNewSessionRef.current && !focusSessionId) {
           const targetWs = { root, name: projects.find((p) => p.root === root)?.name ?? root };
           pendingProjectRef.current = root;
           session.setWorkspace(targetWs);

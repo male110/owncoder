@@ -10,6 +10,11 @@ export interface LoopStrategyResult {
   handoffRequested?: boolean;
   /** Defined when the strategy changes the persisted PRD/TDD workflow state. */
   documentWorkflow?: import("./types.ts").DocumentWorkflowState | null;
+  /**
+   * 本轮首个文件修改工具执行前所建 git 快照的锚点（ZCode 式 hidden ref）；
+   * turn 层 persistCheckpoint 引用它替代复制文件。
+   */
+  snapshotRef?: import("../checkpoint.ts").GitSnapshotAnchor;
   /** The strategy stopped because required exploration could not proceed. */
   blocked?: boolean;
   blockedReason?: string;

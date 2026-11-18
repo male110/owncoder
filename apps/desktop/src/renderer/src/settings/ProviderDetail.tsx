@@ -17,10 +17,16 @@ export function ProviderDetail({
   provider,
   selectedModels,
   patch,
+  autoOpenCatalog = false,
+  onCatalogClosed,
 }: {
   provider: Provider;
   selectedModels: AvailableModel[];
   patch: (fn: (d: SystemWorkflowConfig) => void) => void;
+  /** 「获取并添加」刚创建本平台时为 true：挂载即打开目录弹窗展示拉取结果。 */
+  autoOpenCatalog?: boolean;
+  /** autoOpenCatalog 标记的消费回调；父级借此清除标记，避免重挂载再次自动弹窗。 */
+  onCatalogClosed?: () => void;
 }) {
   const [name, setName] = useState(provider.name);
   const [baseUrl, setBaseUrl] = useState(provider.baseUrl);
@@ -46,7 +52,18 @@ export function ProviderDetail({
   // 「获取所有模型」拉取到的平台目录为空时的空态提示；空串 = 未拉取或拉取到条目。
   const [catalogNotice, setCatalogNotice] = useState("");
   // 「获取所有模型」结果弹窗的数据源；null = 未打开。
-  const [browseModels, setBrowseModels] = useState<ListedModel[] | null>(null);
+  // autoOpenCatalog（「获取并添加」完成）：初始即展示刚写入 provider.models 的目录。
+  // 否则拉取成功后界面无任何可见变化——详情列表只显示已接入模型，目录本身不可见，
+  // 用户会以为“点了没反应”。
+  const [browseModels, setBrowseModels] = useState<ListedModel[] | null>(() =>
+    autoOpenCatalog && (provider.models?.length ?? 0) > 0
+      ? provider.models!.map((m) => ({
+          id: m.id,
+          name: m.name,
+          ...(m.displayName ? { display_name: m.displayName } : {}),
+        }))
+      : null,
+  );
   // 当前编辑会话是否已提交，保证同一次编辑只保存一次（blur 不重复提交）。
   const editCommittedRef = useRef(false);
   const modelListInputRef = useRef<HTMLInputElement>(null);
@@ -56,7 +73,13 @@ export function ProviderDetail({
   const fetchInFlightRef = useRef(false);
   const { t: tr } = useI18n();
 
+  // 上一轮记录的平台 id：目录弹窗只在「切换平台」时收起。
+  // 挂载首轮不清（autoOpenCatalog 初始即打开）；同平台字段编辑不影响已拉取的目录。
+  const prevProviderIdRef = useRef<string | null>(null);
   useEffect(() => {
+    const providerSwitched =
+      prevProviderIdRef.current !== null && prevProviderIdRef.current !== provider.id;
+    prevProviderIdRef.current = provider.id;
     setName(provider.name);
     setBaseUrl(provider.baseUrl);
     setApiKey(provider.apiKey);
@@ -74,12 +97,19 @@ export function ProviderDetail({
     setCopiedId(null);
     setFetchError("");
     setCatalogNotice("");
-    setBrowseModels(null);
+    if (providerSwitched) setBrowseModels(null);
     if (copyFeedbackTimerRef.current) {
       clearTimeout(copyFeedbackTimerRef.current);
       copyFeedbackTimerRef.current = null;
     }
   }, [provider.id, provider.name, provider.baseUrl, provider.apiKey, provider.apiFormat]);
+
+  // autoOpenCatalog 标记挂载即消费：是否打开已由初始 state 定格，
+  // 之后切换走再切回（重挂载）不再自动弹窗。
+  useEffect(() => {
+    if (autoOpenCatalog) onCatalogClosed?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     modelListInputRef.current?.focus();

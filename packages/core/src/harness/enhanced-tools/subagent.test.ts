@@ -12,6 +12,7 @@ import type { IndexClient } from "@owncoder/index";
 import { executeTool } from "../execute.ts";
 import type { ToolContext } from "../tools/types.ts";
 import { DISPATCH_AGENT_TOOL_DEF } from "./subagent.ts";
+import { DECOMPOSE_PLANNER_TOOL_DEF } from "../loop/stage-handlers/task-decompose.ts";
 import { runExploreSubagent } from "../subagent/run-subagent.ts";
 import type { DispatchSubagentRequest } from "../subagent/run-subagent.ts";
 import type { AgentLoopResult } from "../loop/types.ts";
@@ -102,13 +103,22 @@ describe("dispatch_agent — relevantHistory 端到端", () => {
     expect(prompt).not.toContain("任务分解阶段相关历史");
   });
 
-  it("schema 暴露可选 relevantHistory 参数，required 不变", () => {
+  it("schema 暴露可选 relevantHistory / continueAgentId 参数，required 不变", () => {
     const params = DISPATCH_AGENT_TOOL_DEF.function.parameters as {
       properties: Record<string, unknown>;
       required: string[];
     };
     expect(params.properties.relevantHistory).toBeDefined();
+    expect(params.properties.continueAgentId).toBeDefined();
     expect(params.required).toEqual(["task"]);
+  });
+
+  it("Planner schema 不继承续接参数（结构性一次性子代理）", () => {
+    const params = DECOMPOSE_PLANNER_TOOL_DEF.function.parameters as {
+      properties: Record<string, unknown>;
+    };
+    expect(params.properties.continueAgentId).toBeUndefined();
+    expect(params.properties.relevantHistory).toBeDefined();
   });
 });
 
@@ -134,5 +144,36 @@ describe("dispatch_agent — Planner 派发入口收敛", () => {
       properties: { agent_type: { enum: string[] } };
     };
     expect(params.properties.agent_type.enum).toEqual(["Explore"]);
+  });
+
+  it("executeTool 把 continueAgentId 透传进派发请求", async () => {
+    const requestSpy = vi.fn(async (_request: DispatchSubagentRequest) => "## Final Report");
+    const ctx = { dispatchSubagent: requestSpy, workflow: {} } as unknown as ToolContext;
+    const result = await executeTool(ctx, call({
+      agent_type: "Explore", task: "追问", continue_agent_id: "explore-2",
+    }));
+    expect(result.ok).toBe(true);
+    expect(requestSpy.mock.calls[0]![0].continueAgentId).toBe("explore-2");
+  });
+
+  it("空白 continueAgentId 不进入请求（走全新派发）", async () => {
+    const requestSpy = vi.fn(async (_request: DispatchSubagentRequest) => "## Final Report");
+    const ctx = { dispatchSubagent: requestSpy, workflow: {} } as unknown as ToolContext;
+    await executeTool(ctx, call({ agent_type: "Explore", task: "新问题", continue_agent_id: "  " }));
+    expect(requestSpy.mock.calls[0]![0].continueAgentId).toBeUndefined();
+  });
+});
+
+describe("dispatch_agent — 探索合并引导", () => {
+  it("工具描述要求单一交付的调研合并为一次综合简报，禁止为并行拆分", () => {
+    const description = DISPATCH_AGENT_TOOL_DEF.function.description;
+    // 一次任务一次派发：单一报告的调研/审查是同一个综合 brief。
+    expect(description).toMatch(/one deliverable per dispatch/);
+    expect(description).toMatch(/ONE consolidated brief/);
+    expect(description).toMatch(/do not split it into parallel briefs/);
+    // 并行只保留给真正独立的问题（互不相干的领域、各自独立交付）。
+    expect(description).toMatch(/genuinely independent questions with disjoint areas/);
+    // 旧的「每派发一个问题 + 批量并行」表述不得回潮。
+    expect(description).not.toContain("one concrete question per dispatch");
   });
 });

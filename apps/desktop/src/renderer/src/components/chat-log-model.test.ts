@@ -77,7 +77,7 @@ describe("buildChatItems", () => {
     expect(items[0]?.key).toContain("u1");
   });
 
-  it("omits process, tools, and saved plans while preserving final replies", () => {
+  it("omits process and tools while rendering saved-plan notices and final replies", () => {
     const items = buildChatItems([
       { kind: "user", turn: userTurn("修 bug") },
       { kind: "process", items: [{ id: "t1", role: "tool", content: "ok" }] },
@@ -85,8 +85,9 @@ describe("buildChatItems", () => {
       { kind: "assistant", turn: { id: "p1", role: "assistant", content: "<!--plan_saved:plan.md-->" } },
       { kind: "assistant", turn: { id: "a1", role: "assistant", content: "已修好" } },
     ]);
-    expect(items.map((it) => it.block.kind)).toEqual(["user", "assistant"]);
-    expect(items[1]?.block).toMatchObject({ turn: { content: "已修好" } });
+    expect(items.map((it) => it.block.kind)).toEqual(["user", "assistant", "assistant"]);
+    expect(items[1]?.block).toMatchObject({ turn: { content: "<!--plan_saved:plan.md-->" } });
+    expect(items[2]?.block).toMatchObject({ turn: { content: "已修好" } });
   });
 
   it("does not inject status/current rows into the virtual list", () => {
@@ -167,7 +168,7 @@ describe("buildLogBlocks process panel", () => {
 });
 
 describe("conversation visibility", () => {
-  it("hides in-progress thoughts, plans and tools until a final reply", () => {
+  it("hides in-progress thoughts and tools while sending; completed plan notices stay visible", () => {
     const turns: ChatTurnDto[] = [
       userTurn("修复问题"),
       { id: "a1", role: "assistant", content: "思考及执行进度" },
@@ -176,7 +177,21 @@ describe("conversation visibility", () => {
     ];
     expect(buildChatItems(buildLogBlocks(turns, true, 4)).map((item) => item.block.kind)).toEqual(["user"]);
     turns.push({ id: "a2", role: "assistant", content: "最终答复" });
-    expect(buildChatItems(buildLogBlocks(turns, false, 0)).map((item) => item.block.kind)).toEqual(["user", "assistant"]);
+    expect(buildChatItems(buildLogBlocks(turns, false, 0)).map((item) => item.block.kind)).toEqual(["user", "assistant", "assistant"]);
+  });
+
+  it("renders the plan notice as the round's reply when it is the only assistant turn", () => {
+    // 计划轮：planner deliverPlan 是该轮唯一助手回复，结束后必须可见，
+    // 否则「计划已保存」在会话里什么都不显示（9ddc097 曾把它过滤掉）。
+    const turns: ChatTurnDto[] = [
+      userTurn("帮我规划这个功能"),
+      { id: "t1", role: "tool", toolName: "dispatch_agent", content: "计划报告" },
+      { id: "p1", role: "assistant", content: "计划已保存：uuid，版本 v1\n\n<!--plan_saved:.owncoder/plans/sessions/abc/uuid-v1.md-->" },
+    ];
+    const blocks = buildLogBlocks(turns, false, 0);
+    expect(blocks.map((b) => b.kind)).toEqual(["user", "tools", "assistant"]);
+    expect(blocks[2]).toMatchObject({ kind: "assistant", turn: { content: expect.stringContaining("<!--plan_saved:") } });
+    expect(buildChatItems(blocks).map((item) => item.block.kind)).toEqual(["user", "assistant"]);
   });
 
   it("keeps a terminal error when no final reply is available", () => {

@@ -16,6 +16,7 @@ import {
   listCheckpoints as listCheckpointMetas,
   loadCheckpoint,
   restoreCheckpointFiles,
+  deleteCheckpoint,
 } from "./harness/checkpoint.ts";
 import { buildChangesFromCheckpoint, restoreSingleFile, type ChangeFile } from "./changes.ts";
 import {
@@ -151,8 +152,13 @@ export async function getPendingChanges(host: PlansHost, sessionId?: string): Pr
 
 /** Accept all pending file changes (keep on disk). */
 export async function keepAllChanges(host: PlansHost, sessionId?: string): Promise<void> {
+  const root = sessionId ? host.sessionWorkspaceRoot(sessionId) : host.workspaceRoot();
   const r = host.rtOpt(sessionId);
   if (r) {
+    // 检查点使命完成：删掉它（含 git 快照 ref），不再留在磁盘上。
+    if (root && r.lastCheckpointId) {
+      await deleteCheckpoint(root, r.id, r.lastCheckpointId).catch(() => undefined);
+    }
     r.keptPaths.clear();
     r.lastCheckpointId = null;
     await host.persist(sessionId);
@@ -160,11 +166,15 @@ export async function keepAllChanges(host: PlansHost, sessionId?: string): Promi
 }
 
 export async function keepChange(host: PlansHost, path: string, sessionId?: string): Promise<void> {
+  const root = sessionId ? host.sessionWorkspaceRoot(sessionId) : host.workspaceRoot();
   const r = host.rtOpt(sessionId);
   if (!r) return;
   r.keptPaths.add(path);
   const pending = await getPendingChanges(host, sessionId);
   if (pending.files.length === 0) {
+    if (root && r.lastCheckpointId) {
+      await deleteCheckpoint(root, r.id, r.lastCheckpointId).catch(() => undefined);
+    }
     r.keptPaths.clear();
     r.lastCheckpointId = null;
     await host.persist(sessionId);
@@ -184,6 +194,9 @@ export async function undoChange(host: PlansHost, path: string, sessionId?: stri
   r.keptPaths.add(path);
   const pending = await getPendingChanges(host, sessionId);
   if (pending.files.length === 0) {
+    if (root && r.lastCheckpointId) {
+      await deleteCheckpoint(root, r.id, r.lastCheckpointId).catch(() => undefined);
+    }
     r.keptPaths.clear();
     r.lastCheckpointId = null;
   }
@@ -235,6 +248,8 @@ export async function rollbackCheckpoint(
   }
   r.lastCheckpointId = null;
   r.keptPaths.clear();
+  // 回滚即终结：删掉这个检查点（元数据 + 快照 ref），让 git gc 回收对象。
+  await deleteCheckpoint(root, activeSessionId, cp.id).catch(() => undefined);
   r.history.push({
     role: "assistant",
     content: `已回滚检查点 ${cp.id}（${restored.length} 个文件）。`,
@@ -306,6 +321,9 @@ export async function approvePlan(
   // 清除 checkpoint 引用：Plan 模式生成的文档文件（PRD/TDD 等）以 existed=false
   // 记录在 checkpoint 中，若不清除，后续 rollback 会因 existed=false 将其删除。
   // 批准即视为用户确认所有生成产物，无需保留回滚能力。
+  if (r.lastCheckpointId) {
+    await deleteCheckpoint(root, r.id, r.lastCheckpointId).catch(() => undefined);
+  }
   r.keptPaths.clear();
   r.lastCheckpointId = null;
 

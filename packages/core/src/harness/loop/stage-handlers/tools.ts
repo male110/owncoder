@@ -139,6 +139,9 @@ async function runToolLoop(ctx: StageHandlerContext): Promise<void> {
   if (reactResult.documentWorkflow !== undefined) {
     state.documentWorkflow = reactResult.documentWorkflow;
   }
+  if (reactResult.snapshotRef) {
+    state.snapshotRef = reactResult.snapshotRef;
+  }
   if (reactResult.taskRunState !== undefined) {
     state.taskRunState = reactResult.taskRunState;
   }

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { executeTool } from "../execute.ts";
 import { createLoopState } from "./termination.ts";
-import { executeIterationTools } from "./react-tool-exec.ts";
+import { executeIterationTools, recordSkippedCall } from "./react-tool-exec.ts";
 import type { ReActLoopContext } from "./react-loop-context.ts";
 import type { TurnEvent } from "./types.ts";
 
@@ -34,6 +34,8 @@ function makeContext() {
     docDeliverableEnabled: false,
     documentDelivered: false,
     handoffRequested: false,
+    submittedToolName: null,
+    submittedText: "",
     totalToolCalls: 0,
     consecutiveReadonlyIters: 0,
   } as unknown as ReActLoopContext;
@@ -123,3 +125,75 @@ describe("ReAct 执行阶段禁止派发 Planner 子代理", () => {
     expect(events.some((event) => event.type === "tool_end" && event.ok === true)).toBe(true);
   });
 });
+
+describe("子代理结构性收口（submit_plan / submit_report）", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("submit_plan 成功：捕获计划文本并置位提交标志", async () => {
+    const { ctx, events } = makeContext();
+    vi.mocked(executeTool).mockResolvedValueOnce({
+      ok: true,
+      output: "Plan submitted. The planning loop ends here; do not call any further tools.",
+    } as Awaited<ReturnType<typeof executeTool>>);
+    const plan = "## Final Report\n### 目标\n修复收口。\n### 编号步骤\n1. …";
+    await call(ctx, "submit_plan", { plan }, 0);
+    expect(ctx.submittedToolName).toBe("submit_plan");
+    expect(ctx.submittedText).toBe(plan);
+    expect(events.some((event) => event.type === "tool_end" && event.ok === true)).toBe(true);
+  });
+
+  it("submit_report 成功：与 submit_plan 共用同一提交机制（report 参数）", async () => {
+    const { ctx } = makeContext();
+    vi.mocked(executeTool).mockResolvedValueOnce({
+      ok: true,
+      output: "Report submitted. The exploration loop ends here; do not call any further tools.",
+    } as Awaited<ReturnType<typeof executeTool>>);
+    const report = "## Final Report\n- `src/a.ts:12` 确认入口";
+    await call(ctx, "submit_report", { report }, 0);
+    expect(ctx.submittedToolName).toBe("submit_report");
+    expect(ctx.submittedText).toBe(report);
+  });
+
+  it("submit_plan 失败：不置位提交标志（错误交回模型自行纠错重试）", async () => {
+    const { ctx } = makeContext();
+    vi.mocked(executeTool).mockResolvedValueOnce({
+      ok: false,
+      output: "Error: plan required: pass the complete plan text",
+    } as Awaited<ReturnType<typeof executeTool>>);
+    await call(ctx, "submit_plan", { plan: "  " }, 0);
+    expect(ctx.submittedToolName).toBeNull();
+    expect(ctx.submittedText).toBe("");
+  });
+
+  it("提交后同批剩余调用不再执行：nextTi 停在提交调用之后，由编排层补记占位", async () => {
+    const { ctx, events } = makeContext();
+    vi.mocked(executeTool)
+      .mockResolvedValueOnce({ ok: true, output: "Plan submitted." } as Awaited<ReturnType<typeof executeTool>>)
+      .mockResolvedValueOnce({ ok: true, output: "lines 1-50" } as Awaited<ReturnType<typeof executeTool>>);
+    const plan = "## Final Report\n计划";
+    // 同一批：先 submit_plan，再一个本会执行的读取调用。
+    const outcome = await executeIterationTools(
+      ctx, 0,
+      [
+        { id: "call-submit", name: "submit_plan", arguments: { plan }, rawArguments: JSON.stringify({ plan }) },
+        { id: "call-read", name: "read_file", arguments: { file_path: "src/a.ts" }, rawArguments: '{"file_path":"src/a.ts"}' },
+      ],
+      "", "tool_calls",
+      { promptTokens: 0, completionTokens: 0, totalTokens: 0, source: "provider" },
+    );
+    // 只执行了 submit_plan；读取调用既不执行也不在工具层补记——
+    // 提前 break 后 nextTi=1，占位 tool result 由 react.ts 终态分支按序补记。
+    expect(executeTool).toHaveBeenCalledTimes(1);
+    expect(ctx.submittedToolName).toBe("submit_plan");
+    expect(outcome.nextTi).toBe(1);
+    expect(events.some((event) => event.type === "tool_end" && event.skipped)).toBe(false);
+    expect(skippedCallPlaceholder(ctx)).toContain("submit_plan");
+  });
+});
+
+/** react.ts 终态分支对剩余调用补记的占位文案（recordSkippedCall 的 planner 分支）。 */
+function skippedCallPlaceholder(ctx: ReActLoopContext): string {
+  const before = ctx.messages.length;
+  recordSkippedCall(ctx, { id: "call-read", name: "read_file", arguments: { file_path: "src/a.ts" }, rawArguments: "{}" }, "call-read");
+  return String(ctx.messages[before]!.content);
+}

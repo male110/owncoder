@@ -185,6 +185,9 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
     opts.mode === "spec" && opts.workflow.modes.spec.bash === "readonly";
 
   // ── Tools: use enhanced tools (backward-compatible: all existing tools still work) ──
+  // 主 executor 循环（agent 模式）探索外包：不注册发现类搜索工具，调研全部
+  // 走 dispatch_agent（Explore 子代理）。子代理循环（exploreLoop/plannerLoop
+  // 自带白名单）与 readOnly 分析型循环不受影响。
   let toolsFinal: ToolDef[] = [
     ...allEnhancedTools({
       mode: opts.mode,
@@ -194,6 +197,13 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
       enableLsp: opts.enableLsp !== false,
       enableWebSearch: opts.enableWebSearch !== false,
       enableVerification: opts.enableVerification !== false && opts.mode === "agent",
+      plannerLoop: opts.plannerLoop === true,
+      exploreLoop: opts.exploreLoop === true,
+      delegateExploration:
+        opts.mode === "agent" &&
+        opts.plannerLoop !== true &&
+        opts.exploreLoop !== true &&
+        opts.readOnly !== true,
     }),
     ...(hasToolStage && opts.mode === "agent" && opts.mcp
       ? (mcpToolsToOpenAi(opts.mcp.listTools()) as ToolDef[])
@@ -240,20 +250,41 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
   const model = resolveStageModel(opts.workflow, opts.mode, toolNode ?? draftNode);
 
   // Wrap system prompt with semantic tag to clearly mark it as core instructions
-  const { tagSystemInstructions } = await import("./message-tags.js");
-  const messages: ChatMessage[] = [{ role: "system", content: tagSystemInstructions(systemPrompt) }];
+  const { tagSystemInstructions, tagUserInput } = await import("./message-tags.js");
+  // 续接种子：沿用预置转录（含系统提示与历史工具往返），userMessage 作为
+  // 新 user 消息追加到末尾；scheduler 的用户消息注入由 userMessageInjected
+  // 初值置位跳过，避免把历史打包再注一遍。
+  const messages: ChatMessage[] = opts.initialMessages
+    ? [...opts.initialMessages, { role: "user", content: tagUserInput(opts.userMessage) }]
+    : [{ role: "system", content: tagSystemInstructions(systemPrompt) }];
 
-  // ── Language: settings harness.locale (system → OS locale) ──
-  messages.push({
-    role: "system",
-    content: localeSystemPrompt(opts.workflow.harness.locale),
-  });
+  if (!opts.initialMessages) {
+    // ── Language: settings harness.locale (system → OS locale) ──
+    messages.push({
+      role: "system",
+      content: localeSystemPrompt(opts.workflow.harness.locale),
+    });
+  }
 
   const history = [...opts.history];
 
   // ── Few-shot examples: removed (Assistant-style minimal system, no curated examples) ──
 
   memory.setGoal(opts.userMessage.slice(0, 200));
+
+  // ── Explore 子代理续接线程表（本父轮次作用域）──────────────────────────
+  // 对齐 ZCode SendMessage：「continue a previously spawned agent with its
+  // context intact」——派发结束后保留子代理的消息转录，后续带 continueAgentId
+  // 的派发以之为 initialMessages，子代理读过的内容与结论全部保留，追问无需
+  // 重搜。线程只在本父轮次存活，不跨用户轮次持久化（v1 边界）。
+  const subagentThreads = new Map<string, ChatMessage[]>();
+  let subagentThreadSeq = 0;
+  /** 收尾补记：submit_report 的工具结果只是确认串、报告原文不在 messages 里，
+   *  注册前追加一条携带最终报告的 assistant 消息，续接的代理才「记得」自己交付了什么。 */
+  const withClosingReport = (transcript: ChatMessage[], report: string): ChatMessage[] => [
+    ...transcript,
+    { role: "assistant", content: report },
+  ];
 
   const readSet = new Set<string>();
   const toolCtx: ToolContext = {
@@ -292,11 +323,11 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
     // 子智能体派发：按请求角色运行隔离子循环（包括 Explore 与 Planner）。
     // 动态导入 run-subagent，避免 subagent ↔ loop 的静态导入环。
     dispatchSubagent: async (request) => {
-      const { runExploreSubagent } = await import("./subagent/run-subagent.ts");
+      const { runExploreSubagent, resolveContinuation } = await import("./subagent/run-subagent.ts");
       const relevantHistory = request.relevantHistory?.trim()
         ? request.relevantHistory
         : opts.activeTasks?.find((task) => task.relevantHistory?.trim())?.relevantHistory;
-      return runExploreSubagent({ ...request, relevantHistory }, {
+      const subagentDeps = {
         workspaceRoot: opts.workspaceRoot,
         sessionId: opts.sessionId,
         workflow: opts.workflow,
@@ -312,7 +343,22 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
         autoApproveDangerousBash: opts.autoApproveDangerousBash,
         budget: opts.budget,
         onEvent: opts.onEvent,
-      });
+      };
+      // 续接解析（拒绝语义见 resolveContinuation）：拒绝直接把原因串交还父智能体。
+      const continuation = resolveContinuation(request, subagentThreads);
+      if (continuation.kind === "refused") return continuation.message;
+      if (continuation.kind === "continue") {
+        const { report, transcript } = await runExploreSubagent(
+          { ...request, relevantHistory, initialMessages: continuation.initialMessages }, subagentDeps);
+        if (transcript) subagentThreads.set(request.continueAgentId!, withClosingReport(transcript, report));
+        return report;
+      }
+      const agentId = `explore-${++subagentThreadSeq}`;
+      const { report, transcript } = await runExploreSubagent(
+        { ...request, relevantHistory }, subagentDeps);
+      if (transcript) subagentThreads.set(agentId, withClosingReport(transcript, report));
+      // id 尾注是父智能体发现续接通道的唯一入口（工具结果为纯文本）。
+      return `${report}\n\n---\n[Explore agent id: ${agentId} · dispatch again with continueAgentId="${agentId}" to ask follow-ups with its full context intact]`;
     },
     // Shared bounded evidence cache and sequential task-list updates.
     evidenceStore: opts.evidenceStore,
@@ -388,11 +434,15 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
     return {
       history,
       assistantText,
+      // 完整 LLM 消息转录：父循环为 Explore 子代理注册续接线程用。
+      agentMessages: messages,
       lastPlanPath: toolCtx.lastPlanPath,
       currentFeature: toolCtx.currentFeature,
       presentChanges:
         opts.mode === "agent" ? presentNodes.length > 0 && !autoKeep : undefined,
       documentWorkflow: state.documentWorkflow,
+      // 透传本轮 git 快照锚点：turn 层 persistCheckpoint 引用它（ZCode 式）。
+      snapshotRef: state.snapshotRef ?? undefined,
       reasoningTrace,
       traceSummary,
       taskRunState: state.taskRunState ?? opts.taskRunState ?? null,
@@ -400,6 +450,10 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
       // 透传硬限制（迭代/工具调用/成本上限）终态，供 Explore 子智能体标注部分结果。
       blocked: state.blocked === true,
       blockedReason: state.blockedReason,
+      // 透传中止终态（用户中止 / 工具循环检测终止）：子代理调度方据此标注
+      // 部分结果，此前该信息在 finish() 处被丢弃，aborted 只影响父级跳过
+      // verify，子级拿到的是"看似完整"的假成功报告。
+      aborted: state.aborted === true,
     };
   };
 
@@ -532,7 +586,9 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
     correctionCount: 0,
     currentPlan: reasoningTrace.plan,
     turnInformationTask: null,
-    userMessageInjected: false,
+    // 续接转录已含全部前置上下文，且 userMessage 已在消息构造时追加，
+    // 调度器不得再注入历史打包或重复的用户消息。
+    userMessageInjected: Boolean(opts.initialMessages),
     budgetUsed: 0,
     decomposeCount: 0,
     aborted: false,

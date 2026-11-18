@@ -163,6 +163,10 @@ export interface ToolContext {
     task: string;
     thoroughness?: string;
     relevantHistory?: string;
+    /** 续接既有 Explore 子代理；由 loop 侧解析，未知或非 Explore 时拒绝。 */
+    continueAgentId?: string;
+    /** 续接种子：既有子代理消息转录，仅由 loop 侧注入，工具层不得自行构造。 */
+    initialMessages?: import("@owncoder/llm").ChatMessage[];
   }) => Promise<string>;
   /** Bounded fresh-read cache shared by the active sequential turn. */
   evidenceStore?: import("../evidence-store.ts").EvidenceStore;

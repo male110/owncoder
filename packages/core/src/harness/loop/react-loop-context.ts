@@ -16,6 +16,7 @@ import type { AutoFixState } from "../auto-fix.ts";
 import type { TaskRunState } from "../../task-run.ts";
 import type { TaskItem } from "../../plans.ts";
 import type { ReasoningTrace, PlanStep, AgentPlan } from "../agent-reasoning.ts";
+import type { GitSnapshotAnchor } from "../checkpoint.ts";
 import type { ContextControlState } from "./context-control.ts";
 import type {
   AgentLoopOpts,
@@ -33,6 +34,11 @@ export type ReActReturn = {
   awaitingUserConfirmation?: boolean;
   handoffRequested?: boolean;
   documentWorkflow?: DocumentWorkflowState | null;
+  /**
+   * 本轮首个文件修改工具执行前所建 git 快照的锚点；由 turn 层写入
+   * checkpoint 元数据（非 git 工作区为 undefined，走内容退化路径）。
+   */
+  snapshotRef?: GitSnapshotAnchor;
   blocked?: boolean;
   blockedReason?: string;
   correctionCount: number;
@@ -103,6 +109,14 @@ export interface ReActLoopContext {
   postToolTextNudgeCount: number;
   prevIterHadToolCalls: boolean;
   gitSnapshotWarned: boolean;
+  /**
+   * 本轮的 git 快照只在首个含文件修改工具的迭代前建一次（ZCode 式：
+   * 用户仓库 hidden ref，零拷贝）。此前每个迭代都建一份，ref 池会被
+   * 无消费者的迭代快照挤占，把 turn 级检查点顶出 prune 上限。
+   */
+  gitSnapshotTaken: boolean;
+  /** 本轮已建快照的锚点；turn 层 persistCheckpoint 直接引用它。 */
+  turnSnapshot: GitSnapshotAnchor | null;
   // ── 工具计数 ──
   totalToolCalls: number;
   consecutiveReadonlyIters: number;
@@ -117,4 +131,12 @@ export interface ReActLoopContext {
   documentWorkflowUpdate: DocumentWorkflowState | null | undefined;
   handoffRequested: boolean;
   handoffReport: string;
+  /**
+   * 子代理已通过结构性收口工具提交最终交付物（Planner 的 submit_plan /
+   * Explore 的 submit_report）：成功终态（区别于 handoff），剩余调用不再
+   * 执行，提交文本作为最终报告返回父级。
+   */
+  submittedToolName: string | null;
+  /** submit_plan / submit_report 提交的完整交付文本。 */
+  submittedText: string;
 }

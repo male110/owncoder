@@ -100,6 +100,30 @@ describe("新建对话的项目归属", () => {
     expect(useSessionStore.getState().sessionsByProject[projectA.root]).toEqual([originalSession]);
   });
 
+  it("pending-new 时跨项目点击已有会话，必须切换到该会话而不是只记项目归属", async () => {
+    const b1 = { id: "B1", title: "B 的任务", updatedAt: "2026-01-01", pinned: false, projectRoot: projectB.root };
+    useSessionStore.setState({
+      sessionsByProject: { [projectA.root]: [originalSession], [projectB.root]: [b1] },
+      activeSessionIdByProject: { [projectB.root]: "B1" },
+    });
+    ipc.switchChatSession = vi.fn(async () => ({
+      state: { mode: "agent", sessionTitle: b1.title, queuedMessages: [], activePlanPath: null },
+      history: [],
+      terminal: [],
+    }));
+    ipc.getChatHistoryPage = vi.fn(async () => ({ turns: [], beforeSeq: null, hasMore: false }));
+
+    await api.onNewSession();
+    expect(api.pendingNewSessionRef.current).toBe(true);
+
+    // AgentSidebar 跨项目点会话的原子路径：onSelectProject(root, sessionId)
+    await api.onSelectProject(projectB.root, "B1");
+
+    expect(useSessionStore.getState().activeSessionId).toBe("B1");
+    expect(api.pendingNewSessionRef.current).toBe(false);
+    expect(ipc.switchChatSession).toHaveBeenCalledWith("B1", projectB.root);
+  });
+
   it.each([false, true])("打开新项目 B 后保留草稿并归属 B（先选择 A：%s）", async (selectAFirst) => {
     await api.onNewSession();
     if (selectAFirst) await api.onSelectProject(projectA.root);

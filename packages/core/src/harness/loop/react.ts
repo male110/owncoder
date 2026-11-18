@@ -58,7 +58,7 @@ import { callModelForIteration } from "./react-llm-call.ts";
 import { handleTerminationCheck } from "./react-termination-check.ts";
 import { handleTextResponse } from "./react-text-branch.ts";
 import { executeIterationTools, recordSkippedCall } from "./react-tool-exec.ts";
-import { forcedFinalReport } from "./react-forced-report.ts";
+import { forcedFinalReport, forcedFinalReportWithStatus, PLANNER_FORCED_REPORT_INSTRUCTION } from "./react-forced-report.ts";
 
 // ── ReAct Loop (Enhanced Tool-Calling Stage) ───────────────
 
@@ -216,6 +216,8 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
     // 上一轮是否执行了工具调用（用于判断本轮是否为"工具执行后的纯文本响应"）
     prevIterHadToolCalls: false,
     gitSnapshotWarned: false,
+    gitSnapshotTaken: false,
+    turnSnapshot: null,
     totalToolCalls: 0,
     consecutiveReadonlyIters: 0,
     // 同文件读取计数（按归一化路径）：超过 maxSameFileReads 即拦截；
@@ -230,6 +232,10 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
     // 去用别的手段达成同一个已被拦下的目标。
     handoffRequested: false,
     handoffReport: "",
+    // 子代理调用 submit_plan / submit_report 后置值：交付物已提交，本轮以
+    // 提交文本收尾（Planner 计划 / Explore 报告共用同一结构性收口机制）。
+    submittedToolName: null,
+    submittedText: "",
   };
   // 工具错误（含权限/用户决策类）一律写入 tool result 交回 LLM，不再强制 blocked。
 
@@ -452,6 +458,33 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
       }, "blocked");
     }
 
+    // ── 结构性收口：submit_plan / submit_report 已调用，本轮以提交的交付物成功收尾 ──
+    // 子代理（Planner 计划 / Explore 报告）的机械出口：模型不再需要"自发输出
+    // 纯文本"才算完成，交付文本从工具参数直达终态，绕开弱模型永不收敛的失败模式。
+    if (ctx.submittedToolName) {
+      // 剩余调用不再执行：按原顺序补记占位 tool result，保持协议与 history 确定性。
+      let ti = nextTi;
+      while (ti < calls.length) {
+        recordSkippedCall(ctx, calls[ti]!, openaiCalls[ti]!.id);
+        ti++;
+      }
+      const submittedReport = ctx.submittedText.trim() || ctx.lastAssistant.trim();
+      logReasoningStep(ctx.reasoningTrace, {
+        type: "observation",
+        content: `Subagent submitted the final deliverable via ${ctx.submittedToolName}; ending the loop with it as the final report`,
+        timestamp: Date.now(),
+      });
+      if (submittedReport) {
+        ctx.history.push({ role: "assistant", content: submittedReport });
+        opts.onEvent?.({ type: "assistant_delta", text: submittedReport });
+      }
+      return finalizeSuccess(ctx, {
+        lastAssistant: submittedReport,
+        aborted: false,
+        correctionCount: ctx.correctionCount,
+      });
+    }
+
     // ── Plan 模式文档交付物：写入 PRD/TDD 等后立即停止，等待用户确认 ──
     if (ctx.documentDelivered) {
       // The assistant tool-call message already lists every call. Record a
@@ -550,22 +583,57 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
       lastAssistantChars: ctx.lastAssistant.length,
     },
   });
+  const isPlannerLoop = opts.plannerLoop === true;
+  const isExploreLoop = opts.exploreLoop === true;
   opts.onEvent?.({
     type: "warning",
-    message: `已达到最大迭代限制（${maxIter} 次），任务可能尚未完成。可在流水线设置中调高"Max model/tool iterations"后重试。`,
+    message: isPlannerLoop
+      ? `Planner 调研预算已耗尽（${maxIter} 次迭代），将基于已收集的证据强制生成计划。`
+      : isExploreLoop
+        ? `Explore 调研预算已耗尽（${maxIter} 次迭代），将基于已收集的证据强制生成报告。`
+        : `已达到最大迭代限制（${maxIter} 次），任务可能尚未完成。可在流水线设置中调高"Max model/tool iterations"后重试。`,
   });
 
   const blockedReason = `已达到最大迭代限制（${maxIter} 次）`;
   // 没有任何结论文本时，先做一次无工具的强制总结，保证父智能体拿到
   // 已收集到的发现，而不是空占位语。未启用（主循环）时沿用历史摘要兜底。
   let finalText: string;
-  if (opts.forcedFinalReportOnLimit && !ctx.lastAssistant.trim()) {
+  let reportRecovered = false;
+  if ((isPlannerLoop || isExploreLoop) && opts.forcedFinalReportOnLimit) {
+    // 子代理调研循环：过渡性文本（"现在读取X…"）不算报告，一律按报告契约
+    // 强制收口（Planner 五段计划 / Explore Searched-Findings-Gaps），保证
+    // 打满上限时交付的是真报告而不是一句过渡文本。
+    // Planner：模型真的产出计划（fromModel）→ 成功降级收尾——partial 前缀会
+    // 让父级整轮作废，而计划已把未知点显式写入风险段。
+    // Explore：维持 blocked → 父级看到 partial 标注（发现可能不完整是事实），
+    // 但拿到的已是强制总结的真发现。
+    // 强制调用失败（fromModel=false）时两者都维持 blocked，交由父级报真实原因。
+    const forced = await forcedFinalReportWithStatus(
+      ctx,
+      blockedReason,
+      isPlannerLoop ? PLANNER_FORCED_REPORT_INSTRUCTION : undefined,
+    );
+    finalText = forced.text;
+    reportRecovered = isPlannerLoop && forced.fromModel && forced.text.trim().length > 0;
+  } else if (opts.forcedFinalReportOnLimit && !ctx.lastAssistant.trim()) {
     finalText = await forcedFinalReport(ctx, blockedReason);
   } else {
     finalText =
       ctx.lastAssistant ||
       lastAssistantSummaryFromHistory(ctx.history) ||
       "(max iterations reached)";
+  }
+
+  if (reportRecovered) {
+    if (finalText.trim()) {
+      ctx.history.push({ role: "assistant", content: finalText });
+      opts.onEvent?.({ type: "assistant_delta", text: finalText });
+    }
+    return finalizeSuccess(ctx, {
+      lastAssistant: finalText,
+      aborted: false,
+      correctionCount: ctx.correctionCount,
+    });
   }
 
   // 达迭代上限不是成功：标记 blocked，避免绕过成功门禁。

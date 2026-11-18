@@ -53,7 +53,7 @@ describe("任务分解失败事件", () => {
     expect(instructions).toContain("needs repository evidence and separate user approval before implementation");
     expect(instructions).toContain("ordinary conceptual discussion or explanation, a small single-file change");
     expect(instructions).toContain("already clear edit site that needs no separate approval");
-    expect(instructions).toContain("## Final Report with 目标, numbered 步骤, 相关文件 backed by actual code paths and line or symbol ranges, 风险与不确定性, 验证方式");
+    expect(instructions).toContain("submit_plan tool with the full plan text — 目标, numbered 步骤, 相关文件 backed by actual code paths and line or symbol ranges, 风险与不确定性, 验证方式");
     expect(instructions).toContain("never start editing before approval");
     expect(vi.mocked(chatCompletionStream).mock.calls[0][2]?.tools).toEqual(expect.arrayContaining([expect.objectContaining({ function: expect.objectContaining({ name: "dispatch_agent" }) })]));
   });

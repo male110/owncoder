@@ -14,6 +14,7 @@ import type { AgentPlan, ReasoningTrace } from "../../agent-reasoning.ts";
 import type { MemoryManager } from "../../memory.ts";
 import type { classifyTask } from "../../model-coordinator.ts";
 import type { AgentLoopOpts, ChatTurn, DocumentWorkflowState } from "../types.ts";
+import type { GitSnapshotAnchor } from "../../checkpoint.ts";
 import type { ContextControlState } from "../context-control.ts";
 import type { TaskItem, TaskRelevantHistory } from "../../../plans.ts";
 
@@ -41,6 +42,11 @@ export interface SchedulerState {
   handoffRequested: boolean;
   /** Cross-turn document workflow update emitted by ReAct after a PRD/TDD write. */
   documentWorkflow?: DocumentWorkflowState | null;
+  /**
+   * 本轮首个文件修改工具执行前所建 git 快照的锚点（ZCode 式 hidden ref）；
+   * turn 层 persistCheckpoint 引用它替代复制文件。
+   */
+  snapshotRef?: GitSnapshotAnchor | null;
   /** A stage produced the whole reply locally; stop all remaining pipeline stages. */
   shortCircuited: boolean;
   /**

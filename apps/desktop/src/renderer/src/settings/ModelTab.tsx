@@ -25,6 +25,9 @@ export function ModelTab({
   const providers = useMemo(() => draft.providers ?? [], [draft.providers]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
+  // 刚通过「获取并添加」创建的平台 id：详情挂载后自动打开目录弹窗展示拉取结果，
+  // 否则表单关闭后界面没有任何可见反馈（目录只存在 provider.models 里，不展示）。
+  const [autoBrowseId, setAutoBrowseId] = useState<string | null>(null);
   const [transferAction, setTransferAction] = useState<"import" | "export" | null>(null);
   const providerCountRef = useRef(providers.length);
   const { t: tr } = useI18n();
@@ -134,6 +137,7 @@ export function ModelTab({
               });
               setAdding(false);
               setSelectedId(p.id);
+              setAutoBrowseId(p.id);
             }}
             onCancel={() => setAdding(false)}
           />
@@ -143,6 +147,8 @@ export function ModelTab({
             provider={providers.find((p) => p.id === selectedId)!}
             selectedModels={draft.selectedModels ?? []}
             patch={patch}
+            autoOpenCatalog={autoBrowseId === selectedId}
+            onCatalogClosed={() => setAutoBrowseId(null)}
           />
         ) : (
           <div className="model-empty">
