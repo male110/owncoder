@@ -1,13 +1,8 @@
 import type { DocumentMetadata, DocumentWorkflowState, DocumentType } from "./types.ts";
 
 /**
- * Staged spec workflow (spec → design → tasks) state, rendered for prompt
- * context.
- *
- * Each phase document is written by its save_* tool, which pauses the turn
- * until the user approves it by replying in the chat. The system prompt reads this
- * block to know which phase is under review and what comes next, so it never
- * races ahead of the user's approval.
+ * Staged Spec workflow context. Persisted stage and status names are retained.
+ * Saving ends the turn for review; it does not start the next phase.
  */
 
 /** Which save_* tool writes which phase. */
@@ -25,34 +20,24 @@ export function specPhaseOfTool(toolName: string): DocumentType | undefined {
 export function documentIntentContext(state: DocumentWorkflowState): string {
   const next =
     state.stage === "awaiting_spec_confirmation"
-      ? "design.md (technical design — only after the user approves requirement.md)"
+      ? "Requirements review: draft the technical design only when the user asks to continue. Revise the requirements if asked."
       : state.stage === "awaiting_design_confirmation"
-        ? "tasks.md (implementation task list — only after the user approves design.md)"
+        ? "Design review: draft tasks.md only when the user asks to continue. Revise the design if asked."
         : state.stage === "awaiting_tasks_confirmation"
-          ? "execution (Agent mode runs the approved tasks in order)"
-          : "nothing — the spec workflow is complete";
-
-  // Show document history if available
-  let historyText = "";
-  if (state.documents && state.documents.length > 0) {
-    const approved = state.documents.filter((d) => d.status === "approved");
-    if (approved.length > 0) {
-      historyText = `\nPreviously approved documents: ${approved.map(d => `${d.path} (${d.type})`).join(", ")}`;
-    }
-  }
+          ? "Task list ready for review: start one task with 执行 or run the list with 全部执行 in its preview."
+          : "The Spec document workflow is complete.";
+  const previous = state.documents?.filter((doc) => doc.path !== state.documentPath).map((doc) => doc.path);
 
   return [
-    `Workflow stage: ${state.stage}`,
-    `Document awaiting the user's review: ${state.documentPath}`,
-    `Next stage once the user approves: ${next}`,
-    historyText,
+    `Current Spec document: ${state.documentPath}`,
+    next,
+    previous?.length ? `Previously saved documents: ${previous.join(", ")}` : "",
   ].filter(Boolean).join("\n");
 }
 
 /**
  * Build the workflow state update for a save_spec / save_design / save_tasks
- * tool call. Keeps previously approved documents and marks the new one as
- * pending approval.
+ * tool call, preserving previous documents and recording the one just saved.
  */
 export function buildSpecWorkflowUpdate(
   document: { feature: string; path: string; phase: DocumentType },

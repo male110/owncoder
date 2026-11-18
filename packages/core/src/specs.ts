@@ -1,13 +1,14 @@
 /**
  * Spec-Driven Development — requirements → design → tasks (Kiro 风格).
  *
- * Three-layer document chain under `.owncoder/specs/<feature>/`:
+ * Three-layer document chain: public requirements/design under `docs/<feature>-requirement.md` and `docs/<feature>-design.md`,
+ * private executable tasks under `.owncoder/specs/sessions/<session>/<feature>`:
  *   - requirement.md   — requirements document (WHAT to build: goals, scope, user
- *                 stories, numbered R1/R2 requirements, acceptance criteria,
+ *                 stories, optional R/FR identifiers, acceptance criteria,
  *                 constraints — no technical design content)
  *   - design.md — HOW to build (architecture, components, interfaces, data
- *                 models, flows, error handling, testing strategy, plus a
- *                 requirements traceability matrix covering every R number)
+ *                 models, flows, error handling, testing strategy, optional
+ *                 requirements traceability)
  *   - tasks.md  — execution checklist (Kiro-style checkbox tasks, each with
  *                 dependencies, files/modules, implementation requirements,
  *                 verification and requirement references; parsed by plans.ts,
@@ -27,12 +28,16 @@
  */
 
 import { promises as fs } from "node:fs";
-import { join, resolve } from "node:path";
+import { randomUUID } from "node:crypto";
+import { join, resolve, relative, isAbsolute } from "node:path";
 import { fromMarkdown } from "mdast-util-from-markdown";
 import { parseTasksFromMarkdown, readPlanFile, sessionArtifactDir, type TaskItem } from "./plans.ts";
 
 
 const STATE_FILE = ".state.json";
+const PUBLIC_DOCS_DIR = "docs";
+const PUBLIC_OWNER_DIR = "public-docs";
+const PUBLIC_OWNER_FILE = ".owner.json";
 
 export type SpecPhase = "spec" | "design" | "tasks";
 
@@ -45,6 +50,7 @@ export function phaseFileName(phase: string): string {
 export type SpecStage =
   | "awaiting_spec_approval"
   | "spec_approved"
+  // Persisted names retained for existing sessions: design is read, not formally approved.
   | "awaiting_design_approval"
   | "design_approved"
   | "awaiting_tasks_approval"
@@ -84,6 +90,92 @@ export function featureDirRel(feature: string, sessionId: string): string {
 
 function featureDirAbs(workspaceRoot: string, feature: string, sessionId: string): string {
   return resolve(workspaceRoot, featureDirRel(feature, sessionId));
+}
+
+function publicPhaseFileName(feature: string, phase: SpecPhase): string {
+  const slug = assertFeatureName(feature);
+  if (phase !== "spec" && phase !== "design") throw new Error("公共文档只支持 requirement/design 阶段");
+  return `${slug}-${phaseFileName(phase)}`;
+}
+
+function publicPhasePath(workspaceRoot: string, feature: string, phase: SpecPhase): string {
+  return join(resolve(workspaceRoot, PUBLIC_DOCS_DIR), publicPhaseFileName(feature, phase));
+}
+
+export function publicPhaseRel(feature: string, phase: SpecPhase): string {
+  return `${PUBLIC_DOCS_DIR}/${publicPhaseFileName(feature, phase)}`;
+}
+
+function publicOwnerPath(workspaceRoot: string, feature: string, _sessionId: string): string {
+  return resolve(workspaceRoot, ".owncoder", "specs", PUBLIC_OWNER_DIR, `${slugify(feature)}${PUBLIC_OWNER_FILE}`);
+}
+
+async function assertPublicDocsRoot(workspaceRoot: string): Promise<string> {
+  const docs = resolve(workspaceRoot, PUBLIC_DOCS_DIR);
+  await fs.mkdir(docs, { recursive: true });
+  const realDocs = await fs.realpath(docs);
+  if (realDocs !== docs) throw new Error("docs 目录不能是符号链接");
+  return realDocs;
+}
+
+async function assertPublicFeaturePath(workspaceRoot: string, feature: string, phase: SpecPhase): Promise<string> {
+  const docs = await assertPublicDocsRoot(workspaceRoot);
+  const target = publicPhasePath(workspaceRoot, feature, phase);
+  const rel = relative(docs, target);
+  if (!rel || rel.startsWith("..") || isAbsolute(rel)) throw new Error("公共文档路径越界");
+  const stat = await fs.lstat(target).catch(() => null);
+  if (stat?.isSymbolicLink()) throw new Error("公共文档不能是符号链接");
+  return target;
+}
+
+async function claimPublicDocs(workspaceRoot: string, feature: string, phase: SpecPhase, sessionId: string): Promise<void> {
+  const target = await assertPublicFeaturePath(workspaceRoot, feature, phase);
+  const ownerPath = publicOwnerPath(workspaceRoot, feature, sessionId);
+  const ownerDir = resolve(ownerPath, "..");
+  await fs.mkdir(ownerDir, { recursive: true });
+  const ownerDirStat = await fs.lstat(ownerDir);
+  if (ownerDirStat.isSymbolicLink()) throw new Error("公共文档 owner 目录不能是符号链接");
+  let owner: { sessionId?: string } | null = null;
+  try { owner = JSON.parse(await fs.readFile(ownerPath, "utf8")) as { sessionId?: string }; } catch { /* first claim */ }
+  if (owner?.sessionId && owner.sessionId !== sessionId) {
+    throw new Error(`docs/${slugify(feature)} 已属于另一个会话，拒绝覆盖公共文档`);
+  }
+  if (!owner?.sessionId) {
+    await fs.writeFile(ownerPath, JSON.stringify({ sessionId }, null, 2), "utf8");
+  }
+  void target;
+}
+
+async function assertPublicOwner(workspaceRoot: string, feature: string, phase: SpecPhase, sessionId: string): Promise<void> {
+  await assertPublicFeaturePath(workspaceRoot, feature, phase);
+  try {
+    const owner = JSON.parse(await fs.readFile(publicOwnerPath(workspaceRoot, feature, sessionId), "utf8")) as { sessionId?: string };
+    if (owner.sessionId !== sessionId) throw new Error("公共文档所属会话不匹配");
+  } catch (error) {
+    if (error instanceof Error && error.message === "公共文档所属会话不匹配") throw error;
+    throw new Error(`docs/${slugify(feature)} 尚未绑定当前会话`);
+  }
+}
+
+async function readPublicPhase(workspaceRoot: string, feature: string, phase: SpecPhase, sessionId: string): Promise<string> {
+  await assertPublicOwner(workspaceRoot, feature, phase, sessionId);
+  const path = publicPhasePath(workspaceRoot, feature, phase);
+  const stat = await fs.lstat(path).catch(() => null);
+  if (stat?.isSymbolicLink()) throw new Error("公共文档不能是符号链接");
+  return fs.readFile(path, "utf8");
+}
+
+async function savePublicPhase(workspaceRoot: string, feature: string, phase: SpecPhase, content: string, sessionId: string): Promise<string> {
+  await claimPublicDocs(workspaceRoot, feature, phase, sessionId);
+  const target = await assertPublicFeaturePath(workspaceRoot, feature, phase);
+  const file = publicPhaseFileName(feature, phase);
+  const body = content.trim().startsWith("#") ? content : `# ${file.replace(".md", "")}: ${slugify(feature)}\n\n${content}`;
+  const existing = await fs.lstat(target).catch(() => null);
+  if (existing?.isSymbolicLink()) throw new Error("公共文档不能是符号链接");
+  const tmp = `${target}.${randomUUID()}.tmp`;
+  await fs.writeFile(tmp, body.endsWith("\n") ? body : `${body}\n`, "utf8");
+  await fs.rename(tmp, target);
+  return publicPhaseRel(feature, phase);
 }
 
 function assertFeatureName(feature: string): string {
@@ -135,15 +227,29 @@ async function resolveFeatureSlug(workspaceRoot: string, feature: string, sessio
 // requirements document, design.md traces every requirement, and tasks.md
 // stays an executable Kiro-style checklist that covers the design.
 
-/** Requirement id (R1, R2, …) referenced by design/tasks documents. */
-const REQ_ID = /\bR(\d+)\b/g;
+/** Requirement ids (R1 / FR1, …) referenced by design/tasks documents. */
+const REQ_ID = /\b(FR|R)(\d+)\b/gi;
 
 function extractReqIds(content: string): string[] {
-  return [...content.matchAll(REQ_ID)].map((m) => `R${m[1]}`);
+  return [...content.matchAll(REQ_ID)].map((m) => `${m[1]!.toUpperCase()}${m[2]}`);
 }
 
 function uniqueSorted(ids: string[]): string[] {
-  return [...new Set(ids)].sort((a, b) => Number(a.slice(1)) - Number(b.slice(1)));
+  return [...new Set(ids)].sort((a, b) => {
+    const ai = Number(a.replace(/^[A-Z]+/i, ""));
+    const bi = Number(b.replace(/^[A-Z]+/i, ""));
+    return ai - bi || a.localeCompare(b);
+  });
+}
+
+function requirementDefinitions(content: string): string[] {
+  const lines = content.split(/\r?\n/);
+  const ids: string[] = [];
+  for (const line of lines) {
+    const match = line.match(/^\s*(?:[-*]\s+|\d+[.)、]\s+)?((?:FR|R)\d+)\s*[:：]/i);
+    if (match) ids.push(match[1]!.toUpperCase());
+  }
+  return ids;
 }
 
 function duplicates(ids: string[]): string[] {
@@ -185,24 +291,18 @@ const TECH_SNIPPET_PATTERNS: RegExp[] = [
 /**
  * Validate the phase-1 requirements document (requirement.md).
  *
- * Must be a pure requirements doc: numbered R1/R2… requirements (unique),
- * goals/scope/user stories/acceptance criteria/constraints. Rejects empty
- * documents, missing or duplicated requirement ids, and technical design
- * content (architecture sections, interface signatures, file lists).
+ * Must be a pure requirements doc: goals/scope/user stories/acceptance criteria/
+ * constraints. R/FR identifiers are optional; when present they must be unique.
+ * EARS is recommended but not required. Technical design content remains rejected.
  */
 export function validateSpecContent(content: string): void {
   const text = content.trim();
   if (!text) throw new Error("requirement.md must not be empty");
 
-  const ids = extractReqIds(text);
-  if (ids.length === 0) {
-    throw new Error(
-      "requirement.md must contain numbered requirements (R1, R2, …) — e.g. a line like \"R1: WHEN … THE SYSTEM SHALL …\"",
-    );
-  }
+  const ids = requirementDefinitions(text);
   const dup = duplicates(ids);
   if (dup.length > 0) {
-    throw new Error(`requirement.md has duplicated requirement ids: ${dup.join(", ")} — each R number must be unique`);
+    throw new Error(`requirement.md has duplicated requirement ids: ${dup.join(", ")} — each R/FR definition must be unique`);
   }
 
   const lines = text.split(/\r?\n/);
@@ -239,18 +339,9 @@ export function validateDesignContent(content: string, specContent?: string): vo
   if (!text) throw new Error("design.md must not be empty");
 
   const ids = extractReqIds(text);
-  if (ids.length === 0) {
-    throw new Error(
-      "design.md must reference the requirements it implements (R1, R2, …) — e.g. section titles or a traceability matrix row per requirement",
-    );
-  }
-  const dup = duplicates(ids);
-  if (dup.length > 0) {
-    throw new Error(`design.md has duplicated requirement references: ${dup.join(", ")}`);
-  }
 
   if (specContent !== undefined) {
-    const specIds = uniqueSorted(extractReqIds(specContent));
+    const specIds = uniqueSorted(requirementDefinitions(specContent));
     if (specIds.length > 0) {
       const designIds = new Set(ids);
       const unknown = uniqueSorted(ids).filter((id) => !specIds.includes(id));
@@ -286,7 +377,7 @@ const TASK_FIELD_PATTERNS: Array<{ re: RegExp; label: string }> = [
  *
  * Kiro-style checkbox tasks; each task must carry dependencies, files/modules,
  * implementation requirements, verification and requirement references.
- * Called with the approved design content so unknown references and missing
+ * Called with the design content so unknown references and missing
  * coverage are caught. Rejects empty documents and lists without checkboxes.
  */
 export function validateTasksContent(content: string, designContent?: string): void {
@@ -304,10 +395,6 @@ export function validateTasksContent(content: string, designContent?: string): v
   }
 
   const ids = extractReqIds(text);
-  const dup = duplicates(ids);
-  if (dup.length > 0) {
-    throw new Error(`tasks.md has duplicated requirement references: ${dup.join(", ")}`);
-  }
 
   if (designContent !== undefined) {
     const designIds = uniqueSorted(extractReqIds(designContent));
@@ -316,13 +403,13 @@ export function validateTasksContent(content: string, designContent?: string): v
       const unknown = uniqueSorted(ids).filter((id) => !designIds.includes(id));
       if (unknown.length > 0) {
         throw new Error(
-          `tasks.md references unknown requirement ids: ${unknown.join(", ")} — only ids traced in the approved design.md (${designIds.join(", ")}) are valid`,
+          `tasks.md references unknown requirement ids: ${unknown.join(", ")} — only ids traced in the design.md (${designIds.join(", ")}) are valid`,
         );
       }
       const missing = designIds.filter((id) => !taskIds.has(id));
       if (missing.length > 0) {
         throw new Error(
-          `tasks.md does not cover requirements: ${missing.join(", ")} — every requirement traced in the approved design must be covered by at least one task`,
+          `tasks.md does not cover requirements: ${missing.join(", ")} — every requirement traced in the design must be covered by at least one task`,
         );
       }
     }
@@ -361,7 +448,7 @@ export async function saveSpec(
   sessionId: string,
 ): Promise<string> {
   validateSpecContent(content);
-  return savePhase(workspaceRoot, feature, "requirement.md", content, sessionId);
+  return savePublicPhase(workspaceRoot, feature, "spec", content, sessionId);
 }
 
 export async function saveDesign(
@@ -374,7 +461,7 @@ export async function saveDesign(
   // coverage are rejected before design.md reaches disk.
   const specContent = await readSpecPhase(workspaceRoot, feature, "spec", sessionId).catch(() => undefined);
   validateDesignContent(content, specContent);
-  return savePhase(workspaceRoot, feature, "design.md", content, sessionId);
+  return savePublicPhase(workspaceRoot, feature, "design", content, sessionId);
 }
 
 export async function saveTasks(
@@ -383,7 +470,7 @@ export async function saveTasks(
   content: string,
   sessionId: string,
 ): Promise<string> {
-  // Cross-check against the approved design so tasks cover the confirmed design.
+  // Cross-check against the design so tasks cover the reviewed design.
   const designContent = await readSpecPhase(workspaceRoot, feature, "design", sessionId).catch(() => undefined);
   validateTasksContent(content, designContent);
   return savePhase(workspaceRoot, feature, "tasks.md", content, sessionId);
@@ -415,6 +502,9 @@ export async function readSpecPhase(
 ): Promise<string> {
   const slug = await resolveFeatureSlug(workspaceRoot, feature, sessionId);
   try {
+    if (phase === "spec" || phase === "design") {
+      return await readPublicPhase(workspaceRoot, slug, phase, sessionId);
+    }
     return await readPlanFile(workspaceRoot, `${featureDirRel(slug, sessionId)}/${phaseFileName(phase)}`, sessionId);
   } catch {
     throw new Error(`${phaseFileName(phase)} not found for feature ${slug}`);
@@ -498,8 +588,8 @@ export async function listSpecs(workspaceRoot: string, sessionId: string): Promi
     let mtimeMs = 0;
     let title = ent.name;
     for (const p of ["spec", "design", "tasks"] as SpecPhase[]) {
-      const pFile = join(fdir, phaseFileName(p));
-      if (await readPlanFile(workspaceRoot, `${featureDirRel(ent.name, sessionId)}/${phaseFileName(p)}`, sessionId).then(() => true, () => false)) {
+      const pFile = p === "tasks" ? join(fdir, phaseFileName(p)) : publicPhasePath(workspaceRoot, ent.name, p);
+      if (await readSpecPhase(workspaceRoot, ent.name, p, sessionId).then(() => true, () => false)) {
         phases.push(p);
         const st = await fs.stat(pFile);
         if (st.mtimeMs > mtimeMs) mtimeMs = st.mtimeMs;
@@ -576,11 +666,24 @@ export async function getSpecStatus(
   };
 }
 
+/** Keep legacy stage keys out of user-facing design status. */
+export function specStageDisplay(stage: SpecStage | null): string {
+  switch (stage) {
+    case "awaiting_spec_approval":
+    case "spec_approved": return "待查看需求，可直接表达继续生成设计或修改需求的意图";
+    case "awaiting_design_approval":
+    case "design_approved": return "待查看设计，可直接表达继续生成任务或修改设计的意图";
+    case "awaiting_tasks_approval": return "任务清单已生成，可在预览中执行单项或全部任务";
+    case "approved": return "任务清单已激活";
+    default: return "unknown";
+  }
+}
+
 /** Compact status summary for tool output. */
 export function formatSpecStatus(status: SpecStatus): string {
   const parts: string[] = [
     `## Spec: ${status.feature}`,
-    `stage: ${status.stage ?? "unknown"}`,
+    `stage: ${specStageDisplay(status.stage)}`,
     `- spec: ${status.hasSpec ? "✅" : "⬜"}`,
     `- design: ${status.hasDesign ? "✅" : "⬜"}`,
     `- tasks: ${status.hasTasks ? "✅" : "⬜"}`,

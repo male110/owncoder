@@ -17,11 +17,13 @@ import { lastAssistantSummaryFromHistory } from "./react-prompt.ts";
 import {
   activeInformationTask,
   finalizeSuccess,
+  finalizeTerminal,
   persistTaskUpdate,
   syncLoopTask,
 } from "./react-finalize.ts";
 import type { NormalizedUsage } from "../observability.ts";
 import type { ReActLoopContext, ReActReturn } from "./react-loop-context.ts";
+import { SPEC_TASK_REPORT_REQUIRED } from "./single-spec-task.ts";
 
 /** 工具执行后纯文本 nudge 的最大注入次数（一旦消耗不回退）。 */
 const maxPostToolTextNudges = 2;
@@ -72,6 +74,19 @@ export async function handleTextResponse(
       ctx.history.push({ role: "assistant", content });
     }
     return { kind: "continue" };
+  }
+
+  if (ctx.opts.singleSpecTask) {
+    const lastAssistant = [content.trim(), SPEC_TASK_REPORT_REQUIRED].filter(Boolean).join("\n\n");
+    ctx.history.push({ role: "assistant", content: lastAssistant });
+    ctx.opts.onEvent?.({ type: "assistant_delta", text: content.trim() ? `\n\n${SPEC_TASK_REPORT_REQUIRED}` : SPEC_TASK_REPORT_REQUIRED });
+    return {
+      kind: "return",
+      result: finalizeTerminal(ctx, {
+        lastAssistant, aborted: false, blocked: true, blockedReason: SPEC_TASK_REPORT_REQUIRED,
+        correctionCount: ctx.correctionCount,
+      }, "failed"),
+    };
   }
 
   // 弱模型：LLM 本轮只回纯文本（无 tool_calls）时，仅在探索未完成时 nudge（上限 maxPostToolTextNudges）。

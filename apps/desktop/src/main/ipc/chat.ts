@@ -6,7 +6,7 @@
  */
 import { ipcMain } from "electron";
 import { classifyError, serializeError } from "@owncoder/shared";
-import type { TurnEventInput } from "@owncoder/core";
+import type { SpecTaskRef, TurnEventInput } from "@owncoder/core";
 import { sendToRenderer } from "../renderer-send";
 import type { IpcContext } from "./types";
 import { createChatEventBuffer } from "./chat-event-buffer";
@@ -68,7 +68,7 @@ export function registerChatHandlers(ctx: IpcContext): void {
     return true;
   });
 
-  ipcMain.handle("chat:send", async (_e, text: string, attachments: import("@owncoder/llm").ChatAttachment[] = [], sessionId?: string) => {
+  ipcMain.handle("chat:send", async (_e, text: string, attachments: import("@owncoder/llm").ChatAttachment[] = [], sessionId?: string, taskRef?: SpecTaskRef) => {
     const sid = sessionId ?? session.getState().activeSessionId ?? undefined;
     const t0 = Date.now();
     const ts = (label: string) => `[chat:send +${Date.now() - t0}ms] ${label}`;
@@ -79,6 +79,8 @@ export function registerChatHandlers(ctx: IpcContext): void {
         (ev: TurnEventInput) => emitChat(sid ?? null, ev),
         sid,
         attachments,
+        true,
+        taskRef,
       );
       console.log(ts(`ok historyLen=${result.history.length} planPath=${result.lastPlanPath ?? "null"}`));
       console.log(ts(`DETAILED history:`) + ' ' + result.history.map((h, i) => `[${i}] ${h.role}: ${h.content.substring(0, 50)}...`).join(' | '));
@@ -86,6 +88,7 @@ export function registerChatHandlers(ctx: IpcContext): void {
       return {
         ok: true as const,
         assistantText: result.assistantText,
+        ...(taskRef ? { taskOutcome: result.specTaskOutcome } : {}),
         history: result.history,
         lastPlanPath: result.lastPlanPath,
         lastCheckpointId: state.lastCheckpointId,

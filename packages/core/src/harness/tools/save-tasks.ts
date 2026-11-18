@@ -1,4 +1,5 @@
 import { readFeatureState, saveTasks, stageForPhase, writeFeatureState } from "../../specs.ts";
+import { matchesSpecSnapshot, readSpecDesignSnapshot } from "../loop/spec-design-intent.ts";
 import type { ToolContext, ToolResult } from "./types.ts";
 import { cap, fail } from "./shared.ts";
 import { inferFeatureFromContent, okMutation } from "./fs-shared.ts";
@@ -14,25 +15,29 @@ export async function toolSaveTasks(
   if (!content.trim()) return fail("save_tasks requires non-empty content");
   const feat = feature.trim() || ctx.currentFeature?.trim() || inferFeatureFromContent(content);
   if (!feat) return fail("save_tasks requires a feature name (pass `feature` explicitly)");
-  // Gate: the tasks phase only starts after the user approved the design.
-  const state = await readFeatureState(ctx.workspaceRoot, feat, ctx.sessionId!);
-  if (!state || !["design_approved", "awaiting_tasks_approval", "approved"].includes(state.stage)) {
-    return fail(
-      `The design for "${feat}" is still awaiting the user's approval. Do not write tasks.md until the user approves the design.`,
-    );
+  const sid = ctx.sessionId;
+  if (!sid) return fail("save_tasks requires a session");
+  const state = await readFeatureState(ctx.workspaceRoot, feat, sid);
+  const authorized = ctx.specTaskGeneration;
+  if (ctx.specRequirementsFollowup) return fail("Do not draft tasks during the requirements review.");
+  if (ctx.specDesignFollowup || authorized || (state?.stage !== "awaiting_tasks_approval" && state?.stage !== "approved")) {
+    if (!authorized || authorized.sessionId !== sid || authorized.feature !== state?.feature) {
+      return fail("Only generate tasks after the user asks to continue from the current design.");
+    }
+    const current = await readSpecDesignSnapshot(ctx.workspaceRoot, state.feature, sid);
+    if (!matchesSpecSnapshot(current, authorized)) {
+      return fail("The Spec design or its stage changed. Ask the user to review the current design before drafting tasks.");
+    }
   }
-  if (state?.stage === "awaiting_spec_approval") {
-    return fail(
-      `The spec for "${feat}" is still awaiting the user's approval. Do not write tasks.md yet.`,
-    );
-  }
-  const rel = await saveTasks(ctx.workspaceRoot, feat, content, ctx.sessionId!);
-  await writeFeatureState(ctx.workspaceRoot, feat, stageForPhase("tasks"), ctx.sessionId!);
-  ctx.currentFeature = feat;
+  if (ctx.signal?.aborted) return fail("操作已停止");
+  const target = state?.feature ?? feat;
+  const rel = await saveTasks(ctx.workspaceRoot, target, content, sid);
+  await writeFeatureState(ctx.workspaceRoot, target, stageForPhase("tasks"), sid);
+  ctx.currentFeature = target;
   return okMutation(
     cap(
-      `Tasks saved to ${rel}.\nThis phase now PAUSES for the user's review. ` +
-        `Confirm the list in the chat: the user replies "下一步"/"next" to approve — the workspace then switches to Agent mode and executes them in order.`,
+      `Tasks saved to ${rel}.\nPause and let the user review the task list. ` +
+        "In the tasks.md preview, select 执行 for one task or 全部执行 for the list.",
       ctx.maxOutputChars,
     ),
     rel,

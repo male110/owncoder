@@ -122,7 +122,7 @@ type TurnEventFields =
       filteringTime: number;
       stagesApplied: string[];
     }
-  | { type: "task_update"; tasks: TaskItem[]; currentTaskId: string | null }
+  | { type: "task_update"; tasks: TaskItem[]; currentTaskId: string | null; planRef?: { path: string; version: string; approvedAt: string } }
   /**
    * Unified task-run snapshot for UI live status.
    * Emitted whenever TaskRunState changes inside the ReAct loop.
@@ -355,6 +355,8 @@ export interface AgentLoopOpts {
   activePlan?: { path: string; content: string } | null;
   /** Spec feature carried into the loop so save_spec/save_design/save_tasks can track it. */
   currentFeature?: string;
+  /** Scoped guidance for a classified Spec review follow-up. */
+  specReviewGuidance?: string;
   todoAnchor?: string | null;
   projectRules?: string | null;
   /** Pre-formatted available-skills catalog injected into the system prompt. */
@@ -434,6 +436,8 @@ export interface AgentLoopOpts {
     /** 释放归档存储及其 native 资源。 */
     close?: () => void;
   };
+  /** Execute only the validated Spec task in Agent mode. Supply exactly one active task and its currentTaskId. */
+  singleSpecTask?: boolean;
   /** id of the task the agent must currently execute; null when none active. */
   currentTaskId?: string | null;
   /** Called whenever task status/currentTaskId changes so the session can persist + notify UI. */
@@ -500,7 +504,14 @@ export interface AgentLoopOpts {
   budget?: import("../budget-ledger.ts").BudgetLedger;
 }
 
+export interface SpecTaskOutcome {
+  status: "completed" | "failed" | "blocked" | "cancelled";
+  result?: string;
+}
+
 export interface AgentLoopResult {
+  /** Final outcome for singleSpecTask turns only. The turn executor owns persistence. */
+  specTaskOutcome?: SpecTaskOutcome;
   history: ChatTurn[];
   assistantText: string;
   /**

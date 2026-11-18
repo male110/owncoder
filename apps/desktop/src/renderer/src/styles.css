@@ -2232,7 +2232,6 @@ button.ghost.accent {
 
 .agent-body:not(.with-editor) .agent-chat > .composer,
 .agent-body:not(.with-editor) .agent-chat > .agent-status-bar,
-.agent-body:not(.with-editor) .agent-chat > .task-bar,
 .agent-body:not(.with-editor) .agent-chat > .danger-confirm-bar,
 .agent-body:not(.with-editor) .agent-chat > .ask-user-card,
 .agent-body:not(.with-editor) .session-chat-panel > .queued-messages-bar {
@@ -2594,6 +2593,95 @@ button.ghost.accent {
 .md-ul li,
 .md-ol li {
   margin: 0.15em 0;
+}
+
+.md-task-progress {
+  margin: 0 0 18px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+}
+
+.md-task-progress-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.md-task-progress-summary > strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.md-task-progress-track {
+  flex: 1;
+  min-width: 40px;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--glass-bg-strong);
+}
+
+.md-task-progress-fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.2s ease;
+}
+
+.md-task-unsaved {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.md-task-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  list-style: none;
+  margin-left: -1.4em !important;
+}
+
+.md-task-checkbox {
+  width: 1.1em;
+  flex: 0 0 1.1em;
+  color: var(--muted);
+}
+
+.md-task-checkbox.checked,
+.md-task-status--completed {
+  color: var(--success, #42a56a);
+}
+
+.md-task-item-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.md-task-item--completed .md-task-item-text {
+  color: var(--muted);
+}
+
+.md-task-item--current .md-task-checkbox {
+  color: var(--accent);
+}
+
+.md-task-status {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.md-task-status--in_progress {
+  color: var(--accent);
+}
+
+.md-task-status--failed {
+  color: var(--danger, #d45b5b);
 }
 
 .md-inline-code {
@@ -7107,88 +7195,6 @@ button.ghost.model-copy-btn.copied {
 .provider-model-group-list .provider-model-group-item:only-child::before {
   top: 0;
   bottom: 0;
-}
-
-/* 鈹€鈹€ TaskListBar (approved plan step driver) 鈹€鈹€ */
-.task-bar {
-  max-width: 860px;
-  width: calc(100% - 48px);
-  margin: 0 auto 8px;
-  background: var(--surface-4);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 10px 14px;
-}
-
-.task-bar-head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  padding: 0;
-  margin: 0;
-}
-
-.task-bar-toggle {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
-  text-align: left;
-}
-
-.task-list-execute {
-  display: flex;
-  justify-content: flex-end;
-  margin: 0 0 8px;
-}
-
-.task-bar.open .task-bar-head {
-  margin-bottom: 8px;
-}
-
-.task-bar .activity-chev {
-  font-size: 11px;
-  color: var(--muted);
-  width: 12px;
-  flex-shrink: 0;
-}
-
-.task-bar-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text);
-}
-
-.task-bar-count {
-  font-size: 12px;
-  color: var(--muted);
-  font-variant-numeric: tabular-nums;
-}
-
-.task-bar-progress {
-  flex: 1;
-  height: 6px;
-  background: var(--glass-bg-strong);
-  border-radius: 3px;
-  overflow: hidden;
-}
-
-.task-bar-progress-fill {
-  height: 100%;
-  background: var(--accent);
-  transition: width 0.2s ease;
-}
-
-.task-bar-done {
-  font-size: 11px;
-  color: #6ed47a;
 }
 
 /* 鈹€鈹€ TaskRunPanel (verification summary + repair progress) 鈹€鈹€ */

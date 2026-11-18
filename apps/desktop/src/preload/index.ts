@@ -157,7 +157,7 @@ type ChatEventFields =
       totalLines?: number;
       affectedPaths?: number;
     }
-  | { type: "task_update"; tasks: TaskItemDto[]; currentTaskId: string | null }
+  | { type: "task_update"; tasks: TaskItemDto[]; currentTaskId: string | null; planRef?: Omit<SpecTaskRefDto, "taskId"> }
   | {
       type: "task_run_state";
       phase:
@@ -218,6 +218,7 @@ export type PlanStatusDto = "pending_approval" | "approved" | "executing" | "com
 
 export interface TaskItemDto {
   id: string;
+  sourceLine?: number;
   /** 执行指引：指导下属如何完成该任务。 */
   executionGuidance: string;
   status: TaskStatusDto;
@@ -228,9 +229,25 @@ export interface TaskItemDto {
   maxRetries: number;
 }
 
+export interface SpecTaskRefDto {
+  path: string;
+  version: string;
+  approvedAt: string;
+  taskId: string;
+}
+
+export interface SpecTaskDocumentDto {
+  path: string;
+  version: string;
+  approvedAt: string | null;
+  tasks: TaskItemDto[];
+  currentTaskId: string | null;
+}
+
 export interface ActivePlanMetaDto {
   path: string;
   approvedAt: string;
+  documentDigest?: string;
   title?: string;
   tasks: TaskItemDto[];
   currentTaskId: string | null;
@@ -473,7 +490,7 @@ export interface DesktopApi {
   getWorkspace: () => Promise<WorkspaceInfo | null>;
   /** Current app version (from package.json), shown in the titlebar. */
   getAppVersion: () => Promise<string>;
-  getSessionState: () => Promise<SessionStateDto>;
+  getSessionState: (sessionId?: string) => Promise<SessionStateDto>;
   listChatSessions: (root?: string) => Promise<{ activeId: string | null; sessions: ChatSessionMetaDto[] }>;
   createChatSession: (title?: string) => Promise<{
     meta: ChatSessionMetaDto;
@@ -509,12 +526,12 @@ export interface DesktopApi {
   }>;
   clearActivePlan: (sessionId?: string) => Promise<{ activePlanPath: string | null }>;
   getActivePlan: (sessionId?: string) => Promise<ActivePlanMetaDto | null>;
-  updateTask: (taskId: string, status: TaskStatusDto, result?: string, sessionId?: string) => Promise<ActivePlanMetaDto | null>;
+  updateTask: (taskId: string, status: TaskStatusDto, result?: string, sessionId?: string, taskRef?: SpecTaskRefDto) => Promise<ActivePlanMetaDto | null>;
+  getSpecTaskDocument: (path: string, sessionId: string) => Promise<SpecTaskDocumentDto | null>;
+  prepareSpecTaskExecution: (path: string, version: string, sessionId: string) => Promise<SessionStateDto>;
   // ── Spec workflow（spec → design → tasks 审批流） ──
   listSpecs: (sessionId?: string) => Promise<SpecFeatureDto[]>;
   getSpecStatus: (feature: string, sessionId?: string) => Promise<SpecStatusDto>;
-  approveSpec: (feature: string, sessionId?: string) => Promise<Partial<SessionStateDto>>;
-  rejectSpec: (feature: string, feedback: string, sessionId?: string) => Promise<Partial<SessionStateDto>>;
   setTodoAnchor: (todo: string | null) => Promise<unknown>;
   compactHistory: (sessionId?: string) => Promise<ChatTurnDto[]>;
   wipeSession: () => Promise<{ history: ChatTurnDto[]; terminal: TerminalEntryDto[] }>;
@@ -603,10 +620,11 @@ export interface DesktopApi {
     size: number;
     provider: string;
   }>;
-  sendChat: (text: string, sessionId?: string, attachments?: ChatAttachmentDto[]) => Promise<
+  sendChat: (text: string, sessionId?: string, attachments?: ChatAttachmentDto[], taskRef?: SpecTaskRefDto) => Promise<
     | {
         ok: true;
         assistantText: string;
+        taskOutcome?: { status: "completed" | "failed" | "blocked" | "cancelled"; result?: string };
         history: ChatTurnDto[];
         lastPlanPath?: string;
         lastCheckpointId?: string | null;
@@ -704,7 +722,7 @@ const api: DesktopApi = {
   removeProject: (root: string) => ipcRenderer.invoke("workspace:removeProject", root),
   getWorkspace: () => ipcRenderer.invoke("workspace:get"),
   getAppVersion: () => ipcRenderer.invoke("app:version"),
-  getSessionState: () => ipcRenderer.invoke("session:getState"),
+  getSessionState: (sessionId) => ipcRenderer.invoke("session:getState", sessionId),
   listChatSessions: (root?) => ipcRenderer.invoke("sessions:list", root),
   createChatSession: (title) => ipcRenderer.invoke("sessions:create", title),
   switchChatSession: (id, projectRoot) => ipcRenderer.invoke("sessions:switch", id, projectRoot),
@@ -716,7 +734,9 @@ const api: DesktopApi = {
   approvePlan: (opts, sessionId) => ipcRenderer.invoke("session:approvePlan", opts, sessionId),
   clearActivePlan: (sessionId) => ipcRenderer.invoke("session:clearActivePlan", sessionId),
   getActivePlan: (sessionId?: string) => ipcRenderer.invoke("session:getActivePlan", sessionId),
-  updateTask: (taskId, status, result, sessionId) => ipcRenderer.invoke("session:updateTask", taskId, status, result, sessionId),
+  updateTask: (taskId, status, result, sessionId, taskRef) => ipcRenderer.invoke("session:updateTask", taskId, status, result, sessionId, taskRef),
+  getSpecTaskDocument: (path, sessionId) => ipcRenderer.invoke("specs:taskDocument", path, sessionId),
+  prepareSpecTaskExecution: (path, version, sessionId) => ipcRenderer.invoke("specs:prepareTaskExecution", path, version, sessionId),
   setTodoAnchor: (todo) => ipcRenderer.invoke("session:setTodoAnchor", todo),
   compactHistory: (sessionId) => ipcRenderer.invoke("session:compact", sessionId),
   wipeSession: () => ipcRenderer.invoke("session:wipe"),
@@ -742,8 +762,6 @@ const api: DesktopApi = {
   respondPlanApproval: (requestId, error) => ipcRenderer.send("plans:approvalResponse", requestId, error),
   listSpecs: (sessionId?: string) => ipcRenderer.invoke("specs:list", sessionId),
   getSpecStatus: (feature, sessionId) => ipcRenderer.invoke("specs:status", feature, sessionId),
-  approveSpec: (feature, sessionId) => ipcRenderer.invoke("specs:approve", feature, sessionId),
-  rejectSpec: (feature, feedback, sessionId) => ipcRenderer.invoke("specs:reject", feature, feedback, sessionId),
   listRules: () => ipcRenderer.invoke("rules:list"),
   readRule: (name) => ipcRenderer.invoke("rules:read", name),
   writeRule: (name, content) => ipcRenderer.invoke("rules:write", name, content),
@@ -816,7 +834,7 @@ const api: DesktopApi = {
     return () => ipcRenderer.removeListener("app:closeSettingsPanel", handler);
   },
   uploadFile: (input) => ipcRenderer.invoke("upload:file", input),
-  sendChat: (text, sessionId, attachments) => ipcRenderer.invoke("chat:send", text, attachments, sessionId),
+  sendChat: (text, sessionId, attachments, taskRef) => ipcRenderer.invoke("chat:send", text, attachments, sessionId, taskRef),
   regenerateChat: (sessionId) => ipcRenderer.invoke("chat:regenerate", sessionId),
   onChatEvent: (handler) => {
     const listener = (_: Electron.IpcRendererEvent, payload: { sessionId: string | null; ev?: ChatEventDto; events?: ChatEventDto[] }) => {

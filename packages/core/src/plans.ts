@@ -96,6 +96,8 @@ export function normalizeRelevantHistory(value: unknown): TaskRelevantHistory | 
 
 export interface TaskItem {
   id: string;
+  /** 1-based line in the approved Spec task document. */
+  sourceLine?: number;
   /** 执行指引：指导下属如何完成该任务（关键入口、注意点、建议验证方式）。 */
   executionGuidance: string;
   /** @deprecated 旧字段，读时折叠进 executionGuidance；写入只写 executionGuidance。 */
@@ -136,6 +138,7 @@ export interface TaskItem {
 export interface ActivePlanMeta {
   path: string;
   approvedAt: string;
+  documentDigest?: string;
   title?: string;
   tasks: TaskItem[];
   currentTaskId: string | null;
@@ -449,6 +452,7 @@ export function normalizeActiveMeta(meta: Partial<ActivePlanMeta>): ActivePlanMe
     path: meta.path ?? "",
     sessionId: meta.sessionId,
     approvedAt: meta.approvedAt ?? new Date().toISOString(),
+    ...(typeof meta.documentDigest === "string" ? { documentDigest: meta.documentDigest } : {}),
     title: meta.title,
     tasks,
     currentTaskId,
@@ -522,6 +526,7 @@ function normalizeTask(t: Partial<TaskItem>): TaskItem {
 
   return {
     id: typeof t.id === "string" ? t.id : `task_${Math.random().toString(36).slice(2, 8)}`,
+    ...(typeof t.sourceLine === "number" && Number.isSafeInteger(t.sourceLine) && t.sourceLine > 0 ? { sourceLine: t.sourceLine } : {}),
     executionGuidance: foldExecutionGuidance(t),
     status: t.status === "in_progress" || t.status === "completed" || t.status === "failed" || t.status === "skipped"
       ? t.status
@@ -646,47 +651,99 @@ export function truncatePlanForContext(content: string, maxChars = 2500): string
  * Recognises `- [ ]` / `- [x]` checkboxes and ordered list items `1. `.
  * Falls back to a single task wrapping the whole body when nothing matches.
  */
-export function parseTasksFromMarkdown(content: string): TaskItem[] {
+export function parseTasksFromMarkdown(content: string, specDocument = false): TaskItem[] {
   const lines = content.split(/\r?\n/);
   const tasks: TaskItem[] = [];
-  let idx = 0;
-  const push = (
-    executionGuidance: string,
-    acceptance?: string,
-  ) => {
-    const d = executionGuidance.trim();
-    if (!d) return;
-    idx += 1;
+  const taskEntries: Array<{ index: number; title: string; checked: boolean }> = [];
+  let fence: string | undefined;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    if (specDocument) {
+      const marker = line.match(/^\s*(`{3,}|~{3,})(.*)$/);
+      if (fence) {
+        if (marker && marker[1]!.startsWith(fence) && !marker[2]!.trim()) fence = undefined;
+        continue;
+      }
+      if (marker) { fence = marker[1]; continue; }
+    }
+    const checkbox = line.match(/^\s*(?:[-*]|\d+[.、)])\s+\[([ xX])\]\s+(.+)$/);
+    if (checkbox) {
+      taskEntries.push({ index: i, title: checkbox[2]!.trim(), checked: checkbox[1]!.toLowerCase() === "x" });
+      continue;
+    }
+    // Compatibility with older plan files; newly saved Spec files still require checkboxes.
+    const ordered = specDocument ? null : line.match(/^\s*\d+[.、)]\s+(.+)$/);
+    if (ordered) taskEntries.push({ index: i, title: ordered[1]!.trim(), checked: false });
+  }
+
+  const fieldPattern = /^\s*(?:[-*+]\s+|>\s*)?(依赖|depends?\s*on|前置|文件|模块|files?|modules?|实现(?:要求)?|implementation|验收|验证|acceptance|verification|需求|requirement)\s*[:：]\s*(.*)$/i;
+  const cleanContinuation = (line: string): string => line.replace(/^\s*(?:[-*+]\s+|>\s*)/, "").trim();
+  const fieldValue = (fields: Map<string, string[]>, names: string[]): string => {
+    for (const name of names) {
+      const value = fields.get(name)?.join(" ").trim();
+      if (value) return value;
+    }
+    return "";
+  };
+  const normalizeDependency = (value: string, position: number): string[] => {
+    if (!value || /^(?:无|none|nil|n\/a|-)$/.test(value.trim().toLowerCase())) return [];
+    return [...value.matchAll(/(?:task[_ -]?)?(\d+)/gi)]
+      .map((match) => `task_${match[1]}`)
+      .filter((id, index, all) => all.indexOf(id) === index)
+      .filter((id) => specDocument || Number(id.slice(5)) <= position);
+  };
+
+  for (let entryIndex = 0; entryIndex < taskEntries.length; entryIndex++) {
+    const entry = taskEntries[entryIndex]!;
+    const end = taskEntries[entryIndex + 1]?.index ?? lines.length;
+    const fields = new Map<string, string[]>();
+    const extraLines: string[] = [];
+    let currentField = "";
+    for (const line of lines.slice(entry.index + 1, end)) {
+      if (/^\s*#{1,6}\s/.test(line)) break;
+      const match = line.match(fieldPattern);
+      if (match) {
+        const label = match[1]!.toLowerCase().replace(/\s+/g, " ");
+        currentField = label;
+        const values = fields.get(label) ?? [];
+        if (match[2]!.trim()) values.push(match[2]!.trim());
+        fields.set(label, values);
+      } else if (currentField && line.trim()) {
+        fields.get(currentField)?.push(cleanContinuation(line));
+      } else if (line.trim()) {
+        extraLines.push(cleanContinuation(line));
+      }
+    }
+
+    const files = fieldValue(fields, ["文件", "模块", "file", "files", "module", "modules"]);
+    const implementation = fieldValue(fields, ["实现", "实现要求", "implementation"]);
+    const requirements = fieldValue(fields, ["需求", "requirement"]);
+    const acceptance = fieldValue(fields, ["验收", "验证", "acceptance", "verification"]);
+    const dependencies = fieldValue(fields, ["依赖", "depends on", "前置"]);
+    const guidance = [
+      entry.title.replace(/\s*[—–-]\s*$/, ""),
+      ...extraLines,
+      files ? `文件/模块: ${files}` : "",
+      implementation ? `实现: ${implementation}` : "",
+      requirements ? `需求: ${requirements}` : "",
+    ].filter(Boolean).join("\n").trim();
+    if (!guidance) continue;
+    const id = `task_${tasks.length + 1}`;
+    const hasDependencyField = ["依赖", "depends on", "前置"].some((name) => fields.has(name));
+    const explicitDeps = normalizeDependency(dependencies, tasks.length);
     tasks.push({
-      id: `task_${idx}`,
-      executionGuidance: d,
-      status: "pending",
-      acceptance: acceptance?.trim() || undefined,
-      dependsOn: idx > 1 ? [`task_${idx - 1}`] : [],
+      id,
+      ...(specDocument ? { sourceLine: entry.index + 1 } : {}),
+      executionGuidance: guidance,
+      status: entry.checked ? "completed" : "pending",
+      acceptance: acceptance || undefined,
+      dependsOn: hasDependencyField ? explicitDeps : tasks.length > 0 ? [`task_${tasks.length}`] : [],
       retryCount: 0,
       maxRetries: 2,
     });
-  };
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    const box = line.match(/^\s*[-*]\s+\[[ xX]\]\s+(.+)$/);
-    if (box) {
-      const desc = box[1]!.replace(/\s*[—–-]\s*$/, "");
-      const acc = lines[i + 1]?.match(/^\s*[>/*]?\s*(?:验收|acceptance|验证)[:：]\s*(.+)$/i)?.[1];
-      push(desc, acc);
-      continue;
-    }
-    const ord = line.match(/^\s*(\d+)[.、)]\s+(.+)$/);
-    if (ord) {
-      const desc = ord[2]!;
-      const acc = lines[i + 1]?.match(/^\s*[>/*]?\s*(?:验收|acceptance|验证)[:：]\s*(.+)$/i)?.[1];
-      push(desc, acc);
-      continue;
-    }
   }
 
-  if (tasks.length === 0) {
+  if (!specDocument && tasks.length === 0) {
     const compact = content.trim().replace(/\n{2,}/g, "\n").slice(0, 400);
     if (compact) {
       tasks.push({

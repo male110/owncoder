@@ -1,16 +1,14 @@
 /**
- * Spec 工作流审批闸门（Kiro 风格）。
+ * Spec 文档工作流与任务执行准备。
  *
- * spec → design → tasks 三段式，每一段文档生成后暂停等待用户审批：
- * approveSpecPhase 推进闸门（tasks 审批后切换 Agent 模式并复用计划执行器），
- * rejectSpecPhase 把用户反馈推入对话让模型修订重写。
+ * 需求与设计通过对话推进；任务清单只在用户点击执行或全部执行后启动。
  *
  * 设计与 session-plans.ts 对称：通过 SpecsHost 桥接编排器，只依赖会话
  * 运行时、项目根与持久化，编排器方法退化为委托。
  */
 import type { AgentMode } from "@owncoder/shared";
 import type { SessionRuntime, SessionState } from "./session-runtime.ts";
-import { deleteCheckpoint } from "./harness/checkpoint.ts";
+import { readSpecTaskDocument, specTaskFeature, specTaskVersion, type SpecTaskDocument } from "./spec-task-document.ts";
 import {
   extractTitle,
   normalizeTasks,
@@ -20,29 +18,14 @@ import {
   type ActivePlanMeta,
 } from "./plans.ts";
 import {
-  featureDirRel,
   getSpecStatus as readSpecStatusFromDisk,
   listSpecs,
-  phaseFileName,
-  phaseUnderReview,
-  readFeatureState,
   readSpecPhase,
+  validateTasksContent,
   writeFeatureState,
   type SpecFeature,
   type SpecStatus,
-  type SpecStage,
 } from "./specs.ts";
-
-const ERR_NO_WORKSPACE = "请先打开项目文件夹";
-
-const STAGE_LABEL: Record<SpecStage, string> = {
-  awaiting_spec_approval: "spec 待审批",
-  spec_approved: "spec 已批准",
-  awaiting_design_approval: "design 待审批",
-  design_approved: "design 已批准",
-  awaiting_tasks_approval: "tasks 待审批",
-  approved: "tasks 已批准，执行中",
-};
 
 /** 宿主桥：编排器向本模块提供的方法与状态（SessionOrchestrator 满足该接口）。 */
 export interface SpecsHost {
@@ -73,134 +56,49 @@ export async function getSpecStatus(
   return readSpecStatusFromDisk(host.sessionWorkspaceRoot(r.id), feature, r.id);
 }
 
-/**
- * 批准当前等待审批的阶段。
- * - spec → design：标记 spec 已批准，等待生成 design。
- * - design → tasks：标记 design 已批准，等待生成 tasks。
- * - tasks：解析任务、写入 ActivePlanMeta、切换 Agent 模式（复用计划执行器）。
- */
-export async function approveSpecPhase(
-  host: SpecsHost,
-  feature: string,
-  sessionId?: string,
-): Promise<SessionState> {
+export async function getSpecTaskDocument(host: SpecsHost, path: string, sessionId: string): Promise<SpecTaskDocument | null> {
+  const r = host.rt(sessionId);
+  return readSpecTaskDocument(host.sessionWorkspaceRoot(r.id), path, r.id, r.activePlanPath);
+}
+
+export async function prepareSpecTaskExecution(host: SpecsHost, path: string, expectedVersion: string, sessionId: string): Promise<SessionState> {
   const r = host.rt(sessionId);
   const root = host.sessionWorkspaceRoot(r.id);
-  if (!root) throw new Error(ERR_NO_WORKSPACE);
-
-  const state = await readFeatureState(root, feature, r.id);
-  if (!state) {
-    throw new Error(`特性 ${feature} 尚未生成任何 spec 文档`);
-  }
-  const phase = phaseUnderReview(state.stage);
-  if (!phase) {
-    const next: Record<string, string> = {
-      spec_approved: "spec 已批准，请让模型生成 design.md",
-      design_approved: "design 已批准，请让模型生成 tasks.md",
-      approved: "tasks 已批准并进入执行，无需重复操作",
+  const feature = specTaskFeature(path, r.id);
+  if (!feature) throw new Error("任务清单不属于当前会话");
+  const document = await getSpecTaskDocument(host, path, sessionId);
+  if (!document || document.version !== expectedVersion) throw new Error("任务清单已修改，请重新加载后执行");
+  if (document.tasks.some((task) => task.status === "in_progress")) throw new Error("任务正在执行");
+  const runnable = selectNextPendingTask(document.tasks.map((task) => task.status === "failed" ? { ...task, status: "pending" } : task));
+  if (!runnable) throw new Error("没有可执行的任务，请检查任务状态和依赖");
+  if (!document.approvedAt) {
+    const body = await readSpecPhase(root, feature, "tasks", r.id);
+    const documentDigest = specTaskVersion(body);
+    if (documentDigest !== expectedVersion) throw new Error("任务清单已修改，请重新加载后执行");
+    const design = await readSpecPhase(root, feature, "design", r.id).catch(() => undefined);
+    validateTasksContent(body, design);
+    const tasks = normalizeTasks(parseTasksFromMarkdown(body, true));
+    // Legacy on-disk fields identify the active execution snapshot, not an approval action.
+    const meta: ActivePlanMeta = {
+      path,
+      approvedAt: new Date().toISOString(),
+      documentDigest,
+      title: extractTitle(body, path) || feature,
+      tasks,
+      currentTaskId: runnable.id,
+      status: "approved",
+      sessionId: r.id,
     };
-    throw new Error(next[state.stage] ?? `当前状态 ${STAGE_LABEL[state.stage]} 无需审批`);
+    await writeActiveMeta(root, meta, r.id);
+    await writeFeatureState(root, feature, "approved", r.id);
   }
 
   r.currentFeature = feature;
-
-  if (phase === "spec" || phase === "design") {
-    await readSpecPhase(root, feature, phase, r.id);
-    await writeFeatureState(root, feature, phase === "spec" ? "spec_approved" : "design_approved", r.id);
-    const nextDoc = phase === "spec" ? "design.md（技术设计）" : "tasks.md（任务清单）";
-    r.history.push({
-      role: "assistant",
-      content:
-        `✅ ${feature} 的 ${phaseFileName(phase)} 已批准。\n\n` +
-        `📋 **下一步**：生成 ${nextDoc}。` +
-        (phase === "spec"
-          ? "请基于已批准的 spec 探索代码库，产出 design.md。"
-          : "请基于已批准的 spec 和 design 产出 tasks.md 任务清单。"),
-    });
-    await host.persist(sessionId);
-    return host.getState(sessionId);
-  }
-
-  // tasks 审批 → 激活执行（与 approvePlan 同款机制）
-  const path = `${featureDirRel(state.feature, r.id)}/tasks.md`;
-  const body = await readSpecPhase(root, state.feature, "tasks", r.id);
-  const tasks = normalizeTasks(parseTasksFromMarkdown(body));
-  if (tasks.length === 0) {
-    throw new Error("tasks.md 中没有解析到任务，无法执行");
-  }
-  const firstPending = selectNextPendingTask(tasks);
-  const meta: ActivePlanMeta = {
-    path,
-    approvedAt: new Date().toISOString(),
-    title: extractTitle(body, path) || feature,
-    tasks,
-    currentTaskId: firstPending?.id ?? null,
-    status: "approved",
-    sessionId: r.id,
-  };
-  await writeActiveMeta(root, meta, r.id);
-
-  // 清除 checkpoint 引用：生成的 spec 文档以 existed=false 记录在 checkpoint 中，
-  // 若不清除，后续 rollback 会将其删除。批准即视为用户确认所有生成产物。
-  if (r.lastCheckpointId) {
-    await deleteCheckpoint(root, r.id, r.lastCheckpointId).catch(() => undefined);
-  }
-  r.keptPaths.clear();
-  r.lastCheckpointId = null;
-
   r.activePlanPath = path;
   r.lastPlanPath = path;
   r.mode = "agent";
   r.todoAnchor = null;
-  if (r.id === host.focusSessionId()) {
-    host.setFocusMode("agent");
-  }
-
-  await writeFeatureState(root, feature, "approved", r.id);
-
-  r.history.push({
-    role: "assistant",
-    content:
-      `✅ ${feature} 的 tasks.md 已批准 → 已切换到 Agent 模式。\n\n` +
-      `📋 **活动计划**：${path}\n📊 **任务总数**：${tasks.length}\n\n` +
-      `💡 **下一步**：在下方输入框发送消息（如"开始执行"）即可触发 Agent 按顺序执行任务。`,
-  });
-
-  await host.persist(sessionId);
-  return host.getState(sessionId);
-}
-
-/**
- * 驳回当前等待审批的阶段：把用户反馈推入对话历史，模型据此修订并重新保存。
- * 闸门状态保持不变（仍是 awaiting_*_approval），重写后再次等待审批。
- */
-export async function rejectSpecPhase(
-  host: SpecsHost,
-  feature: string,
-  feedback: string,
-  sessionId?: string,
-): Promise<SessionState> {
-  const r = host.rt(sessionId);
-  const root = host.sessionWorkspaceRoot(r.id);
-  if (!root) throw new Error(ERR_NO_WORKSPACE);
-
-  const state = await readFeatureState(root, feature, r.id);
-  if (!state) {
-    throw new Error(`特性 ${feature} 尚未生成任何 spec 文档`);
-  }
-  const phase = phaseUnderReview(state.stage);
-  if (!phase) {
-    throw new Error(`当前状态「${STAGE_LABEL[state.stage]}」不在等待审批，无法驳回`);
-  }
-
-  r.currentFeature = feature;
-  r.history.push({
-    role: "user",
-    content:
-      `↩️ ${feature} 的 ${phaseFileName(phase)} 未通过审批。请修改后重新保存。\n\n` +
-      `**用户反馈**：${feedback.trim() || "（未填写具体意见，请重新审视该文档）"}`,
-  });
-
+  if (r.id === host.focusSessionId()) host.setFocusMode("agent");
   await host.persist(sessionId);
   return host.getState(sessionId);
 }

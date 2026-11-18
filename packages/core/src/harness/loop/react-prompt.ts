@@ -9,6 +9,7 @@ import { type TaskItem } from "../../plans.ts";
 import type { ChatTurn } from "./types.ts";
 import type { ToolResultMetadata } from "../tools/types.ts";
 import { USER_FACING_WRITE_TOOLS } from "./react-steps.ts";
+import { SPEC_TASK_OUTCOME_TOOL } from "./single-spec-task.ts";
 
 const SPEC_DOC_LABEL: Record<string, string> = {
   save_spec: "Requirements spec",
@@ -29,7 +30,13 @@ export function summarizeToolActionForUser(
   if (name === "save_spec" || name === "save_design" || name === "save_tasks") {
     const label = SPEC_DOC_LABEL[name] ?? "Document";
     const p = out.replace(/^(?:Spec|Design|Tasks) saved to\s*/i, "").replace(/\.\n[\s\S]*$/s, "").trim();
-    return `${label} saved${p ? `: ${p}` : ""}. Reply "下一步"/"next" in the chat to approve and continue to the next phase (or describe the changes you want).`;
+    const link = p ? `[${p}](${p})` : "";
+    const next = name === "save_design"
+      ? '请查看设计文档。看完后，用自己的话告诉我想继续生成任务，还是调整设计。'
+      : name === "save_tasks"
+        ? "请查看任务清单。准备好后，在预览中点击任务旁的「执行」或顶部的「全部执行」。"
+        : "请查看需求文档。看完后，用自己的话告诉我想继续生成设计，还是调整需求。";
+    return `${label} saved${link ? `: ${link}` : ""}. ${next}`;
   }
   if (name === "write_file") {
     const p = out.replace(/^Wrote\s*/i, "").replace(/\s*\([^)]*\)\s*$/, "").trim();
@@ -68,9 +75,12 @@ export const EXPLORE_WRAP_UP_TURNS = 6;
 export function formatIterationBudgetHint(
   current: number,
   max: number,
-  mode: "executor" | "planner" | "explore" = "executor",
+  mode: "executor" | "planner" | "explore" | "single_spec_task" = "executor",
 ): string {
   const remaining = Math.max(0, max - current);
+  if (remaining === 0 && mode === "single_spec_task") {
+    return `Final iteration. Call ${SPEC_TASK_OUTCOME_TOOL} or report_blocker now. Do not make any other tool calls.`;
+  }
   if (remaining === 0) {
     return `当前第 ${current} 次迭代，上限 ${max} 次，剩余 0 次。这是最后一次迭代：本轮不得再调用任何工具，必须直接输出最终计划/结论文本（含已完成工作、证据与剩余风险），不要再发起工具调用。`;
   }
@@ -105,11 +115,13 @@ export function formatTaskConstraints(task: TaskItem): string {
 
 
 
-export function formatCurrentTaskContext(task: TaskItem): string {
+export function formatCurrentTaskContext(task: TaskItem, singleSpecTask = false): string {
   // Keep this contract short and mechanical. The model needs an explicit stop
   // condition, while detailed exploration prose belongs in the base prompt.
   return [
-    "## **Current Task (in progress; prioritize; move to the next only after completion)**",
+    singleSpecTask
+      ? "## Current Task (only the selected Spec task is authorized)"
+      : "## **Current Task (in progress; prioritize; move to the next only after completion)**",
     "Execution discipline (mandatory):",
     "- If the task names an exact file/range or replacement text, read only that target, then edit and verify; do not inspect anything else.",
     "- You have no search tools: any fact not already established (file location, symbol, call chain, external doc) must come from a dispatch_agent (Explore) report. read_file is only for paths already established by the task, plan, a prior Explore report, or your own edits.",
@@ -124,7 +136,9 @@ export function formatCurrentTaskContext(task: TaskItem): string {
     task.progressStatus ? `Progress status: ${task.progressStatus}` : "",
     formatTaskConstraints(task),
     formatPackedHistory(task),
-    "Use tools to execute this task. When done, stop calling tools and report the result concisely.",
+    singleSpecTask
+      ? `Do not execute another task or change the plan/task list. After doing the work and checking acceptance, call ${SPEC_TASK_OUTCOME_TOOL} with completed or failed and the result. If user action is needed, call report_blocker. Plain text cannot complete the task.`
+      : "Use tools to execute this task. When done, stop calling tools and report the result concisely.",
     "Final response format (unless the user explicitly requests a different format):",
     "- For multi-point analysis or reports, use Markdown headings (## / ###), short paragraphs separated by blank lines, and bullet or numbered lists for distinct findings, evidence, changes, and verification results as applicable.",
     "- Put code, SQL, configuration, or multi-line commands in fenced code blocks with a language tag when needed; keep identifiers and file paths in inline code.",

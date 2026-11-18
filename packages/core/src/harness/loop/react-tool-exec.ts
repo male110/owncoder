@@ -29,13 +29,15 @@ import {
   summarizeToolResultForHistory,
 } from "./react-prompt.ts";
 import { buildSpecWorkflowUpdate, specPhaseOfTool } from "./document-workflow.ts";
-import { featureDirRel, phaseFileName } from "../../specs.ts";
+import { featureDirRel, phaseFileName, publicPhaseRel } from "../../specs.ts";
 import { updateStateAfterResponse } from "./termination.ts";
 import { activeInformationTask, applyRunEvent, recordDecision } from "./react-finalize.ts";
 import { type FreshnessFollowUp } from "./context-control.ts";
+import { collectGeneratedFiles } from "./generated-files.ts";
 import { normalizeRel, toAbs } from "../tools/shared.ts";
 import type { ParsedToolCall } from "../parser.ts";
 import type { ReActLoopContext } from "./react-loop-context.ts";
+import { parseSpecTaskSubmission, SPEC_TASK_OUTCOME_TOOL } from "./single-spec-task.ts";
 
 /**
  * 证据板路径键：与 toolRead 的板键同一归一（toAbs + normalizeRel）。
@@ -110,7 +112,16 @@ async function runOne(
   // 硬拦截：ReAct 执行阶段禁止派发 Planner 子代理（不能只靠提示词软约束）。
   // Planner 的唯一合法派发入口是任务分解阶段的 runAgentPlanner（planner.ts → executeTool），
   // 不经过本执行路径；此处拒绝产生工具级错误交回 LLM 纠错，不打断循环。
-  if (call.name === "dispatch_agent" && (call.arguments as Record<string, unknown> | undefined)?.agent_type === "Planner") {
+  if (call.name === SPEC_TASK_OUTCOME_TOOL) {
+    const report = ctx.opts.singleSpecTask && ctx.currentTask?.id === ctx.opts.currentTaskId
+      ? parseSpecTaskSubmission(call.rawArguments) : undefined;
+    if (report) {
+      ctx.specTaskReport = report;
+      result = { ok: true, output: "Task outcome submitted. The harness will apply the verification gates." };
+    } else {
+      result = { ok: false, output: "Submit a completed or failed status and a non-empty result for the selected Spec task." };
+    }
+  } else if (call.name === "dispatch_agent" && (call.arguments as Record<string, unknown> | undefined)?.agent_type === "Planner") {
     result = {
       ok: false,
       output:
@@ -225,6 +236,12 @@ function recordResult(
     result: r.result.output,
   });
   if (r.result.ok && resultMetadata?.kind === "file_mutation") {
+    const generated = collectGeneratedFiles([
+      { role: "tool", toolName: r.call.name, content: r.result.output },
+    ]);
+    for (const path of generated) {
+      if (!ctx.generatedFiles.includes(path)) ctx.generatedFiles.push(path);
+    }
     for (const modifiedPath of resultMetadata.paths) {
       emitFreshnessFollowUp(ctx, ctx.contextControl?.invalidatePath(modifiedPath) ?? null);
       // 证据板同步失效（metadata 路径已是相对形式，归一幂等）。
@@ -281,13 +298,13 @@ function recordResult(
   if (ctx.docDeliverableEnabled && ctx.opts.mode === "spec" && !ctx.documentDelivered && r.result.ok) {
     const phase = specPhaseOfTool(r.call.name);
     const feature = String(r.call.arguments?.feature ?? "").trim();
-    if (phase && feature) {
+    if (phase && phase !== "other" && feature) {
       ctx.documentDelivered = true;
       ctx.deliveredDocName = phaseFileName(phase);
       // 仅在尚未设置工作流状态时才创建新状态，避免后续阶段覆盖当前审批闸门
       if (ctx.documentWorkflowUpdate === undefined) {
         ctx.documentWorkflowUpdate = buildSpecWorkflowUpdate(
-          { feature, path: resultMetadata?.kind === "file_mutation" ? resultMetadata.paths[0]! : `${featureDirRel(feature, ctx.opts.sessionId)}/${phaseFileName(phase)}`, phase },
+          { feature, path: resultMetadata?.kind === "file_mutation" ? resultMetadata.paths[0]! : (phase === "tasks" ? `${featureDirRel(feature, ctx.opts.sessionId)}/${phaseFileName(phase)}` : publicPhaseRel(feature, phase)), phase },
           ctx.opts.documentWorkflow,
           ctx.opts.sessionId,
         );
@@ -323,9 +340,11 @@ function recordResult(
 export function recordSkippedCall(ctx: ReActLoopContext, call: ParsedToolCall, id: string): void {
   const output = ctx.handoffRequested
     ? "Skipped: control was handed back to the user by report_blocker."
-    : ctx.submittedToolName
-      ? `Skipped: the final deliverable was submitted via ${ctx.submittedToolName}; the loop ends here.`
-      : `Skipped: document ${ctx.deliveredDocName} is awaiting user confirmation.`;
+    : ctx.specTaskReport
+      ? `Skipped: the task outcome was submitted via ${SPEC_TASK_OUTCOME_TOOL}.`
+      : ctx.submittedToolName
+        ? `Skipped: the final deliverable was submitted via ${ctx.submittedToolName}; the loop ends here.`
+        : `Skipped: paused after delivering ${ctx.deliveredDocName} for review.`;
   ctx.opts.onEvent?.({ type: "tool_start", id, name: call.name, args: call.arguments });
   ctx.messages.push({ role: "tool", tool_call_id: id, name: call.name, content: output });
   ctx.history.push({ role: "tool", id, content: output, toolName: call.name, toolArgs: call.arguments });
@@ -499,7 +518,7 @@ export async function executeIterationTools(
   let skippedReadonlyCap = false;
   let ti = 0;
   while (ti < calls.length) {
-    if (ctx.documentDelivered || ctx.handoffRequested || ctx.submittedToolName) break;
+    if (ctx.documentDelivered || ctx.handoffRequested || ctx.submittedToolName || ctx.specTaskReport) break;
     // 连续只读硬上限：maxConsecutiveReadonlyIters <= 0 表示「不限制」（默认）。
     // 只有显式配置正整数时才机械拦截，避免把正常的多轮证据收集误判为失控。
     if (

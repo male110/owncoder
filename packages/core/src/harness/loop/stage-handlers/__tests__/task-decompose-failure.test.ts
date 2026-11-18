@@ -58,17 +58,18 @@ describe("任务分解失败事件", () => {
     expect(vi.mocked(chatCompletionStream).mock.calls[0][2]?.tools).toEqual(expect.arrayContaining([expect.objectContaining({ function: expect.objectContaining({ name: "dispatch_agent" }) })]));
   });
 
-  it("spec 跨模块设计请求使用专用分解提示词并提供原生 Planner", async () => {
+  it("uses the current Spec review guidance without offering Planner", async () => {
     vi.mocked(chatCompletionStream).mockResolvedValue({ choices: [{ message: { content: JSON.stringify({ intent: "设计 spec 流程改造", tasks: [{ id: "t1", executionGuidance: "给出设计方案" }] }) } }] } as never);
     const { ctx } = context();
     ctx.opts.mode = "spec";
     ctx.opts.userMessage = "spec 模式怎么改成跨模块任务分解 → ReAct？先给代码库依据的设计改造方案";
+    ctx.opts.specReviewGuidance = "Draft the technical design for the current feature.";
     ctx.node = { id: "decompose", type: "task_decompose", label: "理解与任务分解", prompt: BUILTIN_SPEC_TASK_DECOMPOSE_PROMPT };
     await taskDecomposeHandler.run(ctx);
     const [_, messages, options] = vi.mocked(chatCompletionStream).mock.calls[0];
     expect(String(messages[0]?.content)).toContain("# Spec Mode — Task Planning Overrides");
-    expect(String(messages[0]?.content)).toContain("tracing across modules or workflow boundaries");
-    expect(options?.tools).toEqual(expect.arrayContaining([expect.objectContaining({ function: expect.objectContaining({ name: "dispatch_agent" }) })]));
+    expect(String(messages[0]?.content)).toContain("Current Spec turn: Draft the technical design for the current feature.");
+    expect(options?.tools).toBeUndefined();
     expect(ctx.state.rawDecompose?.tasks[0]?.executionGuidance).toBe("给出设计方案");
   });
 

@@ -212,14 +212,19 @@ export function assertSpecMutationAllowed(ctx: ToolContext, relPath: string): To
   if (!ctx.workflow.modes.spec.allowSpecFiles) {
     return fail("Spec mode: file writes disabled in settings");
   }
-  // `.owncoder/specs/` 下的规格文档一律允许（save_spec / save_design / save_tasks）
-  if (isSpecPath(relPath)) return null;
+  // save_spec/save_design/save_tasks 通过各自的安全写入与审批闸门受控落盘。
+  // 普通 write_file/apply_patch 不能绕过 docs 中的 Spec 公共文档 owner 约束。
+  if (isControlledSpecDocPath(relPath)) {
+    return fail("Spec requirement/design documents must be written with save_spec/save_design");
+  }
+  if (isSpecPath(relPath)) return fail("Session-private Spec documents must be written with the matching save tool");
+  if (isDocsPath(relPath)) return null;
   // 旧版 `.owncoder/plans/` 目录保留只读兼容，不再作为工作流入口
   // 文档交付物（.md）允许写到项目任意位置（根目录、docs/ 等），不进 spec 面板
   if (relPath.toLowerCase().endsWith(".md")) return null;
   // 源代码等其他文件保持只读，守住 Spec 模式不改源码的契约
   return fail(
-    `Spec mode is read-only for source files. Writable: \`.owncoder/specs/\` (specs via save_spec/save_design/save_tasks) and \`.md\` document files (deliverables via write_file). Got ${relPath}.`,
+    `Spec mode is read-only for source files. Writable: project \`docs/<feature>-requirement.md\` / \`docs/<feature>-design.md\` via save_spec/save_design, session-private \`.owncoder/specs/.../\` via save_tasks, and generic \`.md\` deliverables via write_file. Got ${relPath}.`,
   );
 }
 
@@ -228,6 +233,18 @@ export function isSpecPath(relPath: string): boolean {
   const prefix = ".owncoder/specs/";
   const norm = relPath.replace(/\\/g, "/");
   return norm === prefix.slice(0, -1) || norm.startsWith(prefix);
+}
+
+/** True when relPath sits under the project-level docs directory. */
+export function isDocsPath(relPath: string): boolean {
+  const norm = relPath.replace(/\\/g, "/");
+  return norm === "docs" || norm.startsWith("docs/");
+}
+
+/** Controlled phase files are only written by save_spec/save_design. */
+export function isControlledSpecDocPath(relPath: string): boolean {
+  const norm = relPath.replace(/\\/g, "/");
+  return /^docs\/[^/]+-(?:requirement|design)\.md$/i.test(norm);
 }
 
 /** Backwards-compatible alias; plan files stay readable for legacy sessions. */

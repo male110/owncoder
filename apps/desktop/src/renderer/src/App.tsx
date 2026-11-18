@@ -57,7 +57,7 @@ export function App() {
   const {
     workspace, projects, sessions, sessionsByProject, activeSessionId, sessionTitle,
     expanded, mode, modelLabel, availableModels, providers, llmConfigured,
-    activePlanPathBySession, plansBySession,
+    activePlanPathBySession, activePlanMetaBySession, plansBySession,
     gitStatus, changesBySession, thinkingEffort,
     separateStageModels, reactModelId, reactProviderId, reactThinkingEffort,
   } = useSessionStore();
@@ -165,7 +165,7 @@ export function App() {
 
   const {
     onSend, onRegenerate,
-    onApprovePlan,
+    onApprovePlan, onExecutePlan, onUpdateTask, onExecuteSpecTasks,
     onRollback, onKeepAll, onKeepFile, onUndoFile,
     onSelectModel, onMode, onSelectThinkingEffort, onSelectReactThinkingEffort, sendQueued,
   } = useChatActions({
@@ -725,6 +725,12 @@ export function App() {
                               })}
                           onSaved={() => void refreshChanges()}
                           onDirtyChange={(dirty) => handleEditorDirtyChange(tabPath, dirty)}
+                          activePlanMeta={activePlanMetaBySession[activeSessionId ?? ""] as import("../../preload/index").ActivePlanMetaDto | undefined}
+                          taskBusy={busy || sending}
+                          sessionId={activeSessionId ?? undefined}
+                          onExecutePlan={() => activeSessionId && onExecutePlan(activeSessionId)}
+                          onExecuteSpecTasks={activeSessionId ? (document, taskId) => void onExecuteSpecTasks(activeSessionId, document, taskId) : undefined}
+                          onUpdateTask={(taskId, status, document) => activeSessionId && void onUpdateTask(taskId, status, activeSessionId, document)}
                         />
                       </div>
                     );

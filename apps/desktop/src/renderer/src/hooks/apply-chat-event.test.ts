@@ -34,6 +34,26 @@ function apply(ev: ChatEventDto, sessionId: string | null = "s1") {
   applyChatEvent(useChatStore.getState(), useSessionStore.getState(), sessionId, ev);
 }
 
+describe("versioned Spec task updates", () => {
+  it("ignores old or unscoped progress and applies the matching version", () => {
+    const sid = "spec-progress";
+    const store = useSessionStore.getState();
+    const task = { id: "task_1", executionGuidance: "Verify the change", status: "pending" as const, dependsOn: [], retryCount: 0, maxRetries: 1 };
+    const planRef = { path: ".owncoder/specs/sessions/hash/feature/tasks.md", approvedAt: "now", version: "current" };
+    store.setActivePlanMetaBySession(sid, { path: planRef.path, approvedAt: planRef.approvedAt, documentDigest: planRef.version, tasks: [task], currentTaskId: null });
+    try {
+      const event = { type: "task_update" as const, sessionId: sid, tasks: [{ ...task, status: "completed" as const }], currentTaskId: null };
+      apply({ ...event, planRef: { ...planRef, version: "old" } });
+      apply(event);
+      expect(store.getActivePlanMetaForSession(sid)?.tasks[0]?.status).toBe("pending");
+      apply({ ...event, planRef });
+      expect(store.getActivePlanMetaForSession(sid)?.tasks[0]?.status).toBe("completed");
+    } finally {
+      store.setActivePlanMetaBySession(sid, null);
+    }
+  });
+});
+
 describe("applyChatEvent task_run_state", () => {
   beforeEach(() => resetChat());
 

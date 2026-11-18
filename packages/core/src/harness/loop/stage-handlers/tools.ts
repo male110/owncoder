@@ -51,7 +51,10 @@ async function runToolLoop(ctx: StageHandlerContext): Promise<void> {
     reasoningTrace, state, node, taskClassification,
   } = ctx;
 
-  if ((opts.mode === "agent" || state.plannerPlan) && !(opts.leanPipeline && opts.readOnly) && !await requireAgentPlanApproval(ctx)) return;
+  if (opts.mode === "agent" && !(opts.leanPipeline && opts.readOnly) && !await requireAgentPlanApproval(ctx)) {
+    if (opts.singleSpecTask) state.lastAssistant = state.blockedReason ?? "Pending Planner approval";
+    return;
+  }
 
   // 使用分阶段模型配置（如果启用）
   const stageModel = resolveStageModel(opts.workflow, opts.mode, node, "react");
@@ -67,10 +70,10 @@ async function runToolLoop(ctx: StageHandlerContext): Promise<void> {
   });
 
   const loopParams = node.params ?? {};
-  let enrichedOpts = withDecomposeHistory(opts, state);
+  let enrichedOpts = opts.singleSpecTask ? opts : withDecomposeHistory(opts, state);
 
   // Task decomposition feeds the normal sequential ReAct task driver.
-  if (!enrichedOpts.activeTasks?.length && state.rawDecompose?.tasks?.length) {
+  if (!opts.singleSpecTask && !enrichedOpts.activeTasks?.length && state.rawDecompose?.tasks?.length) {
     enrichedOpts = {
       ...enrichedOpts,
       activeTasks: state.rawDecompose.tasks.map((task) => ({
@@ -145,6 +148,7 @@ async function runToolLoop(ctx: StageHandlerContext): Promise<void> {
   if (reactResult.taskRunState !== undefined) {
     state.taskRunState = reactResult.taskRunState;
   }
+  if (reactResult.specTaskSubmission) state.specTaskSubmission = reactResult.specTaskSubmission;
   if (reactResult.successRejected) {
     state.successRejected = true;
     state.blocked = true;

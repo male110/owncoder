@@ -19,6 +19,7 @@ import {
   deleteCheckpoint,
 } from "./harness/checkpoint.ts";
 import { buildChangesFromCheckpoint, restoreSingleFile, type ChangeFile } from "./changes.ts";
+import { isSpecTaskPath, readApprovedSpecTask, type SpecTaskRef } from "./spec-task-document.ts";
 import {
   extractTitle,
   isPlanPath,
@@ -90,13 +91,26 @@ export async function updateTask(
   status: TaskStatus,
   result?: string,
   sessionId?: string,
+  taskRef?: SpecTaskRef,
 ): Promise<ActivePlanMeta | null> {
   const sid = sessionId ?? host.focusSessionId();
   const root = sid ? host.sessionWorkspaceRoot(sid) : host.workspaceRoot();
   if (!root) throw new Error(ERR_NO_WORKSPACE);
   return host.enqueueActivePlanUpdate(async () => {
-    const meta = await readActiveMeta(root, sid ?? undefined);
-    if (!meta) throw new Error("没有活动计划");
+    const active = await readActiveMeta(root, sid ?? undefined);
+    if (!active) throw new Error("没有活动计划");
+    let meta = active;
+    if (taskRef || isSpecTaskPath(active.path)) {
+      if (!sid || !taskRef || taskRef.taskId !== taskId || (status !== "pending" && status !== "skipped")) {
+        throw new Error("任务清单已失效或不支持此操作");
+      }
+      const checked = await readApprovedSpecTask(root, sid, host.rt(sid).activePlanPath, taskRef);
+      if (checked.meta.tasks.some((task) => task.status === "in_progress")) throw new Error("任务正在执行");
+      if (status === "skipped" ? checked.task.status !== "pending" : !["failed", "skipped"].includes(checked.task.status)) {
+        throw new Error("任务状态已变更");
+      }
+      meta = checked.meta;
+    }
     const t = meta.tasks.find((x) => x.id === taskId);
     if (!t) throw new Error(`找不到任务 ${taskId}`);
     t.status = status;

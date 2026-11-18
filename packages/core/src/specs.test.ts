@@ -67,8 +67,20 @@ describe("validateSpecContent", () => {
     expect(() => validateSpecContent("   \n  ")).toThrow(/empty/i);
   });
 
-  it("拒绝缺少需求编号", () => {
-    expect(() => validateSpecContent("# 需求\n\n只有目标，没有编号需求。")).toThrow(/R1/i);
+  it("接受不带固定编号或 EARS 句式的自然语言需求", () => {
+    expect(() => validateSpecContent("# 需求\n\n用户需要在登录失败时看到清晰提示。")).not.toThrow();
+  });
+
+  it("支持 FR 编号并允许设计追踪", () => {
+    expect(() => validateSpecContent("# 需求\n\n- FR1: 用户可以登录\n- R2: 管理员可以退出登录")).not.toThrow();
+    expect(() => validateDesignContent("# 设计\n\nFR1 在认证模块实现，R2 在会话模块实现。", "FR1: 用户可以登录\nR2: 管理员可以退出登录")).not.toThrow();
+  });
+
+  it("中文 feature 使用 docs 根目录扁平文件名", async () => {
+    await saveSpec(root, "养生馆", "# 需求\n\n用户可以预约课程。", SID);
+    await saveDesign(root, "养生馆", "# 设计\n\n预约服务负责处理课程预约。", SID);
+    expect(await fs.readFile(join(root, "docs/养生馆-requirement.md"), "utf8")).toContain("预约课程");
+    expect(await fs.readFile(join(root, "docs/养生馆-design.md"), "utf8")).toContain("预约服务");
   });
 
   it("拒绝重复需求编号", () => {
@@ -150,22 +162,22 @@ describe("三阶段落盘校验", () => {
     await saveSpec(root, "login", validSpec, SID);
     await saveDesign(root, "login", validDesign, SID);
     await saveTasks(root, "login", validTasks, SID);
-    const dir = join(root, featureDirRel("login", SID));
-    for (const f of ["requirement.md", "design.md", "tasks.md"]) {
-      expect(await fs.readFile(join(dir, f), "utf8")).toBeTruthy();
-    }
+    const privateDir = join(root, featureDirRel("login", SID));
+    expect(await fs.readFile(join(root, "docs/login-requirement.md"), "utf8")).toBeTruthy();
+    expect(await fs.readFile(join(root, "docs/login-design.md"), "utf8")).toBeTruthy();
+    expect(await fs.readFile(join(privateDir, "tasks.md"), "utf8")).toBeTruthy();
   });
 
   it("需求阶段拒绝技术内容，不落盘", async () => {
     await expect(saveSpec(root, "login", `${validSpec}\n\n## 架构\n分层。\n`, SID)).rejects.toThrow(/pure requirements/i);
-    await expect(fs.access(join(root, featureDirRel("login", SID), "requirement.md"))).rejects.toThrow();
+    await expect(fs.access(join(root, "docs/login-requirement.md"))).rejects.toThrow();
   });
 
   it("设计阶段拒绝缺失追踪，不落盘", async () => {
     await saveSpec(root, "login", validSpec, SID);
     const missing = validDesign.replace("| R2 | 错误提示 |", "");
     await expect(saveDesign(root, "login", missing, SID)).rejects.toThrow(/does not cover/i);
-    await expect(fs.access(join(root, featureDirRel("login", SID), "design.md"))).rejects.toThrow();
+    await expect(fs.access(join(root, "docs/login-design.md"))).rejects.toThrow();
   });
 
   it("任务阶段拒绝字段缺失，不落盘", async () => {
@@ -184,6 +196,32 @@ describe("与计划执行接口兼容", () => {
     expect(tasks[0]!.id).toBe("task_1");
     expect(tasks[0]!.status).toBe("pending");
     expect(tasks[0]!.executionGuidance).toContain("实现登录流程");
+    expect(tasks[0]!.executionGuidance).toContain("文件/模块: src/login.ts");
+    expect(tasks[0]!.executionGuidance).toContain("需求: R1");
+    expect(tasks[0]!.acceptance).toContain("登录成功进入首页");
     expect(tasks[1]!.dependsOn).toEqual(["task_1"]);
+  });
+
+  it("保留多行字段、显式依赖和 checkbox 状态", () => {
+    const body = [
+      "# 任务",
+      "- [x] 准备数据",
+      "  - 文件: data/seed.ts",
+      "  - 实现: 创建测试数据",
+      "    并保证重复运行幂等",
+      "  - 验收: 脚本可重复执行",
+      "  - 需求: R1",
+      "- [ ] 执行迁移",
+      "  - 依赖: task_1",
+      "  - 文件: db/migrate.ts",
+      "  - 实现: 应用迁移",
+      "  - 验收: 数据库结构正确",
+      "  - 需求: R2",
+    ].join("\n");
+    const tasks = parseTasksFromMarkdown(body);
+    expect(tasks[0]!.status).toBe("completed");
+    expect(tasks[0]!.executionGuidance).toContain("并保证重复运行幂等");
+    expect(tasks[1]!.dependsOn).toEqual(["task_1"]);
+    expect(tasks[1]!.acceptance).toBe("数据库结构正确");
   });
 });

@@ -40,7 +40,7 @@ describe("版本化计划保存与审批", () => {
     expect(needsAgentPlanApproval({ mode: "agent", activePlan: null }, true)).toBe(true);
     expect(needsAgentPlanApproval({ mode: "agent", activePlan: null }, false)).toBe(false);
     expect(needsAgentPlanApproval({ mode: "agent", activePlan: {} as never }, true)).toBe(false);
-    expect(needsAgentPlanApproval({ mode: "spec", activePlan: null }, true)).toBe(true);
+    expect(needsAgentPlanApproval({ mode: "spec", activePlan: null }, true)).toBe(false);
   });
 
   it("保存完整文件并交付正确版本卡片，同轮不询问批准也不分解实施", async () => {
@@ -75,18 +75,33 @@ describe("版本化计划保存与审批", () => {
     expect(await requireAgentPlanApproval(ctx)).toBe(false);
   });
 
-  it("Spec 批准仍只授权只读设计，不能作为 Agent 实施批准", async () => {
-    const first = makeContext([], "请设计登录方案，不要修改代码"); first.opts.mode = "spec";
-    await runAgentPlanner(first, call);
-    const spec = makeContext(first.history, "批准计划"); spec.opts.mode = "spec";
-    await resumeAgentPlan(spec);
-    expect(spec.state.planApproval).toBe("approved");
-    expect(spec.opts.userMessage).toBe("请设计登录方案，不要修改代码");
-    expect(spec.opts.askUser).toHaveBeenCalledWith(expect.objectContaining({ question: expect.stringContaining("不修改源代码") }));
-    const agent = makeContext(first.history);
-    await resumeAgentPlan(agent);
-    expect(agent.state.blocked).toBe(true);
-    expect(agent.opts.askUser).not.toHaveBeenCalled();
+  it("Spec never dispatches the approval Planner or saves a plan for approval", async () => {
+    const ctx = makeContext([], "请设计登录方案，不要修改代码");
+    ctx.opts.mode = "spec";
+    await runAgentPlanner(ctx, call);
+    expect(ctx.toolCtx.dispatchSubagent).not.toHaveBeenCalled();
+    expect(ctx.state.awaitingUserConfirmation).toBeUndefined();
+    expect(await readPlannerPlan(root, "session-a")).toBeNull();
+  });
+
+  it.each(["spec", "agent"] as const)("Spec ignores an old %s plan without giving Agent permission to adopt a Spec plan", async (mode) => {
+    const plan = await savePlannerPlan(root, "session-a", mode, report);
+    const message = "把这版方案拆成待办吧";
+    const ctx = makeContext([{ role: "assistant", content: `<!--plan_saved:${plan.path}-->` }], message);
+    ctx.opts.mode = "spec";
+    await resumeAgentPlan(ctx);
+    expect(await requireAgentPlanApproval(ctx)).toBe(true);
+    expect(ctx.state.awaitingUserConfirmation).toBeUndefined();
+    expect(ctx.state.plannerPlan).toBeUndefined();
+    expect(ctx.opts.userMessage).toBe(message);
+    expect(ctx.opts.askUser).not.toHaveBeenCalled();
+    expect((await readPlannerPlan(root, "session-a"))?.status).toBe("pending_approval");
+    if (mode === "spec") {
+      const agent = makeContext(ctx.history);
+      await resumeAgentPlan(agent);
+      expect(agent.state.blocked).toBe(true);
+      expect(agent.opts.askUser).not.toHaveBeenCalled();
+    }
   });
 
   it("修改已批准计划保存完整新版、更新引用并使旧批准失效", async () => {

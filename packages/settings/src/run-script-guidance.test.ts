@@ -70,18 +70,12 @@ for (const [mode, prompt] of [["agent", BUILTIN_AGENT_PROMPT], ["spec", BUILTIN_
   });
 }
 
-describe("spec-mode Planner eligibility", () => {
-  it("plans cross-file architecture before approval without escalating simple requests", () => {
-    expect(BUILTIN_SPEC_PROMPT).toContain("use dispatch_agent with agent_type=\"Planner\" first");
+describe("spec-mode design research", () => {
+  it("uses read-only evidence without a Planner approval", () => {
+    expect(BUILTIN_SPEC_PROMPT).toContain("read-only tools or Explore");
     expect(BUILTIN_SPEC_PROMPT).toContain("crosses modules or workflow boundaries");
-    expect(BUILTIN_SPEC_PROMPT).toContain("even when the current deliverable is only a design");
-    expect(BUILTIN_SPEC_PROMPT).toContain("## Final Report");
-    expect(BUILTIN_SPEC_PROMPT).toContain("相关文件 backed by actual code paths and line or symbol ranges");
-    expect(BUILTIN_SPEC_PROMPT).toContain("Do not call Planner merely because a request mentions design");
-    expect(BUILTIN_SPEC_PROMPT).toContain("explanations of an already-known single file");
-    expect(BUILTIN_SPEC_PROMPT).toContain("do not edit source code before approval");
-    expect(BUILTIN_SPEC_PROMPT).toContain("Present its plan via ask_user for explicit approval");
-    expect(BUILTIN_SPEC_PROMPT).toContain("if approval is unavailable, rejected, or requests revision, pause without saving the next document");
+    expect(BUILTIN_SPEC_PROMPT).toContain("do not dispatch Planner or require a separate plan approval in Spec mode");
+    expect(BUILTIN_SPEC_PROMPT).toContain("source code never modified");
   });
 });
 
@@ -100,8 +94,9 @@ describe("dedicated spec task decomposition", () => {
     expect(BUILTIN_SPEC_TASK_DECOMPOSE_PROMPT).toContain("# Output requirements");
     expect(BUILTIN_SPEC_TASK_DECOMPOSE_PROMPT).toContain('\"relevantHistory\"');
     expect(BUILTIN_SPEC_TASK_DECOMPOSE_PROMPT).toContain("never create implementation tasks that edit source code");
-    expect(BUILTIN_SPEC_TASK_DECOMPOSE_PROMPT).toContain("crossing modules or workflows");
-    expect(BUILTIN_SPEC_TASK_DECOMPOSE_PROMPT).toContain("ordinary conceptual requests or explanations of a known single file");
+    expect(BUILTIN_SPEC_TASK_DECOMPOSE_PROMPT).toContain("Planner and code-change rules apply only to Agent mode");
+    expect(BUILTIN_SPEC_TASK_DECOMPOSE_PROMPT).toContain("latest user message clearly asks to proceed");
+    expect(BUILTIN_SPEC_TASK_DECOMPOSE_PROMPT).toContain("全部执行");
   });
 });
 

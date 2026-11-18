@@ -16,7 +16,8 @@ import type { AskUserRequest } from "./harness/tools/types.ts";
 import { appendTurnEvent, completeTurn } from "./conversation-store.ts";
 import { saveSessionById } from "./session-store.ts";
 import { newCheckpointId, persistCheckpoint, type FileSnapshot } from "./harness/checkpoint.ts";
-import { readActiveMeta, readPlanFile, writeActiveMeta, type TaskItem } from "./plans.ts";
+import { readActiveMeta, readPlanFile, selectNextPendingTask, writeActiveMeta, type TaskItem } from "./plans.ts";
+import { assertSpecTaskReady, isSpecTaskPath, readApprovedSpecTask, type SpecTaskRef } from "./spec-task-document.ts";
 import { applyTaskEvent, taskRunMetricsSnapshot, taskRunPhaseLabel, taskRunTotalDurationMs } from "./task-run.ts";
 import type { McpManager } from "./mcp/client.ts";
 import type { UserMemoryStore } from "./user-memories.ts";
@@ -31,6 +32,7 @@ export interface AgentTurnContext {
   turnId: string;
   onEvent?: (ev: TurnEvent) => void;
   attachments: ChatAttachment[];
+  taskRef?: SpecTaskRef;
   /** 会话运行时（history、terminalLog、persistQueue 等直接在本函数内读写）。 */
   runtime: SessionRuntime;
   /** 本轮绑定的项目根目录；openWorkspace 切换不影响这个快照。 */
@@ -118,7 +120,8 @@ export async function executeAgentTurn(ctx: AgentTurnContext): Promise<AgentLoop
   let activePlan: { path: string; content: string } | null = null;
   let activeTasks: TaskItem[] | undefined;
   let currentTaskId: string | null | undefined;
-  if (r.mode === "agent" && r.activePlanPath) {
+  const taskRef = ctx.taskRef;
+  if (r.mode === "agent" && r.activePlanPath && !taskRef && !isSpecTaskPath(r.activePlanPath)) {
     try {
       const content = await readPlanFile(workspaceRoot, r.activePlanPath, sessionId);
       activePlan = { path: r.activePlanPath, content };
@@ -133,7 +136,14 @@ export async function executeAgentTurn(ctx: AgentTurnContext): Promise<AgentLoop
   }
 
   const onTaskUpdate = async (tasks: TaskItem[], nextId: string | null) => {
+    if (taskRef) {
+      if (tasks.some((task) => task.id === taskRef.taskId && task.status === "in_progress")) {
+        await updateSpecTask("in_progress");
+      }
+      return;
+    }
     const activePlanPath = r.activePlanPath;
+    if (activePlanPath && isSpecTaskPath(activePlanPath)) return;
     const snapshot = JSON.parse(JSON.stringify(tasks)) as TaskItem[];
     // 有批准计划：写回 .owncoder/plans/.active/<sid>.json（线程安全队列）。
     if (activePlanPath) {
@@ -184,8 +194,41 @@ export async function executeAgentTurn(ctx: AgentTurnContext): Promise<AgentLoop
     });
   };
 
+  let specTaskStarted = false;
+  const updateSpecTask = async (status: TaskItem["status"], report?: string) => {
+    if (!taskRef || (status === "in_progress" ? specTaskStarted : !specTaskStarted)) return;
+    const meta = await ctx.enqueueActivePlanUpdate(async () => {
+      const { meta, task } = await readApprovedSpecTask(workspaceRoot, sessionId, r.activePlanPath, taskRef);
+      if (status === "in_progress") {
+        ctx.abortController.signal.throwIfAborted();
+        assertSpecTaskReady(meta, task);
+      } else if (task.status !== "in_progress") {
+        throw new Error("任务状态已变更，拒绝写入过期结果");
+      }
+      task.status = status;
+      task.result = report?.slice(0, 8000);
+      meta.currentTaskId = status === "in_progress" ? task.id : selectNextPendingTask(meta.tasks)?.id ?? null;
+      await writeActiveMeta(workspaceRoot, meta, sessionId);
+      return meta;
+    });
+    specTaskStarted = status === "in_progress";
+    const event = stampTurnEvent({ type: "task_update", tasks: meta.tasks, currentTaskId: meta.currentTaskId,
+      planRef: { path: taskRef.path, version: taskRef.version, approvedAt: taskRef.approvedAt } }, sessionId);
+    persistEvent(event);
+    onEvent?.(event);
+  };
+
   let result: AgentLoopResult;
   try {
+    if (taskRef) {
+      if (r.mode !== "agent") throw new Error("请从任务清单启动执行");
+      const { meta, task, body } = await readApprovedSpecTask(workspaceRoot, sessionId, r.activePlanPath, taskRef);
+      assertSpecTaskReady(meta, task);
+      ctx.abortController.signal.throwIfAborted();
+      activePlan = { path: taskRef.path, content: body };
+      activeTasks = [{ ...task, status: "pending", result: undefined }];
+      currentTaskId = task.id;
+    }
     result = await runAgentLoop({
       mode: r.mode,
       workspaceRoot,
@@ -234,7 +277,8 @@ export async function executeAgentTurn(ctx: AgentTurnContext): Promise<AgentLoop
       skillsCatalog: ctx.skillsCatalog,
       skills: ctx.skills,
       documentWorkflow: r.documentWorkflow,
-      taskRunState: r.taskRunState,
+      singleSpecTask: Boolean(taskRef),
+      taskRunState: taskRef ? null : r.taskRunState,
 
       fileSnapshots: checkpointEnabled ? fileSnapshots : undefined,
       touchedPaths: checkpointEnabled ? touchedPaths : undefined,
@@ -254,7 +298,12 @@ export async function executeAgentTurn(ctx: AgentTurnContext): Promise<AgentLoop
     const finalizeStarted = performance.now();
     const messageStarted = performance.now();
     // 判断是否是用户中止
-    const isAborted = error instanceof Error && error.name === 'AbortError';
+    const isAborted = ctx.abortController.signal.aborted || (error instanceof Error && error.name === 'AbortError');
+    if (specTaskStarted) {
+      await updateSpecTask(isAborted ? "pending" : "failed", error instanceof Error ? error.message : String(error)).catch((statusError) => {
+        console.warn("[turn] Could not persist the Spec task result:", statusError);
+      });
+    }
 
     // loop 失败时，用户消息已在 sendMessage 中可靠落盘；这里只补写助手错误消息。
     // 不要再次追加 user，否则失败回合会产生重复的 ChatTurn。
@@ -437,7 +486,24 @@ export async function executeAgentTurn(ctx: AgentTurnContext): Promise<AgentLoop
   await timed("events_drain", () => eventPersist);
   const eventsMs = Math.round(performance.now() - eventsStarted);
   const completeStarted = performance.now();
-  await timed("completeTurn", () => completeTurn(capturedRoot, sessionId, turnId, result));
+  if (taskRef && (!specTaskStarted || !result.specTaskOutcome || ctx.abortController.signal.aborted)) {
+    result.specTaskOutcome = ctx.abortController.signal.aborted
+      ? { status: "cancelled", result: result.assistantText }
+      : { status: "blocked", result: result.assistantText };
+  }
+  const outcome = taskRef ? result.specTaskOutcome : undefined;
+  const terminal = outcome?.status === "cancelled" ? "cancelled"
+    : outcome && outcome.status !== "completed" ? "failed" : undefined;
+  try {
+    await timed("completeTurn", () => completeTurn(capturedRoot, sessionId, turnId, result, terminal));
+    if (outcome && specTaskStarted) {
+      await updateSpecTask(outcome.status === "completed" ? "completed" : outcome.status === "failed" ? "failed" : "pending", outcome.result);
+      await eventPersist;
+    }
+  } catch (error) {
+    if (specTaskStarted) await updateSpecTask("failed", String(error)).catch(() => {});
+    throw error;
+  }
   const completeMs = Math.round(performance.now() - completeStarted);
   console.log(`[turn] ${timingContext} persist checkpoint=${checkpointMs}ms session=${sessionMs}ms events=${eventsMs}ms completeTurn=${completeMs}ms total=${Math.round(performance.now() - persistStarted)}ms`);
   const notifyStarted = performance.now();

@@ -113,7 +113,7 @@ export function DecomposeCard({
   const current = rows.find((r) => r.status === "in_progress");
   const allDone = joined && total > 0 && done === total;
 
-  // 摘要词：与 TaskListBar 重复的任务详情交给任务栏，这里只给一句状态。
+  // 摘要词：任务详情在 tasks.md 文档预览中展示，这里只给一句状态。
   const hasDetail = Boolean(
     current?.title ||
       current?.executionGuidance ||

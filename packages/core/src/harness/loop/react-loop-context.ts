@@ -26,6 +26,7 @@ import type {
 } from "./types.ts";
 import type { LoopState, TerminationConfig } from "./termination.ts";
 import type { TaskReport } from "./task-reports.ts";
+import type { SpecTaskSubmission, SpecTaskReport } from "./single-spec-task.ts";
 
 /** runReActLoop 的内部返回形状（与公开签名一致）。 */
 export type ReActReturn = {
@@ -43,6 +44,7 @@ export type ReActReturn = {
   blockedReason?: string;
   correctionCount: number;
   taskRunState?: TaskRunState | null;
+  specTaskSubmission?: SpecTaskSubmission;
   successRejected?: boolean;
   decisionSummaries?: ReactDecisionSummary[];
 };
@@ -128,9 +130,12 @@ export interface ReActLoopContext {
   // ── 文档交付物 / 交还用户停止状态 ──
   documentDelivered: boolean;
   deliveredDocName: string;
+  /** 本轮成功写入的文件，最终回复会以 Markdown 链接列出。 */
+  generatedFiles: string[];
   documentWorkflowUpdate: DocumentWorkflowState | null | undefined;
   handoffRequested: boolean;
   handoffReport: string;
+  specTaskReport?: SpecTaskReport;
   /**
    * 子代理已通过结构性收口工具提交最终交付物（Planner 的 submit_plan /
    * Explore 的 submit_report）：成功终态（区别于 handoff），剩余调用不再

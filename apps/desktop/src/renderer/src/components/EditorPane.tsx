@@ -8,6 +8,7 @@ import jsonWorker from "./monaco-json.worker?worker";
 import cssWorker from "./monaco-css.worker?worker";
 import htmlWorker from "./monaco-html.worker?worker";
 import { useUiStore } from "../store/ui-store";
+import type { ActivePlanMetaDto, SpecTaskDocumentDto, TaskStatusDto } from "../../../preload/index";
 import { Markdown } from "./Markdown";
 import { useI18n } from "../i18n";
 
@@ -102,7 +103,23 @@ function isMarkdownPath(path: string): boolean {
   return path.split(".").pop()?.toLowerCase() === "md";
 }
 
+function isScopedSpecTasksPath(path: string): boolean {
+  return /^\.owncoder\/specs\/sessions\/[^./\\][^/\\]*\/[^./\\][^/\\]*\/tasks\.md$/.test(path);
+}
+
+async function textDigest(text: string): Promise<string> {
+  const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
 type MdViewMode = "source" | "preview";
+type TaskDocumentSnapshot = {
+  scope: string;
+  revision: string;
+  document: SpecTaskDocumentDto | null;
+  source: string;
+  matchesSource: boolean;
+};
 
 // 使用 discriminated union 确保类型安全
 type EditorPaneProps = {
@@ -120,6 +137,12 @@ type EditorPaneProps = {
   active?: boolean;
   /** 定位到指定行；requestId 用于同一文件的重复定位。 */
   revealLine?: { line: number; column?: number; requestId: number };
+  sessionId?: string;
+  activePlanMeta?: ActivePlanMetaDto | null;
+  taskBusy?: boolean;
+  onExecuteSpecTasks?: (document: SpecTaskDocumentDto, taskId?: string) => void;
+  onExecutePlan?: () => void;
+  onUpdateTask?: (taskId: string, status: TaskStatusDto, document?: SpecTaskDocumentDto) => void;
 } & (
   | {
       /** 普通编辑模式 */
@@ -149,6 +172,12 @@ export function EditorPane({
   actionsHost = null,
   active = true,
   revealLine,
+  sessionId,
+  activePlanMeta,
+  taskBusy = false,
+  onExecuteSpecTasks,
+  onExecutePlan,
+  onUpdateTask,
 }: EditorPaneProps) {
   const [value, setValue] = useState("");
   const [original, setOriginal] = useState("");
@@ -156,11 +185,26 @@ export function EditorPane({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [mdViewMode, setMdViewMode] = useState<MdViewMode>("preview");
+  const [taskSnapshot, setTaskSnapshot] = useState<TaskDocumentSnapshot | null>(null);
+  const [taskRefresh, setTaskRefresh] = useState(0);
   const { t } = useI18n();
   const theme = useUiStore((s) => s.theme);
   const monacoTheme = theme === "light" ? "vs" : "vs-dark";
   const isMarkdown = useMemo(() => isMarkdownPath(path), [path]);
   const dirty = value !== original;
+  const isSpecTasks = isScopedSpecTasksPath(path);
+  const taskSessionId = isSpecTasks ? sessionId : undefined;
+  const taskScope = taskSessionId ? JSON.stringify([path, taskSessionId]) : null;
+  const matchingPlan = activePlanMeta?.path === path ? activePlanMeta : null;
+  const taskRevision = JSON.stringify([taskRefresh, matchingPlan?.approvedAt, matchingPlan?.documentDigest]);
+  const taskDocument = taskSnapshot && taskSnapshot.scope === taskScope ? taskSnapshot.document : null;
+  const taskStale = Boolean(taskDocument && (
+    loading || !taskSnapshot?.matchesSource || taskSnapshot.revision !== taskRevision || taskSnapshot.source !== original
+  ));
+  const documentTaskMeta = !diffMode && matchingPlan && (!isSpecTasks || (
+    !taskStale && taskDocument && matchingPlan.documentDigest === taskDocument.version
+    && matchingPlan.approvedAt === taskDocument.approvedAt
+  )) ? matchingPlan : null;
   const saveRef = useRef<() => Promise<void>>(async () => {});
   const loadRequestRef = useRef(0);
 
@@ -175,7 +219,8 @@ export function EditorPane({
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
   const diffEditorRef = useRef<monaco.editor.IStandaloneDiffEditor | null>(null);
   const editorModelRef = useRef<monaco.editor.ITextModel | null>(null);
-  const normalLoadedRef = useRef(false);
+  const normalLoadedRef = useRef<string | null>(null);
+  const sourceScope = isSpecTasks ? taskScope ?? path : path;
   const diffSnapshotRef = useRef<{ before: string; after: string } | null>(null);
   if (diffMode) diffSnapshotRef.current = { before: originalContent, after: content };
   const diffSnapshot = diffSnapshotRef.current;
@@ -203,34 +248,32 @@ export function EditorPane({
       setLoading(false);
       return;
     }
-    if (content !== undefined) {
-      normalLoadedRef.current = true;
-      setValue(content);
-      setOriginal(content);
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
     setError("");
+    if (content === undefined) setLoading(true);
     try {
-      const text = await window.owncoder.readWorkspaceFile(path);
+      const text = content ?? await window.owncoder.readWorkspaceFile(path);
       if (!isCurrent()) return;
-      normalLoadedRef.current = true;
+      normalLoadedRef.current = sourceScope;
       setValue(text);
       setOriginal(text);
+      if (isSpecTasks) setTaskRefresh((revision) => revision + 1);
     } catch (e) {
-      if (isCurrent()) setError(e instanceof Error ? e.message : String(e));
+      if (isCurrent()) {
+        normalLoadedRef.current = null;
+        setError(e instanceof Error ? e.message : String(e));
+        if (isSpecTasks) setTaskRefresh((revision) => revision + 1);
+      }
     } finally {
       if (isCurrent()) setLoading(false);
     }
-  }, [path, content, diffMode]);
+  }, [path, content, diffMode, sourceScope, isSpecTasks]);
 
   useEffect(() => {
-    if (diffMode || !normalLoadedRef.current) void load();
+    if (diffMode || normalLoadedRef.current !== sourceScope) void load();
     return () => {
       loadRequestRef.current += 1;
     };
-  }, [load]);
+  }, [load, sourceScope]);
 
   useEffect(() => {
     setMdViewMode("preview");
@@ -246,19 +289,39 @@ export function EditorPane({
     editor.focus();
   }, [active, isMarkdown, revealLine]);
 
+  const sourceLoaded = normalLoadedRef.current === sourceScope;
+  useEffect(() => {
+    if (!taskScope || !taskSessionId || diffMode || !active || !sourceLoaded || loading) return;
+    let cancelled = false;
+    void (async () => {
+      let document: SpecTaskDocumentDto | null = null;
+      let matchesSource = false;
+      try {
+        document = await window.owncoder.getSpecTaskDocument(path, taskSessionId);
+        if (document?.path !== path) document = null;
+        if (document) matchesSource = document.version === await textDigest(original);
+      } catch {
+        // Keep Markdown readable, but do not enable actions without a verified source revision.
+      }
+      if (!cancelled) setTaskSnapshot({ scope: taskScope, revision: taskRevision, document, source: original, matchesSource });
+    })();
+    return () => { cancelled = true; };
+  }, [active, diffMode, loading, original, path, sourceLoaded, taskRevision, taskScope, taskSessionId]);
+
   const save = useCallback(async () => {
     setSaving(true);
     setError("");
     try {
       await window.owncoder.writeWorkspaceFile(path, value);
       setOriginal(value);
+      if (isSpecTasks) setTaskRefresh((revision) => revision + 1);
       onSaved?.();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setSaving(false);
     }
-  }, [path, value, onSaved]);
+  }, [path, value, onSaved, isSpecTasks]);
 
   useEffect(() => {
     saveRef.current = save;
@@ -439,7 +502,19 @@ export function EditorPane({
         {active && !diffMode && isMarkdown && mdViewMode === "preview" ? (
           <div className="editor-md-preview">
             {value.trim() ? (
-              <Markdown content={value} className="md-body editor-md-body" showCopy={false} />
+              <Markdown
+                content={value}
+                className="md-body editor-md-body"
+                showCopy={false}
+                taskMeta={documentTaskMeta}
+                specTaskDocument={taskDocument}
+                specTasksStale={taskStale}
+                tasksDirty={dirty}
+                taskBusy={taskBusy || saving || loading}
+                onExecuteSpecTasks={onExecuteSpecTasks}
+                onExecuteTasks={onExecutePlan}
+                onUpdateTask={onUpdateTask}
+              />
             ) : (
               <p className="hint context-empty">{t("空文档")}</p>
             )}

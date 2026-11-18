@@ -28,6 +28,8 @@ import { compactHistory } from "./history-compact.ts";
 import { CodemapManager } from "./codemap-manager.ts";
 import { WorkspaceFileWatcher } from "./workspace-watcher.ts";
 import { executeAgentTurn } from "./turn-execution.ts";
+import { assertSpecTaskReady, readApprovedSpecTask, type SpecTaskRef } from "./spec-task-document.ts";
+export type { SpecTaskRef } from "./spec-task-document.ts";
 import { applyLoadedSession, type LoadedSession, type SessionLoadHost } from "./session-load.ts";
 import {
   approvePlan,
@@ -49,10 +51,10 @@ import type {
   SpecStatus as SpecStatusDto,
 } from "./specs.ts";
 import {
-  approveSpecPhase,
+  prepareSpecTaskExecution,
+  getSpecTaskDocument,
   getSpecStatus as getSpecFeatureStatus,
   listSpecFeatures,
-  rejectSpecPhase,
   type SpecsHost,
 } from "./session-specs.ts";
 import type { SessionState } from "./session-runtime.ts";
@@ -155,13 +157,21 @@ export class SessionOrchestrator {
   private sessionRoots = new Map<string, string>();
 
   /** Session execution coordinator - ensures at most one active drain loop per session */
-  private coordinator: SessionRunCoordinator<AgentLoopResult, { turnId: string; onEvent?: (ev: TurnEvent) => void; attachments?: ChatAttachment[] }> = 
+  private coordinator: SessionRunCoordinator<AgentLoopResult, { turnId: string; onEvent?: (ev: TurnEvent) => void; attachments?: ChatAttachment[]; taskRef?: SpecTaskRef }> =
     new SessionRunCoordinator(
-      // Drain handler: 执行一轮代理循环，使用 input.context 中的 onEvent
-      async (sessionId: string, input: SessionInput<{ turnId: string; onEvent?: (ev: TurnEvent) => void; attachments?: ChatAttachment[] }>) => {
-        const { turnId, onEvent, attachments } = input.context || {};
+      async (sessionId: string, input: SessionInput<{ turnId: string; onEvent?: (ev: TurnEvent) => void; attachments?: ChatAttachment[]; taskRef?: SpecTaskRef }>) => {
+        const { turnId, onEvent, attachments, taskRef } = input.context || {};
         if (!turnId) throw new Error(`Missing turnId for session ${sessionId}`);
-        return await this.executeAgentTurn(sessionId, input.text, turnId, onEvent, attachments);
+        if (taskRef) {
+          const runtime = this.rt(sessionId);
+          const root = this.sessionWorkspaceRoot(sessionId);
+          if (runtime.mode !== "agent") throw new Error("请从任务清单启动执行");
+          const { meta, task } = await readApprovedSpecTask(root, sessionId, runtime.activePlanPath, taskRef);
+          assertSpecTaskReady(meta, task);
+          this.coordinator.getAbortController(sessionId)?.signal.throwIfAborted();
+          await this.beginChatTurn(sessionId, turnId, input.text, attachments ?? [], true);
+        }
+        return this.executeAgentTurn(sessionId, input.text, turnId, onEvent, attachments, taskRef);
       },
       // Continuation check: 检查是否需要继续（暂时总是返回 false）
       async (_sessionId: string, _lastResult: AgentLoopResult) => {
@@ -1349,8 +1359,9 @@ export class SessionOrchestrator {
     return getActivePlan(this.plansHost, sessionId);
   }
 
-  async updateTask(taskId: string, status: TaskStatus, result?: string, sessionId?: string): Promise<ActivePlanMeta | null> {
-    return updateTask(this.plansHost, taskId, status, result, sessionId);
+  async updateTask(taskId: string, status: TaskStatus, result?: string, sessionId?: string, taskRef?: SpecTaskRef): Promise<ActivePlanMeta | null> {
+    if (taskRef && (!sessionId || this.coordinator.isActive(sessionId))) throw new Error("当前会话正在执行或不可用");
+    return updateTask(this.plansHost, taskId, status, result, sessionId, taskRef);
   }
 
   async listCheckpoints(): Promise<
@@ -1419,12 +1430,17 @@ export class SessionOrchestrator {
     return getSpecFeatureStatus(this.specsHost, feature, sessionId);
   }
 
-  async approveSpec(feature: string, sessionId?: string): Promise<SessionState> {
-    return approveSpecPhase(this.specsHost, feature, sessionId);
+  async getSpecTaskDocument(path: string, sessionId: string) {
+    if (!sessionId) throw new Error("缺少会话标识");
+    return getSpecTaskDocument(this.specsHost, path, sessionId);
   }
 
-  async rejectSpec(feature: string, feedback: string, sessionId?: string): Promise<SessionState> {
-    return rejectSpecPhase(this.specsHost, feature, feedback, sessionId);
+  async prepareSpecTaskExecution(path: string, version: string, sessionId: string): Promise<SessionState> {
+    if (!sessionId) throw new Error("缺少会话标识");
+    return this.enqueueActivePlanUpdate(async () => {
+      if (this.coordinator.isActive(sessionId)) throw new Error("当前会话正在执行");
+      return prepareSpecTaskExecution(this.specsHost, path, version, sessionId);
+    }, sessionId);
   }
 
   cancelTurn(sessionId?: string): void {
@@ -1516,6 +1532,7 @@ export class SessionOrchestrator {
     sessionId?: string,
     attachments: import("@owncoder/llm").ChatAttachment[] = [],
     updateActivity = true,
+    taskRef?: SpecTaskRef,
   ): Promise<AgentLoopResult> {
     const trimmed = text.trim();
     if (!trimmed && !attachments.length) {
@@ -1534,6 +1551,12 @@ export class SessionOrchestrator {
       pendingCount: this.coordinator.getPendingCount(sid),
     });
 
+    const turnId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+    if (!taskRef) await this.beginChatTurn(sid, turnId, trimmed, attachments, updateActivity);
+    return this.coordinator.admit(sid, trimmed, { turnId, onEvent, attachments, taskRef });
+  }
+
+  private async beginChatTurn(sid: string, turnId: string, trimmed: string, attachments: ChatAttachment[], updateActivity: boolean): Promise<void> {
     // 用户消息必须先进入 conversation store（beginTurn），再写入 session JSON。
     // 若先 persist 再 beginTurn，并发的 getChatHistoryPage 会在 store 仍为空时
     // 把「仅有新 user、尚无 turn 行」的磁盘历史 migrate 成一条已完成 legacy turn，
@@ -1549,8 +1572,6 @@ export class SessionOrchestrator {
     const migrateSource = diskHistory.length >= r.history.length ? diskHistory : r.history;
     await migrateLegacyHistory(workspaceRoot, sid, migrateSource);
 
-    // Generate the durable turn id and claim the conversation-store row first.
-    const turnId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
     const userTurn: ChatTurn = {
       role: "user",
       content: trimmed,
@@ -1563,10 +1584,6 @@ export class SessionOrchestrator {
     // 看到 store 已有行时会跳过 migrate，不会再复制一条 user。
     r.history = [...r.history, userTurn];
     await this.persist(sid, updateActivity ? new Date().toISOString() : undefined);
-
-    // 通过协调器提交输入，传递 onEvent 上下文
-    // 协调器会自动处理队列、串行化和 drain loop
-    return await this.coordinator.admit(sid, trimmed, { turnId, onEvent, attachments });
   }
 
   /**
@@ -1579,6 +1596,7 @@ export class SessionOrchestrator {
     turnId: string,
     onEvent?: (ev: TurnEvent) => void,
     attachments: import("@owncoder/llm").ChatAttachment[] = [],
+    taskRef?: SpecTaskRef,
   ): Promise<AgentLoopResult> {
     const r = this.rt(sessionId);
     const ws = this.sessionWorkspace(sessionId);
@@ -1600,6 +1618,7 @@ export class SessionOrchestrator {
       turnId,
       onEvent,
       attachments,
+      taskRef,
       runtime: r,
       workspaceRoot: ws.root,
       abortController,

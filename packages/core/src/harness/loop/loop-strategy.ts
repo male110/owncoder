@@ -21,6 +21,7 @@ export interface LoopStrategyResult {
   correctionCount: number;
   /** 本轮结束时的统一任务运行状态。 */
   taskRunState?: import("../../task-run.ts").TaskRunState | null;
+  specTaskSubmission?: import("./single-spec-task.ts").SpecTaskSubmission;
   /** 成功门禁拒绝时为 true。 */
   successRejected?: boolean;
 }

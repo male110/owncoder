@@ -234,12 +234,17 @@ export const en = {
 
   // ── 任务进度条 ────────────────────────────────────────────────────────────
   "任务进度": "Task progress",
+  "全部执行": "Execute All",
+  "请先完成前置任务": "Complete the prerequisite tasks first",
+  "任务文档已更改，请重新加载预览。": "Task document changed. Reload to refresh the preview.",
   "进度 {{pct}}%": "Progress {{pct}}%",
   "全部完成": "All done",
   "执行": "Execute",
   "验收：": "Acceptance: ",
   "跳过此任务": "Skip this task",
   "重置为待执行": "Reset to pending",
+  "请先保存任务文档，再开始执行。": "Save the task document before execution.",
+  "任务文档有未保存修改，请先保存后再执行。": "The task document has unsaved changes. Save it before execution.",
 
   // ── 变更条 ────────────────────────────────────────────────────────────────
   "新增": "Added",
@@ -762,20 +767,6 @@ export const en = {
   "Requirements": "Requirements",
   "Design": "Design",
   "Tasks": "Tasks",
-  "批准并进入下一阶段": "Approve & continue to the next phase",
-  "批准任务并开始执行": "Approve tasks & start execution",
-  "驳回：写下修改意见（留空则直接驳回）":
-    "Request changes: describe what to fix (empty to reject outright)",
-  "驳回修改": "Request changes",
-  "任务已批准。请先配置 LLM，再发送消息开始执行。":
-    "Tasks approved. Configure the LLM first, then send a message to start.",
-  "任务已批准，自动开始执行 {{count}} 个任务…":
-    "Tasks approved, automatically executing {{count}} tasks…",
-  "请根据以下反馈修改并重新保存：" : "Please revise per this feedback and re-save: ",
-  "请重新审视该文档并修改后重新保存。":
-    "Please review this document, revise it, and re-save.",
-  "{{feature}}/{{phase}}.md 已生成。在对话里回复「下一步」即批准并继续。":
-    "{{feature}}/{{phase}}.md is ready. Reply \"next\" in the chat to approve and continue.",
 } as const;
 
 /** msgid 全集（key 即中文文案源）；t() 的合法入参类型。 */

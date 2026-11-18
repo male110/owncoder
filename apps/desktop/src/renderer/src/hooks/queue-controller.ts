@@ -71,9 +71,9 @@ export function requestStop(sid: string): void {
   stopRequested.add(sid);
 }
 
-/** Clear the stop flag (e.g. when a new send kicks off the queue again). */
+/** A new send can clear a paused queue, but cannot undo a stop of the current run. */
 export function clearStopRequest(sid: string): void {
-  stopRequested.delete(sid);
+  if (!running.has(sid)) stopRequested.delete(sid);
 }
 
 /** Append a message and persist immediately ("每次发送也要保存"). */

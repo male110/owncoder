@@ -227,6 +227,12 @@ export function applyChatEvent(
 
   // ── task_update ───────────────────────────────────────────────────────
   if (ev.type === "task_update") {
+    const meta = session.getActivePlanMetaForSession(ev.sessionId);
+    if (ev.planRef) {
+      if (meta?.path !== ev.planRef.path || meta.approvedAt !== ev.planRef.approvedAt || meta.documentDigest !== ev.planRef.version) return;
+    } else if (meta?.documentDigest) {
+      return;
+    }
     session.patchActivePlanMetaBySession(ev.sessionId, ev.tasks, ev.currentTaskId);
     return;
   }

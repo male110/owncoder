@@ -70,6 +70,8 @@ export interface SchedulerState {
   approvedAgentPlan?: string;
   /** 本轮统一任务运行状态（由 ReAct 回写）。 */
   taskRunState?: import("../../../task-run.ts").TaskRunState | null;
+  specTaskSubmission?: import("../single-spec-task.ts").SpecTaskSubmission;
+  specTaskApprovalBlocked?: boolean;
   /** 成功门禁拒绝。 */
   successRejected?: boolean;
   /** post_verify 发生硬失败；禁止随后生成成功型验证报告。 */

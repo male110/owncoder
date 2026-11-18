@@ -18,6 +18,11 @@ import { OS_LOCALE } from "./tools/shared.ts";
 import { BudgetLedger } from "./budget-ledger.ts";
 import { EvidenceStore } from "./evidence-store.ts";
 import { assertSessionArtifactPath, readPlanFile } from "../plans.ts";
+import { publicPhaseRel, readFeatureState } from "../specs.ts";
+import {
+  classifySpecDesignIntent, classifySpecRequirementsIntent, isSpecDesignReview, isSpecRequirementsReview,
+  readSpecDesignSnapshot, readSpecRequirementsSnapshot,
+} from "./loop/spec-design-intent.ts";
 
 // ── Language directive: single source of truth for reply-language instruction ──
 // All LLM calls within one task (main agent loop AND pre-loop stages such as
@@ -73,7 +78,7 @@ import {
 
 import { persistExperiences } from "./experience.ts";
 export { classifyRecoveryError } from "./recovery.ts";
-import { applyTaskEvent } from "../task-run.ts";
+import { applyTaskEvent, formatVerificationFailureNotice, sealTaskRunSuccess } from "../task-run.ts";
 import { persistRoundReport, persistRoundEvidence, persistRoundFileChanges, persistRoundToolCalls, collectReadEvidenceFromTurns, collectToolCallsFromTurns, type PersistedEvidence, type PersistedFileChange } from "../turn-rounds.ts";
 
 // Loop submodules (responsibility split: types / prompts / stages / scheduler)
@@ -82,6 +87,10 @@ import { stampTurnEvent, type AgentLoopOpts, type AgentLoopResult, type TurnEven
 import { resolveMidStages, resolveStageModel } from "./loop/stages.ts";
 import { runPipelineScheduler, type SchedulerContext, type SchedulerState } from "./loop/pipeline-scheduler.ts";
 import { resumeAgentPlan } from "./loop/stage-handlers/planner.ts";
+import {
+  selectedSpecTask, SPEC_TASK_OUTCOME_TOOL, SPEC_TASK_OUTCOME_TOOL_DEF,
+  SPEC_TASK_REPORT_REQUIRED, SPEC_TASK_WORKFLOW_TOOLS,
+} from "./loop/single-spec-task.ts";
 import { runVerifyReport, mergeVerificationIntoAssistant } from "./loop/react-verify.ts";
 
 export type { TurnEvent, TurnEventInput, ChatTurn, DocumentWorkflowState, AgentLoopOpts, AgentLoopResult, ReactDecisionSummary } from "./loop/types.ts";
@@ -117,6 +126,10 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
 
   if (!sessionId) {
     throw new Error("runAgentLoop requires a non-empty sessionId");
+  }
+  if (opts.singleSpecTask) {
+    // Keep the caller's validated Spec plan as context, not as a continuation.
+    opts = { ...opts, documentWorkflow: null, taskRunState: null, forcedFinalReportOnLimit: false };
   }
   if (opts.documentWorkflow?.sessionId !== sessionId) opts = { ...opts, documentWorkflow: null };
   if (opts.documentWorkflow) {
@@ -209,6 +222,11 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
       ? (mcpToolsToOpenAi(opts.mcp.listTools()) as ToolDef[])
       : []),
   ];
+  if (opts.singleSpecTask) {
+    toolsFinal = toolsFinal.filter(({ function: { name } }) =>
+      !SPEC_TASK_WORKFLOW_TOOLS.has(name) && name !== SPEC_TASK_OUTCOME_TOOL);
+    toolsFinal.push(SPEC_TASK_OUTCOME_TOOL_DEF);
+  }
 
   // ── Permission sandbox: filter tools by role ──
   // When a role declares an explicit allowedTools whitelist, only those tools
@@ -220,7 +238,7 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
   } else if (opts.readOnly) {
     const WRITE_TOOLS = new Set([
       "apply_patch", "write_file", "append_file", "bash",
-      "save_plan", "save_spec", "save_design", "save_experience",
+      "save_plan", "save_spec", "save_design", "save_tasks", "save_experience",
       "save_memory", "update_memory", "forget_memory",
       "undo_session_change", "run_script",
       // 任务清单状态变更（活清单的新增与修改）同样是会话状态写入，readOnly
@@ -243,11 +261,53 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
   // 用户在设置里写下的提示词是契约、规则、约束；内置 prompt 也是出厂定义的产品行为。
   // 任何裁剪都会让 LLM 丢掉关键指令（典型如大项目禁止全量 build 的约束被砍）。
   // 历史消息可以截断（由 history_compact 控制）。
-  const systemPrompt = opts.systemPromptOverride ?? basePrompt;
-
-  // Authentication is checked at each actual model-call boundary. This lets
-  // pre-model local routers answer without requiring an LLM credential.
   const model = resolveStageModel(opts.workflow, opts.mode, toolNode ?? draftNode);
+  const specReview: Pick<ToolContext, "specRequirementsFollowup" | "specDesignFollowup" | "specRequirementsRevision" | "specDesignGeneration" | "specDesignRevision" | "specTaskGeneration"> = {};
+  if (!opts.singleSpecTask && opts.mode === "spec" && opts.currentFeature && !opts.readOnly && !opts.initialMessages) {
+    const state = await readFeatureState(opts.workspaceRoot, opts.currentFeature, sessionId);
+    if (state && (isSpecRequirementsReview(state.stage) || isSpecDesignReview(state.stage))) {
+      const { feature } = state;
+      const requirementsPath = publicPhaseRel(feature, "spec");
+      const designPath = publicPhaseRel(feature, "design");
+      let allowedSave: string | undefined;
+      let guidance: string;
+      if (isSpecRequirementsReview(state.stage)) {
+        specReview.specRequirementsFollowup = true;
+        const snapshot = await readSpecRequirementsSnapshot(opts.workspaceRoot, feature, sessionId);
+        const intent = snapshot && await classifySpecRequirementsIntent(opts, model, feature);
+        if (snapshot && intent === "generate_design") {
+          specReview.specDesignGeneration = snapshot;
+          allowedSave = "save_design";
+          guidance = `The user wants to draft the technical design for ${feature}. Read ${requirementsPath} and call save_design for this feature. Do not ask for requirements approval or draft tasks this turn.`;
+        } else if (snapshot && intent === "revise_requirements") {
+          specReview.specRequirementsRevision = snapshot;
+          allowedSave = "save_spec";
+          guidance = `Read and revise ${requirementsPath} according to the latest feedback. Save the requirements again for ${feature}; do not advance this turn.`;
+        } else {
+          guidance = "Answer the requirements follow-up or clarify what the user wants. Do not save or advance a Spec document this turn.";
+        }
+      } else {
+        specReview.specDesignFollowup = true;
+        const snapshot = await readSpecDesignSnapshot(opts.workspaceRoot, feature, sessionId);
+        const intent = snapshot && await classifySpecDesignIntent(opts, model, feature);
+        if (snapshot && intent === "generate_tasks") {
+          specReview.specTaskGeneration = snapshot;
+          allowedSave = "save_tasks";
+          guidance = `The user wants to draft tasks for ${feature}. Read ${requirementsPath} and ${designPath}, then call save_tasks for this feature. Do not ask for design approval or implement the tasks.`;
+        } else if (snapshot && intent === "revise_design") {
+          specReview.specDesignRevision = snapshot;
+          allowedSave = "save_design";
+          guidance = `Read and revise ${designPath} according to the latest feedback. Save the design again for ${feature}; do not generate tasks this turn.`;
+        } else {
+          guidance = "Answer the design follow-up or clarify what the user wants. Do not save or advance a Spec document this turn.";
+        }
+      }
+      toolsFinal = toolsFinal.filter(({ function: { name } }) =>
+        name === allowedSave || (name !== "save_spec" && name !== "save_design" && name !== "save_tasks"));
+      opts = { ...opts, currentFeature: feature, specReviewGuidance: guidance };
+    }
+  }
+  const systemPrompt = [opts.systemPromptOverride ?? basePrompt, opts.specReviewGuidance].filter(Boolean).join("\n\n");
 
   // Wrap system prompt with semantic tag to clearly mark it as core instructions
   const { tagSystemInstructions, tagUserInput } = await import("./message-tags.js");
@@ -300,8 +360,9 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
     maxOutputChars: opts.workflow.harness.toolOutputMaxChars,
     bashMaxChars: opts.workflow.harness.bashMaxChars,
     currentFeature: opts.currentFeature,
+    ...specReview,
     fileSnapshots: opts.fileSnapshots,
-    touchedPaths: opts.touchedPaths,
+    touchedPaths: opts.touchedPaths ?? (opts.singleSpecTask ? [] : undefined),
     confirmDangerousBash: opts.confirmDangerousBash,
     autoApproveDangerousBash: opts.autoApproveDangerousBash,
     askUser: opts.askUser,
@@ -362,13 +423,18 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
     },
     // Shared bounded evidence cache and sequential task-list updates.
     evidenceStore: opts.evidenceStore,
-    updateTasks: opts.updateTasks,
+    updateTasks: opts.singleSpecTask ? undefined : opts.updateTasks,
   };
 
   // ── Resolve middle stages from pipeline (user-configurable) ──
   // T8-T10: resolveMidStages now includes context_gather so the scheduler
   // dispatches it through its StageHandler instead of hardcoding it before the loop.
   let midStages = resolveMidStages(pipeline);
+  if (opts.singleSpecTask) {
+    const execute = midStages.find((node) => node.type === "execute_tools");
+    midStages = midStages.filter((node) => node === execute || node.type === "context_gather" ||
+      node.type === "post_verify" || node.type === "present_changes");
+  }
   if (opts.leanPipeline) {
     // Subagents run only the tool stage; no context gather, decomposition,
     // verification, or change presentation.
@@ -431,7 +497,17 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
       }
     }
 
+    const specTaskOutcome: AgentLoopResult["specTaskOutcome"] = !opts.singleSpecTask ? undefined
+      : opts.signal?.aborted ? { status: "cancelled" }
+      : state.handoffRequested ? { status: "blocked", result: assistantText }
+      : state.specTaskApprovalBlocked ? { status: "blocked", result: state.blockedReason }
+      : state.specTaskSubmission?.status === "completed" && state.taskRunState?.phase === "completed"
+        && !state.aborted && !state.blocked && !state.awaitingUserConfirmation
+        ? { status: "completed", result: state.specTaskSubmission.result }
+        : { status: "failed", result: state.blockedReason ?? state.specTaskSubmission?.result ?? SPEC_TASK_REPORT_REQUIRED };
+
     return {
+      ...(specTaskOutcome && { specTaskOutcome }),
       history,
       assistantText,
       // 完整 LLM 消息转录：父循环为 Explore 子代理注册续接线程用。
@@ -629,9 +705,36 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
 
   console.log(ts(`scheduler start stages=${midStages.map((n: PipelineNode) => n.type).join(",")}`));
   try {
-    await resumeAgentPlan(schedulerCtx);
+    if (!opts.singleSpecTask) {
+      await resumeAgentPlan(schedulerCtx);
+    } else if (opts.signal?.aborted) {
+      state.aborted = true;
+    } else if (!selectedSpecTask(opts) || !midStages.some((node) => node.type === "execute_tools")
+      || !toolCtx.availableTools?.has(SPEC_TASK_OUTCOME_TOOL) || !toolCtx.availableTools?.has("report_blocker")) {
+      state.blocked = true;
+      state.blockedReason = "Single Spec task execution requires one selected runnable task, an Agent execution stage, and the outcome tools.";
+      state.lastAssistant = state.blockedReason;
+    }
     if (!state.aborted && !state.blocked && !state.awaitingUserConfirmation) {
       await runPipelineScheduler(midStages, schedulerCtx);
+    }
+    // Seal completion only after execution-grounded post_verify has run.
+    if (opts.singleSpecTask && state.specTaskSubmission?.status === "completed" && state.taskRunState
+      && !state.aborted && !opts.signal?.aborted && !state.blocked && !state.awaitingUserConfirmation) {
+      const sealed = sealTaskRunSuccess(state.taskRunState, {
+        requiresVerification: state.specTaskSubmission.requiresVerification,
+      });
+      state.taskRunState = sealed.state;
+      if (!sealed.ok) {
+        state.successRejected = true;
+        state.blocked = true;
+        state.blockedReason = sealed.reason;
+        const notice = formatVerificationFailureNotice(sealed.state);
+        state.lastAssistant = `${state.lastAssistant}\n\n${notice}`;
+        const last = history[history.length - 1];
+        if (last?.role === "assistant") last.content = state.lastAssistant;
+        opts.onEvent?.({ type: "assistant_delta", text: `\n\n${notice}` });
+      }
     }
     console.log(ts(`scheduler done`));
   } catch (stageError) {
@@ -654,6 +757,10 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
       },
     });
     opts.onEvent?.({ type: "error", message: `Stage error: ${msg}` });
+    if (opts.singleSpecTask) {
+      state.blocked = true;
+      state.blockedReason = `Stage error: ${msg}`;
+    }
     return finishWithRoundsPersist(state.lastAssistant || msg);
   }
 

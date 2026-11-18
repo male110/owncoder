@@ -39,12 +39,13 @@ import { lastAssistantSummaryFromHistory } from "./react-prompt.ts";
 
 import { parseToolCallsFromAssistant, normalizeToolName } from "../parser.ts";
 import { logReasoningStep, selectNextStep } from "../agent-reasoning.ts";
-import type { DocumentWorkflowState, ReActLoopArgs, ReactDecisionSummary } from "./types.ts";
+import type { ReActLoopArgs } from "./types.ts";
 import { autoFixAfterTools, createAutoFixState, getDirtyFiles, isAdvisoryVerificationResult } from "../auto-fix.ts";
 import { createTaskRunState, restoreTaskRunState, type TaskRunState } from "../../task-run.ts";
 import { applyTaskListOps, selectNextPendingTask, type TaskItem } from "../../plans.ts";
 
-import type { ReActLoopContext } from "./react-loop-context.ts";
+import type { ReActLoopContext, ReActReturn } from "./react-loop-context.ts";
+import { selectedSpecTask, SPEC_TASK_OUTCOME_TOOL, SPEC_TASK_WORKFLOW_TOOLS } from "./single-spec-task.ts";
 import {
   applyRunEvent,
   exitNoPendingTasks,
@@ -59,32 +60,11 @@ import { handleTerminationCheck } from "./react-termination-check.ts";
 import { handleTextResponse } from "./react-text-branch.ts";
 import { executeIterationTools, recordSkippedCall } from "./react-tool-exec.ts";
 import { forcedFinalReport, forcedFinalReportWithStatus, PLANNER_FORCED_REPORT_INSTRUCTION } from "./react-forced-report.ts";
+import { appendGeneratedFileLinks, formatGeneratedFileLinks } from "./generated-files.ts";
 
 // ── ReAct Loop (Enhanced Tool-Calling Stage) ───────────────
 
-export async function runReActLoop(args: ReActLoopArgs): Promise<{
-  lastAssistant: string;
-  aborted: boolean;
-  /** A document deliverable was written and requires user confirmation. */
-  awaitingUserConfirmation?: boolean;
-  /**
-   * The model called `report_blocker`: the remaining work belongs to the user.
-   * A successful terminal state, distinct from `aborted`. Suppresses every
-   * autonomous follow-up (verify / post_verify / auto-fix / task auto-advance)
-   * while still allowing changes made before the handoff to be presented.
-   */
-  handoffRequested?: boolean;
-  /** Defined only when this turn changes the persisted document workflow. */
-  documentWorkflow?: DocumentWorkflowState | null;
-  blocked?: boolean;
-  blockedReason?: string;
-  correctionCount: number;
-  /** 本轮结束时的统一任务运行状态。 */
-  taskRunState?: TaskRunState | null;
-  /** 成功门禁拒绝时为 true。 */
-  successRejected?: boolean;
-  decisionSummaries?: ReactDecisionSummary[];
-}> {
+export async function runReActLoop(args: ReActLoopArgs): Promise<ReActReturn> {
   const {
     opts, model, messages, history, toolsFinal, toolCtx, maxIter, stageId,
     reasoningTrace, memory, tracer, plan, transientInformationTask, contextControl,
@@ -99,6 +79,17 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
   } = args;
   void _mpf;
   void _mrr;
+
+  const scopedTask = opts.singleSpecTask ? selectedSpecTask(opts) : undefined;
+  if (opts.singleSpecTask && !scopedTask) {
+    return {
+      lastAssistant: "No valid selected Spec task.", aborted: false,
+      blocked: true, blockedReason: "No valid selected Spec task.", correctionCount: args.correctionCount,
+    };
+  }
+  if (opts.singleSpecTask && opts.signal?.aborted) {
+    return { lastAssistant: "", aborted: true, correctionCount: args.correctionCount };
+  }
 
   // ── Resolve reactSteps config from node params ──────────────────────────────
   const reactSteps: ReactStepConfig[] = args.reactSteps ?? defaultReactSteps();
@@ -137,7 +128,7 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
   // ── Unified task execution state ──
   let taskRunState: TaskRunState | null = null;
   if (opts.mode === "agent" || opts.mode === "spec") {
-    const restored = restoreTaskRunState(opts.taskRunState, opts.sessionId);
+    const restored = opts.singleSpecTask ? null : restoreTaskRunState(opts.taskRunState, opts.sessionId);
     taskRunState = restored
       ? { ...restored, maxRepairAttempts: autoFixMaxAttempts }
       : createTaskRunState(opts.sessionId, autoFixMaxAttempts);
@@ -226,6 +217,7 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
     // 写入 PRD/TDD 等文档交付物后置 true，停止后续自动生成，等待用户确认
     documentDelivered: false,
     deliveredDocName: "",
+    generatedFiles: [],
     documentWorkflowUpdate: undefined,
     // 模型调用 report_blocker 后置 true：剩余工作不属于 agent，本轮正常结束。
     // 这是成功终止，不是 aborted —— 但必须压制所有"继续推进"机制，否则模型会绕道
@@ -246,9 +238,11 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
   if (ctx.taskDriven) {
     const startId = opts.currentTaskId ?? ctx.tasks[0]?.id ?? null;
     const selected = startId ? ctx.tasks.find((t) => t.id === startId) : undefined;
-    ctx.currentTask = selected && (selected.status === "pending" || selected.status === "in_progress")
-      ? selected
-      : selectNextPendingTask(ctx.tasks);
+    ctx.currentTask = scopedTask
+      ? ctx.tasks[0]!
+      : selected && (selected.status === "pending" || selected.status === "in_progress")
+        ? selected
+        : selectNextPendingTask(ctx.tasks);
     if (ctx.currentTask) {
       ctx.currentTask.status = "in_progress";
       await persistTaskUpdate(ctx, ctx.currentTask.id);
@@ -264,7 +258,7 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
   // 引用，text-branch 的任务推进与 react-llm-call 每轮重注入的
   // formatCurrentTaskContext 看到的都是同一份；持久化走既有 persistTaskUpdate
   // 通路（activePlan 写回 .active meta + task_update 事件下发 UI）。
-  if (ctx.taskDriven && !ctx.opts.updateTasks) {
+  if (ctx.taskDriven && !opts.singleSpecTask && !ctx.opts.updateTasks) {
     ctx.toolCtx.updateTasks = async (ops) => {
       const applied = applyTaskListOps(ctx.tasks, ops);
       if (!applied.ok) return applied;
@@ -353,7 +347,11 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
     // known tool — surface them as a synthetic tool-result error so the model
     // learns the correct name instead of repeating the mistake.
     const unknownCalls = normalized.filter((c) => !known.has(c.name));
-    const calls = normalized.filter((c) => known.has(c.name));
+    const calls = normalized.filter((c) => known.has(c.name) && (!opts.singleSpecTask || (
+      !SPEC_TASK_WORKFLOW_TOOLS.has(c.name) &&
+      // A prose example of a terminal call is not a task outcome.
+      ((c.name !== SPEC_TASK_OUTCOME_TOOL && c.name !== "report_blocker") || Boolean(choice.tool_calls?.length))
+    )));
 
     // If there were unknown tool names, inject their errors as tool results
     // so the model sees the feedback in the same turn.
@@ -401,12 +399,16 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
   }
 
   // ── Execute tools ──
+  if (opts.singleSpecTask && opts.signal?.aborted) {
+    return finalizeTerminal(ctx, { lastAssistant: ctx.lastAssistant, aborted: true, correctionCount: ctx.correctionCount }, "interrupted");
+  }
   // Consecutive parallel-safe calls (pure reads: read_file, grep, lsp_*, …)
   // run concurrently; writes / bash / memory mutations / unknown tools run
   // sequentially. Results are always recorded in the original call order so
   // the OpenAI tool-call protocol and history stay deterministic.
   // ask_user is never parallel-safe; still allow at most one real prompt per
   // model tool batch so the UI is not asked twice in the same React iteration.
+  const touchedBefore = toolCtx.touchedPaths?.length ?? 0;
   const toolOutcome = await executeIterationTools(ctx, i, calls, content, finishReason, responseUsage);
   const { executedToolResults, openaiCalls, nextTi } = toolOutcome;
 
@@ -485,7 +487,7 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
       });
     }
 
-    // ── Plan 模式文档交付物：写入 PRD/TDD 等后立即停止，等待用户确认 ──
+    // Pause after delivering one Spec document so the user can review it.
     if (ctx.documentDelivered) {
       // The assistant tool-call message already lists every call. Record a
       // non-side-effect result for calls skipped after the document write.
@@ -494,10 +496,21 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
         recordSkippedCall(ctx, calls[ti]!, openaiCalls[ti]!.id);
         ti++;
       }
-      const deliveredSummary = `Document generated: ${ctx.deliveredDocName}. Please confirm the content is correct before proceeding to the next step.`;
+      const links = formatGeneratedFileLinks(ctx.generatedFiles);
+      const stage = ctx.documentWorkflowUpdate?.stage;
+      const deliveredSummary = appendGeneratedFileLinks(
+        stage === "awaiting_spec_confirmation"
+          ? "需求文档已生成。看完后，可以直接说你想继续生成设计，还是调整需求。"
+          : stage === "awaiting_design_confirmation"
+            ? "设计文档已生成。看完后，可以直接说你想继续生成任务清单，还是调整设计。"
+            : stage === "awaiting_tasks_confirmation"
+              ? "任务清单已生成。准备好后，在预览中点击任务旁的「执行」或顶部的「全部执行」。"
+              : `Document generated: ${ctx.deliveredDocName}.`,
+        links,
+      );
       logReasoningStep(ctx.reasoningTrace, {
         type: "observation",
-        content: `Document deliverable detected (${ctx.deliveredDocName}), stopping further generation, awaiting user confirmation`,
+        content: `Document deliverable detected (${ctx.deliveredDocName}); pausing for review`,
         timestamp: Date.now(),
       });
       ctx.history.push({ role: "assistant", content: deliveredSummary });
@@ -511,10 +524,23 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
       });
     }
 
+    if (ctx.specTaskReport) {
+      for (let ti = nextTi; ti < calls.length; ti++) recordSkippedCall(ctx, calls[ti]!, openaiCalls[ti]!.id);
+    }
     // ── Auto-Fix Verification: auto type-check after file modifications ──
-    const dirtyFiles = getDirtyFiles(calls);
+    const dirtyFiles = opts.singleSpecTask
+      ? [...new Set(toolCtx.touchedPaths?.slice(touchedBefore) ?? [])]
+      : getDirtyFiles(calls);
     if (dirtyFiles.length > 0) ctx.hadFileModifyingTools = true;
-    if (autoFixEnabled && dirtyFiles.length > 0 && opts.mode !== "spec" && opts.enableAutoFix !== false) {
+    if (opts.singleSpecTask && ctx.taskRunState && dirtyFiles.length > 0) {
+      // A check from before the latest edit cannot authorize completion.
+      ctx.taskRunState = {
+        ...ctx.taskRunState,
+        verification: createTaskRunState(opts.sessionId).verification,
+      };
+    }
+    if (autoFixEnabled && dirtyFiles.length > 0 && opts.mode !== "spec" && opts.enableAutoFix !== false
+      && (!opts.singleSpecTask || (ctx.specTaskReport?.status !== "failed" && opts.enableVerification !== false))) {
       const fixResult = await autoFixAfterTools(
         toolCtx.workspaceRoot,
         dirtyFiles,
@@ -563,6 +589,26 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<{
         ctx.autoFixState.fixAttempts = 0;
         ctx.autoFixState.hasUnresolvedErrors = false;
       }
+    }
+
+    if (ctx.specTaskReport) {
+      const { result, status } = ctx.specTaskReport;
+      ctx.history.push({ role: "assistant", content: result });
+      opts.onEvent?.({ type: "assistant_delta", text: result });
+      const response: ReActReturn = {
+        lastAssistant: result,
+        aborted: false,
+        correctionCount: ctx.correctionCount,
+        specTaskSubmission: {
+          status, result,
+          requiresVerification: ctx.hadFileModifyingTools || ctx.autoFixState.hasUnresolvedErrors,
+        },
+        taskRunState: ctx.taskRunState,
+        snapshotRef: ctx.turnSnapshot ?? undefined,
+      };
+      return status === "failed"
+        ? finalizeTerminal(ctx, { ...response, blocked: true, blockedReason: result }, "failed")
+        : response;
     }
 
     logReasoningStep(ctx.reasoningTrace, {

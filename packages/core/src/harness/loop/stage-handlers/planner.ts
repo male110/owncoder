@@ -25,9 +25,7 @@ function deliverPlan(ctx: PlanContext, plan: PlannerPlan, content: string): void
   ctx.state.lastAssistant = [
     `计划已保存：${plan.planId}，版本 v${plan.version}，摘要 ${plan.digest}。`,
     content.trim(),
-    ctx.opts.mode === "spec"
-      ? "请查看计划后批准；仅授权只读设计，不授权源码实施。本轮到此结束。"
-      : "请打开计划查看；下一轮明确批准执行或提出修改意见。本轮未实施计划内容。",
+    "请打开计划查看；下一轮明确批准执行或提出修改意见。本轮未实施计划内容。",
   ].join("\n\n") + `\n\n<!--plan_saved:${plan.path}-->`;
   ctx.history.push({ role: "assistant", content: ctx.state.lastAssistant });
   ctx.opts.onEvent?.({ type: "assistant_delta", text: ctx.state.lastAssistant });
@@ -40,7 +38,7 @@ export async function requestAgentPlanApproval(ctx: PlanContext, planText: strin
     return;
   }
   try {
-    if (opts.mode !== "agent" && opts.mode !== "spec") throw new Error("当前模式不支持计划审批");
+    if (opts.mode !== "agent") return;
     const plan = await savePlannerPlan(opts.workspaceRoot, opts.sessionId, opts.mode, planText, state.plannerPlan, opts.userMessage);
     const content = await validatePlannerPlan(opts.workspaceRoot, opts.sessionId, plan);
     if (opts.signal?.aborted) {
@@ -57,13 +55,25 @@ export function needsAgentPlanApproval(
   opts: Pick<AgentLoopOpts, "mode" | "activePlan">,
   requested: boolean | undefined,
 ): boolean {
-  return (opts.mode === "agent" || opts.mode === "spec") && !opts.activePlan && requested === true;
+  return opts.mode === "agent" && !opts.activePlan && requested === true;
 }
 
 /** 即使流水线省略任务分解，也在进入工具循环前重新校验磁盘版本和批准。 */
 export async function requireAgentPlanApproval(ctx: Pick<StageHandlerContext, "opts" | "state">): Promise<boolean> {
+  if (ctx.opts.mode !== "agent") return true;
   try {
     const current = await readPlannerPlan(ctx.opts.workspaceRoot, ctx.opts.sessionId);
+    if (ctx.opts.singleSpecTask) {
+      // This task has its own approval. Do not adopt a Planner plan, but
+      // honor any unresolved Agent Planner approval in the same session.
+      if (current?.mode === "agent") {
+        await validatePlannerPlan(ctx.opts.workspaceRoot, ctx.opts.sessionId, current, true);
+      } else if (!current && ctx.opts.history.some((turn) =>
+        turn.role === "assistant" && turn.content.includes("<!--plan_saved:.owncoder/plans/"))) {
+        throw new Error("会话存在计划引用，但当前版本元数据缺失");
+      }
+      return true;
+    }
     if (ctx.state.plannerPlan && ctx.state.plannerPlan.sessionId !== ctx.opts.sessionId) throw new Error("计划不属于当前会话");
     if (!current && !ctx.state.planRequested && !ctx.state.plannerPlan && !ctx.state.approvedAgentPlan) return true;
     if (current && current.mode === ctx.opts.mode && ctx.state.planApproval === "approved"
@@ -75,6 +85,7 @@ export async function requireAgentPlanApproval(ctx: Pick<StageHandlerContext, "o
   } catch (error) {
     ctx.state.planApproval = "unavailable";
     ctx.state.blocked = true;
+    if (ctx.opts.singleSpecTask) ctx.state.specTaskApprovalBlocked = true;
     ctx.state.blockedReason = `执行已暂停：${error instanceof Error ? error.message : String(error)}`;
     return false;
   }
@@ -97,7 +108,7 @@ async function generatePlanRevision(ctx: Omit<StageHandlerContext, "node">, plan
 /** 从既有计划目录恢复；计划生成轮不调用此处的审批分支。 */
 export async function resumeAgentPlan(ctx: Omit<StageHandlerContext, "node">): Promise<void> {
   const { opts, state } = ctx;
-  if (opts.leanPipeline || opts.readOnly || (opts.mode !== "agent" && opts.mode !== "spec")) return;
+  if (opts.leanPipeline || opts.readOnly || opts.mode !== "agent") return;
   try {
     const plan = await readPlannerPlan(opts.workspaceRoot, opts.sessionId);
     if (!plan) {
@@ -151,9 +162,7 @@ export async function resumeAgentPlan(ctx: Omit<StageHandlerContext, "node">): P
       }
       opts.activePlan = { path: plan.path, content: approvedContent };
       // 既定契约：批准后把获批计划的完整内容作为用户输入送入任务分解。
-      opts.userMessage = opts.mode === "spec"
-        ? plan.originalRequest ?? "按已批准的只读计划继续设计，文档仍需另行批准，不实施源码变更"
-        : approvedContent;
+      opts.userMessage = approvedContent;
       return;
     }
     const viewed = [...opts.history].reverse().find((turn) => turn.role === "assistant");
@@ -163,9 +172,9 @@ export async function resumeAgentPlan(ctx: Omit<StageHandlerContext, "node">): P
     if (!opts.askUser) throw new Error("当前宿主未提供用户确认通道");
     const token = `approve:${encodeURIComponent(opts.sessionId)}:${plan.planId}:${plan.version}:${plan.digest}`;
     const answer = await opts.askUser({
-      question: `${opts.mode === "spec" ? "仅批准只读设计，不修改源代码" : "批准后进入代码实施"}：${plan.path}（v${plan.version}，摘要 ${plan.digest}）。`,
+      question: `批准后进入代码实施：${plan.path}（v${plan.version}，摘要 ${plan.digest}）。`,
       options: [
-        { label: opts.mode === "spec" ? "批准计划" : "批准执行", value: token },
+        { label: "批准执行", value: token },
         { label: "拒绝计划", value: "reject" },
       ],
       allowFreeText: true, placeholder: "输入修改意见将生成完整新版，并重新等待批准",
@@ -196,9 +205,7 @@ export async function resumeAgentPlan(ctx: Omit<StageHandlerContext, "node">): P
       state.taskRunState = null;
     }
     opts.activePlan = { path: plan.path, content: state.approvedAgentPlan };
-    opts.userMessage = opts.mode === "spec"
-      ? plan.originalRequest ?? "按已批准的只读计划继续设计，文档仍需另行批准，不实施源码变更"
-      : state.approvedAgentPlan;
+    opts.userMessage = state.approvedAgentPlan;
   } catch (error) {
     failPlan(ctx, error);
   }
@@ -230,6 +237,7 @@ export function validatePlannerReport(report: string): { normalized: string; mis
 
 export async function runAgentPlanner(ctx: Omit<StageHandlerContext, "node">, call: ToolCall): Promise<void> {
   const { opts, state } = ctx;
+  if (opts.mode !== "agent") return;
   if (state.planApproval === "approved" && state.approvedAgentPlan?.trim()) return;
   if (!state.plannerPlan && !needsAgentPlanApproval(opts, state.planRequested)) return;
   if (opts.signal?.aborted) {

@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactElement } from "react";
+import { createHash } from "node:crypto";
+import type { ActivePlanMetaDto, SpecTaskDocumentDto } from "../../../preload/index";
 
 const hooks = vi.hoisted(() => {
   vi.stubGlobal("self", {});
@@ -19,7 +21,9 @@ vi.mock("react", async (importOriginal) => ({
   useState: (value: unknown) => {
     const index = hooks.stateIndex++;
     if (!(index in hooks.states)) hooks.states[index] = value;
-    return [hooks.states[index], (next: unknown) => { hooks.states[index] = next; }];
+    return [hooks.states[index], (next: unknown) => {
+      hooks.states[index] = typeof next === "function" ? next(hooks.states[index]) : next;
+    }];
   },
   useRef: (value: unknown) => {
     const index = hooks.refIndex++;
@@ -62,6 +66,14 @@ function findElement(node: unknown, type: string): Element | undefined {
 }
 const findDiff = (node: unknown) => findElement(node, "mock-diff");
 const findEditor = (node: unknown) => findElement(node, "mock-editor");
+const findMarkdown = (node: unknown) => findElement(node, "mock-markdown");
+function findButton(node: unknown, name: string): Element | undefined {
+  if (Array.isArray(node)) return node.map((child) => findButton(child, name)).find(Boolean);
+  if (!node || typeof node !== "object" || !("type" in node)) return undefined;
+  const element = node as Element;
+  return element.type === "button" && (element.props["aria-label"] === name || element.props.children === name)
+    ? element : findButton(element.props.children, name);
+}
 function render(props: Parameters<typeof EditorPane>[0]) {
   hooks.refIndex = 0;
   hooks.effects = [];
@@ -248,5 +260,148 @@ describe("变更查看器", () => {
     hooks.refs = [];
     const deleted = findDiff(render({ path: "old.ts", diffMode: true, originalContent: "删除", content: "" }))!;
     expect(deleted.props.modified).toBe("");
+  });
+});
+
+const scopedPath = ".owncoder/specs/sessions/scope/login/tasks.md";
+const savedText = "\n# Tasks\r\n- [ ] Sign in\r\n";
+const specProps = { path: scopedPath, sessionId: "session-a" };
+const specDocument = (text: string, approvedAt: string | null = null): SpecTaskDocumentDto => ({
+  path: scopedPath,
+  version: createHash("sha256").update(text).digest("hex"),
+  approvedAt,
+  tasks: [],
+  currentTaskId: null,
+});
+const makeDeferred = <T,>() => {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => { resolve = done; });
+  return { promise, resolve };
+};
+const runTaskEffect = () => hooks.effects[4]!();
+const flushTasks = async () => { for (let i = 0; i < 10; i++) await Promise.resolve(); };
+
+function setupTasks(document: SpecTaskDocumentDto | null = specDocument(savedText)) {
+  const getSpecTaskDocument = vi.fn().mockResolvedValue(document);
+  const readWorkspaceFile = vi.fn().mockResolvedValue(savedText);
+  const writeWorkspaceFile = vi.fn().mockResolvedValue(undefined);
+  vi.stubGlobal("window", { owncoder: { readWorkspaceFile, writeWorkspaceFile, getSpecTaskDocument } });
+  vi.stubGlobal("crypto", { subtle: { digest: vi.fn(async (_name: string, bytes: Uint8Array) => {
+    const result = createHash("sha256").update(bytes).digest();
+    return Uint8Array.from(result).buffer;
+  }) } });
+  return { getSpecTaskDocument, readWorkspaceFile, writeWorkspaceFile };
+}
+
+async function loadSource(props: Parameters<typeof EditorPane>[0]) {
+  render(props);
+  hooks.effects[1]!();
+  await flushTasks();
+  return render(props);
+}
+
+// UI tests use the same hook harness as the Monaco lifecycle tests above.
+describe("Spec task document preview", () => {
+  it("fetches only session-scoped tasks in normal editor mode", async () => {
+    const { getSpecTaskDocument } = setupTasks();
+    for (const path of ["docs/tasks.md", ".owncoder/specs/login/tasks.md", ".owncoder/specs/sessions/scope/login/design.md"]) {
+      await loadSource({ path, sessionId: "session-a" });
+      runTaskEffect();
+    }
+    await loadSource({ path: scopedPath });
+    runTaskEffect();
+    await loadSource({ ...specProps, diffMode: true, content: "new", originalContent: "old" });
+    runTaskEffect();
+    expect(getSpecTaskDocument).not.toHaveBeenCalled();
+
+    await loadSource(specProps);
+    runTaskEffect();
+    await flushTasks();
+    expect(getSpecTaskDocument).toHaveBeenCalledExactlyOnceWith(scopedPath, "session-a");
+    expect(findMarkdown(render(specProps))?.props.specTasksStale).toBe(false);
+  });
+
+  it("refreshes on live metadata changes, reload, and successful save, and rejects a mismatched saved version", async () => {
+    const { getSpecTaskDocument, readWorkspaceFile, writeWorkspaceFile } = setupTasks();
+    await loadSource(specProps);
+    runTaskEffect();
+    await flushTasks();
+    const approved = specDocument(savedText, "2026-01-01T00:00:00.000Z");
+    const activePlanMeta: ActivePlanMetaDto = {
+      path: scopedPath, approvedAt: approved.approvedAt!, documentDigest: approved.version, tasks: [], currentTaskId: null,
+    };
+    getSpecTaskDocument.mockResolvedValue(approved);
+    const props = { ...specProps, activePlanMeta };
+    expect(findMarkdown(render(props))?.props.specTasksStale).toBe(true);
+    runTaskEffect();
+    await flushTasks();
+    expect(findMarkdown(render(props))?.props.taskMeta).toBe(activePlanMeta);
+
+    const updated = `${savedText}- [ ] Other\n`;
+    const nextDocument = specDocument(updated);
+    getSpecTaskDocument.mockResolvedValue(nextDocument);
+    const beforeReload = render(props);
+    await findButton(beforeReload, "重新加载")!.props.onClick();
+    await flushTasks();
+    render(props);
+    runTaskEffect();
+    await flushTasks();
+    expect(readWorkspaceFile).toHaveBeenCalledTimes(2);
+    expect(findMarkdown(render(props))?.props.specTasksStale).toBe(true);
+
+    findButton(render(props), "原码")!.props.onClick();
+    findEditor(render(props))!.props.onChange(updated);
+    findButton(render(props), "保存")!.props.onClick();
+    await flushTasks();
+    findButton(render(props), "预览")!.props.onClick();
+    expect(findMarkdown(render(props))?.props.specTasksStale).toBe(true);
+    runTaskEffect();
+    await flushTasks();
+    const preview = findMarkdown(render(props))!;
+    expect(writeWorkspaceFile).toHaveBeenCalledWith(scopedPath, updated);
+    expect(getSpecTaskDocument).toHaveBeenCalledTimes(4);
+    expect(preview.props.specTaskDocument).toBe(nextDocument);
+    expect(preview.props.specTasksStale).toBe(false);
+    expect(preview.props.taskMeta).toBeNull();
+  });
+
+  it("forwards the verified document and batch callback without approval, and preserves busy and dirty flags", async () => {
+    const document = specDocument(savedText);
+    setupTasks(document);
+    const onExecuteSpecTasks = vi.fn();
+    const props = { ...specProps, onExecuteSpecTasks };
+    await loadSource(props);
+    runTaskEffect();
+    await flushTasks();
+    const preview = findMarkdown(render(props))!;
+    expect(preview.props.specTaskDocument).toBe(document);
+    expect(preview.props.specTasksStale).toBe(false);
+    expect(preview.props.taskBusy).toBe(false);
+    expect(preview.props.tasksDirty).toBe(false);
+    expect(preview.props).not.toHaveProperty("onApproveSpecTasks");
+    expect(preview.props.onExecuteSpecTasks).toBe(onExecuteSpecTasks);
+    expect(onExecuteSpecTasks).not.toHaveBeenCalled();
+
+    expect(findMarkdown(render({ ...props, taskBusy: true }))?.props.taskBusy).toBe(true);
+    findButton(render(props), "原码")!.props.onClick();
+    findEditor(render(props))!.props.onChange(`${savedText}- [ ] Unsaved\n`);
+    findButton(render(props), "预览")!.props.onClick();
+    expect(findMarkdown(render(props))?.props.tasksDirty).toBe(true);
+  });
+
+  it("ignores a task read from the previous session even when the file path stays open", async () => {
+    const { getSpecTaskDocument } = setupTasks(null);
+    const previous = makeDeferred<SpecTaskDocumentDto>();
+    getSpecTaskDocument.mockReturnValueOnce(previous.promise);
+    await loadSource(specProps);
+    const cancel = runTaskEffect() as () => void;
+    cancel();
+    const next = { ...specProps, sessionId: "session-b" };
+    await loadSource(next);
+    runTaskEffect();
+    previous.resolve(specDocument(savedText));
+    await flushTasks();
+    expect(getSpecTaskDocument).toHaveBeenLastCalledWith(scopedPath, "session-b");
+    expect(findMarkdown(render(next))?.props.specTaskDocument).toBeNull();
   });
 });

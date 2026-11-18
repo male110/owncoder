@@ -5,12 +5,13 @@ import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { BUILTIN_WORKFLOW } from "@owncoder/settings";
 import { activeMetaPath, approvePlannerPlan, listPlans, readActiveMeta, readPlanFile, readPlannerPlan, savePlannerPlan, samePlannerPlan, sessionArtifactDir, validatePlannerPlan, writeActiveMeta, writePlanFile } from "./plans.ts";
-import { featureDirRel, getSpecStatus, listSpecs, phaseFileName, readFeatureState, readSpecPhase, saveSpec, writeFeatureState } from "./specs.ts";
+import { featureDirRel, getSpecStatus, listSpecs, phaseFileName, publicPhaseRel, readFeatureState, readSpecPhase, saveSpec, writeFeatureState } from "./specs.ts";
 import { toolSaveDesign } from "./harness/tools/save-design.ts";
 import { toolSaveTasks } from "./harness/tools/save-tasks.ts";
 import { executeTool } from "./harness/execute.ts";
 import { buildSpecWorkflowUpdate } from "./harness/loop/document-workflow.ts";
-import { approveSpecPhase } from "./session-specs.ts";
+import { prepareSpecTaskExecution } from "./session-specs.ts";
+import { readSpecDesignSnapshot, readSpecRequirementsSnapshot } from "./harness/loop/spec-design-intent.ts";
 import { approvePlan, readPlan, type PlansHost } from "./session-plans.ts";
 import { createSessionRuntime } from "./session-runtime.ts";
 import type { ToolContext } from "./harness/tools/types.ts";
@@ -19,6 +20,7 @@ let root: string;
 beforeEach(async () => { root = await fs.mkdtemp(join(tmpdir(), "owncoder-artifacts-")); });
 afterEach(async () => { await fs.rm(root, { recursive: true, force: true }); });
 const context = (sessionId: string) => ({ workspaceRoot: root, sessionId, mode: "spec", workflow: BUILTIN_WORKFLOW, maxOutputChars: 10000 }) as ToolContext;
+const taskList = (label: string) => `# ${label} 任务\n\n- [ ] 实施登录\n  - 依赖: 无\n  - 文件: src/login.ts\n  - 实现: 登录流程\n  - 验收: 登录成功\n  - 需求: R1`;
 
 describe("会话产物隔离", () => {
   it("同名文件、相同 planId 分属不同目录，列表与打开严格隔离", async () => {
@@ -78,7 +80,7 @@ describe("会话产物隔离", () => {
 
   it("需求、设计和任务仅在所属会话创建、恢复、展示和审批", async () => {
     const a = context("a"); const b = context("b");
-    const specPath = await saveSpec(root, "login", "# A 需求\n\nR1: WHEN 用户提交凭证 THE SYSTEM SHALL 完成登录", "a");
+    await saveSpec(root, "login", "# A 需求\n\nR1: WHEN 用户提交凭证 THE SYSTEM SHALL 完成登录", "a");
     await writeFeatureState(root, "login", "awaiting_spec_approval", "a");
     expect(await listSpecs(root, "b")).toEqual([]);
     expect((await getSpecStatus(root, "login", "b")).phase).toBe("empty");
@@ -87,36 +89,77 @@ describe("会话产物隔离", () => {
       await expect(readSpecPhase(root, "login", phase, "b")).rejects.toThrow();
     }
     expect((await toolSaveDesign(b, "login", "# B 设计")).ok).toBe(false);
-    expect((await toolSaveTasks(b, "login", "# B 任务")).ok).toBe(false);
     const r = createSessionRuntime("b", "spec");
     const host = { rt: () => r, sessionWorkspaceRoot: () => root, focusSessionId: () => "b", persist: vi.fn(), getState: vi.fn(), setFocusMode: vi.fn() };
-    await expect(approveSpecPhase(host, "login", "b")).rejects.toThrow();
-    await writeFeatureState(root, "login", "spec_approved", "a");
-    expect((await toolSaveDesign(a, "login", "# A 设计\n\n## 需求追踪矩阵\n\n- R1: 登录流程")).ok).toBe(true);
-    await writeFeatureState(root, "login", "design_approved", "a");
-    expect((await toolSaveTasks(a, "login", "# A 任务\n\n- [ ] 实施登录\n  - 依赖: 无\n  - 文件: src/login.ts\n  - 实现: 登录流程\n  - 验收: 登录成功\n  - 需求: R1")).ok).toBe(true);
+    const taskPath = `${featureDirRel("login", "a")}/tasks.md`;
+    await expect(prepareSpecTaskExecution(host, taskPath, "unused", "b")).rejects.toThrow(/不属于当前会话/);
+    const owner = createSessionRuntime("a", "spec");
+    const ownerHost = { ...host, rt: () => owner, focusSessionId: () => "a" };
+    expect((await toolSaveDesign(a, "login", "# A 设计\n\nR1: 登录流程")).ok).toBe(false);
+    const specDesignGeneration = await readSpecRequirementsSnapshot(root, "login", "a");
+    expect(specDesignGeneration).not.toBeNull();
+    expect((await toolSaveDesign({ ...a, specDesignGeneration }, "login", "# A 设计\n\n## 需求追踪矩阵\n\n- R1: 登录流程")).ok).toBe(true);
+    await expect(prepareSpecTaskExecution(ownerHost, taskPath, "unused", "a")).rejects.toThrow();
+    expect((await toolSaveTasks(a, "login", taskList("A"))).ok).toBe(false);
+    const permission = await readSpecDesignSnapshot(root, "login", "a");
+    expect(permission).not.toBeNull();
+    expect((await toolSaveTasks({ ...a, specTaskGeneration: permission }, "login", taskList("A"))).ok).toBe(true);
+    expect(owner.mode).toBe("spec");
+    expect(owner.activePlanPath).toBeNull();
     expect((await listSpecs(root, "a"))[0]?.phases).toEqual(["spec", "design", "tasks"]);
     for (const phase of ["spec", "design", "tasks"] as const) {
       expect(await readSpecPhase(root, "login", phase, "a")).toContain("A");
-      await expect(readPlanFile(root, `${featureDirRel("login", "a")}/${phaseFileName(phase)}`, "b")).rejects.toThrow();
+      if (phase === "tasks") {
+        await expect(readPlanFile(root, `${featureDirRel("login", "a")}/${phaseFileName(phase)}`, "b")).rejects.toThrow();
+      } else {
+        await expect(readSpecPhase(root, "login", phase, "b")).rejects.toThrow();
+      }
     }
-    expect(await readPlanFile(root, specPath, "a")).toContain("A 需求");
-    await saveSpec(root, "login", "# B 需求\n\nR1: WHEN 用户提交凭证 THE SYSTEM SHALL 完成 B 登录", "b");
-    await writeFeatureState(root, "login", "awaiting_spec_approval", "b");
-    expect((await listSpecs(root, "b"))[0]?.title).toBe("B 需求");
+    expect(await fs.readFile(join(root, "docs/login-requirement.md"), "utf8")).toContain("A 需求");
+    await expect(saveSpec(root, "login", "# B 需求\n\nFR1: B 登录", "b")).rejects.toThrow(/属于另一个会话/);
+    expect(await listSpecs(root, "b")).toEqual([]);
     expect(await readSpecPhase(root, "login", "spec", "a")).toContain("A 需求");
-    await writeFeatureState(root, "login", "spec_approved", "b");
-    expect((await toolSaveDesign(b, "login", "# B 设计\n\n## 需求追踪矩阵\n\n- R1: B 登录流程")).ok).toBe(true);
-    await writeFeatureState(root, "login", "design_approved", "b");
-    expect((await toolSaveTasks(b, "login", "# B 任务\n\n- [ ] 实施 B\n  - 依赖: 无\n  - 文件: src/b.ts\n  - 实现: B 登录流程\n  - 验收: B 登录成功\n  - 需求: R1")).ok).toBe(true);
-    await approveSpecPhase(host, "login", "b");
-    expect(r.activePlanPath).toBe(`${featureDirRel("login", "b")}/tasks.md`);
+    expect((await toolSaveDesign(b, "login", "# B 设计\n\nFR1: B 登录")).ok).toBe(false);
     expect((await readFeatureState(root, "login", "a"))?.stage).toBe("awaiting_tasks_approval");
   });
 
+  it("首次生成任务绑定本轮设计版本、特性和会话；既有任务仍可修订", async () => {
+    const feature = "wellness-membership";
+    await saveSpec(root, feature, "# 需求\n\nR1: 登录流程", "a");
+    await writeFeatureState(root, feature, "spec_approved", "a");
+    const specDesignGeneration = await readSpecRequirementsSnapshot(root, feature, "a");
+    expect((await toolSaveDesign({ ...context("a"), specDesignGeneration }, feature, "# A 设计\n\nR1: 登录流程")).ok).toBe(true);
+    // Legacy state does not grant permission by itself.
+    await writeFeatureState(root, feature, "design_approved", "a");
+    const snapshot = await readSpecDesignSnapshot(root, feature, "a");
+    expect(snapshot).not.toBeNull();
+    const ctx = { ...context("a"), specDesignFollowup: true, specTaskGeneration: snapshot };
+    expect((await toolSaveTasks(context("a"), feature, taskList("A"))).ok).toBe(false);
+    expect((await toolSaveTasks(ctx, "other", taskList("A"))).ok).toBe(false);
+    expect((await toolSaveTasks({ ...ctx, sessionId: "b" }, feature, taskList("B"))).ok).toBe(false);
+    await fs.appendFile(join(root, publicPhaseRel(feature, "design")), "\nUpdate design.\n");
+    expect((await toolSaveTasks(ctx, feature, taskList("A"))).ok).toBe(false);
+    expect((await readFeatureState(root, feature, "a"))?.stage).toBe("design_approved");
+    const path = `${featureDirRel(feature, "a")}/tasks.md`;
+    const content = taskList("A");
+    const bypass = await executeTool(context("a"), {
+      id: "write-tasks", name: "write_file", arguments: { file_path: path, content }, rawArguments: "{}",
+    });
+    expect(bypass).toMatchObject({ ok: false, output: expect.stringContaining("matching save tool") });
+    await expect(readSpecPhase(root, feature, "tasks", "a")).rejects.toThrow();
+
+    ctx.specTaskGeneration = await readSpecDesignSnapshot(root, feature, "a");
+    expect((await toolSaveTasks(ctx, feature, taskList("A"))).ok).toBe(true);
+    expect((await readFeatureState(root, feature, "a"))?.stage).toBe("awaiting_tasks_approval");
+    expect((await toolSaveTasks(ctx, feature, taskList("Stale"))).ok).toBe(false);
+    expect((await toolSaveTasks(context("a"), feature, taskList("Revised"))).ok).toBe(true);
+    expect(await readSpecPhase(root, feature, "tasks", "a")).toContain("# Revised 任务");
+    await expect(readSpecPhase(root, feature, "tasks", "b")).rejects.toThrow();
+  });
+
   it("Spec 当前阶段缓存不能继承外国会话的文档历史", () => {
-    const aPath = `${featureDirRel("login", "a")}/requirement.md`;
-    const bPath = `${featureDirRel("login", "b")}/requirement.md`;
+    const aPath = publicPhaseRel("login", "spec");
+    const bPath = publicPhaseRel("login", "spec");
     const a = buildSpecWorkflowUpdate({ feature: "login", path: aPath, phase: "spec" }, null, "a");
     const b = buildSpecWorkflowUpdate({ feature: "login", path: bPath, phase: "spec" }, a, "b");
     expect(b.sessionId).toBe("b");

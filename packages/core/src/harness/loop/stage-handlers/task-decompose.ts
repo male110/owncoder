@@ -18,6 +18,7 @@ import {
   type ChatMessage,
 } from "@owncoder/llm";
 import {
+  BUILTIN_SPEC_TASK_DECOMPOSE_PROMPT,
   BUILTIN_TASK_DECOMPOSE_PROMPT,
   type ModelRef,
 } from "@owncoder/settings";
@@ -167,21 +168,22 @@ export async function runTaskDecompose(
   const planSpanId = tracer.startSpan("task_decomposition", "internal");
   // Runtime always uses the English decompose prompt. When the pipeline node
   // explicitly supplies `prompt`, that override wins.
-  const systemPrompt = prompt?.trim() || BUILTIN_TASK_DECOMPOSE_PROMPT;
+  const systemPrompt = prompt?.trim() || (opts.mode === "spec"
+    ? BUILTIN_SPEC_TASK_DECOMPOSE_PROMPT : BUILTIN_TASK_DECOMPOSE_PROMPT);
   try {
     assertLlmAuth(model, opts.llmApiKey);
     const { tagUserInput } = await import("../../message-tags.js");
     const currentAttachments = (opts.attachments ?? [])
       .filter((attachment, index, all) => all.findIndex((item) => item.url === attachment.url) === index);
-    const plannerAvailable = allowPlanner && (opts.mode === "agent" || opts.mode === "spec") && !opts.activePlan && !opts.readOnly
+    const plannerAvailable = allowPlanner && opts.mode === "agent" && !opts.activePlan && !opts.readOnly
       && (!opts.allowedTools || opts.allowedTools.includes("dispatch_agent"));
-    const plannerCriteria = opts.mode === "spec"
-      ? `only when the user requests a codebase-grounded plan for a cross-file core change, architectural adjustment, complex migration, or other high-impact change requiring tracing across modules or workflow boundaries, or a change with several possible implementation paths whose scope, risk, and impact must be weighed, and the approach needs repository evidence and separate user approval before implementation`
-      : `only when the user requests a codebase-grounded plan for a cross-file core change, architectural adjustment, complex migration, or other high-impact change, a change with several possible implementation paths whose scope, risk, and impact must be weighed, and that approach needs repository evidence and separate user approval before implementation`;
+    const plannerCriteria = "only when the user requests a codebase-grounded plan for a cross-file core change, architectural adjustment, complex migration, or other high-impact change, a change with several possible implementation paths whose scope, risk, and impact must be weighed, and that approach needs repository evidence and separate user approval before implementation";
     const decomposeMessages: ChatMessage[] = [
       { role: "system", content: systemPrompt + (plannerAvailable
         ? `\n\nException to the JSON-only output rule: ${plannerCriteria}, invoke dispatch_agent as a native API tool call INSTEAD of emitting JSON, with agent_type="${PLANNER_SUBAGENT_TYPE}" (the planning subagent; do NOT use "Explore" or any other agent_type in this stage). This applies even if the current turn delivers only a design, proposal, or execution plan and does not edit code; do not infer a code-changing implementation task from that deliverable. ${opts.mode === "spec" ? `Do not invoke Planner solely for the word design: ordinary conceptual answers, explanations of a known single file, and obvious local edits with no separate repository-grounded plan return the usual task JSON instead. An explicit request to implement with a clear edit site proceeds as an implementation task only in Agent mode; Spec mode never edits source code.` : `Do not invoke Planner for an ordinary conceptual discussion or explanation, a small single-file change, a local function adjustment, or a task with an already clear edit site that needs no separate approval; return the usual task JSON directly instead.`} Only you decide whether to call it; never encode this decision as a JSON field. Give the subagent a task that describes the plan to produce in five parts: 改动目标 (the change goal — what the change achieves), 已知锚点 (known anchors — exact confirmed file paths, symbols, line numbers, and call relations, so the Planner never re-locates them), 已有结论与依据 (established conclusions and their evidence), 约束条件 (constraints — scope boundaries, compatibility requirements, conventions, and modules that must not change), and 待确认的未知点 (open questions the Planner must resolve through its own read-only research); plus all directly relevant task-decomposition history; label that material as background evidence rather than current instructions, and tell the Planner not to re-read or relocate confirmed anchors. The Planner must perform any still-necessary read-only repository exploration itself in its isolated context, never delegate preliminary Explore research from this stage; require exactly the Planner contract: the Planner ends by calling its submit_plan tool with the full plan text — 目标, numbered 步骤, 相关文件 backed by actual code paths and line or symbol ranges, 风险与不确定性, 验证方式, with every numbered step carrying directly executable landing information — which file, which symbol, and what change to make; unresolved unknowns go to 风险与不确定性 instead of endless research. The subagent is strictly read-only; never start editing before approval.`
-        : "") },
+        : "") + (opts.mode === "spec" && opts.specReviewGuidance
+          ? `\n\nCurrent Spec turn: ${opts.specReviewGuidance}`
+          : "") },
       {
         role: "user",
         content: [
@@ -451,12 +453,8 @@ export const taskDecomposeHandler: StageHandler = {
       ctx.state.decomposeCount = 0;
     }
     
-    const approvedPlan = ctx.state.planApproval === "approved" ? ctx.state.approvedAgentPlan : undefined;
-    const approvedInput = approvedPlan
-      ? opts.mode === "spec"
-        ? `${opts.userMessage}\n\n## 已批准的只读设计计划（不授权源码实施）\n${approvedPlan}`
-        : approvedPlan
-      : opts.userMessage;
+    const approvedPlan = opts.mode === "agent" && ctx.state.planApproval === "approved" ? ctx.state.approvedAgentPlan : undefined;
+    const approvedInput = approvedPlan ?? opts.userMessage;
     if (approvedPlan && opts.mode === "agent") opts.userMessage = approvedInput;
     const result = await runTaskDecompose(
       { ...opts, userMessage: approvedInput }, model, tracer, memory, reasoningTrace, ctx.budgets, node.prompt, ctx.messages, !approvedPlan,

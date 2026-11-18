@@ -7,7 +7,7 @@
  * focus never aborts a background session's in-flight turn.
  */
 import { ipcMain } from "electron";
-import { listSessionMetas } from "@owncoder/core";
+import { listSessionMetas, type SpecTaskRef } from "@owncoder/core";
 import type { AgentMode } from "@owncoder/shared";
 import type { IpcContext } from "./types";
 
@@ -132,9 +132,12 @@ export function registerSessionHandlers(ctx: IpcContext): void {
 
   ipcMain.handle("session:getActivePlan", (_e, sessionId?: string) => session.getActivePlan(sessionId));
 
-  ipcMain.handle("session:updateTask", async (_e, taskId: string, status: string, result?: string, sessionId?: string) => {
-    return session.updateTask(taskId, status as never, result, sessionId);
+  ipcMain.handle("session:updateTask", async (_e, taskId: string, status: string, result?: string, sessionId?: string, taskRef?: SpecTaskRef) => {
+    return session.updateTask(taskId, status as never, result, sessionId, taskRef);
   });
+
+  ipcMain.handle("specs:taskDocument", (_e, path: string, sessionId: string) => session.getSpecTaskDocument(path, sessionId));
+  ipcMain.handle("specs:prepareTaskExecution", (_e, path: string, version: string, sessionId: string) => session.prepareSpecTaskExecution(path, version, sessionId));
 
   ipcMain.handle("plans:list", (_e, sessionId?: string) => session.listPlans(sessionId));
 
@@ -145,14 +148,6 @@ export function registerSessionHandlers(ctx: IpcContext): void {
   ipcMain.handle("specs:list", (_e, sessionId?: string) => session.listSpecs(sessionId));
 
   ipcMain.handle("specs:status", (_e, feature: string, sessionId?: string) => session.getSpecStatus(feature, sessionId));
-
-  ipcMain.handle("specs:approve", (_e, feature: string, sessionId?: string) =>
-    session.approveSpec(feature, sessionId),
-  );
-
-  ipcMain.handle("specs:reject", (_e, feature: string, feedback: string, sessionId?: string) =>
-    session.rejectSpec(feature, feedback, sessionId),
-  );
 
   // ── Checkpoints & changes ─────────────────────────────────────────────────
 

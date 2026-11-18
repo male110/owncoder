@@ -107,6 +107,14 @@ export interface ToolContext {
   lastPlanPath?: string;
   /** Spec feature this turn is working on (spec → design → tasks chain). */
   currentFeature?: string;
+  specRequirementsFollowup?: boolean;
+  specDesignFollowup?: boolean;
+  /** The document version bound to the current turn's classified intent. */
+  specRequirementsRevision?: import("../loop/spec-design-intent.ts").SpecRequirementsSnapshot | null;
+  specDesignGeneration?: import("../loop/spec-design-intent.ts").SpecRequirementsSnapshot | null;
+  specDesignRevision?: import("../loop/spec-design-intent.ts").SpecDesignSnapshot | null;
+  /** Current turn's authorization to generate tasks from this design version. */
+  specTaskGeneration?: import("../loop/spec-design-intent.ts").SpecDesignSnapshot | null;
   /** Mutable file snapshots for the active turn checkpoint. */
   fileSnapshots?: FileSnapshot[];
   touchedPaths?: string[];

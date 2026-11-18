@@ -17,6 +17,7 @@ import {
   PLANNER_FORCED_REPORT_INSTRUCTION,
 } from "./react-forced-report.ts";
 import type { ReActLoopContext, ReActReturn } from "./react-loop-context.ts";
+import { SPEC_TASK_REPORT_REQUIRED } from "./single-spec-task.ts";
 
 /** 迭代开始时检查终止条件；首轮（i === 0）跳过。 */
 export async function handleTerminationCheck(ctx: ReActLoopContext, i: number): Promise<ReActReturn | null> {
@@ -169,12 +170,12 @@ export async function handleTerminationCheck(ctx: ReActLoopContext, i: number): 
 
   // 硬限制（迭代/工具调用/成本上限）不是成功：标记 blocked 并带上原因，
   // 由 loop 层透传给 Explore 父智能体；普通收敛仍按成功收尾。
-  if (terminationResult.limitReached) {
+  if (terminationResult.limitReached || ctx.opts.singleSpecTask) {
     return finalizeTerminal(ctx, {
       lastAssistant: finalResponse,
       aborted: false,
       blocked: true,
-      blockedReason: terminationResult.reason,
+      blockedReason: terminationResult.limitReached ? terminationResult.reason : SPEC_TASK_REPORT_REQUIRED,
       correctionCount: ctx.correctionCount,
       documentWorkflow: ctx.documentWorkflowUpdate,
     }, "failed");

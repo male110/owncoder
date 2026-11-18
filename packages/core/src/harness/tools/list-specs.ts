@@ -1,4 +1,4 @@
-import { formatSpecStatus, getSpecStatus, listSpecs } from "../../specs.ts";
+import { formatSpecStatus, getSpecStatus, listSpecs, specStageDisplay } from "../../specs.ts";
 import type { ToolContext, ToolResult } from "./types.ts";
 import { cap, ok } from "./shared.ts";
 
@@ -13,7 +13,7 @@ export async function toolListSpecs(
   const features = await listSpecs(ctx.workspaceRoot, ctx.sessionId!);
   if (!features.length) return ok("No specs yet. Use save_spec to start one.");
   const lines = features.map(
-    (f) => `- ${f.name} [${f.phases.join(",") || "empty"}]${f.complete ? " ✅" : ""} — ${f.title}${f.stage ? ` (${f.stage})` : ""}`,
+    (f) => `- ${f.name} [${f.phases.join(",") || "empty"}]${f.complete ? " ✅" : ""} — ${f.title}${f.stage ? ` (${specStageDisplay(f.stage)})` : ""}`,
   );
   return ok(cap(`## Specs\n${lines.join("\n")}`, ctx.maxOutputChars));
 }

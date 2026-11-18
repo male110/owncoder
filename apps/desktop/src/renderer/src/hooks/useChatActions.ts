@@ -22,10 +22,12 @@ import {
   setQueueRunner,
   clearQueueRunner,
   isStopRequested,
+  requestStop,
   clearStopRequest,
   sendQueuedMessage,
+  type QueuedMessage,
 } from "./queue-controller";
-import type { ChatTurnDto, TaskStatusDto } from "../../../preload/index";
+import type { ChatTurnDto, SpecTaskDocumentDto, SpecTaskRefDto, TaskStatusDto } from "../../../preload/index";
 import { t } from "../../../shared/i18n/core";
 import { extractPlanPath } from "../components/chat-log/plan-marker";
 
@@ -63,32 +65,37 @@ export function mergeIncomingHistory(current: ChatTurnDto[], incoming: ChatTurnD
   return extra.length > 0 ? [...current, ...extra] : current;
 }
 
-type SendResult =
-  | {
-      ok: true;
-      history: ChatTurnDto[];
-      lastPlanPath?: string;
-      lastCheckpointId?: string | null;
-      sessionId: string | null;
-      sessionTitle: string | null;
-    }
-  | {
-      ok: false;
-      error: string;
-      /** 用户主动点「停止」中止本轮（非故障，不弹错误条）。 */
-      aborted?: boolean;
-      history: ChatTurnDto[];
-      sessionId: string | null;
-      sessionTitle: string | null;
-    };
+type SendResult = Awaited<ReturnType<Window["owncoder"]["sendChat"]>>;
+
+const specActionsRunning = new Set<string>();
+const deferredQueueStarts = new Set<string>();
+
+function specTaskRef(document: SpecTaskDocumentDto, taskId: string): SpecTaskRefDto | undefined {
+  const { path, version, approvedAt } = document;
+  return approvedAt ? { path, version, approvedAt, taskId } : undefined;
+}
+
+function tryStartSpecAction(sid: string, execute = false): boolean {
+  if (specActionsRunning.has(sid) || isQueueRunning(sid) || useChatStore.getState().isSessionSending(sid)) return false;
+  if (execute) clearStopRequest(sid);
+  specActionsRunning.add(sid);
+  markQueueRunning(sid, true);
+  return true;
+}
+
+function selectSpecTask(document: SpecTaskDocumentDto, retryable: Set<string>, attempted: Set<string>, taskId?: string) {
+  if (document.tasks.some((task) => task.status === "in_progress")) return;
+  const statuses = new Map(document.tasks.map((task) => [task.id, task.status]));
+  return document.tasks.find((task) =>
+    (taskId === undefined || task.id === taskId) && !attempted.has(task.id) &&
+    (task.status === "pending" || (task.status === "failed" && retryable.has(task.id))) &&
+    task.dependsOn.every((id) => statuses.get(id) === "completed" || statuses.get(id) === "skipped"),
+  );
+}
 
 // 保留首条消息的完整标题，显示省略号由侧栏的可用宽度决定。
 function provisionalTitle(text: string): string {
   return text.replace(/\s+/g, " ").trim();
-}
-
-function isSpecAdvanceRequest(text: string): boolean {
-  return /^(?:下一步|继续(?:下一步)?|next)[\s.!。！]*$/i.test(text.trim());
 }
 
 // 仅当会话仍持有默认标题（"新会话"或空）时，立即用首条用户消息更新侧栏标题，
@@ -395,83 +402,80 @@ export function useChatActions(deps: {
     return false;
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Queue runner ──────────────────────────────────────────────────────────
+  // ── Chat turn and queue runner ──────────────────────────────────────────────
+
+  const sendTurn = useCallback(async (sid: string, next: QueuedMessage, taskRef?: SpecTaskRefDto) => {
+    chat.setSending(true, sid);
+    chat.resetTurnState(sid);
+    chat.setLiveStatus(t("正在分解任务…"), sid);
+    chat.setHistory((h) => [
+      ...h,
+      {
+        role: "user",
+        content: next.text,
+        ...(next.attachments?.length ? { attachments: next.attachments } : {}),
+      },
+    ], sid);
+    applyProvisionalTitleIfNeeded(sid, next.text);
+    try {
+      // A spec batch checks Stop before starting the turn. Invoke its IPC in
+      // the same tick so Stop cannot land before the backend sees the request.
+      if (!taskRef) await new Promise((r) => setTimeout(r, 0));
+      const res = taskRef
+        ? await window.owncoder.sendChat(next.text, sid, next.attachments, taskRef)
+        : await window.owncoder.sendChat(next.text, sid, next.attachments);
+      if (getFocusSessionId() === sid) {
+        void depsRef.current.refreshChanges(sid).catch(() => {});
+      }
+      await applyChatResult(res, sid);
+      if (getFocusSessionId() === sid) {
+        void depsRef.current.refreshGit().catch(() => {});
+      }
+      // Skip the frontend notification when the backend already saved the card.
+      if (
+        res.ok && res.lastPlanPath &&
+        !res.history.some((turn) => turn.role === "assistant" && extractPlanPath(turn.content) === res.lastPlanPath)
+      ) void injectPlanNotification(res.lastPlanPath, sid);
+      return res;
+    } catch (e) {
+      if (!taskRef || !isStopRequested(sid)) showError(e, sid);
+      else chat.setLiveStatus("", sid);
+      chat.clearPendingDelete(sid);
+      return null;
+    } finally {
+      if (!taskRef) chat.setSending(false, sid);
+    }
+  }, [applyChatResult, injectPlanNotification, showError]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const runQueue = useCallback(async (sid: string, oneOnly = false) => {
-    console.log("[runQueue] called, sid=", sid, "isRunning=", isQueueRunning(sid));
-    if (isQueueRunning(sid)) return;
+    if (isQueueRunning(sid) || isStopRequested(sid)) return;
     markQueueRunning(sid, true);
     try {
-      while (true) {
-        // Stop requested by the user: break out of the drain loop WITHOUT
-        // clearing the remaining queued messages, so they survive the stop.
-        if (isStopRequested(sid)) {
-          clearStopRequest(sid);
-          break;
-        }
+      while (!isStopRequested(sid)) {
         const next = dequeueMessage(sid);
         if (!next) break;
-        chat.setSending(true, sid);
-        chat.resetTurnState(sid);
-        // Immediate user-facing feedback BEFORE the IPC roundtrip so the user
-        // sees "正在分解任务…" / "正在运行中…" even when the backend hasn't
-        // emitted its first stage event yet. Subsequent `stage_start` /
-        // `thinking_delta` / `tool_start` events will overwrite this with
-        // more specific text via `setLiveStatus`.
-        chat.setLiveStatus(t("正在分解任务…"), sid);
-        chat.setHistory(
-          (h) => [
-            ...h,
-            {
-              role: "user",
-              content: next.text,
-              ...(next.attachments?.length ? { attachments: next.attachments } : {}),
-            },
-          ],
-          sid,
-        );
-        applyProvisionalTitleIfNeeded(sid, next.text);
-        try {
-          await new Promise((r) => setTimeout(r, 0));
-          const res = await window.owncoder.sendChat(next.text, sid, next.attachments);
-          // Kick off refreshChanges IMMEDIATELY — don't wait for applyChatResult.
-          // The backend has finished writing files by now, so the changes panel
-          // can start populating while history/title updates settle.
-          if (getFocusSessionId() === sid) {
-            depsRef.current.refreshChanges(sid).catch(() => {});
-          }
-          await applyChatResult(res, sid);
-          // Mark session completed immediately so the sidebar shows "已结束"
-          // without waiting for the (potentially slow) changes/git refreshes.
-          chat.setSending(false, sid);
-          // Fire-and-forget: remaining refreshes run in the background.
-          if (getFocusSessionId() === sid) {
-            depsRef.current.refreshGit().catch(() => {});
-          }
-          // 后端 history 已含同路径的 plan_saved 消息（planner 流程）时跳过注入，
-          // 否则会话里会出现两张同路径计划卡片；save_plan 等无标记消息的流程仍注入。
-          if (
-            res.ok && res.lastPlanPath &&
-            !res.history.some((turn) => turn.role === "assistant" && extractPlanPath(turn.content) === res.lastPlanPath)
-          ) void injectPlanNotification(res.lastPlanPath, sid);
-        } catch (e) {
-          showError(e, sid);
-          chat.setSending(false, sid);
-          // IPC 层异常 reject（正常错误会被主进程捕获并返回 ok:false）：
-          // 复位停止窗口标志，避免 stopping 残留导致删除入口状态不一致。
-          chat.setStopping(false, sid);
-          chat.clearPendingDelete(sid);
-        }
+        await sendTurn(sid, next);
         if (oneOnly) break;
-        // Do NOT resetTurnState() here - sealAllStreaming() (triggered by the
-        // IPC "turn_complete" event) has already sealed the liveEvents in place
-        // so the user can review the trace. The next iteration's resetTurnState()
-        // call at the top of the loop will clear them before the new turn.
       }
     } finally {
       markQueueRunning(sid, false);
     }
-  }, [applyChatResult, injectPlanNotification, showError]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [sendTurn]);
+
+  const startQueue = useCallback((sid: string) => {
+    if (specActionsRunning.has(sid)) {
+      deferredQueueStarts.add(sid);
+      return;
+    }
+    clearStopRequest(sid);
+    void runQueue(sid);
+  }, [runQueue]);
+
+  const finishSpecAction = useCallback((sid: string) => {
+    specActionsRunning.delete(sid);
+    markQueueRunning(sid, false);
+    if (deferredQueueStarts.delete(sid) && !isStopRequested(sid)) void runQueue(sid);
+  }, [runQueue]);
 
   const sendQueued = useCallback((sid: string, index: number) => {
     sendQueuedMessage(sid, index);
@@ -612,54 +616,6 @@ export function useChatActions(deps: {
     const sendSession = useSessionStore.getState();
     if (!sendSession.workspace) { console.log("[onSend] workspace not ready → return"); chat.setLiveStatus(t("工作区尚未就绪，请稍候…"), sid); return; }
 
-    if (sendSession.mode === "spec" && isSpecAdvanceRequest(text)) {
-      const specs = await window.owncoder.listSpecs(sid);
-      const feature = specs.find((item) =>
-        item.stage === "awaiting_spec_approval" ||
-        item.stage === "awaiting_design_approval" ||
-        item.stage === "awaiting_tasks_approval",
-      );
-      if (feature) {
-        try {
-          await window.owncoder.keepAllChanges(sid).catch(() => undefined);
-          const res = await window.owncoder.approveSpec(feature.name, sid);
-          if (res.mode) session.setMode(res.mode);
-          if (res.activePlanPath !== undefined) session.setActivePlanPath(res.activePlanPath, sid);
-          if (res.currentFeature !== undefined) session.setCurrentFeature(res.currentFeature, sid);
-          const backendHistory = await window.owncoder.getChatHistory(sid);
-          await depsRef.current.refreshSpecs(sid);
-          const meta = await depsRef.current.refreshActivePlan(sid);
-          if (meta && meta.tasks.length > 0) {
-            chat.setHistory((current) => {
-              const merged = mergeIncomingHistory(current, backendHistory);
-              if (merged.some((turn) => turn.role === "user" && turn.content === text)) return merged;
-              let assistantIndex = merged.length - 1;
-              while (assistantIndex >= 0 && merged[assistantIndex]?.role !== "assistant") assistantIndex--;
-              const confirmationTurn: ChatTurnDto = { role: "user", content: text };
-              return assistantIndex >= 0
-                ? [...merged.slice(0, assistantIndex), confirmationTurn, ...merged.slice(assistantIndex)]
-                : [...merged, confirmationTurn];
-            }, sid);
-            chat.setLiveStatus(t("任务已准备好，请打开任务详情后点击执行。"), sid);
-            ui.clearSentDrafts(sid);
-            return;
-          }
-          ui.clearSentDrafts(sid);
-          if (sendSession.llmConfigured) {
-            enqueueMessage(sid, text);
-            clearStopRequest(sid);
-            void runQueue(sid);
-          } else {
-            chat.setLiveStatus(t("已确认当前文档。请先配置 LLM，再发送消息继续。"), sid);
-          }
-          return;
-        } catch (e) {
-          showError(e, sid);
-          return;
-        }
-      }
-    }
-
     console.log("[onSend] checking llmConfigured...");
     if (!sendSession.llmConfigured) { console.log("[onSend] LLM not configured → return"); showError(t("未配置 LLM API Key"), sid); return; }
 
@@ -675,7 +631,8 @@ export function useChatActions(deps: {
       const meta = store.getActivePlanMetaForSession(sid);
       console.log("[onSend] meta=", meta ? `${meta.tasks.length} tasks` : "null");
       if (
-        meta &&
+        !specActionsRunning.has(sid) &&
+        meta && !meta.path.startsWith(".owncoder/specs/") &&
         meta.tasks.length > 0 &&
         meta.tasks.every((t) => t.status === "completed" || t.status === "skipped")
       ) {
@@ -692,10 +649,7 @@ export function useChatActions(deps: {
       enqueueMessage(sid, text, attachments);
       // 消息实际入队后才更新排序时间。
       useSessionStore.getState().touchSessionUpdatedAt(sid);
-      // 用户主动发送新消息，清除可能残留的停止标志，确保队列能正常执行。
-      clearStopRequest(sid);
-      console.log("[onSend] running queue...");
-      void runQueue(sid);
+      startQueue(sid);
     } catch (err) {
       console.error("[onSend] INNER ERROR:", err);
     }
@@ -707,13 +661,13 @@ export function useChatActions(deps: {
       showError(err, sid);
     }
   }
-  }, [runSlash, runQueue, showError]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [runSlash, startQueue, showError]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const onRegenerate = useCallback(async () => {
     const sid = getFocusSessionId();
     const currentSession = useSessionStore.getState();
     if (!sid) return;
-    if (chat.isSessionSending(sid)) return;
+    if (chat.isSessionSending(sid) || isQueueRunning(sid)) return;
     if (!currentSession.workspace) return;
     if (!currentSession.llmConfigured) { showError(t("未配置 LLM API Key"), sid); return; }
     chat.setSending(true, sid);
@@ -753,7 +707,7 @@ export function useChatActions(deps: {
 
   const onApprovePlan = useCallback(async (path?: string) => {
     const sid = getFocusSessionId();
-    if (!sid) return;
+    if (!sid || specActionsRunning.has(sid)) return;
     ui.setBusy(true);
     try {
       // 批准前先 keepAll：将 Plan 模式生成的文档文件（PRD/TDD 等）标记为已保留，
@@ -802,9 +756,8 @@ export function useChatActions(deps: {
           chat.setLiveStatus(t("计划已批准。请先配置 LLM，再发送消息开始执行。"), sid);
         } else {
           enqueueMessage(sid, t("开始执行"));
-          clearStopRequest(sid);
           chat.setLiveStatus(t("计划已批准，自动开始执行 {{count}} 个任务…", { count: meta.tasks.length }), sid);
-          void runQueue(sid);
+          startQueue(sid);
         }
       }
     } catch (e) {
@@ -813,25 +766,120 @@ export function useChatActions(deps: {
     } finally {
       ui.setBusy(false);
     }
-  }, [showError, runQueue]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [showError, startQueue]); // eslint-disable-line react-hooks/exhaustive-deps
 
 
 
-  // ── Spec 工作流（spec → design → tasks 审批）────────────────────────────
-
-  const onUpdateTask = useCallback(async (taskId: string, status: TaskStatusDto) => {
-    const sid = getFocusSessionId();
+  const onExecutePlan = useCallback((sidOverride?: string) => {
+    const sid = sidOverride ?? getFocusSessionId();
     if (!sid) return;
-    ui.setBusy(true);
+    const currentSession = useSessionStore.getState();
+    const meta = currentSession.getActivePlanMetaForSession(sid);
+    if (!meta || meta.tasks.length === 0 || meta.path.startsWith(".owncoder/specs/")) return;
+    if (useChatStore.getState().isSessionSending(sid) || isQueueRunning(sid)) return;
+    if (!currentSession.workspace) {
+      chat.setLiveStatus(t("工作区尚未就绪，请稍候…"), sid);
+      return;
+    }
+    if (!currentSession.llmConfigured) {
+      chat.setLiveStatus(t("任务已准备好。请先配置 LLM，再发送消息开始执行。"), sid);
+      return;
+    }
+    enqueueMessage(sid, t("开始执行"));
+    chat.setLiveStatus(t("开始执行 {{count}} 个任务…", { count: meta.tasks.length }), sid);
+    startQueue(sid);
+  }, [startQueue]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const onExecuteSpecTasks = useCallback(async (sid: string, document: SpecTaskDocumentDto, taskId?: string) => {
+    const { workspace, llmConfigured } = useSessionStore.getState();
+    if (!workspace) {
+      chat.setLiveStatus(t("工作区尚未就绪，请稍候…"), sid);
+      return;
+    }
+    if (!llmConfigured) {
+      showError(t("未配置 LLM API Key"), sid);
+      return;
+    }
+    const queueWasPaused = isStopRequested(sid);
+    if (!tryStartSpecAction(sid, true)) return;
+
+    const { path, version } = document;
+    const attempted = new Set<string>();
+    // Keep Stop available during setup and between turns, not just during IPC.
+    chat.setSending(true, sid);
     try {
-      const meta = await window.owncoder.updateTask(taskId, status, undefined, sid);
+      const initial = await window.owncoder.getSpecTaskDocument(path, sid);
+      if (isStopRequested(sid) || initial?.path !== path || initial.version !== version) return;
+      // A fresh click can retry pre-existing failures. A task that fails during
+      // this batch must not be retried automatically.
+      const retryable = new Set(initial.tasks.filter((task) => task.status === "failed").map((task) => task.id));
+      if (!selectSpecTask(initial, retryable, attempted, taskId)) return;
+
+      const state = await window.owncoder.prepareSpecTaskExecution(path, version, sid);
+      if (state.mode !== "agent" || state.activePlanPath !== path) return;
+      if (getFocusSessionId() === sid) session.setMode(state.mode);
+      session.setActivePlanPath(state.activePlanPath, sid);
+      session.setCurrentFeature(state.currentFeature, sid);
+      let [latest] = await Promise.all([
+        window.owncoder.getSpecTaskDocument(path, sid),
+        depsRef.current.refreshActivePlan(sid),
+        depsRef.current.refreshSpecs(sid),
+      ]);
+      const approvedAt = latest?.approvedAt;
+      if (!approvedAt || (initial.approvedAt && initial.approvedAt !== approvedAt)) return;
+
+      while (!isStopRequested(sid) && latest?.path === path && latest.version === version && latest.approvedAt === approvedAt) {
+        const task = selectSpecTask(latest, retryable, attempted, taskId);
+        if (!task) break;
+        attempted.add(task.id);
+        useSessionStore.getState().touchSessionUpdatedAt(sid);
+        const res = await sendTurn(sid, { text: `${t("开始执行")} ${task.id}` }, { path, version, approvedAt, taskId: task.id });
+        if (res?.ok ? res.taskOutcome?.status === "cancelled" : res?.aborted) requestStop(sid);
+        // Re-read authority even on failure/cancellation; never change task
+        // status locally, or treat a normal assistant reply as completion.
+        [latest] = await Promise.all([
+          window.owncoder.getSpecTaskDocument(path, sid),
+          depsRef.current.refreshActivePlan(sid),
+        ]);
+        if (taskId !== undefined || !res?.ok || res.taskOutcome?.status !== "completed" || latest?.tasks.find((item) => item.id === task.id)?.status !== "completed") break;
+      }
+    } catch (e) {
+      if (!isStopRequested(sid)) showError(e, sid);
+    } finally {
+      if (isStopRequested(sid)) {
+        chat.setLiveStatus("", sid);
+        chat.clearPendingDelete(sid);
+      }
+      // Running a spec task does not opt in to resuming paused chat messages.
+      if (queueWasPaused && !deferredQueueStarts.has(sid)) requestStop(sid);
+      chat.setSending(false, sid);
+      finishSpecAction(sid);
+    }
+  }, [finishSpecAction, sendTurn, showError]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const onUpdateTask = useCallback(async (
+    taskId: string,
+    status: TaskStatusDto,
+    sidOverride?: string,
+    document?: SpecTaskDocumentDto,
+  ) => {
+    const sid = sidOverride ?? getFocusSessionId();
+    if (!sid || specActionsRunning.has(sid)) return;
+    const taskRef = document && specTaskRef(document, taskId);
+    if (document && (!taskRef || !tryStartSpecAction(sid))) return;
+    if (!document) ui.setBusy(true);
+    try {
+      const meta = taskRef
+        ? await window.owncoder.updateTask(taskId, status, undefined, sid, taskRef)
+        : await window.owncoder.updateTask(taskId, status, undefined, sid);
       session.setActivePlanMetaBySession(sid, meta);
     } catch (e) {
       showError(e, sid);
     } finally {
-      ui.setBusy(false);
+      if (document) finishSpecAction(sid);
+      else ui.setBusy(false);
     }
-  }, [showError]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [finishSpecAction, showError]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Changes / rollback ────────────────────────────────────────────────────
 
@@ -929,6 +977,8 @@ export function useChatActions(deps: {
     onSend,
     onRegenerate,
     onApprovePlan,
+    onExecutePlan,
+    onExecuteSpecTasks,
     onUpdateTask,
     onRollback,
     onKeepAll,
