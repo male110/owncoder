@@ -20,8 +20,6 @@ export interface ExplorePromptEnv {
 
 /**
  * 构建 Explore 子智能体的系统提示词。
- * thoroughness 由调用方传入，控制搜索广度：very thorough 模式下放宽
- * "禁止扩大搜索"类纪律并允许更多图跳转，避免证据不足时保守空转。
  *
  * 结构参考 ZCode Explore：速度优先框架（"fast agent that returns output
  * as quickly as possible"）、一批并行调用指令（机制层 PARALLEL_SAFE_TOOLS
@@ -29,13 +27,10 @@ export interface ExplorePromptEnv {
  * 定位代码而不是评审代码"的范围声明。
  */
 export function buildExploreSubagentPrompt(
-  thoroughness: string,
   env: ExplorePromptEnv = {},
   relevantHistory?: string,
 ): string {
-  const breadth = thoroughness === "very thorough"
-    ? "Search breadth: broad, but stop once the requested question is established; do not enumerate unrelated files."
-    : "Search breadth: focused. Start from the named path/symbol and stop after one or two confirming reads.";
+  const breadth = "Search breadth: focused. Start from the named path/symbol and stop after one or two confirming reads.";
 
   const envLines = [
     "Environment:",

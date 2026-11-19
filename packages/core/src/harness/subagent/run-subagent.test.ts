@@ -61,7 +61,6 @@ describe("runExploreSubagent — Planner 输入可见", () => {
     const start = onEvent.mock.calls.find(([event]) => event.type === "stage_start")![0];
     expect(start.subagentInput.userMessage).toBe(task.replace(/ghp_[A-Za-z0-9]{36}/, "***"));
     expect(start.subagentInput.systemPromptOverride).toBe(opts.systemPromptOverride);
-    expect(start.subagentInput.thoroughness).toBe("medium");
     expect(opts.userMessage).toBe(task);
     expect(onEvent.mock.invocationCallOrder[0]).toBeLessThan(mockedRunAgentLoop.mock.invocationCallOrder[0]);
     expect(result.report.startsWith("[Planner partial result")).toBe(partial);
@@ -157,7 +156,7 @@ describe("runExploreSubagent — 索引导航引导块", () => {
   it("ftsSearch 有命中 → systemPromptOverride 含引导块与命中符号", async () => {
     const index = fakeIndex([sym("src/auth.ts", "validateToken", 42), sym("src/auth.ts", "login", 88)]);
     await runExploreSubagent(
-      { agentType: "Explore", task: "为什么 UserService 的 validateToken 登录失败", thoroughness: "medium" },
+      { agentType: "Explore", task: "为什么 UserService 的 validateToken 登录失败" },
       baseDeps(index),
     );
     const prompt = mockedRunAgentLoop.mock.calls[0]![0].systemPromptOverride as string;
@@ -171,7 +170,7 @@ describe("runExploreSubagent — 索引导航引导块", () => {
   it("ftsSearch 空结果 → 不注入引导块（降级为现状）", async () => {
     const index = fakeIndex([]);
     await runExploreSubagent(
-      { agentType: "Explore", task: "排查 validateToken", thoroughness: "medium" },
+      { agentType: "Explore", task: "排查 validateToken" },
       baseDeps(index),
     );
     const prompt = mockedRunAgentLoop.mock.calls[0]![0].systemPromptOverride as string;
@@ -182,7 +181,7 @@ describe("runExploreSubagent — 索引导航引导块", () => {
 
   it("索引无 ftsSearch（stub 索引）→ 同样降级", async () => {
     await runExploreSubagent(
-      { agentType: "Explore", task: "排查 validateToken", thoroughness: "medium" },
+      { agentType: "Explore", task: "排查 validateToken" },
       baseDeps({} as IndexClient),
     );
     const prompt = mockedRunAgentLoop.mock.calls[0]![0].systemPromptOverride as string;
@@ -192,7 +191,7 @@ describe("runExploreSubagent — 索引导航引导块", () => {
   it("ftsSearch 抛错 → 降级不注入，子代理仍正常运行", async () => {
     const index = { ftsSearch: vi.fn(async () => { throw new Error("index corrupt"); }) } as unknown as IndexClient;
     const run = await runExploreSubagent(
-      { agentType: "Explore", task: "排查 validateToken", thoroughness: "medium" },
+      { agentType: "Explore", task: "排查 validateToken" },
       baseDeps(index),
     );
     expect(typeof run.report).toBe("string");

@@ -30,6 +30,16 @@ describe("任务上下文：短硬执行纪律", () => {
     expect(text).toMatch(/stop dispatching explorations/i);
   });
 
+  it("明文要求把实现类工作留在执行器自己手上（正向表述，不含否定约束）", () => {
+    const text = formatCurrentTaskContext(makeTask({
+      executionGuidance: "修改 packages/core/src/harness/loop/context.ts:46 的 freshReadGuidance 并运行相关测试。",
+    }));
+    expect(text).toMatch(/Explore's deliverable is a research report only/i);
+    expect(text).toMatch(/Keep all implementation work in your own context/i);
+    expect(text).toMatch(/editing, rewriting, running, and verifying stay with you/i);
+    expect(text).not.toMatch(/Never dispatch a brief that asks Explore to modify, rewrite, implement, run, or verify anything/i);
+  });
+
   it.each([
     "分析 @EnumValue 与 @JsonValue 的项目使用规范并提供证据",
     "修复格式缺陷并报告根因、修改与验证结果",

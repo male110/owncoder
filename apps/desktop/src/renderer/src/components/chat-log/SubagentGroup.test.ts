@@ -154,7 +154,7 @@ describe("SubagentGroupCard Planner 输入预览", () => {
   it("长输入默认截断为 200 字符并显示「...」按钮", () => {
     const long = "a".repeat(500);
     const tree = renderCard(makeGroup({
-      input: { userMessage: long, systemPromptOverride: "sys", thoroughness: "medium" },
+      input: { userMessage: long, systemPromptOverride: "sys" },
     }));
     const pre = inputPre(tree, 0);
     const children = pre.props.children as unknown[];
@@ -166,7 +166,7 @@ describe("SubagentGroupCard Planner 输入预览", () => {
 
   it("短输入不截断、不显示「...」按钮", () => {
     const tree = renderCard(makeGroup({
-      input: { userMessage: "短任务", systemPromptOverride: "sys", thoroughness: "medium" },
+      input: { userMessage: "短任务", systemPromptOverride: "sys" },
     }));
     const pre = inputPre(tree, 0);
     // pre 的 children 恒为数组 [shown, toggle|null]
@@ -177,7 +177,7 @@ describe("SubagentGroupCard Planner 输入预览", () => {
 
   it("恰好 200 字符视为不超限，不出现「...」", () => {
     const tree = renderCard(makeGroup({
-      input: { userMessage: "b".repeat(200), systemPromptOverride: "s", thoroughness: "low" },
+      input: { userMessage: "b".repeat(200), systemPromptOverride: "s" },
     }));
     const pre = inputPre(tree, 0);
     const children = pre.props.children as unknown[];
@@ -188,7 +188,7 @@ describe("SubagentGroupCard Planner 输入预览", () => {
   it("点击「...」展开完整内容，再次点击收起", () => {
     const long = "x".repeat(300);
     const group = makeGroup({
-      input: { userMessage: long, systemPromptOverride: "y".repeat(300), thoroughness: "medium" },
+      input: { userMessage: long, systemPromptOverride: "y".repeat(300) },
     });
     const tree = renderCard(group);
     const toggle = (inputPre(tree, 0).props.children as unknown[])[1] as Element;
@@ -206,7 +206,7 @@ describe("SubagentGroupCard Planner 输入预览", () => {
 
   it("空输入渲染空 pre，不出现「...」按钮", () => {
     const tree = renderCard(makeGroup({
-      input: { userMessage: "", systemPromptOverride: "", thoroughness: "medium" },
+      input: { userMessage: "", systemPromptOverride: "" },
     }));
     const pre = inputPre(tree, 0);
     const children = pre.props.children as unknown[];
@@ -217,7 +217,7 @@ describe("SubagentGroupCard Planner 输入预览", () => {
   it("换行与 JSON 内容按原样保留在截断预览中", () => {
     const json = `{"a": 1,\n"b": "值"}\n` + "c".repeat(250);
     const tree = renderCard(makeGroup({
-      input: { userMessage: json, systemPromptOverride: "s", thoroughness: "medium" },
+      input: { userMessage: json, systemPromptOverride: "s" },
     }));
     const children = inputPre(tree, 0).props.children as unknown[];
     expect(children[0]).toBe(json.slice(0, 200));
@@ -226,7 +226,7 @@ describe("SubagentGroupCard Planner 输入预览", () => {
 
   it("点击分组条头部切换的是执行过程展开状态，而非输入内容", () => {
     const group = makeGroup({
-      input: { userMessage: "task", systemPromptOverride: "sys", thoroughness: "medium" },
+      input: { userMessage: "task", systemPromptOverride: "sys" },
       report: "节点报告内容",
     });
     const tree = renderCard(group, false);

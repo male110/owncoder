@@ -57,7 +57,7 @@ type TurnEventFields =
   | { type: "tool_start"; id: string; name: string; args: Record<string, unknown>; subagent?: SubagentProvenance }
   | { type: "tool_end"; id: string; name: string; ok: boolean; output: string; metadata?: ToolResultMetadata; skipped?: boolean; subagent?: SubagentProvenance }
   | { type: "terminal"; entry: TerminalEntry }
-  | { type: "stage_start"; id: string; nodeType: string; label: string; subagentInput?: { userMessage: string; systemPromptOverride: string; thoroughness: string } }
+  | { type: "stage_start"; id: string; nodeType: string; label: string; subagentInput?: { userMessage: string; systemPromptOverride: string } }
   | { type: "stage_done"; id: string; nodeType: string; label: string; ok?: boolean; report?: string }
   /**
    * Result of the task_decompose stage: the user's intent, the durable user

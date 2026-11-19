@@ -19,8 +19,8 @@ export const DISPATCH_AGENT_TOOL_DEF: ToolDef = {
       "This is your only exploration path: you have no search tools of your own (no grep/glob/symbol search, no web search). " +
       "Dispatch \"Explore\" whenever a fact you need is not already established in context — locating files, finding symbols, tracing call chains, or looking up external errors/docs. " +
       "It reads excerpts rather than whole files, so it locates code and evidence; it does not review or audit code. " +
-      "The subagent is read-only: implementation work cannot be delegated. " +
-      "Use read_file only for paths already established (edit targets, plan references, Explore report citations); never dispatch as a pre-flight before an edit whose site is already known. " +
+      "The subagent's deliverable is a research report (read-only tool whitelist); implementation work — edits, builds, tests — stays with you. " +
+      "Use read_file only for paths already established (edit targets, plan references, Explore report citations); for an edit whose site is already known, go straight to read_file and skip the pre-flight dispatch. " +
       "Keep each brief tight and scoped: one deliverable per dispatch — a research or review assignment that ends in a single report is ONE consolidated brief enumerating all its unknowns (locate, read, then audit stays one dispatch); do not split it into parallel briefs that re-search the same entry points and merge back into one report. " +
       "Dispatch parallel subagents only for genuinely independent questions with disjoint areas and separate deliverables.",
     parameters: {
@@ -35,11 +35,6 @@ export const DISPATCH_AGENT_TOOL_DEF: ToolDef = {
           type: "string",
           description:
             "The concrete research question or search request for the subagent. Include exact symbols, file paths, or identifiers when known, and what the answer must establish.",
-        },
-        thoroughness: {
-          type: "string",
-          enum: ["medium", "very thorough"],
-          description: 'Search breadth. "medium" for likely-location-first exploration (default); "very thorough" only for cross-cutting questions whose answer genuinely spans multiple directories or naming conventions.',
         },
         relevantHistory: {
           type: "string",

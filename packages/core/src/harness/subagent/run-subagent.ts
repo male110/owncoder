@@ -35,8 +35,6 @@ export interface DispatchSubagentRequest {
   agentType: string;
   /** 派给子智能体的具体调研问题，原样作为它的 user 消息。 */
   task: string;
-  /** 搜索广度："medium"（默认）或 "very thorough"。 */
-  thoroughness?: string;
   /** 任务分解阶段提取的背景证据；仅注入提示词，不作为子代理指令。 */
   relevantHistory?: string;
   /**
@@ -108,11 +106,10 @@ export interface DispatchSubagentDeps {
 }
 
 /**
- * 迭代预算按搜索广度分级。预算只统计模型往返：纯工具调用轮同样计数，
- * 因此这里要为"最后写报告"留出余量。very thorough 需要更多搜索轮次。
+ * 迭代预算按子智能体角色分级。预算只统计模型往返：纯工具调用轮同样计数，
+ * 因此这里要为"最后写报告"留出余量。
  */
-const EXPLORE_MEDIUM_MAX_ITERATIONS = 40;
-const EXPLORE_VERY_THOROUGH_MAX_ITERATIONS = 70;
+const EXPLORE_MAX_ITERATIONS = 40;
 /**
  * Planner 的小预算（结构性收口之后不再需要大迭代数）：
  * dispatch_agent 的任务描述已携带"已知锚点"，调研只补齐未知点；
@@ -157,12 +154,7 @@ export async function runExploreSubagent(
       };
     }
   }
-  const thoroughness = request.thoroughness === "very thorough" ? "very thorough" : "medium";
-  const maxIterations = isPlanner
-    ? PLANNER_MAX_ITERATIONS
-    : thoroughness === "very thorough"
-      ? EXPLORE_VERY_THOROUGH_MAX_ITERATIONS
-      : EXPLORE_MEDIUM_MAX_ITERATIONS;
+  const maxIterations = isPlanner ? PLANNER_MAX_ITERATIONS : EXPLORE_MAX_ITERATIONS;
 
   // start/done 共用同一个 id，保证阶段条能正确配对收口。
   // 追加单调序号：并行派发（同一批多个 dispatch_agent）即使落在同一毫秒
@@ -189,7 +181,7 @@ export async function runExploreSubagent(
   const userMessage = request.task;
   const basePrompt = isPlanner
     ? buildPlannerSubagentPrompt(env, request.relevantHistory)
-    : buildExploreSubagentPrompt(thoroughness, env, request.relevantHistory);
+    : buildExploreSubagentPrompt(env, request.relevantHistory);
   const systemPromptOverride = isContinuation ? undefined : basePrompt + navBlock;
   const redact = (text: string) => isRedactionEnabled(deps.workflow)
     ? redactPromptSecrets(text, deps.workflow.secrets?.patterns)
@@ -199,7 +191,7 @@ export async function runExploreSubagent(
     id: stageId,
     nodeType: "subagent",
     label: `${isPlanner ? "Planner" : "Explore"}: ${redact(userMessage).slice(0, 60)}`,
-    ...(isPlanner ? { subagentInput: { userMessage: redact(userMessage), systemPromptOverride: redact(systemPromptOverride ?? ""), thoroughness } } : {}),
+    ...(isPlanner ? { subagentInput: { userMessage: redact(userMessage), systemPromptOverride: redact(systemPromptOverride ?? "") } } : {}),
   });
 
   let plannerSucceeded = false;

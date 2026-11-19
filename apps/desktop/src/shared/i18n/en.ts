@@ -64,7 +64,6 @@ export const en = {
   "节点报告": "Node report",
   "发送给 Planner 的输入（按设置遮盖敏感值）": "Input sent to Planner (sensitive values masked when enabled)",
   "用户任务": "User task",
-  "搜索广度": "Search breadth",
   "系统提示词（含索引导航）": "System prompt (including index navigation)",
   "收起": "Collapse",
   "项目": "Projects",

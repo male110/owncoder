@@ -299,7 +299,7 @@ describe("applyChatEvent subagent grouping", () => {
 
   it.each(["Planner finished", "Planner partial result: subagent finished without producing a report"])(
     "保留 Planner 输入，即使没有工具或报告：%s", (report) => {
-      const input = { userMessage: "完整任务\n第二行", systemPromptOverride: "系统提示词\n索引导航", thoroughness: "medium" };
+      const input = { userMessage: "完整任务\n第二行", systemPromptOverride: "系统提示词\n索引导航" };
       apply({ type: "stage_start", sessionId: "s1", id: "planner-1", nodeType: "subagent", label: "Planner", subagentInput: input });
       expect(useChatStore.getState().liveEvents[0]).toMatchObject({ kind: "subagent", group: { input, status: "running" } });
       const ok = report === "Planner finished";
