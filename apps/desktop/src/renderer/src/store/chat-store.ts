@@ -75,7 +75,7 @@ export interface SubagentGroup {
   agentType: string;
   task: string;
   /** 发送给 Planner 的完整提示词（仅展示副本经过敏感值遮盖，不裁剪）。 */
-  input?: { userMessage: string; systemPromptOverride: string; thoroughness: string };
+  input?: { userMessage: string; systemPromptOverride: string };
   tools: PendingTool[];
   status: "running" | "done" | "error";
   /** stage_done 带回的节点文字报告（完成/失败摘要），展开卡片时展示。 */

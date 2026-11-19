@@ -169,7 +169,6 @@ export interface ToolContext {
   dispatchSubagent?: (request: {
     agentType: string;
     task: string;
-    thoroughness?: string;
     relevantHistory?: string;
     /** 续接既有 Explore 子代理；由 loop 侧解析，未知或非 Explore 时拒绝。 */
     continueAgentId?: string;

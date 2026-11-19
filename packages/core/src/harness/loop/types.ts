@@ -57,7 +57,7 @@ type TurnEventFields =
   | { type: "tool_start"; id: string; name: string; args: Record<string, unknown>; subagent?: SubagentProvenance }
   | { type: "tool_end"; id: string; name: string; ok: boolean; output: string; metadata?: ToolResultMetadata; skipped?: boolean; subagent?: SubagentProvenance }
   | { type: "terminal"; entry: TerminalEntry }
-  | { type: "stage_start"; id: string; nodeType: string; label: string; subagentInput?: { userMessage: string; systemPromptOverride: string; thoroughness: string } }
+  | { type: "stage_start"; id: string; nodeType: string; label: string; subagentInput?: { userMessage: string; systemPromptOverride: string } }
   | { type: "stage_done"; id: string; nodeType: string; label: string; ok?: boolean; report?: string }
   /**
    * Result of the task_decompose stage: the user's intent, the durable user
@@ -412,7 +412,7 @@ export interface AgentLoopOpts {
   /** Shared bounded evidence cache for fresh source reads in this turn. */
   evidenceStore?: import("../evidence-store.ts").EvidenceStore;
   /**
-   * 动态任务清单更新闭包（add_tasks / update_tasks 工具）。任务图路径由调度器注入
+   * 动态任务清单追加闭包（add_tasks 工具，append-only）。任务图路径由调度器注入
    * （改共享 tasks 数组）；顺序路径由 react.ts 兜底安装（改 ctx.tasks）。
    */
   updateTasks?: (ops: import("../../plans.ts").TaskListOps) => Promise<import("../../plans.ts").TaskListApplyOutcome>;

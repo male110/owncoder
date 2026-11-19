@@ -102,78 +102,7 @@ describe("applyTaskListOps — add", () => {
   });
 });
 
-describe("applyTaskListOps — update", () => {
-  it("合并字段：executionGuidance/status/dependsOn 更新，未提供字段不变", () => {
-    const tasks: TaskItem[] = [
-      makeTask({ id: "t1", executionGuidance: "旧指引", acceptance: "旧验收" }),
-    ];
-    const outcome = applyTaskListOps(tasks, {
-      update: [{ id: "t1", executionGuidance: "新指引", status: "in_progress", dependsOn: [] }],
-    });
-    expect(outcome.ok).toBe(true);
-    expect(tasks[0]!.executionGuidance).toBe("新指引");
-    expect(tasks[0]!.status).toBe("in_progress");
-    expect(tasks[0]!.acceptance).toBe("旧验收");
-  });
-
-  it("update 空 executionGuidance → 拒绝", () => {
-    const tasks: TaskItem[] = [makeTask({ id: "t1", executionGuidance: "a" })];
-    const outcome = applyTaskListOps(tasks, { update: [{ id: "t1", executionGuidance: "   " }] });
-    expect(outcome.ok).toBe(false);
-    if (!outcome.ok) expect(outcome.error).toContain("executionGuidance 不能为空");
-    expect(tasks[0]!.executionGuidance).toBe("a"); // 原子性
-  });
-
-  it("未知 id / 非法 status / 自环 / 悬空依赖 → 拒绝且数组不变", () => {
-    const tasks: TaskItem[] = [makeTask({ id: "t1", executionGuidance: "a" })];
-    expect(applyTaskListOps(tasks, { update: [{ id: "nope", status: "completed" }] }).ok).toBe(false);
-    expect(
-      applyTaskListOps(tasks, { update: [{ id: "t1", status: "done" as TaskItem["status"] }] }).ok,
-    ).toBe(false);
-    expect(applyTaskListOps(tasks, { update: [{ id: "t1", dependsOn: ["t1"] }] }).ok).toBe(false);
-    expect(applyTaskListOps(tasks, { update: [{ id: "t1", dependsOn: ["ghost"] }] }).ok).toBe(false);
-    expect(tasks[0]!.status).toBe("pending");
-  });
-});
-
-describe("applyTaskListOps — remove", () => {
-  it("未知 id / in_progress → 拒绝", () => {
-    const tasks: TaskItem[] = [
-      makeTask({ id: "t1", executionGuidance: "a" }),
-      makeTask({ id: "t2", executionGuidance: "b", status: "in_progress" }),
-    ];
-    expect(applyTaskListOps(tasks, { remove: [{ id: "ghost" }] }).ok).toBe(false);
-    expect(applyTaskListOps(tasks, { remove: [{ id: "t2" }] }).ok).toBe(false);
-    expect(tasks).toHaveLength(2);
-  });
-
-  it("删除后剥离依赖方的悬空 dependsOn，summary 说明剥离事实", () => {
-    const tasks: TaskItem[] = [
-      makeTask({ id: "t1", executionGuidance: "a" }),
-      makeTask({ id: "t2", executionGuidance: "b", dependsOn: ["t1"] }),
-      makeTask({ id: "t3", executionGuidance: "c", dependsOn: ["t1"] }),
-    ];
-    const outcome = applyTaskListOps(tasks, { remove: [{ id: "t1" }] });
-    expect(outcome.ok).toBe(true);
-    expect(tasks.map((t) => t.id)).toEqual(["t2", "t3"]);
-    expect(tasks[0]!.dependsOn).toEqual([]);
-    expect(tasks[1]!.dependsOn).toEqual([]);
-    if (outcome.ok) expect(outcome.summary).toContain("stripped removed ids from dependsOn");
-  });
-});
-
 describe("applyTaskListOps — 依赖图校验", () => {
-  it("更新使依赖成环（t1→t2→t1）→ 拒绝，原数组不被污染", () => {
-    const tasks: TaskItem[] = [
-      makeTask({ id: "t1", executionGuidance: "a" }),
-      makeTask({ id: "t2", executionGuidance: "b", dependsOn: ["t1"] }),
-    ];
-    const outcome = applyTaskListOps(tasks, { update: [{ id: "t1", dependsOn: ["t2"] }] });
-    expect(outcome.ok).toBe(false);
-    if (!outcome.ok) expect(outcome.error).toContain("依赖成环");
-    expect(tasks[0]!.dependsOn).toEqual([]);
-  });
-
   it("同批 add 构造成环 → 拒绝", () => {
     const tasks: TaskItem[] = [];
     const outcome = applyTaskListOps(tasks, {
@@ -194,14 +123,21 @@ describe("applyTaskListOps — 依赖图校验", () => {
     expect(outcome.ok).toBe(false);
     expect(tasks).toHaveLength(0);
   });
+
+  it("add 的依赖可引用同批后出现的 add id，但悬空依赖仍拒绝", () => {
+    const tasks: TaskItem[] = [];
+    expect(
+      applyTaskListOps(tasks, { add: [{ executionGuidance: "a", dependsOn: ["ghost"] }] }).ok,
+    ).toBe(false);
+  });
 });
 
 describe("applyTaskListOps — 通用语义", () => {
-  it("空操作（无任何数组）→ 拒绝并给出指引", () => {
+  it("空操作（无 add 数组）→ 拒绝并给出指引", () => {
     const tasks: TaskItem[] = [makeTask({ id: "t1", executionGuidance: "a" })];
     const outcome = applyTaskListOps(tasks, {});
     expect(outcome.ok).toBe(false);
-    if (!outcome.ok) expect(outcome.error).toContain("add / update / remove 至少提供一个");
+    if (!outcome.ok) expect(outcome.error).toContain("add 必须提供非空数组");
   });
 
   it("成功后保持原数组引用（原地修改，调用方持有同一份）", () => {
@@ -213,18 +149,15 @@ describe("applyTaskListOps — 通用语义", () => {
     expect(tasks).toHaveLength(2);
   });
 
-  it("summary 含 added/updated 计数与当前清单渲染（自动 id 用真实值，不用占位符）", () => {
+  it("summary 含 added 任务与当前清单渲染（自动 id 用真实值，不用占位符）", () => {
     const tasks: TaskItem[] = [makeTask({ id: "t1", executionGuidance: "a" })];
     const outcome = applyTaskListOps(tasks, {
       add: [{ executionGuidance: "b" }],
-      update: [{ id: "t1", status: "completed" }],
     });
     expect(outcome.ok).toBe(true);
     if (outcome.ok) {
       expect(outcome.summary).toContain("added t2");
       expect(outcome.summary).not.toContain("(auto)");
-      expect(outcome.summary).toContain("updated t1");
-      expect(outcome.summary).toContain("[completed] t1");
     }
   });
 });

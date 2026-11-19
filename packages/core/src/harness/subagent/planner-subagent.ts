@@ -8,6 +8,12 @@
  *
  * 与 Explore 的区别：Explore 是通用只读调研，报告格式自由；Planner 的
  * 报告必须满足计划结构契约（validatePlannerReport），否则父级会暂停执行。
+ *
+ * 防跑题与 Explore 同构、来源相同（Codex well-scoped delegation）：委派侧
+ * 的五段式 brief（改动目标 / 已知锚点 / 已有结论与依据 / 约束条件 /
+ * 待确认的未知点，见 task-decompose.ts 的 DECOMPOSE_PLANNER_TOOL_DEF）
+ * 把范围写窄，子代理侧再用 Scope discipline 块兜底——brief 与背景历史
+ * 已确认的锚点直接用、范围外命中是噪声、生成物/依赖树永不在范围内。
  */
 
 export const PLANNER_SUBAGENT_TYPE = "Planner" as const;
@@ -23,7 +29,8 @@ export interface PlannerPromptEnv {
 
 /**
  * 构建 Planner 子智能体的系统提示词。
- * 在 Explore 式只读调研纪律之上，追加计划报告的结构化契约。
+ * 在 Explore 式只读调研纪律与范围纪律（Scope discipline，防跑题兜底）之上，
+ * 追加计划报告的结构化契约。
  */
 export function buildPlannerSubagentPrompt(env: PlannerPromptEnv = {}, relevantHistory?: string): string {
   const envLines = [
@@ -52,6 +59,12 @@ export function buildPlannerSubagentPrompt(env: PlannerPromptEnv = {}, relevantH
     "- Read only files and symbols needed to ground the plan. Index hits are pointers, not a checklist.",
     "- Reuse fresh evidence already returned by tools; do not repeat an unchanged read or equivalent search.",
     "- Stop as soon as the plan is grounded. Report the gap instead of expanding the search speculatively.",
+    "Scope discipline (mandatory):",
+    "- Stay inside the brief's named scope: the change goal, the confirmed anchors, the constraints (including modules that must not change), and the open questions. Anything the brief does not name — modules unrelated to the goal, other areas of the repository — is out of bounds unless a named open question requires it.",
+    "- Search hits outside the named scope are noise: skip them instead of reading them to judge relevance.",
+    "- Do not tour the repository to build context first — enumerating modules or mapping directories before planning is wasted budget; start from the confirmed anchors and the entry points the brief names.",
+    "- Generated and dependency trees (node_modules, dist, build output, .git) are never in scope unless the task explicitly names them.",
+    "- Do not re-read or re-locate anchors the brief or the background history already confirmed; use them as the plan's starting points directly.",
     ...(envLines.length > 1 ? ["", ...envLines] : []),
     ...historyLines,
     "",

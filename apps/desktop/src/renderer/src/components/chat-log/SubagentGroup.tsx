@@ -137,7 +137,6 @@ function SubagentGroupCardImpl({ group }: { group: SubagentGroup }) {
           {group.input ? (
             <div className="subagent-report">
               <div className="subagent-report-label">{t("发送给 Planner 的输入（按设置遮盖敏感值）")}</div>
-              <div className="subagent-report-label">{t("搜索广度")}：{group.input.thoroughness}</div>
               <div className="subagent-report-label">{t("用户任务")}</div>
               <InputPreview text={group.input.userMessage} />
               <div className="subagent-report-label">{t("系统提示词（含索引导航）")}</div>

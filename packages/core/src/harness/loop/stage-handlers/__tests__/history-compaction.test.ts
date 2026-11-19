@@ -147,17 +147,25 @@ describe("预算触发语义压缩", () => {
     expect((await loadDecomposeHistory(root, sessionId)).checkpoint?.throughIndex).toBe(1);
   });
 
-  it.each([false, true])("超过50轮后原文在磁盘完整保留（已有摘要：%s）", async (compressed) => {
+  it.each([false, true])("超过60轮后最旧轮次折叠进摘要、最近60轮保留原文（已有摘要：%s）", async (compressed) => {
     for (let i = 1; i <= 60; i++) await add(i);
-    const original = (await loadDecomposeHistory(root, sessionId)).rounds;
     if (compressed) {
       expect(await persistDecomposeHistory(root, sessionId, 0, 55, "前55轮摘要")).toBe(true);
     }
-    // 检查点写入和后续追加都不能裁掉任何已压缩原文。
     await add(61);
     const disk = JSON.parse(await fs.readFile(roundsFilePath(root, sessionId), "utf8"));
-    expect(disk.rounds).toHaveLength(61);
-    expect(disk.rounds.slice(0, 60)).toEqual(original);
+    // 最近 60 轮保留原文（第 2..61 轮，索引不重排）
+    expect(disk.rounds).toHaveLength(60);
+    expect(disk.rounds[0]!.index).toBe(2);
+    expect(disk.rounds[59]!.index).toBe(61);
+    if (compressed) {
+      // 被逐出的第 1 轮已被现有摘要（throughIndex=55）覆盖：直接丢弃，检查点不变
+      expect(disk.decomposeHistory).toEqual({ throughIndex: 55, summary: "前55轮摘要" });
+    } else {
+      // 无现有摘要：被折叠的第 1 轮进入启发式摘要
+      expect(disk.decomposeHistory.throughIndex).toBe(1);
+      expect(disk.decomposeHistory.summary).toContain("input-1");
+    }
     expect((await loadDecomposeHistory(root, sessionId)).rounds).toEqual(disk.rounds);
   });
 

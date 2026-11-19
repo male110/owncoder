@@ -76,7 +76,7 @@ describe("single Spec task execution", () => {
     expect(messages.at(-1)?.content).toContain(SPEC_TASK_OUTCOME_TOOL);
     const names = callOptions?.tools?.map((t) => t.function.name);
     expect(names).toEqual(expect.arrayContaining([SPEC_TASK_OUTCOME_TOOL, "report_blocker", "write_file"]));
-    for (const name of ["add_tasks", "update_tasks", "save_tasks", "save_spec", "save_design", "submit_plan"]) {
+    for (const name of ["add_tasks", "save_tasks", "save_spec", "save_design", "submit_plan"]) {
       expect(names).not.toContain(name);
     }
   });

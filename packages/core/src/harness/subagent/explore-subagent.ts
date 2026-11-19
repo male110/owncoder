@@ -20,22 +20,22 @@ export interface ExplorePromptEnv {
 
 /**
  * 构建 Explore 子智能体的系统提示词。
- * thoroughness 由调用方传入，控制搜索广度：very thorough 模式下放宽
- * "禁止扩大搜索"类纪律并允许更多图跳转，避免证据不足时保守空转。
  *
  * 结构参考 ZCode Explore：速度优先框架（"fast agent that returns output
  * as quickly as possible"）、一批并行调用指令（机制层 PARALLEL_SAFE_TOOLS
  * 会并发执行同批只读调用）、显式只读禁令清单、"读节选而非整文件——
  * 定位代码而不是评审代码"的范围声明。
+ *
+ * Scope discipline 块是子代理侧的越界兜底（对齐 Codex 的 well-scoped
+ * delegation：范围窄主要靠委派侧把任务写窄，见
+ * enhanced-tools/subagent.ts 的工具描述；子代理侧再把「命名锚点之外
+ * 即越界、范围外命中是噪声、生成物/依赖树永不在范围内」写成硬规则）。
  */
 export function buildExploreSubagentPrompt(
-  thoroughness: string,
   env: ExplorePromptEnv = {},
   relevantHistory?: string,
 ): string {
-  const breadth = thoroughness === "very thorough"
-    ? "Search breadth: broad, but stop once the requested question is established; do not enumerate unrelated files."
-    : "Search breadth: focused. Start from the named path/symbol and stop after one or two confirming reads.";
+  const breadth = "Search breadth: focused. Start from the named path/symbol and stop after one or two confirming reads.";
 
   const envLines = [
     "Environment:",
@@ -61,6 +61,11 @@ export function buildExploreSubagentPrompt(
     "Scope: you locate code and evidence — reading excerpts rather than whole files. You do not review, audit, or refactor code; report locations and facts, not opinions about quality.",
     "",
     "One principle: read less. Read what the task needs and stop.",
+    "Scope discipline (mandatory):",
+    "- Stay inside the task's named scope. When the brief names files, symbols, or directories, go straight to them; treat anything else as out of scope unless the question cannot be answered without it.",
+    "- Search hits outside the named scope are noise: skip them instead of reading them to judge relevance.",
+    "- Do not tour the repository to build context first — enumerating modules or mapping directories before answering is wasted work; start from the named anchor or a single targeted search.",
+    "- Generated and dependency trees (node_modules, dist, build output, .git) are never in scope unless the task explicitly names them.",
     "Evidence-first discipline (mandatory):",
     "- If the task names an exact file/range or replacement text, do not search; read only that target.",
     "- Read only files and symbols needed to answer the research question. Index hits are pointers, not a checklist.",

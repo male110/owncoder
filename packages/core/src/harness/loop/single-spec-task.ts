@@ -20,7 +20,7 @@ export const SPEC_TASK_OUTCOME_TOOL_DEF: ToolDef = {
 };
 
 export const SPEC_TASK_WORKFLOW_TOOLS = new Set([
-  "add_tasks", "update_tasks", "save_tasks", "save_spec", "save_design", "save_plan",
+  "add_tasks", "save_tasks", "save_spec", "save_design", "save_plan",
 ]);
 
 export const SPEC_TASK_REPORT_REQUIRED = "The selected Spec task ended without a structured outcome. No completion was recorded.";

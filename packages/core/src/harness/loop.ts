@@ -241,9 +241,9 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
       "save_plan", "save_spec", "save_design", "save_tasks", "save_experience",
       "save_memory", "update_memory", "forget_memory",
       "undo_session_change", "run_script",
-      // 任务清单状态变更（活清单的新增与修改）同样是会话状态写入，readOnly
+      // 任务清单追加（活清单的新增）同样是会话状态写入，readOnly
       // 会话（探索沙箱）不可用。
-      "add_tasks", "update_tasks",
+      "add_tasks",
     ]);
     toolsFinal = toolsFinal.filter((t) => !WRITE_TOOLS.has(t.function.name));
   }

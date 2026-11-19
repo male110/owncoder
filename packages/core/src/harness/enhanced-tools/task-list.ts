@@ -16,30 +16,13 @@ const ADD_TASK_ITEM = {
   required: ["executionGuidance"],
 } as const;
 
-const UPDATE_TASK_ITEM = {
-  type: "object",
-  properties: {
-    id: { type: "string", description: "Task id to update." },
-    title: { type: "string" },
-    executionGuidance: {
-      type: "string",
-      description: "Execution guidance — instruct the assignee how to carry out this task.",
-    },
-    kind: { type: "string", enum: ["implementation", "verification"] },
-    dependsOn: { type: "array", items: { type: "string" } },
-    status: { type: "string", enum: ["pending", "in_progress", "completed", "failed", "skipped"] },
-    acceptance: { type: "string" },
-  },
-  required: ["id"],
-} as const;
-
 export const ADD_TASKS_TOOL_DEF: ToolDef = {
   type: "function",
   readOnly: false,
   function: {
     name: "add_tasks",
     description:
-      "Append new tasks to the active task list. Use it only when the requested worklist is genuinely incomplete; do not add exploratory side quests.",
+      "Append new tasks to the active task list. The task list is append-only: existing tasks cannot be edited, replaced, or removed — when execution shows the plan is missing work, extending it is the only option.\n\nUse it only when execution has proved the worklist is genuinely incomplete — i.e. a concrete, independently verifiable deliverable is missing and no existing task covers it. Do not add exploratory side quests, and never add a task whose purpose is to redo or bypass a task that has already failed; a failed task is a terminal state, and retrying it as a new task is not allowed.\n\nEach added task must be self-contained, bounded, and own a write scope disjoint from every other task's files.",
     parameters: {
       type: "object",
       properties: {
@@ -54,23 +37,3 @@ export const ADD_TASKS_TOOL_DEF: ToolDef = {
   },
 };
 
-export const UPDATE_TASKS_TOOL_DEF: ToolDef = {
-  type: "function",
-  readOnly: false,
-  function: {
-    name: "update_tasks",
-    description:
-      "Modify existing tasks in the active task list by id. Only the provided fields change. Use it when task execution guidance, constraints, dependencies, status, or acceptance criteria change.",
-    parameters: {
-      type: "object",
-      properties: {
-        update: {
-          type: "array",
-          description: "Existing tasks to modify (matched by id). Only the provided fields change.",
-          items: UPDATE_TASK_ITEM,
-        },
-      },
-      required: ["update"],
-    },
-  },
-};

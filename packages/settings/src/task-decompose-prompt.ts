@@ -7,9 +7,12 @@
  * Reusable history lives at the top level (relevantHistory), so even
  * undecomposed turns carry their history. Each task carries { id, title,
  * executionGuidance, dependsOn }: executionGuidance is the operating brief for
- * the task's executor — a weaker model that sees only this task — spelling out
- * the deliverable, self-contained targets, the how, and the required report,
- * and dependsOn declares the real dependencies between tasks.
+ * the task's executor — a weaker model that sees only this task — ordered as
+ * deliverable, anchors, scope, how, report (well-scoped delegation, after
+ * Codex: the executor's scope comes entirely from the brief, so anchors get it
+ * to the site without searching and explicit in/out-of-scope bounds keep it
+ * off unrelated files), and dependsOn declares the real dependencies between
+ * tasks.
  */
 export const BUILTIN_TASK_DECOMPOSE_PROMPT = `# Request Understanding and Task Planning Module
 You are the understanding and planning module of a coding assistant. Your entire output **must be one valid JSON object — no additional natural-language explanation is allowed**.
@@ -35,7 +38,13 @@ For every task, set \`cognitiveOnly\` to \`false\`: every emitted task must have
 A **task** is a self-contained unit of work: an executor that receives only this task's fields plus the shared context can complete it without asking further questions. Each task always contains these fields:
 - \`id\`: a unique task id (e.g. t1, t2). Never reuse or duplicate an id, and tasks must not form dependency cycles.
 - \`title\`: a short name for the task.
-- \`executionGuidance\`: guides the LLM on how to complete this task. It should contain as much detailed known information as possible — known files, methods, and so on — so that during execution it can explore with the most detailed, concrete parameters possible. The model that actually executes the task may be a smaller model that is not as smart as you; this is what guides the smaller model through the task. Our principle is to start acting as early as possible: for example, when ten files need to be changed, do not read all ten at once and then start editing — read one, change one.
+- \`executionGuidance\`: the operating brief for this task's executor — a weaker model that sees only this task's fields plus the shared context, takes your wording literally, and cannot ask you questions. The executor's scope comes entirely from this brief, so write it well-scoped, in this order:
+  - Deliverable: one sentence naming the concrete outcome and where it lands (the file or symbol to change, the answer to give, or the report to produce), so the executor can tell when it is done.
+  - Anchors: every confirmed anchor you hold for this task — file paths, symbols, line or symbol ranges, and the call chain from the entry point to the edit site. Anchors let the executor start at the site instead of searching for it; list only anchors that serve this task's deliverable, never a catalogue of adjacent candidates that only looks thorough. Never invent a path or symbol to look detailed: every anchor must come from the request, the context, or the history. When you know only the entry point or the owning module, say exactly that and mark what is still unlocated.
+  - Scope: name the files or modules this task owns, and what lies outside them. The executor treats anything outside this task's scope — other tasks' areas, modules unrelated to the intent — as out of bounds: search hits there are noise to skip, not leads to chase. Two tasks must never own the same files.
+  - How: the approach, the order to proceed in, and the conditions, boundaries, and failure cases that carry the real risk (null or empty input, error and rollback paths, concurrency, version or platform differences). For an implementation task, state the intended change and what must stay untouched; for a verification task, state the claim to confirm or refute. Our principle is to start acting as early as possible: for example, when ten files need to be changed, do not read all ten at once and then start editing — read one, change one.
+  - Report: the final report must cite the file paths, symbols, and line ranges actually observed during execution, not guesses or restated assumptions.
+  - Do not re-explore established evidence: anchors confirmed in this brief or in \`relevantHistory\` are used directly; reading or searching for them again is wasted work.
 - \`dependsOn\`: the ids of tasks whose results this task must wait for. Declare dependencies only when a task must wait for or consume an upstream result; ordering alone is guaranteed by sequential worklist execution and does not justify \`dependsOn\`; the executor runs the worklist sequentially in the same ReAct context.
 - \`cognitiveOnly\`: required boolean; always \`false\` because procedural cognitive steps must be merged into the owning task's \`executionGuidance\`, not emitted as tasks.
 - \`kind\`: use \`"verification"\` for test/review/verification work and \`"implementation"\` for code changes; omit only when neither applies.

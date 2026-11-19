@@ -80,12 +80,11 @@ describe("spec-mode design research", () => {
 });
 
 describe("task-decompose Planner classification", () => {
-  it("keeps design deliverables separate from Planner eligibility and code edits", () => {
-    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain("Deliverable classification is separate from Planner eligibility");
-    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain("even when the current deliverable is only a design or plan");
-    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain("tracing cross-module workflows");
-    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain("an ordinary conceptual proposal or explanation of a known single file does not qualify");
-    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain("Generate code-change tasks only when");
+  it("routes complex changes to Planner together with the relevant history", () => {
+    // 精简后的分解提示词只保留 Planner 入口：复杂变更先出计划，并传递相关历史；
+    // 旧版 deliverable/Planner 分类长段已被有意精简。
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain("invoke the plan-generating subagent (Planner)");
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain("pass the relevant history to it");
   });
 });
 
@@ -106,57 +105,44 @@ describe("task-decompose run_script guidance", () => {
     expect(BUILTIN_TASK_DECOMPOSE_PROMPT).not.toContain("RUN_SCRIPT_EXAMPLES");
   });
 
-  it("keeps code exploration guidance tool-oriented and command-agnostic", () => {
-    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain("read that implementation in one pass");
-    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain("give an entry point, not a search command");
+  it("keeps code exploration guidance tool-agnostic and free of shell commands", () => {
+    // 旧的命令式探索教学（rg --files、先在仓库根目录…）已删；执行指引只保留
+    // 行动原则（read one, change one），不再绑定具体命令。
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain("read one, change one");
     expect(BUILTIN_TASK_DECOMPOSE_PROMPT).not.toContain("rg --files");
     expect(BUILTIN_TASK_DECOMPOSE_PROMPT).not.toContain("先在仓库根目录");
   });
 });
 
-describe("task-decompose plan detail rules", () => {
-  it("requires confirmed anchors in executionGuidance and forbids invented ones", () => {
-    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain("ordered as deliverable, then anchors, then how, then report");
-    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain("Anchors second");
-    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain("Evidence rule — never invent");
-    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain("Confirmed: you hold the path and symbol from evidence");
-    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain("Partially confirmed");
-    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain("No codebase evidence at all");
-    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain("never guess a path or method name to fill the gap");
+describe("task-decompose executionGuidance brief", () => {
+  it("requires a well-scoped brief ordered as deliverable, anchors, scope, how, report", () => {
+    // Codex 式 well-scoped delegation：executor 的范围完全来自 brief，
+    // 所以 brief 必须按固定顺序写全五个部分。
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain("Deliverable: one sentence naming the concrete outcome");
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain("Anchors: every confirmed anchor you hold for this task");
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain("Scope: name the files or modules this task owns");
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain("How: the approach, the order to proceed in");
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain("Report: the final report must cite");
   });
 
-  it("keeps exploration out of the task list and degrades instead of stalling", () => {
-    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain("The plan must be executable at decomposition time, not after re-exploration");
-    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain("Never spend a task on exploration");
-    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain("When evidence runs out, degrade the plan; do not stall it");
-    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain("Never return a plan that only asks for more investigation");
+  it("forbids invented anchors and keeps the executor off out-of-scope files", () => {
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain("Never invent a path or symbol to look detailed");
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain("out of bounds: search hits there are noise to skip");
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain("Two tasks must never own the same files");
   });
 
-  it("mines history entries for reusable anchors", () => {
-    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain("Mine the history for anchors, not just for prose");
-    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain("an anchor already read in an earlier round is confirmed evidence");
+  it("does not re-explore anchors already established in the brief or history", () => {
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain("Do not re-explore established evidence");
+    // relevantHistory 侧的配合：转发给子代理的已确认锚点标记为背景、禁止重定位。
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain("tell the subagent not to re-read or relocate already confirmed anchors");
   });
 
-  it("shows confirmed, partial, and evidence-free task examples", () => {
+  it("keeps task splitting deliverable-oriented", () => {
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain("never return an empty `tasks` array");
+    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain("do not treat the steps of completing a task as separate tasks");
+  });
+
+  it("still shows a confirmed-anchor task example", () => {
     expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain("Confirmed anchors, written into the task so the executor starts at the site");
-    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain("Partial evidence: name the known entry point");
-    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain("locating is the first action inside the deliverable task");
-  });
-
-  it("requires a detailed Explore brief for every delegated exploration", () => {
-    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain("self-contained exploration brief rather than a broad request");
-    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain("every confirmed path and class/method/function/field or line range");
-    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain("the conclusions and evidence already held");
-    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain("the exact unknowns to resolve");
-    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain("the preferred entry points");
-    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain("the limited call chains to trace");
-    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain("the areas and anchors that must not be read or explored again");
-    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain("the relevant boundaries and failure paths");
-    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain("the file paths, symbols, and line ranges the Explore report must return");
-    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain("When only a module-level entry is known");
-    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain("when no repository evidence exists");
-    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain("without guessing paths or method names");
-    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain('Never reduce the request to "explore the relevant code"');
-    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain("never ask Explore to relocate anchors already confirmed in history");
   });
 });

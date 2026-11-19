@@ -43,7 +43,16 @@ export async function callModelForIteration(
   const { tagCurrentTask } = await import("../message-tags.js");
 
   const currentTaskMsg: ChatMessage | null = ctx.currentTask
-    ? { role: "system", content: tagCurrentTask(formatCurrentTaskContext(ctx.currentTask, ctx.opts.singleSpecTask)) }
+    ? {
+        role: "system",
+        content: tagCurrentTask(
+          formatCurrentTaskContext(
+            ctx.currentTask,
+            ctx.opts.singleSpecTask,
+            ctx.upstreamRelays?.get(ctx.currentTask.id),
+          ),
+        ),
+      }
     : null;
   // Keep the initial system/context block contiguous for prefix caching. The
   // current task stays a system message before the user and tool conversation;

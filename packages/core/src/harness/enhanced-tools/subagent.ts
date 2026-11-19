@@ -7,6 +7,11 @@ import type { ToolDef } from "@owncoder/llm";
  * 命中与整文件内容只留在自己的上下文，父智能体只收到最终结论文本。
  * 探索外包架构下这是 executor 的唯一探索入口：主循环不注册任何发现类
  * 搜索工具，定位文件/符号/调用链/外部资料都必须派发 Explore。
+ *
+ * 「探索不跑题」的第一道防线在委派侧而非子代理侧（对齐 Codex 的
+ * well-scoped delegation）：子代理的范围完全由 task 措辞决定，因此
+ * 工具描述要求点名锚点、声明 in-scope 文件、把任务收窄到下一步需要
+ * 的具体产出，并禁止重复派发已有 path:line 引用答案的问题。
  */
 export const DISPATCH_AGENT_TOOL_DEF: ToolDef = {
   type: "function",
@@ -21,6 +26,11 @@ export const DISPATCH_AGENT_TOOL_DEF: ToolDef = {
       "It reads excerpts rather than whole files, so it locates code and evidence; it does not review or audit code. " +
       "The subagent is read-only: implementation work cannot be delegated. " +
       "Use read_file only for paths already established (edit targets, plan references, Explore report citations); never dispatch as a pre-flight before an edit whose site is already known. " +
+      "Designing the brief — the subagent's scope comes entirely from how you word the `task`, so narrow the ask to the concrete output you need next: " +
+      "name the anchors you already know (exact symbols, file paths, identifiers) so it goes straight there instead of searching; " +
+      "declare the in-scope files or modules when the question touches a broad area, since anything you leave unnamed may be treated as out of scope; " +
+      "make the brief concrete and self-contained and state what the answer must establish. " +
+      "Do not duplicate work: when a returned Explore report already establishes a fact with path:line citations, act on those citations instead of dispatching the same question again. " +
       "Keep each brief tight and scoped: one deliverable per dispatch — a research or review assignment that ends in a single report is ONE consolidated brief enumerating all its unknowns (locate, read, then audit stays one dispatch); do not split it into parallel briefs that re-search the same entry points and merge back into one report. " +
       "Dispatch parallel subagents only for genuinely independent questions with disjoint areas and separate deliverables.",
     parameters: {
@@ -34,12 +44,8 @@ export const DISPATCH_AGENT_TOOL_DEF: ToolDef = {
         task: {
           type: "string",
           description:
-            "The concrete research question or search request for the subagent. Include exact symbols, file paths, or identifiers when known, and what the answer must establish.",
-        },
-        thoroughness: {
-          type: "string",
-          enum: ["medium", "very thorough"],
-          description: 'Search breadth. "medium" for likely-location-first exploration (default); "very thorough" only for cross-cutting questions whose answer genuinely spans multiple directories or naming conventions.',
+            "The concrete research question or search request for the subagent. Include exact symbols, file paths, or identifiers when known, and what the answer must establish. " +
+            "Name the in-scope files or modules when the question touches a broad area — the subagent goes there directly and treats the rest of the repository as out of scope.",
         },
         relevantHistory: {
           type: "string",

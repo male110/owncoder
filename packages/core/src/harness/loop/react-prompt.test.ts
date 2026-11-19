@@ -96,6 +96,30 @@ describe("任务上下文：短硬执行纪律", () => {
     );
   });
 
+  it("要求动手前核对 brief 锚点：锚点错误时在任务内校准，且明确任务清单不可改", () => {
+    const text = formatCurrentTaskContext(makeTask());
+    expect(text).toContain("verify the brief's anchors");
+    expect(text).toContain("the task list is append-only");
+    expect(text).toContain("State the corrected anchors you actually used in the final report");
+  });
+
+  it("注入上游接力包（Upstream results），无接力时不注入该段", () => {
+    const withRelay = formatCurrentTaskContext(
+      makeTask({ dependsOn: ["t1"] }),
+      false,
+      "**Verified anchors**: src/a.ts L10-40\n**Changed files**: src/a.ts",
+    );
+    expect(withRelay).toContain("### Upstream results (verified; do not re-verify)");
+    expect(withRelay).toContain("**Verified anchors**: src/a.ts L10-40");
+    // 接力段位于 execution guidance 之前
+    expect(withRelay.indexOf("Upstream results")).toBeLessThan(
+      withRelay.indexOf("Execution guidance (how to carry out this task):"),
+    );
+
+    const withoutRelay = formatCurrentTaskContext(makeTask());
+    expect(withoutRelay).not.toContain("Upstream results");
+  });
+
   it("迭代预算提示给出当前序号、上限与剩余次数，剩余 0 时改为强制收尾指令", () => {
     expect(formatIterationBudgetHint(1, 39)).toContain("当前第 1 次迭代，上限 39 次，剩余 38 次");
     expect(formatIterationBudgetHint(1, 39)).toContain("请据此安排工具调用预算");

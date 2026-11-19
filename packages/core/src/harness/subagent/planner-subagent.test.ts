@@ -35,7 +35,7 @@ describe("submit_plan 工具注册门控", () => {
 describe("Planner 白名单与提示词契约", () => {
   it("白名单含 submit_plan 收口工具，不含写/Bash/任务清单工具", () => {
     expect(PLANNER_SUBAGENT_ALLOWED_TOOLS).toContain("submit_plan");
-    for (const banned of ["bash", "write_file", "apply_patch", "append_file", "save_spec", "save_design", "add_tasks", "update_tasks"]) {
+    for (const banned of ["bash", "write_file", "apply_patch", "append_file", "save_spec", "save_design", "add_tasks"]) {
       expect(PLANNER_SUBAGENT_ALLOWED_TOOLS).not.toContain(banned);
     }
   });
@@ -56,5 +56,21 @@ describe("Planner 白名单与提示词契约", () => {
     expect(prompt).toContain("=== 任务分解阶段相关历史 ===");
     expect(prompt).toContain("背景证据与已确认锚点");
     expect(prompt).toContain("已确认锚点：src/a.ts:12");
+  });
+
+  it("提示词含 Scope discipline：brief 范围之外即越界（对齐 Explore / Codex well-scoped delegation）", () => {
+    const prompt = buildPlannerSubagentPrompt({ workingDirectory: "/tmp/ws", isGitRepository: true, platform: "win32" });
+    for (const text of [
+      "Scope discipline (mandatory)",
+      "Stay inside the brief's named scope",
+      "including modules that must not change",
+      "out of bounds unless a named open question requires it",
+      "Search hits outside the named scope are noise",
+      "Do not tour the repository to build context first",
+      "node_modules, dist, build output, .git",
+      "Do not re-read or re-locate anchors the brief or the background history already confirmed",
+    ]) {
+      expect(prompt).toContain(text);
+    }
   });
 });

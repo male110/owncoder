@@ -12,7 +12,8 @@ import { selectNextPendingTask, taskProgress } from "../../plans.ts";
 import { resetOutputTrackingForNewTask, updateStateAfterResponse } from "./termination.ts";
 import { shouldInjectPostToolTextNudge } from "./continuation-intent.ts";
 import { isExplorationComplete } from "./react-steps.ts";
-import { formatFinalTaskReports, isolateMessagesForNextTask } from "./task-reports.ts";
+import { formatFinalTaskReports, isolateMessagesForNextTask, isFailureReport } from "./task-reports.ts";
+import { buildUpstreamRelay } from "./upstream-relay.ts";
 import { lastAssistantSummaryFromHistory } from "./react-prompt.ts";
 import {
   activeInformationTask,
@@ -154,7 +155,7 @@ export async function handleTextResponse(
       cost: (responseUsage.promptTokens / 1000) * 0.002 + (responseUsage.completionTokens / 1000) * 0.01,
     });
     ctx.history.push({ role: "assistant", content });
-    const failed = /incomplete|failed|unable|cannot|error|failed/i.test(content);
+    const failed = isFailureReport(content);
     ctx.currentTask.status = failed ? "failed" : "completed";
     // 保留完整任务报告，避免后续任务状态只拿到报告开头。
     ctx.currentTask.result = content;
@@ -188,6 +189,12 @@ export async function handleTextResponse(
       ctx.prevIterHadToolCalls = false;
       next.status = "in_progress";
       await persistTaskUpdate(ctx, next.id);
+      // Upstream relay: 把上游终态报告压成下游 brief 摘要，缓存在 ctx，
+      // 由 react-llm-call 在 next 首次调用时注入。失败已内部降级，不阻塞切换。
+      if (next.dependsOn.length > 0) {
+        const relay = await buildUpstreamRelay(ctx, next);
+        if (relay) ctx.upstreamRelays.set(next.id, relay);
+      }
       writeEventLog({
         category: "react_loop",
         message: `任务切换：已隔离上一任务 messages，开始 ${next.id}`,

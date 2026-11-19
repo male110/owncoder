@@ -115,14 +115,19 @@ export function formatTaskConstraints(task: TaskItem): string {
 
 
 
-export function formatCurrentTaskContext(task: TaskItem, singleSpecTask = false): string {
+export function formatCurrentTaskContext(
+  task: TaskItem,
+  singleSpecTask = false,
+  upstreamRelay?: string,
+): string {
   // Keep this contract short and mechanical. The model needs an explicit stop
   // condition, while detailed exploration prose belongs in the base prompt.
   return [
     singleSpecTask
       ? "## Current Task (only the selected Spec task is authorized)"
-      : "## **Current Task (in progress; prioritize; move to the next only after completion)**",
+      : "## **Current Task (in progress; prioritize; move to next only after completion)**",
     "Execution discipline (mandatory):",
+    "- Before acting, verify the brief's anchors (file paths, symbols, ranges) against the repository. If an anchor is wrong or missing, resolve the real location with a dispatch_agent (Explore) and continue in this task's context — the task list is append-only, so never try to rewrite this brief into the task list. State the corrected anchors you actually used in the final report.",
     "- If the task names an exact file/range or replacement text, read only that target, then edit and verify; do not inspect anything else.",
     "- You have no search tools: any fact not already established (file location, symbol, call chain, external doc) must come from a dispatch_agent (Explore) report. read_file is only for paths already established by the task, plan, a prior Explore report, or your own edits.",
     "- Reuse fresh evidence already in context; do not re-read an unchanged file or dispatch a second Explore to re-verify what an earlier report established.",
@@ -130,6 +135,7 @@ export function formatCurrentTaskContext(task: TaskItem, singleSpecTask = false)
     "- Before dispatch_agent with agent_type=\"Explore\", write a self-contained exploration brief from the current request, task guidance, reusable history, and evidence already gathered: the concrete deliverable or decision, confirmed file paths and classes/methods/fields or line ranges, conclusions and their evidence, the specific unknowns to resolve, preferred entry points, the limited call chains to trace, areas and anchors that must not be read or explored again, relevant boundaries and failure paths, and the file paths, symbols, and line ranges the Explore report must return. If only a module-level entry is known, name that module and the symbols to locate and why; if no repository evidence exists, describe the behavior to find and the most likely layer without guessing paths or method names. Never send only broad requests such as \"explore the relevant code\", \"find the implementation\", or \"investigate further\", and never ask Explore to relocate anchors already confirmed in history.",
     "- When the evidence is sufficient, stop dispatching explorations immediately and edit, verify, report, or state the blocker.",
     `ID: ${task.id}`,
+    upstreamRelay ? `### Upstream results (verified; do not re-verify)\n${upstreamRelay}` : "",
     `Execution guidance (how to carry out this task): ${task.executionGuidance}`,
     task.dependsOn.length > 0 ? `Depends on: ${task.dependsOn.join(", ")}` : "",
     task.acceptance ? `Acceptance criteria: ${task.acceptance}` : "",

@@ -86,3 +86,13 @@ export {
   type SkillWriteInput,
 } from "./skills.ts";
 export { BUNDLED_SKILLS } from "./skills-bundled.ts";
+export {
+  WorktreeManager,
+  type CreateWorktree,
+  type ManagedWorktree,
+  defaultWorktreeBase,
+  DEFAULT_WORKTREE_KEEP_COUNT,
+  type WorktreeSettings,
+  defaultWorktreeRoot,
+  resolveWorktreeSettings,
+} from "./worktree/index.ts";

@@ -3,6 +3,7 @@ import { test } from "vitest";
 import type { ChatMessage } from "@owncoder/llm";
 import {
   formatFinalTaskReports,
+  isFailureReport,
   isolateMessagesForNextTask,
   type TaskReport,
 } from "./task-reports.ts";
@@ -48,13 +49,13 @@ test("formatFinalTaskReports composes every retained task report", () => {
   const text = formatFinalTaskReports(reports);
 
   assert.equal(text, "Changed file A.\n\nBlocked on missing credential.");
-  assert.doesNotMatch(text, /±¾´Î¶Ô»°×îÖÕ±¨¸æ/);
-  assert.doesNotMatch(text, /½ø¶È/);
-  assert.doesNotMatch(text, /ÈÎÎñ/);
+  assert.doesNotMatch(text, /æœ¬æ¬¡å¯¹è¯æœ€ç»ˆæŠ¥å‘Š/);
+  assert.doesNotMatch(text, /è¿›åº¦/);
+  assert.doesNotMatch(text, /ä»»åŠ¡/);
 });
 
 test("formatFinalTaskReports keeps one final report for a single task and removes repeated paragraphs", () => {
-  const report = "µ÷²é½áÂÛºÍ´úÂëÖ¤¾İ¡£\n\nĞŞ¸´½¨Òé¡£";
+  const report = "è°ƒæŸ¥ç»“è®ºå’Œä»£ç è¯æ®ã€‚\n\nä¿®å¤å»ºè®®ã€‚";
   assert.equal(formatFinalTaskReports([
     { taskId: "task_1", executionGuidance: "Investigate", status: "completed", report: `${report}\n\n${report}` },
   ]), report);
@@ -62,19 +63,36 @@ test("formatFinalTaskReports keeps one final report for a single task and remove
 
 test("formatFinalTaskReports keeps the latest retry result for a task", () => {
   assert.equal(formatFinalTaskReports([
-    { taskId: "task_1", executionGuidance: "Investigate", status: "failed", report: "ÖĞ¼äÊ§°Ü×´Ì¬" },
-    { taskId: "task_1", executionGuidance: "Investigate", status: "completed", report: "×îÖÕµ÷²é½áÂÛ¼°Ö¤¾İ" },
-  ]), "×îÖÕµ÷²é½áÂÛ¼°Ö¤¾İ");
+    { taskId: "task_1", executionGuidance: "Investigate", status: "failed", report: "ä¸­é—´å¤±è´¥çŠ¶æ€" },
+    { taskId: "task_1", executionGuidance: "Investigate", status: "completed", report: "æœ€ç»ˆè°ƒæŸ¥ç»“è®ºåŠè¯æ®" },
+  ]), "æœ€ç»ˆè°ƒæŸ¥ç»“è®ºåŠè¯æ®");
 });
 
 test("formatFinalTaskReports removes identical report text but preserves distinct task reports", () => {
   assert.equal(formatFinalTaskReports([
-    { taskId: "task_1", executionGuidance: "A", status: "completed", report: "ÏàÍ¬½áÂÛ" },
-    { taskId: "task_2", executionGuidance: "B", status: "completed", report: " ÏàÍ¬½áÂÛ " },
-    { taskId: "task_3", executionGuidance: "C", status: "failed", report: "²»Í¬µÄÊ§°Ü±¨¸æ" },
-  ]), "ÏàÍ¬½áÂÛ\n\n²»Í¬µÄÊ§°Ü±¨¸æ");
+    { taskId: "task_1", executionGuidance: "A", status: "completed", report: "ç›¸åŒç»“è®º" },
+    { taskId: "task_2", executionGuidance: "B", status: "completed", report: " ç›¸åŒç»“è®º " },
+    { taskId: "task_3", executionGuidance: "C", status: "failed", report: "ä¸åŒçš„å¤±è´¥æŠ¥å‘Š" },
+  ]), "ç›¸åŒç»“è®º\n\nä¸åŒçš„å¤±è´¥æŠ¥å‘Š");
 });
 
 test("formatFinalTaskReports returns an empty body when no reports were retained", () => {
   assert.equal(formatFinalTaskReports([]), "");
+});
+
+test("isFailureReport detects explicit failure verdicts", () => {
+  assert.equal(isFailureReport("Task failed: could not find the entry point."), true);
+  assert.equal(isFailureReport("Unable to proceed â€” the API returns 403."), true);
+  assert.equal(isFailureReport("éªŒè¯å¤±è´¥ï¼šç›®æ ‡æ–¹æ³•ä¸å­˜åœ¨ã€‚"), true);
+  assert.equal(isFailureReport("æ— æ³•ç»§ç»­ï¼Œç¼ºå°‘æ•°æ®åº“å‡­æ®ã€‚"), true);
+  assert.equal(isFailureReport("The build is blocked by a missing dependency."), true);
+  assert.equal(isFailureReport("æœªèƒ½å®Œæˆï¼Œè¶…æ—¶ã€‚"), true);
+});
+
+test("isFailureReport does not flag negated mentions of error words", () => {
+  assert.equal(isFailureReport("éªŒè¯é€šè¿‡ï¼Œæœªå‘ç° errorã€‚"), false);
+  assert.equal(isFailureReport("Checked all call sites; no failures were observed."), false);
+  assert.equal(isFailureReport("Test suite passes without any error."), false);
+  assert.equal(isFailureReport("The fix works: did not encounter the error again."), false);
+  assert.equal(isFailureReport("æ²¡æœ‰å¤±è´¥ç”¨ä¾‹ï¼Œå…¨éƒ¨é€šè¿‡ã€‚"), false);
 });

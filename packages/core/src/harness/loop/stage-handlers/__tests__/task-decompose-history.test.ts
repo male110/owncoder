@@ -1177,7 +1177,8 @@ describe("分解历史轮次编号与排序", () => {
       ["3", "回退请求-3"], ["2", "回退请求-2"], ["1", "回退请求-1"],
     ]);
     expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain("Conversation history is presented newest to oldest");
-    expect(BUILTIN_TASK_DECOMPOSE_PROMPT).toContain("Round 1 is the earliest session");
+    // 旧版提示词的「Round 1 is the earliest session」长句已在精简中删除：
+    // 历史顺序由 decompose-context 的展示格式保证，不再由系统提示词复述。
   });
 });
 

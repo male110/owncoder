@@ -129,7 +129,7 @@ type ChatEventFields =
   | { type: "tool_end"; id: string; name: string; ok: boolean; output: string; metadata?: ToolEndMetadataDto; skipped?: boolean; subagent?: SubagentProvenanceDto }
   | { type: "turn_complete"; parts: MessagePartDto[]; metadata: MessageMetadataDto }
   | { type: "terminal"; entry: TerminalEntryDto }
-  | { type: "stage_start"; id: string; nodeType: string; label: string; subagentInput?: { userMessage: string; systemPromptOverride: string; thoroughness: string } }
+  | { type: "stage_start"; id: string; nodeType: string; label: string; subagentInput?: { userMessage: string; systemPromptOverride: string } }
   | { type: "stage_done"; id: string; nodeType: string; label: string; ok?: boolean; report?: string }
   | ({ type: "task_decomposition" } & TaskDecompositionDto)
   /** LLM 调用失败、等待重试。attempt 从 1 起，delayMs 为重试前等待毫秒数。 */

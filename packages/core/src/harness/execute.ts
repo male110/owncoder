@@ -47,7 +47,6 @@ import {
 import { toolUseSkill } from "./tools/skills.ts";
 import { toolRunScript } from "./tools/run-script.ts";
 import { toolAddTasks } from "./tools/add-tasks.ts";
-import { toolUpdateTasks } from "./tools/update-tasks.ts";
 import {
   historyRecallBeforeTurn,
   historyRecallQuery,
@@ -308,7 +307,6 @@ async function runTool(ctx: ToolContext, call: ParsedToolCall): Promise<ToolResu
         if (!ctx.dispatchSubagent) {
           return fail("dispatch_agent 当前不可用：宿主未提供子智能体运行环境。");
         }
-        const thoroughness = str(args.thoroughness ?? "medium");
         // "Planner" 仅由任务分解阶段的 runAgentPlanner（planner.ts）经本分支派发；
         // ReAct 执行入口（react-tool-exec.ts runOne）在调用本函数前已硬拒 Planner。
         if (agentType !== "Explore" && agentType !== "Planner") {
@@ -317,7 +315,6 @@ async function runTool(ctx: ToolContext, call: ParsedToolCall): Promise<ToolResu
         const report = await ctx.dispatchSubagent({
           agentType,
           task,
-          thoroughness,
           // 任务分解步骤产出的相关历史；缺失/空白时不传，保持既有自动注入与兜底行为。
           relevantHistory: str(args.relevantHistory ?? "").trim() || undefined,
           // 续接：Explore 报告尾注里的 agent id，带上即在该代理完整上下文里追问。
@@ -327,9 +324,6 @@ async function runTool(ctx: ToolContext, call: ParsedToolCall): Promise<ToolResu
       }
       case "add_tasks":
         return await toolAddTasks(ctx, args);
-      case "update_tasks":
-        // 闭包由顺序路径（react.ts）或任务图调度器注入，并统一负责原子校验。
-        return await toolUpdateTasks(ctx, args);
       case "project_deps":
         return await toolProjectDeps(ctx);
       case "recall_history":

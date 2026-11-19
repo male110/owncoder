@@ -197,6 +197,7 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<ReActReturn> {
     currentTask: null,
     messagePrefixLen,
     taskReports: [],
+    upstreamRelays: new Map(),
     terminationConfig,
     loopState,
     lastAssistant: "",

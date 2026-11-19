@@ -177,3 +177,30 @@ describe("dispatch_agent — 探索合并引导", () => {
     expect(description).not.toContain("one concrete question per dispatch");
   });
 });
+
+describe("dispatch_agent — 简报范围引导（对齐 Codex well-scoped delegation）", () => {
+  it("工具描述要求点名锚点、声明范围、收窄产出、不重复已答问题", () => {
+    const description = DISPATCH_AGENT_TOOL_DEF.function.description;
+    // 范围完全由 task 措辞决定 → 委派侧必须把任务写窄。
+    expect(description).toMatch(/the subagent's scope comes entirely from how you word the `task`/);
+    expect(description).toMatch(/narrow the ask to the concrete output you need next/);
+    // 点名锚点：子代理直奔目标而不是搜索。
+    expect(description).toMatch(/name the anchors you already know/);
+    // 宽泛问题必须声明 in-scope，未点名者可视为范围外。
+    expect(description).toMatch(/declare the in-scope files or modules/);
+    expect(description).toMatch(/may be treated as out of scope/);
+    // 已有 path:line 引用的答案直接采用，不再重复派发。
+    expect(description).toMatch(/Do not duplicate work/);
+    expect(description).toMatch(/act on those citations instead of dispatching the same question again/);
+  });
+
+  it("task 参数描述要求宽泛问题声明范围、已知时点名锚点", () => {
+    const params = DISPATCH_AGENT_TOOL_DEF.function.parameters as {
+      properties: { task: { description: string } };
+    };
+    const desc = params.properties.task.description;
+    expect(desc).toMatch(/Include exact symbols, file paths, or identifiers when known/);
+    expect(desc).toMatch(/Name the in-scope files or modules when the question touches a broad area/);
+    expect(desc).toMatch(/treats the rest of the repository as out of scope/);
+  });
+});

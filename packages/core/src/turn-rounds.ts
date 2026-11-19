@@ -28,6 +28,15 @@ const MAX_FILE_CHANGE_PATH_CHARS = 500;
 const MAX_FILE_CHANGE_SUMMARY_CHARS = 500;
 const MAX_SUMMARY_CHARS = 300;
 const SOURCE_READ_TOOLS = new Set(["read_file", "read_symbol", "read_outline"]);
+/**
+ * 磁盘上保留的最近原文轮数。更旧的轮次折叠进 decomposeHistory 摘要，
+ * 保证长会话的 rounds.json 体积有常数级上限（早先是全量保留、永不裁剪）。
+ * 读取方最多取 10 轮（loadRecentRounds），分解召回全量读取后再按预算压缩，
+ * 60 轮原文足够覆盖所有读取路径。
+ */
+const MAX_ROUNDS_KEPT = 60;
+/** 折叠摘要的累计字符上限：超出时丢弃最旧的摘要段，避免反复折叠无限增长。 */
+const MAX_CHECKPOINT_SUMMARY_CHARS = 8_000;
 
 /** 完整、可复用的文件证据；content 只在成功的结构化读取中保存。 */
 export interface FileEvidence {
@@ -414,8 +423,43 @@ async function readFile(workspaceRoot: string, sessionId: string): Promise<TurnR
 async function writeFile(workspaceRoot: string, file: TurnRoundsFile): Promise<void> {
   const dir = sessionsDirAbs(workspaceRoot);
   await fs.mkdir(dir, { recursive: true });
-  // 原始轮次始终持久保留；压缩只改变上下文注入形态，不裁剪磁盘原文。
-  await fs.writeFile(roundsFilePath(workspaceRoot, file.sessionId), JSON.stringify(file, null, 2) + "\n", "utf8");
+  const trimmed = trimRoundsFile(file);
+  // 最近 MAX_ROUNDS_KEPT 轮保留原文；更旧的折叠进 decomposeHistory 摘要。
+  await fs.writeFile(roundsFilePath(workspaceRoot, file.sessionId), JSON.stringify(trimmed, null, 2) + "\n", "utf8");
+}
+
+/**
+ * 把超出 MAX_ROUNDS_KEPT 的最旧轮次折叠进 decomposeHistory：
+ * - 已被现有摘要覆盖（index <= throughIndex）的轮次直接丢弃原文；
+ * - 未覆盖的轮次用 summarizeOlderRounds 生成结构化摘要，与现有摘要拼接，
+ *   超出 MAX_CHECKPOINT_SUMMARY_CHARS 时丢弃旧摘要的最旧一段。
+ * 通过 writeFile 调用，所有 persist* 路径自动生效。
+ */
+function trimRoundsFile(file: TurnRoundsFile): TurnRoundsFile {
+  if (file.rounds.length <= MAX_ROUNDS_KEPT) return file;
+  const evicted = file.rounds.slice(0, file.rounds.length - MAX_ROUNDS_KEPT);
+  const kept = file.rounds.slice(-MAX_ROUNDS_KEPT);
+  const existing = file.decomposeHistory;
+  const unsummarized = existing ? evicted.filter((round) => round.index > existing.throughIndex) : evicted;
+  if (unsummarized.length === 0) {
+    return { ...file, rounds: kept };
+  }
+  const section = clip(summarizeOlderRounds(unsummarized), MAX_CHECKPOINT_SUMMARY_CHARS);
+  const summary = mergeCheckpointSummary(existing?.summary, section);
+  return {
+    ...file,
+    rounds: kept,
+    decomposeHistory: { throughIndex: evicted[evicted.length - 1]!.index, summary },
+  };
+}
+
+function mergeCheckpointSummary(previous: string | undefined, section: string): string {
+  if (!section) return clip(previous ?? "", MAX_CHECKPOINT_SUMMARY_CHARS);
+  const budget = MAX_CHECKPOINT_SUMMARY_CHARS - section.length;
+  const prev = previous ?? "";
+  // 预算优先留给新摘要；旧摘要超出预算时丢弃其最旧的一段（靠后的轮次更相关）。
+  const keptPrev = budget > 0 ? prev.slice(Math.max(0, prev.length - budget)) : "";
+  return [keptPrev, section].filter(Boolean).join("\n\n");
 }
 
 function nextIndex(rounds: TurnRoundRecord[]): number {
@@ -591,7 +635,9 @@ export function summarizeOlderRounds(roundsOldestFirst: TurnRoundRecord[]): stri
 
   // 组装摘要
   if (intents.length > 0) {
-    summaryParts.push(`**User Intents:**\n${intents.map((i, idx) => `${idx + 1}. ${clip(i, 300)}`).join("\n")}`);
+    // 折叠大量轮次时 intents 无上限会让摘要失控；只保留最近 15 条意图。
+    const recentIntents = intents.slice(-15);
+    summaryParts.push(`**User Intents:**\n${recentIntents.map((i, idx) => `${idx + 1}. ${clip(i, 300)}`).join("\n")}`);
   }
 
   if (constraints.length > 0) {

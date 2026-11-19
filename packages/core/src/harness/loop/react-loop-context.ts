@@ -91,6 +91,11 @@ export interface ReActLoopContext {
   messagePrefixLen: number;
   /** Per-task reports retained across switches; composed into the final report. */
   taskReports: TaskReport[];
+  /**
+   * 任务接力缓存（按下游 taskId）：切换任务时由 upstream-relay 装配一次，
+   * 下游首次 LLM 调用注入 `## Upstream results`。派生上下文，非任务数据。
+   */
+  upstreamRelays: Map<string, string>;
   // ── 任务运行状态 ──
   taskRunState: TaskRunState | null;
   autoFixState: AutoFixState;

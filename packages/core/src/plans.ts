@@ -780,7 +780,7 @@ export function taskProgress(tasks: TaskItem[]): { done: number; total: number }
   return { done, total };
 }
 
-// ── 动态任务清单（update_tasks 工具的纯函数核心） ─────────────────────────────
+// ── 动态任务清单（add_tasks 工具的纯函数核心） ─────────────────────────────
 // 任务分解产出的是初始清单；执行中模型可以增删改，把它当作"活清单"：
 // 探索发现分解有误或遗漏时，模型直接改清单而不是重新分解一整轮。
 // 两处消费方共享本函数：顺序 ReAct 路径（react.ts 闭包改
@@ -804,39 +804,13 @@ export interface TaskListAddOp {
   dependsOn?: string[];
 }
 
-export interface TaskListUpdateOp {
-  id: string;
-  title?: string;
-  executionGuidance?: string;
-  /** @deprecated 旧字段，读时折叠进 executionGuidance。 */
-  description?: string;
-  /** @deprecated 旧字段，读时折叠进 executionGuidance。 */
-  prompt?: string;
-  /** @deprecated 旧字段，读时折叠进 executionGuidance。 */
-  guidance?: string;
-  kind?: "implementation" | "verification";
-  dependsOn?: string[];
-  status?: TaskStatus;
-  acceptance?: string;
-}
-
-export interface TaskListRemoveOp {
-  id: string;
-}
-
 export interface TaskListOps {
   add?: TaskListAddOp[];
-  update?: TaskListUpdateOp[];
-  remove?: TaskListRemoveOp[];
 }
 
 export type TaskListApplyOutcome =
   | { ok: true; summary: string }
   | { ok: false; error: string };
-
-const TASK_STATUS_VALUES: ReadonlySet<string> = new Set([
-  "pending", "in_progress", "completed", "failed", "skipped",
-]);
 
 /** 依赖成环检测（含自环）：DFS 三色标记，返回环路径（首尾重复）或 null。 */
 function findDependencyCycle(tasks: TaskItem[]): string[] | null {
@@ -879,7 +853,7 @@ function nextAutoTaskId(byId: Map<string, TaskItem>): string {
   return `t${n}`;
 }
 
-/** 渲染当前清单（update_tasks 的工具结果带这份，让模型看到变更生效）。 */
+/** 渲染当前清单（add_tasks 的工具结果带这份，让模型看到变更生效）。 */
 export function formatTaskList(tasks: TaskItem[]): string {
   const shown = tasks.slice(0, 40);
   const lines = shown.map((t) =>
@@ -924,61 +898,21 @@ function addTaskListItems(
   return null;
 }
 
-function updateTaskListItems(
-  byId: Map<string, TaskItem>,
-  updates: TaskListUpdateOp[],
-  depCheckList: Array<{ owner: string; dependsOn: string[] }>,
-): TaskListApplyOutcome | null {
-  for (const op of updates) {
-    const task = byId.get(op.id);
-    if (!task) return { ok: false, error: `update 任务失败：id "${op.id}" 不存在。` };
-    if (op.dependsOn) {
-      task.dependsOn = [...op.dependsOn];
-      depCheckList.push({ owner: op.id, dependsOn: op.dependsOn });
-    }
-    if (op.status !== undefined && !TASK_STATUS_VALUES.has(op.status)) {
-      return { ok: false, error: `update 任务失败：status "${op.status}" 不合法（pending/in_progress/completed/failed/skipped）。` };
-    }
-    if (op.status !== undefined) task.status = op.status;
-    // 归一化入口：只要任一字段（新或旧）被显式传入，就重算执行指引。
-    if (
-      op.executionGuidance !== undefined ||
-      op.description !== undefined ||
-      op.prompt !== undefined ||
-      op.guidance !== undefined
-    ) {
-      const executionGuidance = foldExecutionGuidance(op);
-      if (!executionGuidance) {
-        return { ok: false, error: `update 任务失败：任务 "${op.id}" 的 executionGuidance 不能为空。` };
-      }
-      task.executionGuidance = executionGuidance;
-    }
-    if (op.title !== undefined) task.progressStatus = op.title;
-    if (op.kind !== undefined) task.kind = op.kind;
-    if (op.acceptance !== undefined) task.acceptance = op.acceptance;
-  }
-  return null;
-}
-
 /**
- * 把一批增删改应用到任务清单（原地）。
+ * 把一批新增应用到任务清单（原地，append-only）。
  *
  * 校验（任一失败整体不应用）：
  * - add：id 不得与现有或同批新增冲突；executionGuidance 必填
- * - update/remove：id 必须存在；status 必须是合法 TaskStatus
  * - dependsOn：必须指向最终 id 集合（现有 + 同批新增），禁止自环
- * - remove：禁止删除 in_progress（可能有兄弟节点正在执行它）
  * - 最终依赖图禁止成环
  *
- * 删除任务时把它从其他任务的 dependsOn 中剥离（避免悬空依赖把后续任务
- * 永久卡在 not-ready → 死锁），剥离事实写进 summary。
+ * 执行期计划只能追加新任务（对应 Codex 的 followup_task），不允许修改
+ * 或删除既有任务——既有任务的终态由顺序任务驱动器判定。
  */
 export function applyTaskListOps(tasks: TaskItem[], ops: TaskListOps): TaskListApplyOutcome {
   const adds = ops.add ?? [];
-  const updates = ops.update ?? [];
-  const removes = ops.remove ?? [];
-  if (adds.length === 0 && updates.length === 0 && removes.length === 0) {
-    return { ok: false, error: "update_tasks 参数错误：add / update / remove 至少提供一个非空数组。" };
+  if (adds.length === 0) {
+    return { ok: false, error: "add_tasks 参数错误：add 必须提供非空数组。" };
   }
 
   // 草稿：浅拷贝，原子提交前不触碰真实数组。
@@ -993,8 +927,6 @@ export function applyTaskListOps(tasks: TaskItem[], ops: TaskListOps): TaskListA
   // 新增与更新分别执行，新增先落地以允许同批任务互相依赖。
   const addOutcome = addTaskListItems(draft, byId, adds, depCheckList, addedIds);
   if (addOutcome) return addOutcome;
-  const updateOutcome = updateTaskListItems(byId, updates, depCheckList);
-  if (updateOutcome) return updateOutcome;
 
   // ── 3. 依赖校验（统一在 add/update 落地后：同批 id 可见，禁止自环与悬空） ──
   for (const { owner, dependsOn } of depCheckList) {
@@ -1008,42 +940,18 @@ export function applyTaskListOps(tasks: TaskItem[], ops: TaskListOps): TaskListA
     }
   }
 
-  // ── 4. 删除（先校验，再过滤，最后剥离悬空依赖防后续任务死锁） ──
-  for (const op of removes) {
-    const task = byId.get(op.id);
-    if (!task) return { ok: false, error: `remove 任务失败：id "${op.id}" 不存在。` };
-    if (task.status === "in_progress") {
-      return { ok: false, error: `remove 任务失败：任务 "${op.id}" 正在执行（in_progress），等它结束或先更新其状态再删除。` };
-    }
-  }
-  const removeIds = new Set(removes.map((op) => op.id));
-  const kept = draft.filter((task) => !removeIds.has(task.id));
-  const strippedDeps: string[] = [];
-  for (const task of kept) {
-    const before = task.dependsOn.length;
-    task.dependsOn = task.dependsOn.filter((dep) => !removeIds.has(dep));
-    if (task.dependsOn.length !== before) strippedDeps.push(task.id);
-  }
-
-  // ── 5. 成环校验（作用于删除后的最终图） ──
-  const cycle = findDependencyCycle(kept);
+  // ── 4. 成环校验（作用于最终图） ──
+  const cycle = findDependencyCycle(draft);
   if (cycle) {
     return { ok: false, error: `依赖成环，拒绝应用：${cycle.join(" → ")}。` };
   }
 
-  // ── 6. 原子提交：保持原数组引用（调用方持有同一份引用） ──
+  // ── 5. 原子提交：保持原数组引用（调用方持有同一份引用） ──
   tasks.length = 0;
-  tasks.push(...kept);
+  tasks.push(...draft);
 
-  const parts: string[] = [];
-  if (addedIds.length) parts.push(`added ${addedIds.join(", ")}`);
-  if (updates.length) parts.push(`updated ${updates.map((op) => op.id).join(", ")}`);
-  if (removes.length) parts.push(`removed ${removes.map((op) => op.id).join(", ")}`);
-  if (strippedDeps.length) {
-    parts.push(`stripped removed ids from dependsOn of: ${strippedDeps.join(", ")}`);
-  }
   return {
     ok: true,
-    summary: `${parts.join("; ")}.\nCurrent task list:\n${formatTaskList(kept)}`,
+    summary: `added ${addedIds.join(", ")}.\nCurrent task list:\n${formatTaskList(draft)}`,
   };
 }
