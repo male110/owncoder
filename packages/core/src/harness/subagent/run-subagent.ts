@@ -106,7 +106,7 @@ export interface DispatchSubagentDeps {
 }
 
 /**
- * 迭代预算。预算只统计模型往返：纯工具调用轮同样计数，
+ * 迭代预算按子智能体角色分级。预算只统计模型往返：纯工具调用轮同样计数，
  * 因此这里要为"最后写报告"留出余量。
  */
 const EXPLORE_MAX_ITERATIONS = 40;

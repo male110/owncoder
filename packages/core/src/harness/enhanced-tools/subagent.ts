@@ -24,8 +24,8 @@ export const DISPATCH_AGENT_TOOL_DEF: ToolDef = {
       "This is your only exploration path: you have no search tools of your own (no grep/glob/symbol search, no web search). " +
       "Dispatch \"Explore\" whenever a fact you need is not already established in context — locating files, finding symbols, tracing call chains, or looking up external errors/docs. " +
       "It reads excerpts rather than whole files, so it locates code and evidence; it does not review or audit code. " +
-      "The subagent is read-only: implementation work cannot be delegated. " +
-      "Use read_file only for paths already established (edit targets, plan references, Explore report citations); never dispatch as a pre-flight before an edit whose site is already known. " +
+      "The subagent's deliverable is a research report (read-only tool whitelist); implementation work — edits, builds, tests — stays with you. " +
+      "Use read_file only for paths already established (edit targets, plan references, Explore report citations); for an edit whose site is already known, go straight to read_file and skip the pre-flight dispatch. " +
       "Designing the brief — the subagent's scope comes entirely from how you word the `task`, so narrow the ask to the concrete output you need next: " +
       "name the anchors you already know (exact symbols, file paths, identifiers) so it goes straight there instead of searching; " +
       "declare the in-scope files or modules when the question touches a broad area, since anything you leave unnamed may be treated as out of scope; " +

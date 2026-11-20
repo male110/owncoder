@@ -206,7 +206,7 @@ describe("SubagentGroupCard Planner 输入预览", () => {
 
   it("空输入渲染空 pre，不出现「...」按钮", () => {
     const tree = renderCard(makeGroup({
-      input: { userMessage: "", systemPromptOverride: "", },
+      input: { userMessage: "", systemPromptOverride: "" },
     }));
     const pre = inputPre(tree, 0);
     const children = pre.props.children as unknown[];

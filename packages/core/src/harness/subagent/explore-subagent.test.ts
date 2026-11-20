@@ -19,7 +19,7 @@ test("Explore prompt: 角色与工具能力保留，命令搜索引导全部移�
     assert.ok(prompt.includes(text), text);
   }
   // 已删：命令搜索教学（grep/find/ls 通过 run_script/bash 执行的引导）、
-  // 阅读纪律块、工作流程套路、复用指令。
+  // 阅读纪律块、工作流程套路、广度档位引导、复用指令。
   for (const removed of [
     "grep -rnE --exclude-dir=node_modules 'pattern' .",
     "find . -name 'x'",
