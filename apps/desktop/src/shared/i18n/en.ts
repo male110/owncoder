@@ -217,6 +217,10 @@ export const en = {
     "The model API key is not configured. Finish setup before starting a chat.",
   "待执行 {{count}} 条": "{{count}} queued",
   "删除该待执行消息": "Remove this queued message",
+  "立即发送": "Send now",
+  "中止当前任务并立即发送这条消息": "Abort the current task and send this message now",
+  "正在停止当前任务，立即发送下一条…": "Stopping the current task; sending the next message…",
+  "编辑待执行消息": "Edit the queued message",
 
   // ── 终端 ──────────────────────────────────────────────────────────────────
   "[进程已退出]": "[process exited]",
@@ -263,10 +267,11 @@ export const en = {
   "文档交付物 · 无需批准（如需执行请生成实施计划）":
     "Document deliverable \u00b7 no approval needed (generate an implementation plan to execute)",
   "批准此计划并自动执行": "Approve this plan and run it automatically",
+  "查看完整计划": "Open the full plan",
+  "未知会话": "Unknown session",
   "批准计划": "Approve plan",
   "批准中…": "Approving…",
   "已批准": "Approved",
-  "复制路径": "Copy path",
 
   // ── 询问用户卡片 ──────────────────────────────────────────────────────────
   "Agent 需要你确认": "Agent needs your confirmation",
@@ -380,7 +385,6 @@ export const en = {
   "压缩{{percent}}%": "Compressed {{percent}}%",
   "保留的重要片段：": "Retained snippets: ",
   "已生成计划": "Plan generated",
-  "打开 →": "Open \u2192",
   "压缩信息：": "Compression info: ",
   "原因：": "Reason: ",
   "上下文限制": "Context limit",

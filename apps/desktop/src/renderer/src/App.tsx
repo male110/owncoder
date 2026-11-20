@@ -87,7 +87,7 @@ export function App() {
   // ── Layout refs ─────────────────────────────────────────────────────────────
 
   /** 共享的 per-plan 批准飞行锁：key = sessionId → 正在批准中的 planPath 集合。
-   *  PlanCard 与 PlansBar 两个入口共用，避免同一计划被并发重复批准。 */
+   *  PlanCard 与应用层批准入口共用，避免同一计划被并发重复批准。 */
   const [approvingPlanPathsBySession, setApprovingPlanPathsBySession] = useState<Record<string, Set<string>>>({});
   const approvingPlanLocks = useRef(new Set<string>());
 
@@ -182,7 +182,7 @@ export function App() {
   });
 
   /** 批准计划包装：进入时登记 per-plan 飞行锁，结束后清除。
-   *  与 PlanCard / PlansBar 共享同一把锁，杜绝双入口并发批准。 */
+   *  与 PlanCard 共享同一把锁，杜绝双入口并发批准。 */
   const handleApprovePlan = useCallback(async (path: string, sid = useSessionStore.getState().activeSessionId) => {
     if (!sid || sid !== useSessionStore.getState().activeSessionId) throw new Error("请切换至计划所属会话");
     if (useSessionStore.getState().activePlanPathBySession[sid] === path) throw new Error("计划已批准");
@@ -203,13 +203,6 @@ export function App() {
       });
     }
   }, [onApprovePlan]);
-
-  useEffect(() => window.owncoder.onPlanApprovalRequest((requestId, path, sid) => {
-    void handleApprovePlan(path, sid).then(
-      () => window.owncoder.respondPlanApproval(requestId),
-      (error) => window.owncoder.respondPlanApproval(requestId, error instanceof Error ? error.message : String(error)),
-    );
-  }), [handleApprovePlan]);
 
   // pending 新会话时即使 activeSessionId 尚未清空，也必须读写 PENDING 键，
   // 与 onSend / resolveComposerDraftText 保持一致，否则会出现「有字点发送无反应」。
@@ -488,6 +481,14 @@ export function App() {
   const handleSelectProject = useCallback((root: string) => onSelectProject(root), [onSelectProject]);
   const handleAddProject = useCallback(() => { void onAddProject(); }, [onAddProject]);
 
+  /** 编辑器当前打开的计划文件（若打开的是本会话的计划）。批准入口展示在文件页内，
+   *  与 ZCode plan_approval 的「内容 + 动作区」布局一致。 */
+  const editorPlan = editorPath ? sessionPlans.find((plan) => plan.path === editorPath) : undefined;
+  const editorPlanApproved = Boolean(editorPlan && editorPath && activePlanPathBySession[activeSessionId ?? ""] === editorPath);
+  const editorPlanApproving = Boolean(
+    editorPlan && editorPath && activeSessionId && approvingPlanPathsBySession[activeSessionId]?.has(editorPath),
+  );
+
   // ── Chat panel ────────────────────────────────────────────────────────────────
   const chatPanel = (
     <>
@@ -507,7 +508,7 @@ export function App() {
           onOpenFile={openEditorFile}
           workspaceRoot={workspace?.root}
           onOpenSettings={openSettings}
-          onSendQueuedMessage={(index) => sendQueued(sid, index)}
+          onSendQueuedMessage={(index) => void sendQueued(sid, index)}
         />
         </PlanActionsContext.Provider>
       ))}
@@ -707,6 +708,29 @@ export function App() {
                         style={{ display: active ? "flex" : "none" }}
                         aria-hidden={!active}
                       >
+                        {active && editorPlan ? (
+                          /* 批准入口悬浮在计划正文上方（对齐 ZCode plan_approval 卡片式动作层）。 */
+                          <div className="editor-plan-float">
+                            {editorPlan.kind === "document" ? (
+                              <span className="editor-plan-float-note">{t("文档交付物 · 无需批准（如需执行请生成实施计划）")}</span>
+                            ) : editorPlanApproved ? (
+                              <span className="editor-plan-float-note">{t("已批准")}</span>
+                            ) : (
+                              <button
+                                type="button"
+                                className="plan-approve-cta"
+                                disabled={busy || sending || editorPlanApproving}
+                                onClick={() => {
+                                  if (editorPath && activeSessionId) {
+                                    void handleApprovePlan(editorPath, activeSessionId).catch(() => {});
+                                  }
+                                }}
+                              >
+                                {editorPlanApproving ? t("批准中…") : t("批准此计划并自动执行")}
+                              </button>
+                            )}
+                          </div>
+                        ) : null}
                         <EditorPane
                           path={tabPath}
                           active={active}

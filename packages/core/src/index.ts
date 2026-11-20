@@ -75,6 +75,7 @@ import {
   projectRecentRoundTurns,
   sanitizeOversizedFinalJson,
   sanitizeOversizedEventPayloads,
+  sweepInterruptedTurns,
 } from "./conversation-store.ts";
 
 import type { TerminalEntry } from "./harness/terminal.ts";
@@ -555,6 +556,20 @@ export class SessionOrchestrator {
       console.warn(`[conversation] sanitize oversized event payloads failed for ${sessionId}:`, error);
     }
 
+    // 清扫从未走到 completeTurn 的中断轮：running 行会被分页查询永久隐藏，
+    // 导致这一轮的用户消息和工具过程在界面上完全消失。只在该会话当前没有
+    // 活跃执行时清扫，避免误伤正在跑的轮。
+    try {
+      if (!this.coordinator.isActive(sessionId)) {
+        const interrupted = await sweepInterruptedTurns(root, sessionId);
+        if (interrupted > 0) {
+          console.warn(`[conversation] swept ${interrupted} interrupted turn(s) in ${sessionId}`);
+        }
+      }
+    } catch (error) {
+      console.warn(`[conversation] sweep interrupted turns failed for ${sessionId}:`, error);
+    }
+
     // If the conversation store already has data, use it directly.
     const page = beforeSeq == null
       ? await loadRecentTurns(root, sessionId, limit)
@@ -661,6 +676,9 @@ export class SessionOrchestrator {
       if (start >= 0) {
         let end = start + 1;
         while (end < r.history.length && r.history[end]!.role !== "user") end++;
+        // 用户手动中止后追加的中断标记是 user 角色的合成行，紧跟在本轮
+        // 助理回复之后、属于同一轮次，随轮次一起从 LLM 上下文删除。
+        while (end < r.history.length && r.history[end]?.metadata?.source === "interrupt_marker") end++;
         r.history = [...r.history.slice(0, start), ...r.history.slice(end)];
       }
       await this.persist(sid);
@@ -1086,7 +1104,8 @@ export class SessionOrchestrator {
     const r = this.rt(sessionId);
     let lastUserIdx = -1;
     for (let i = r.history.length - 1; i >= 0; i--) {
-      if (r.history[i]?.role === "user") {
+      // 跳过用户手动中止后追加的合成中断标记，重新生成要找的是真实的用户消息。
+      if (r.history[i]?.role === "user" && r.history[i]?.metadata?.source !== "interrupt_marker") {
         lastUserIdx = i;
         break;
       }

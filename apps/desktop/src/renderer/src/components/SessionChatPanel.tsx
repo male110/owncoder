@@ -1,9 +1,9 @@
-import { useMemo, useRef, useEffect, useCallback } from "react";
+import { useMemo, useRef, useEffect, useCallback, useState } from "react";
 import type { VirtuosoHandle } from "react-virtuoso";
 import { useChatStore } from "../store/chat-store";
 import type { ChatSessionRuntime } from "../store/chat-store";
 import { useSessionStore } from "../store/session-store";
-import { removeMessage } from "../hooks/queue-controller";
+import { editMessage, removeMessage } from "../hooks/queue-controller";
 import type { TabId } from "../SettingsPanel";
 import { ChatLog } from "./ChatLog";
 import { ErrorBanner } from "./ErrorBanner";
@@ -89,12 +89,24 @@ export function SessionChatPanel({
   const virtuosoRef = useRef<VirtuosoHandle | null>(null);
   const pageInitSessionRef = useRef<string | null>(null);
 
+  // 待执行条目的内联编辑态：editingIndex 指向正在编辑的条目下标。
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const [editingText, setEditingText] = useState("");
+  const editorRef = useRef<HTMLTextAreaElement | null>(null);
+
+  useEffect(() => {
+    if (editingIndex !== null) editorRef.current?.focus();
+  }, [editingIndex]);
+
   const visible = useMemo(
     () =>
       history.filter(
         (t) =>
           (t.role === "user" || t.role === "assistant" || t.role === "tool") &&
-          !(t.role === "assistant" && t.content.startsWith("Error:")),
+          !(t.role === "assistant" && t.content.startsWith("Error:")) &&
+          // 中断标记是写给 LLM 的合成用户消息（用户手动中止、任务未完成），
+          // 对用户隐藏；助理消息上的 [用户已中止] 后缀已是可见反馈。
+          !(t.role === "user" && t.metadata?.source === "interrupt_marker"),
       ),
     [history],
   );
@@ -170,7 +182,22 @@ export function SessionChatPanel({
 
   const onRemoveQueuedMessage = useCallback((index: number) => {
     removeMessage(sessionId, index);
+    setEditingIndex((cur: number | null) =>
+      cur === null ? null : cur === index ? null : cur > index ? cur - 1 : cur);
   }, [sessionId]);
+
+  const onStartEditQueuedMessage = useCallback((index: number) => {
+    const item = useChatStore.getState().bySession[sessionId]?.queuedMessages?.[index];
+    setEditingText(item?.text ?? "");
+    setEditingIndex(index);
+  }, [sessionId]);
+
+  // 保存编辑：原地保位，附件保持不变；空文本或未修改直接退出编辑态。
+  const onSaveEditQueuedMessage = useCallback((index: number) => {
+    const trimmed = editingText.trim();
+    if (trimmed) editMessage(sessionId, index, trimmed);
+    setEditingIndex(null);
+  }, [editingText, sessionId]);
 
   const onDeleteTurn = useCallback((turnId: string) => {
     void window.owncoder.deleteChatTurn(turnId, sessionId).then((ok) => {
@@ -252,8 +279,40 @@ export function SessionChatPanel({
               const label = msg.text.trim()
                 || (msg.attachments?.length ? msg.attachments.map((a) => a.name).join(", ") : "");
               const preview = label.length > 80 ? `${label.slice(0, 80)}…` : label;
+              const isEditing = editingIndex === i;
               return (
               <li key={`${msg.text}-${i}-${msg.attachments?.map((a) => a.url).join("|") ?? ""}`} className="queued-messages-item">
+                {isEditing ? (
+                  <>
+                    <textarea
+                      ref={editorRef}
+                      className="queued-messages-editor"
+                      value={editingText}
+                      onChange={(e) => setEditingText(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Escape") { e.preventDefault(); setEditingIndex(null); }
+                        if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); onSaveEditQueuedMessage(i); }
+                      }}
+                      rows={2}
+                      aria-label={t("编辑待执行消息")}
+                    />
+                    <button
+                      type="button"
+                      className="queued-messages-save"
+                      onClick={() => onSaveEditQueuedMessage(i)}
+                    >
+                      {t("保存")}
+                    </button>
+                    <button
+                      type="button"
+                      className="queued-messages-remove"
+                      onClick={() => setEditingIndex(null)}
+                    >
+                      {t("取消")}
+                    </button>
+                  </>
+                ) : (
+                  <>
                 <span className="queued-messages-text">
                   {preview || "（附件）"}
                 </span>
@@ -261,9 +320,17 @@ export function SessionChatPanel({
                   type="button"
                   className="queued-messages-send"
                   onClick={() => onSendQueuedMessage(i)}
-                  disabled={sending}
+                  title={sending ? t("中止当前任务并立即发送这条消息") : t("发送")}
                 >
-                  {t("发送")}
+                  {sending ? t("立即发送") : t("发送")}
+                </button>
+                <button
+                  type="button"
+                  className="queued-messages-edit"
+                  onClick={() => onStartEditQueuedMessage(i)}
+                  title={t("编辑")}
+                >
+                  {t("编辑")}
                 </button>
                 <button
                   type="button"
@@ -273,6 +340,8 @@ export function SessionChatPanel({
                 >
                   {t("删除")}
                 </button>
+                  </>
+                )}
               </li>
               );
             })}

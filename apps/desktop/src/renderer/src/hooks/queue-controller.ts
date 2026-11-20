@@ -10,6 +10,7 @@
  * messages survive app restarts or renderer reloads.
  */
 import { useChatStore } from "../store/chat-store";
+import { t } from "../../../shared/i18n/core";
 
 import type { ChatAttachmentDto } from "../../../preload/index";
 
@@ -17,6 +18,8 @@ export interface QueuedMessage { text: string; attachments?: ChatAttachmentDto[]
 const queues = new Map<string, QueuedMessage[]>();
 const running = new Set<string>();
 const stopRequested = new Set<string>();
+/** 正在执行「立即发送」抢占的会话：防止重复点击重复中止当前轮次。 */
+const preempting = new Set<string>();
 let runner: ((sid: string, oneOnly?: boolean) => Promise<void>) | null = null;
 let runnerOwner: symbol | null = null;
 
@@ -96,16 +99,84 @@ export function dequeueMessage(sid: string): QueuedMessage | undefined {
   return next;
 }
 
-/** Move one queued message to the front for manual sending. */
-export function sendQueuedMessage(sid: string, index: number): void {
+/**
+ * 立即发送一条排队消息（手动提升）。
+ *
+ * 语义参考 ZCode-main 的 sendQueuedNow：正在执行其它轮次时，先中止当前
+ * 轮次（用户通常是对当前任务的补充纠正），等它落盘收口、队列循环退出
+ * 后，再把这条消息作为普通用户消息发送；空闲时直接插队发送。
+ * 其余排队消息保持不动。
+ */
+export async function sendQueuedMessage(sid: string, index: number): Promise<void> {
   const q = queues.get(sid);
-  if (!q || index < 0 || index >= q.length || !runner || running.has(sid)) return;
-  const [next] = q.splice(index, 1);
-  queues.set(sid, [next!, ...q]);
+  if (!q || index < 0 || index >= q.length || !runner) return;
+  if (preempting.has(sid)) return;
+  // busy 要把 regenerate / spec 批次等没经过 runQueue 的发送也计入：
+  // 它们同样持有后端「当前会话正在执行」锁，直接插队会撞车。
+  const busy = running.has(sid) || useChatStore.getState().isSessionSending(sid);
+
+  if (!busy) {
+    preempting.add(sid);
+    const [next] = q.splice(index, 1);
+    queues.set(sid, [next!, ...q]);
+    syncStore(sid);
+    persist(sid);
+    clearStopRequest(sid);
+    void runner(sid, true);
+    // 短暂抑制重复点击：runQueue 的同步序言（markQueueRunning → dequeue →
+    // setSending）在本调用内就完成，但两次 click 事件之间仍可能有极窄窗口，
+    // 用 400ms 软锁防止双击把刚发出的轮次又抢占一次。
+    setTimeout(() => preempting.delete(sid), 400);
+    return;
+  }
+
+  // 有在飞的轮次：抢占之。
+  // 顺序很关键：必须先 requestStop 再移动条目。runQueue 在 await sendTurn 处
+  // 挂起，requestStop 是同步操作，本函数到第一个 await 之间也是同步的，
+  // 因此队列循环恢复时必然先看到 stopRequested 而退出，不会把被提升的条目
+  // 当作普通下一条消费掉。
+  preempting.add(sid);
+  useChatStore.getState().setLiveStatus(t("正在停止当前任务，立即发送下一条…"), sid);
+  try {
+    requestStop(sid);
+    const [next] = q.splice(index, 1);
+    queues.set(sid, [next!, ...q]);
+    syncStore(sid);
+    persist(sid);
+    // 与 Stop 按钮同一套机制：让后端中止当前轮次（保留剩余队列）。
+    try {
+      await window.owncoder.cancelChat(sid);
+    } catch {
+      // 忽略：cancelChat 只是触发中止，失败时下面的等待仍会兜底。
+    }
+    // 等待在飞轮次真正收口（sendChat resolve → sendTurn/onRegenerate 的
+    // finally 清 sending，runQueue 的 finally 清 running）。
+    const deadline = Date.now() + 15_000;
+    while ((running.has(sid) || useChatStore.getState().isSessionSending(sid)) && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    clearStopRequest(sid);
+    void runner(sid, true);
+  } finally {
+    preempting.delete(sid);
+  }
+}
+
+/** 原地编辑一条排队消息（保位），附件保持不变。参考 ZCode-main editQueueItem。 */
+export function editMessage(sid: string, index: number, text: string): boolean {
+  const q = queues.get(sid);
+  if (!q || index < 0 || index >= q.length) return false;
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+  const current = q[index]!;
+  if (current.text === trimmed) return true;
+  q[index] = current.attachments?.length
+    ? { text: trimmed, attachments: current.attachments }
+    : { text: trimmed };
+  queues.set(sid, q);
   syncStore(sid);
   persist(sid);
-  clearStopRequest(sid);
-  void runner(sid, true);
+  return true;
 }
 
 function isAttachment(value: unknown): value is NonNullable<QueuedMessage["attachments"]>[number] {
@@ -157,6 +228,7 @@ export function dropQueue(sid: string): void {
   queues.delete(sid);
   running.delete(sid);
   stopRequested.delete(sid);
+  preempting.delete(sid);
 }
 
 /** Continue executing a restored queue, if any and not already running. */

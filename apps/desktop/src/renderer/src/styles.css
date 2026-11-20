@@ -1978,6 +1978,7 @@ button.ghost.accent {
   min-height: 0;
   display: flex;
   flex-direction: column;
+  position: relative;
 }
 
 .editor-pane {
@@ -2449,53 +2450,35 @@ button.ghost.accent {
   min-width: 0;
 }
 
+/* 标题即是打开入口：点击在主窗口编辑器标签页打开完整计划文件。 */
 .plan-card-title {
   font-weight: 600;
-  color: var(--text);
+  color: var(--accent, #4a9eff);
   font-size: 14px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.plan-card-open {
-  flex-shrink: 0;
-  padding: 6px 14px;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--accent, #4a9eff);
-  background: transparent;
-  border: 1px solid var(--accent, #4a9eff);
-  border-radius: 6px;
   cursor: pointer;
-  transition: all 0.15s;
+  text-align: left;
+  transition: opacity 0.15s;
 }
 
-.plan-card-open:hover {
-  background: var(--accent, #4a9eff);
-  color: #fff;
+.plan-card-title:hover {
+  opacity: 0.8;
 }
 
-/* 复制路径按钮：ghost 风格，复制后切换为 ✓（借鉴 ZCode switch-mode.tsx header 复制按钮）。 */
-.plan-card-copy {
-  flex-shrink: 0;
-  width: 26px;
-  height: 26px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 13px;
+.plan-card-title:disabled {
   color: var(--muted);
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: all 0.15s;
+  cursor: default;
 }
 
-/* 计划卡片的部分内容预览（等宽、限高、底部渐隐）；完整内容由「打开」窗口查看。 */
+/* 计划卡片的部分内容预览（等宽、限高、底部渐隐）；完整内容由点击标题打开的标签页查看。 */
 .plan-preview-body {
-  margin: 8px 0 0;
+  margin: 0;
   padding: 8px 10px 10px;
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -2507,21 +2490,30 @@ button.ghost.accent {
   word-break: break-word;
 }
 
+.plan-preview-wrap {
+  position: relative;
+  margin: 8px 0 0;
+}
+
+/* 批准按钮悬浮在遮罩正文 bottom 居中（对齐 ZCode switch-mode 卡片动作层）。 */
+.plan-approve-float {
+  position: absolute;
+  bottom: 80px;
+  left: 50%;
+  transform: translateX(-50%);
+  margin: 0;
+}
+
 /* 限高 + mask 渐隐必须落在同一节点，分层会导致渐隐按完整内容高度计算而失效
    （借鉴 ZCode switch-mode.tsx 卡片预览）。 */
 .plan-preview-body--masked {
-  max-height: 220px;
+  max-height: 360px;
   overflow: hidden;
-  -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 30%, transparent 100%);
-  mask-image: linear-gradient(to bottom, #000 0%, #000 30%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 45%, transparent 100%);
+  mask-image: linear-gradient(to bottom, #000 0%, #000 45%, transparent 100%);
 }
 
-.plan-card-copy:hover {
-  color: var(--text);
-  border-color: var(--border);
-}
-
-/* 批准操作：计划卡片内（部分内容上方）与独立计划窗口共用。 */
+/* 批准操作：计划卡片正文上方（未加载时）或悬浮在遮罩正文之上（对齐 ZCode 计划卡片）。 */
 .plan-approve-cta {
   display: block;
   margin: 8px 0 0;
@@ -2540,6 +2532,35 @@ button.ghost.accent {
 .plan-approve-cta:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+/* 批准入口悬浮在计划正文上方（对齐 ZCode plan_approval 卡片式动作层）。 */
+.editor-plan-float {
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.editor-plan-float .plan-approve-cta {
+  margin: 0;
+  pointer-events: auto;
+}
+
+.editor-plan-float-note {
+  pointer-events: auto;
+  max-width: 90%;
+  padding: 4px 14px;
+  font-size: 12px;
+  color: var(--text);
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
 }
 
 /* Markdown */
@@ -4192,6 +4213,56 @@ button.ghost.accent {
   background: rgba(255, 107, 107, 0.16);
 }
 
+/* 队列条目内联编辑：textarea + 保存按钮 */
+.queued-messages-editor {
+  flex: 1;
+  min-width: 0;
+  resize: vertical;
+  max-height: 120px;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--fg);
+  background: var(--glass-bg);
+  border: 1px solid rgba(255, 180, 60, 0.35);
+  border-radius: 8px;
+  padding: 6px 8px;
+  outline: none;
+}
+
+.queued-messages-editor:focus {
+  border-color: rgba(255, 180, 60, 0.7);
+}
+
+.queued-messages-edit,
+.queued-messages-save {
+  flex-shrink: 0;
+  appearance: none;
+  background: var(--glass-bg);
+  border: 1px solid rgba(255, 180, 60, 0.25);
+  color: var(--fg-muted);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 4px 10px;
+  line-height: 1;
+  border-radius: 999px;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.queued-messages-edit:hover,
+.queued-messages-save:hover {
+  color: #fff;
+  border-color: rgba(255, 180, 60, 0.65);
+  background: rgba(255, 180, 60, 0.16);
+}
+
+:root[data-theme="light"] .queued-messages-edit,
+:root[data-theme="light"] .queued-messages-save,
+:root[data-theme="light"] .queued-messages-editor {
+  color: #4a4540;
+}
+
 /* Light-mode: boost contrast for queued-messages text */
 :root[data-theme="light"] .queued-messages-bar {
   color: #55504a;
@@ -5496,12 +5567,6 @@ button.ghost {
   gap: 6px;
 }
 
-.plans-body {
-  padding-bottom: 8px;
-  max-height: 280px;
-  overflow: auto;
-}
-
 /* Context panel (right sidebar) */
 .form-sep {
   border: 0;
@@ -5522,12 +5587,6 @@ button.ghost {
   gap: 8px;
   max-height: 300px;
   overflow-y: auto;
-}
-
-.plans-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
 }
 
 /* 鏂扮殑鍙樻洿椤规牱寮?*/
@@ -5730,46 +5789,6 @@ button.ghost {
   background: var(--accent-dim);
 }
 
-.plan-row.active {
-  border-color: var(--primary-border);
-}
-
-.plan-row-main {
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-}
-
-.plan-path {
-  font-size: 11px;
-  color: var(--muted);
-}
-
-.plan-window {
-  max-width: 960px;
-  min-height: 100vh;
-  margin: 0 auto;
-  padding: 24px 36px 48px;
-  color: var(--text);
-  overflow-wrap: anywhere;
-}
-
-.plan-window-header {
-  border-bottom: 1px solid var(--border);
-  margin-bottom: 24px;
-}
-
-.plan-window-content {
-  width: 100%;
-}
-
-.plan-window-footer {
-  border-top: 1px solid var(--border);
-  margin-top: 24px;
-  padding-top: 12px;
-}
-
-.plan-window-error { color: var(--error); }
 
 /* ── Spec 工作流审批条（spec → design → tasks）────────────────────────────── */
 

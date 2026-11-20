@@ -19,6 +19,7 @@ import {
   sanitizeOversizedFinalJson,
   slimDurableEvent,
   slimTurnFinal,
+  sweepInterruptedTurns,
 } from "./conversation-store.ts";
 import Database from "better-sqlite3";
 
@@ -453,6 +454,28 @@ describe("conversation store", () => {
       error: "",
       aborted: true,
     });
+  });
+
+  it("sweepInterruptedTurns 把卡死的 running 轮转为可显示的中断态", async () => {
+    const r = await root();
+    const turn = await beginTurn(r, "s", user("进行到一半的请求"));
+    // beginTurn 之后进程退出：没有 completeTurn，行永远停在 running
+    const before = await loadRecentTurns(r, "s", 10);
+    expect(before.turns).toHaveLength(0);
+
+    const swept = await sweepInterruptedTurns(r, "s");
+    expect(swept).toBe(1);
+
+    const page = await loadRecentTurns(r, "s", 10);
+    expect(page.turns).toHaveLength(1);
+    expect(page.turns[0]!.status).toBe("interrupted");
+    expect(projectConversationTurns(page.turns)).toEqual([
+      { ...user("进行到一半的请求"), turnId: turn.turnId },
+      { role: "assistant", content: "[本轮执行被中断，未正常结束]", turnId: turn.turnId },
+    ]);
+
+    // 已清扫过一次后再次调用幂等
+    expect(await sweepInterruptedTurns(r, "s")).toBe(0);
   });
 
   it("skips and sanitizes oversized legacy final_json without crashing pagination", async () => {

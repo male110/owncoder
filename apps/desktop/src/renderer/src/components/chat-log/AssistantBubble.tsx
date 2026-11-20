@@ -11,24 +11,30 @@ export const PlanActionsContext = createContext<{
   onApprovePlan: (path: string) => void;
   /**
    * 共享的 per-plan 批准飞行锁（key = planPath）。
-   * PlanCard 与 PlansBar 两个入口共用同一把锁，避免并发重复批准。
+   * PlanCard 与应用层批准入口共用同一把锁，避免并发重复批准。
    */
   approvingPlanPaths?: Set<string>;
 } | null>(null);
 
-export function PlanCard({ planPath, sessionId }: { planPath: string; sessionId?: string }) {
+export function PlanCard({
+  planPath,
+  sessionId,
+  onOpenFile,
+}: {
+  planPath: string;
+  sessionId?: string;
+  /** 在主窗口的编辑器标签页中打开计划文件（替代独立 Electron 窗口）。 */
+  onOpenFile?: (path: string) => void;
+}) {
   const actions = useContext(PlanActionsContext);
-  const [opening, setOpening] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const [openError, setOpenError] = useState("");
-  /** 部分内容：随卡片直接展示（对齐 ZCode 计划卡片），完整内容由「打开」窗口查看。 */
+  /** 部分内容：随卡片直接展示（对齐 ZCode 计划卡片），完整内容由点击标题在编辑器标签页查看。 */
   const [content, setContent] = useState<string | null>(null);
   const plan = actions?.plans.find((p) => p.path === planPath && p.sessionId === sessionId);
   const { t } = useI18n();
   const title = plan?.title && !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}(?:\.md)?$/i.test(plan.title)
     ? t("计划已生成：{{name}}", { name: plan.title }) : t("已生成计划");
   const approved = actions?.activePlanPath === planPath;
-  // 批准去重锁来自共享层（PlanActionsContext），与 PlansBar 共用同一把 per-plan 飞行锁。
+  // 批准去重锁来自共享层（PlanActionsContext），与应用层批准入口共用同一把 per-plan 飞行锁。
   const approving = actions?.approvingPlanPaths?.has(planPath) ?? false;
   useEffect(() => {
     let cancelled = false;
@@ -40,50 +46,34 @@ export function PlanCard({ planPath, sessionId }: { planPath: string; sessionId?
     }
     return () => { cancelled = true; };
   }, [planPath, sessionId]);
-  const open = async () => {
-    if (!sessionId || opening) return;
-    setOpening(true);
-    try {
-      await window.owncoder.openPlanWindow(planPath, sessionId);
-      setOpenError("");
-    } catch (reason) {
-      setOpenError(reason instanceof Error ? reason.message : String(reason));
-    } finally {
-      setOpening(false);
-    }
+  const open = () => {
+    // openEditorFile 内部会先用 readPlan 校验会话归属，再以新标签页打开计划文件。
+    if (!sessionId) return;
+    onOpenFile?.(planPath);
   };
   const approve = () => {
     if (!plan || plan.kind === "document" || approved || approving || actions?.busy) return;
     actions?.onApprovePlan(planPath);
-  };
-  const copyPath = async () => {
-    try {
-      await navigator.clipboard.writeText(planPath);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch { /* ignore */ }
   };
   return (
     <div>
     <div className="plan-card">
       <div className="plan-card-icon">📋</div>
       <div className="plan-card-body">
-        <div className="plan-card-title">{title}</div>
+        {/* 点击标题在主窗口编辑器标签页打开完整计划文件。 */}
+        <button type="button" className="plan-card-title" onClick={open} disabled={!sessionId}
+          title={sessionId ? t("查看完整计划") : t("未知会话")}>
+          {title}
+        </button>
       </div>
-      <button type="button" className="plan-card-copy" onClick={() => void copyPath()}
-        title={copied ? t("已复制") : t("复制路径")}>
-        {copied ? "✓" : "⧉"}
-      </button>
-      <button type="button" className="plan-card-open" onClick={() => void open()} disabled={opening || !sessionId}>
-        {t("打开 →")}
-      </button>
     </div>
-    {/* 审批入口在部分内容上方：计划名称 → 批准计划 → 部分内容（对齐 ZCode plan_approval 布局）。 */}
+    {/* 文案态（文档交付物 / 已批准）留在正文上方；待批准时按钮悬浮在正文之上（对齐 ZCode 计划卡片）。 */}
     {plan?.kind === "document" ? (
       <span className="plan-kind-note">{t("文档交付物 · 无需批准（如需执行请生成实施计划）")}</span>
     ) : approved ? (
       <span className="plan-kind-note">{t("已批准")}</span>
-    ) : plan ? (
+    ) : plan && content === null ? (
+      /* 正文尚未加载完成时，批准按钮留在原位，避免孤悬。 */
       <button
         type="button"
         className="plan-approve-cta"
@@ -94,9 +84,20 @@ export function PlanCard({ planPath, sessionId }: { planPath: string; sessionId?
       </button>
     ) : null}
     {content !== null ? (
-      <pre className="plan-preview-body plan-preview-body--masked">{content}</pre>
+      <div className="plan-preview-wrap">
+        <pre className="plan-preview-body plan-preview-body--masked">{content}</pre>
+        {plan && plan.kind !== "document" && !approved ? (
+          <button
+            type="button"
+            className="plan-approve-cta plan-approve-float"
+            disabled={actions?.busy || approving}
+            onClick={approve}
+          >
+            {approving ? t("批准中…") : t("批准计划")}
+          </button>
+        ) : null}
+      </div>
     ) : null}
-    {openError && <p role="alert" className="plan-window-error">{openError}</p>}
     </div>
   );
 }
@@ -191,7 +192,7 @@ function AssistantBubbleImpl({
       )}
       {/* 计划通知：正文（「计划已保存：…/请查看计划…」）对用户无信息量，卡片
           已承载计划名称、部分内容、批准入口与完整查看，整块替换为 PlanCard。 */}
-      {planPath ? <PlanCard planPath={planPath} sessionId={sessionId} /> : (
+      {planPath ? <PlanCard planPath={planPath} sessionId={sessionId} onOpenFile={onOpenFile} /> : (
         <Markdown content={displayContent} onOpenFile={onOpenFile} workspaceRoot={workspaceRoot} />
       )}
       <div className="msg-actions">

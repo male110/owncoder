@@ -201,10 +201,12 @@ export function useChatActions(deps: {
     const wasPendingDelete = useChatStore.getState().bySession[sid]?.pendingDelete === true;
     let merged = mergeIncomingHistory(currentHistory, incoming);
 
-    // 被中止的本轮位于返回历史尾部：定位最后一条 user 行（及其 turnId）。
+    // 被中止的本轮位于返回历史尾部：定位最后一条真实 user 行（及其 turnId）。
+    // 中断标记（metadata.source === "interrupt_marker"）是同轮的合成 user 行，
+    // 不能算作本轮的起点，否则会误把它当成用户消息、漏删被中止的整轮。
     let tailUserIdx = -1;
     for (let i = merged.length - 1; i >= 0; i--) {
-      if (merged[i]!.role === "user") {
+      if (merged[i]!.role === "user" && merged[i]!.metadata?.source !== "interrupt_marker") {
         tailUserIdx = i;
         break;
       }
@@ -436,6 +438,11 @@ export function useChatActions(deps: {
         res.ok && res.lastPlanPath &&
         !res.history.some((turn) => turn.role === "assistant" && extractPlanPath(turn.content) === res.lastPlanPath)
       ) void injectPlanNotification(res.lastPlanPath, sid);
+      // 新计划落盘后必须刷新 plansBySession：PlanCard 的批准按钮依赖计划元数据匹配，
+      // 不刷新时 plan 查不到，批准入口不会渲染（inject 分支与后端卡片分支都覆盖）。
+      if (res.ok && res.lastPlanPath) {
+        void depsRef.current.refreshPlans(sid).catch(() => {});
+      }
       return res;
     } catch (e) {
       if (!taskRef || !isStopRequested(sid)) showError(e, sid);
@@ -696,6 +703,10 @@ export function useChatActions(deps: {
         res.ok && res.lastPlanPath &&
         !res.history.some((turn) => turn.role === "assistant" && extractPlanPath(turn.content) === res.lastPlanPath)
       ) void injectPlanNotification(res.lastPlanPath, sid);
+      // 同 runQueue：刷新 plansBySession 以恢复 PlanCard 的批准按钮。
+      if (res.ok && res.lastPlanPath) {
+        void depsRef.current.refreshPlans(sid).catch(() => {});
+      }
     } catch (e) {
       showError(e, sid);
       chat.setSending(false, sid);

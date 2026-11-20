@@ -73,4 +73,19 @@ describe("Planner 白名单与提示词契约", () => {
       expect(prompt).toContain(text);
     }
   });
+
+  it("Task intake: refines the upstream brief before acting (critical-path ordering, anchor verification, first step)", () => {
+    const prompt = buildPlannerSubagentPrompt({ workingDirectory: "/tmp/ws", isGitRepository: true, platform: "win32" });
+    for (const text of [
+      "Task intake (mandatory — refine the upstream brief before acting)",
+      "restate the delegated goal in one sentence",
+      "Verify the brief's confirmed anchors",
+      "Sequence the plan around the critical path",
+      "Decide the first concrete step before acting",
+    ]) {
+      expect(prompt).toContain(text);
+    }
+    // 计划契约要求锚点修正显式进入相关文件段。
+    expect(prompt).toContain("call the correction out under 相关文件");
+  });
 });

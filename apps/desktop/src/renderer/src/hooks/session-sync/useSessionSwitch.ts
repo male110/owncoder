@@ -55,9 +55,8 @@ export function useSessionSwitch(
           // 1. 立即更新 UI 状态（乐观更新）- 让用户感觉切换很快
           syncFocusSession(id);
 
-          // 2. 检查缓存状态
+          // 2. 检查缓存状态（终端/队列/运行态仍用 runtime 缓存；历史一律走 sqlite）
           const existing = useChatStore.getState().bySession[id];
-          const isFirstVisit = !existing?.history?.length;
 
           // 3. Always notify main so it can persist+unload the previous idle
           // runtime. Skipping this on cache hits was the multi-session OOM path:
@@ -77,14 +76,9 @@ export function useSessionSwitch(
           if (!isNavigationCurrent(navigationVersion)) return;
           // await 期间 applySessionState 可能读到后端尚未切换完的 A1；再次锁定 B1。
           syncFocusSession(id);
-          // 即使后续导航版本已过期，也先把后端快照写入 bySession[id]。
-          // 跨项目首次点历史会话时，乐观 syncFocusSession 会先露出空 runtime；
-          // 若上面已因 navigationVersion 过期 return，则不会走到这里。
-          if (isFirstVisit || !existing?.history?.length) {
-            if (backendData.history?.length) {
-              applyHistory(backendData.history, id);
-            }
-          }
+          // 显示层是单源的：历史一律以 sqlite 分页（下面的 getChatHistoryPage）
+          // 为准。不再应用 backendData.history（runtime/session.json 快照），
+          // 否则两个来源不一致时会出现"切回来回复消失"的闪烁。
           if (!existing?.terminal?.length) {
             chat.setTerminal(backendData.terminal, id);
           }

@@ -14,6 +14,11 @@
  * 待确认的未知点，见 task-decompose.ts 的 DECOMPOSE_PLANNER_TOOL_DEF）
  * 把范围写窄，子代理侧再用 Scope discipline 块兜底——brief 与背景历史
  * 已确认的锚点直接用、范围外命中是噪声、生成物/依赖树永不在范围内。
+ *
+ * Task intake 块是子代理侧的任务细化：对照 Codex「先规划再派发」的
+ * 规则，Planner 收到上游 brief 后先复述交付目标、核对锚点、按关键路径
+ * 排序步骤、定第一个动作——把分解阶段写粗的任务在自身上下文里锐化
+ * 一次，锚点修正随计划回到父级与用户审批。
  */
 
 export const PLANNER_SUBAGENT_TYPE = "Planner" as const;
@@ -59,6 +64,11 @@ export function buildPlannerSubagentPrompt(env: PlannerPromptEnv = {}, relevantH
     "- Read only files and symbols needed to ground the plan. Index hits are pointers, not a checklist.",
     "- Reuse fresh evidence already returned by tools; do not repeat an unchanged read or equivalent search.",
     "- Stop as soon as the plan is grounded. Report the gap instead of expanding the search speculatively.",
+    "Task intake (mandatory — refine the upstream brief before acting):",
+    "- First restate the delegated goal in one sentence: what the plan must enable the parent to do, and which deliverable the parent takes from it. If the brief is vague, narrow it to the smallest plan that achieves that goal.",
+    "- Verify the brief's confirmed anchors (paths, symbols) with one cheap targeted read before planning on them. If an anchor is wrong or missing, relocate it and list the correction under 相关文件 — the parent's steps and the user's approval are built on those anchors being real.",
+    "- Sequence the plan around the critical path: order steps so the blocking change comes first and independent steps are marked as parallel-safe. Do not pad the plan with verification or cleanup steps that the goal does not need.",
+    "- Decide the first concrete step before acting, and make it the single cheapest read that grounds the goal. Never tour the repository to build context first.",
     "Scope discipline (mandatory):",
     "- Stay inside the brief's named scope: the change goal, the confirmed anchors, the constraints (including modules that must not change), and the open questions. Anything the brief does not name — modules unrelated to the goal, other areas of the repository — is out of bounds unless a named open question requires it.",
     "- Search hits outside the named scope are noise: skip them instead of reading them to judge relevance.",
@@ -81,6 +91,7 @@ export function buildPlannerSubagentPrompt(env: PlannerPromptEnv = {}, relevantH
     "5. `验证方式` (or `Verification`) — how to verify the change works (tests, commands, manual checks).",
     "Section heading tolerance: any heading level (`#` to `######`), an optional number prefix (`## 1. 目标`), and either the Chinese or the English section name are accepted. Sub-headings deeper than a section heading are treated as part of that section; each required section must still contain actual content outside headings and code fences. A missing or empty section or steps without numbered actions causes the parent agent to pause execution.",
     "- Cite every claim with workspace-relative file paths and line numbers.",
+    "- If a named anchor in the brief was wrong or missing and you relocated it, call the correction out under 相关文件 (real path plus the one-line reason) so the parent and the user approve a plan built on real locations.",
     "- If something could not be established, state it explicitly under 风险与不确定性 instead of guessing — then submit the plan anyway rather than researching further.",
     "- Write the report in the same language as the task description, but keep the five section headings in Chinese or English as shown above; keep it concise and structured.",
   ].join("\n");

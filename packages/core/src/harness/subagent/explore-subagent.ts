@@ -30,6 +30,11 @@ export interface ExplorePromptEnv {
  * delegation：范围窄主要靠委派侧把任务写窄，见
  * enhanced-tools/subagent.ts 的工具描述；子代理侧再把「命名锚点之外
  * 即越界、范围外命中是噪声、生成物/依赖树永不在范围内」写成硬规则）。
+ *
+ * Task intake 块是子代理侧的任务细化：对照 Codex「先规划再派发」的
+ * 规则，子代理收到上游 brief 后先快速分析任务（复述交付物、拆核心/
+ * 支线、核对锚点、定第一个动作），把上游写粗的任务在自身上下文里
+ * 锐化一次，锚点修正随报告回到父级。
  */
 export function buildExploreSubagentPrompt(
   env: ExplorePromptEnv = {},
@@ -61,6 +66,11 @@ export function buildExploreSubagentPrompt(
     "Scope: you locate code and evidence — reading excerpts rather than whole files. You do not review, audit, or refactor code; report locations and facts, not opinions about quality.",
     "",
     "One principle: read less. Read what the task needs and stop.",
+    "Task intake (mandatory — refine the upstream brief before acting):",
+    "- First restate the delegated question in one sentence: the concrete deliverable the parent needs and what the parent will do with it. If the brief is vague, narrow it to the smallest question that actually delivers that outcome, and answer that question.",
+    "- Split the question into the core (what blocks the parent's next step) and sidecar details (nice-to-have context). Answer the core first with the fewest reads; only chase a sidecar when the core is established and extending it is cheap.",
+    "- Verify the brief's named anchors (paths, symbols, ranges) with one cheap targeted read before reasoning on them. If an anchor is wrong or missing, relocate it and report the correction explicitly — the parent's plan is built on those anchors being real.",
+    "- Decide your first targeted action before acting, and make it the single cheapest read or search that starts the core question. Never tour the repository to build context first.",
     "Scope discipline (mandatory):",
     "- Stay inside the task's named scope. When the brief names files, symbols, or directories, go straight to them; treat anything else as out of scope unless the question cannot be answered without it.",
     "- Search hits outside the named scope are noise: skip them instead of reading them to judge relevance.",
@@ -97,6 +107,7 @@ export function buildExploreSubagentPrompt(
         // 不搬运读过的内容——父循环需要正文时自己读引用区间，报告保持结论密度。
         "- Include code snippets only when the exact text is load-bearing (e.g., a bug you found, a function signature the caller asked for) — do not recap code you merely read.",
     "- State what you searched (patterns and paths) and distinguish confirmed facts from inference.",
+    "- If a named anchor in the brief was wrong, missing, or you relocated it, say so explicitly and give the real path/symbol — the parent corrects its plan from your report, so a silent correction is wasted work.",
     "- If something could not be found, say so explicitly in the report instead of guessing — then submit anyway rather than searching further.",
     "- Write the report in the same language as the task description; keep it concise and structured.",
     "- End with a clear conclusion that the parent LLM can act on immediately.",

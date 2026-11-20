@@ -4,7 +4,7 @@ import { join, resolve } from "node:path";
 import type { ChatTurn } from "./harness/loop/types.ts";
 import type { TurnRoundRecord } from "./turn-rounds.ts";
 
-export type ConversationTurnStatus = "running" | "completed" | "cancelled" | "failed";
+export type ConversationTurnStatus = "running" | "completed" | "cancelled" | "failed" | "interrupted";
 
 export interface ConversationTurn {
   turnId: string;
@@ -328,6 +328,28 @@ export async function completeTurn(root: string, sessionId: string, turnId: stri
       json(slimTurnFinal(result)),
       turnId,
     );
+  });
+}
+
+/** 中断轮占位回复：区分于 LLM 真实输出，仅用于界面标记。 */
+const INTERRUPTED_REPLY = "[本轮执行被中断，未正常结束]";
+
+/**
+ * 清扫从未走到 completeTurn 的 running 轮（应用退出/崩溃/中断路径异常）。
+ * 分页查询的 `status <> 'running'` 会把这类行永久隐藏——用户消息和工具过程
+ * 全部不可见。清扫把它们转为 interrupted 终态并补一条占位回复，让界面能显示
+ * 出这一轮。调用方必须保证该会话当前没有活跃执行（否则会误伤在跑的轮）。
+ */
+export async function sweepInterruptedTurns(root: string, sessionId: string): Promise<number> {
+  return serial(lockKey(root, sessionId), async () => {
+    const db = await dbFor(root, sessionId);
+    const now = new Date().toISOString();
+    const result = db
+      .prepare(
+        "UPDATE turns SET status = 'interrupted', completed_at = ?, final_json = COALESCE(final_json, ?) WHERE status = 'running'",
+      )
+      .run(now, json({ role: "assistant", content: INTERRUPTED_REPLY }));
+    return Number(result.changes);
   });
 }
 

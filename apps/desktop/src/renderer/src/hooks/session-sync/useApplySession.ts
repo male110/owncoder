@@ -64,7 +64,7 @@ export function useApplySession(ctx: SessionSyncContext, refreshers: SyncRefresh
       if (!focusAfterSync || focusAfterSync === state.activeSessionId) {
         session.setSessionTitle(state.sessionTitle);
       }
-      // 计划路径按后端会话写入缓存；非焦点会话不会盖住当前 PlansBar。
+      // 计划路径按后端会话写入缓存；非焦点会话不会盖住当前会话的卡片。
       if (state.activeSessionId) {
         session.setActivePlanPath(state.activePlanPath, state.activeSessionId);
       }

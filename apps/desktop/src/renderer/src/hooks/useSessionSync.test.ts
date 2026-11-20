@@ -124,6 +124,33 @@ describe("新建对话的项目归属", () => {
     expect(ipc.switchChatSession).toHaveBeenCalledWith("B1", projectB.root);
   });
 
+  it("切换会话时历史一律取 sqlite 分页，不应用 runtime/session.json 快照", async () => {
+    useSessionStore.setState({
+      sessionsByProject: { [projectA.root]: [originalSession] },
+      activeSessionIdByProject: {},
+    });
+    // 模拟 runtime 快照与 sqlite 不一致：快照是旧数据
+    ipc.switchChatSession = vi.fn(async () => ({
+      state: { mode: "agent", sessionTitle: "旧标题", queuedMessages: [], activePlanPath: null },
+      history: [{ role: "user", content: "STALE-RUNTIME-SNAPSHOT" }],
+      terminal: [],
+    }));
+    ipc.getChatHistoryPage = vi.fn(async () => ({
+      turns: [
+        { role: "user", content: "sqlite-input" },
+        { role: "assistant", content: "sqlite-reply" },
+      ],
+      beforeSeq: null,
+      hasMore: false,
+    }));
+
+    await api.onSwitchSession("A1", projectA.root);
+
+    const rt = useChatStore.getState().bySession["A1"];
+    expect(rt.history.some((t) => t.content === "STALE-RUNTIME-SNAPSHOT")).toBe(false);
+    expect(rt.history.map((t) => `${t.role}:${t.content}`)).toEqual(["user:sqlite-input", "assistant:sqlite-reply"]);
+  });
+
   it.each([false, true])("打开新项目 B 后保留草稿并归属 B（先选择 A：%s）", async (selectAFirst) => {
     await api.onNewSession();
     if (selectAFirst) await api.onSelectProject(projectA.root);

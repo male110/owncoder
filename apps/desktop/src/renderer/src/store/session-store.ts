@@ -47,7 +47,7 @@ export interface SessionState {
   // Plan & tasks
   /** Focused-session mirror of the approved plan path. */
   activePlanPath: string | null;
-  /** Per-session approved plan path. Prevents A's approval from hiding B's PlansBar. */
+  /** Per-session approved plan path. Prevents A's approval from hiding B's plan card. */
   activePlanPathBySession: Record<string, string | null>;
   activePlanMeta: ActivePlanMetaDto | null;
   /** Per-session active plan meta cache. Keys are sessionId; values may be
@@ -59,7 +59,7 @@ export interface SessionState {
 
   // Plans list (sidebar) — focused-session mirror
   plans: PlanInfoDto[];
-  /** Per-session pending-plan list shown in PlansBar. */
+  /** Per-session pending-plan list backing the plan cards. */
   plansBySession: Record<string, PlanInfoDto[]>;
 
   // Spec workflow (Kiro 风格 spec → design → tasks)
@@ -237,7 +237,7 @@ export const useSessionStore = create<SessionState & SessionActions>()((set, get
         : s.activePlanPathBySession;
       return {
         activePlanPathBySession,
-        // 非焦点写入只更新该会话缓存，不覆盖当前 PlansBar。
+        // 非焦点写入只更新该会话缓存，不覆盖当前会话的卡片。
         activePlanPath: !sid || sid === s.activeSessionId ? path : s.activePlanPath,
       };
     });

@@ -115,7 +115,7 @@ function makePlanActions(overrides: Partial<{
   };
 }
 
-function renderCard(actions: ReturnType<typeof makePlanActions>, sessionId = "s1") {
+function renderCard(actions: ReturnType<typeof makePlanActions>, sessionId = "s1", onOpenFile = vi.fn()) {
   // 保留已有 states（如 open() 写入的 preview），仅在首次调用时初始化。
   // stateIndex 重置为 0 让 useState 从索引 0 开始读取已有状态。
   hooks.stateIndex = 0;
@@ -128,7 +128,7 @@ function renderCard(actions: ReturnType<typeof makePlanActions>, sessionId = "s1
   // 让 useContext 返回我们的 actions
   (PlanActionsContext as any)._currentValue = actions;
   // 直接调用 PlanCard 函数（hooks mock 已就位，useState 返回受控状态）
-  return (PlanCard as any)({ planPath: "/plans/test.md", sessionId, onOpen: vi.fn() });
+  return (PlanCard as any)({ planPath: "/plans/test.md", sessionId, onOpenFile });
 }
 
 // ── 测试用例 ──────────────────────────────────────────────────────────────────────
@@ -140,7 +140,6 @@ describe("PlanCard", () => {
     (globalThis as any).window = {
       owncoder: {
         readPlan: vi.fn(async () => "# 计划内容\n步骤 1\n步骤 2"),
-        openPlanWindow: vi.fn(async () => undefined),
       },
     };
   });
@@ -156,14 +155,10 @@ describe("PlanCard", () => {
     expect(findByClass(tree, "plan-card-title")?.props.children).toBe("已生成计划");
   });
 
-  it("shows copy button", () => {
+  it("shows no copy or open buttons — the title is the only open entry", () => {
     const tree = renderCard(makePlanActions());
-    expect(findByClass(tree, "plan-card-copy")).toBeDefined();
-  });
-
-  it("shows open button", () => {
-    const tree = renderCard(makePlanActions());
-    expect(findByClass(tree, "plan-card-open")).toBeDefined();
+    expect(findByClass(tree, "plan-card-copy")).toBeUndefined();
+    expect(findByClass(tree, "plan-card-open")).toBeUndefined();
   });
 
   it("does not show partial content before readPlan resolves", () => {
@@ -171,10 +166,11 @@ describe("PlanCard", () => {
     expect(findByClass(tree, "plan-preview-body")).toBeUndefined();
   });
 
-  it("opens an independent window, not an inline toolbar", async () => {
-    const tree = renderCard(makePlanActions());
-    await findByClass(tree, "plan-card-open")!.props.onClick();
-    expect(window.owncoder.openPlanWindow).toHaveBeenCalledWith("/plans/test.md", "s1");
+  it("opens the plan in an in-app editor tab when the title is clicked", async () => {
+    const onOpenFile = vi.fn();
+    const tree = renderCard(makePlanActions(), "s1", onOpenFile);
+    await findByClass(tree, "plan-card-title")!.props.onClick();
+    expect(onOpenFile).toHaveBeenCalledWith("/plans/test.md");
     expect(findByClass(tree, "prompt-toolbar")).toBeUndefined();
     expect(findByClass(tree, "plan-preview-actions")).toBeUndefined();
   });
@@ -190,6 +186,22 @@ describe("PlanCard", () => {
     expect(preview).toBeDefined();
     expect(preview?.props.className).toContain("plan-preview-body--masked");
     expect(preview?.props.children).toBe("# 计划内容\n步骤 1\n步骤 2");
+  });
+
+  it("floats the approve CTA over the loaded preview (ZCode-style overlay)", async () => {
+    const actions = makePlanActions();
+    renderCard(actions);
+    // hooks mock 只收集 useEffect；手动执行以驱动 readPlan → setContent。
+    for (const effect of [...hooks.effects]) void effect();
+    await Promise.resolve();
+    const tree = renderCard(actions);
+    const wrap = findByClass(tree, "plan-preview-wrap");
+    expect(wrap).toBeDefined();
+    const cta = findByClass(wrap!, "plan-approve-float");
+    expect(cta).toBeDefined();
+    expect(cta?.props.children).toBe("批准计划");
+    cta!.props.onClick();
+    expect(actions.onApprovePlan).toHaveBeenCalledWith("/plans/test.md");
   });
 
   it("shows the approve CTA above the partial content and wires it to onApprovePlan", () => {
@@ -226,25 +238,11 @@ describe("PlanCard", () => {
     expect(findByClass(tree, "plan-approve-cta")).toBeUndefined();
   });
 
-  it("reports a failed window open without inline preview", async () => {
-    vi.mocked(window.owncoder.openPlanWindow).mockRejectedValueOnce(new Error("read failed"));
-    await findByClass(renderCard(makePlanActions()), "plan-card-open")!.props.onClick();
-    const tree = renderCard(makePlanActions());
-    expect(findByClass(tree, "plan-window-error")?.props.children).toBe("read failed");
-    expect(findByClass(tree, "plan-preview")).toBeUndefined();
-  });
-
-  it("keeps the plan path available to copy", async () => {
-    const writeText = vi.fn(async () => undefined);
-    vi.stubGlobal("navigator", { clipboard: { writeText } });
-    await findByClass(renderCard(makePlanActions()), "plan-card-copy")!.props.onClick();
-    expect(writeText).toHaveBeenCalledWith("/plans/test.md");
-  });
-
-  it("does not open a window without an owning session", async () => {
-    const tree = renderCard(makePlanActions(), "");
-    await findByClass(tree, "plan-card-open")!.props.onClick();
-    expect(window.owncoder.openPlanWindow).not.toHaveBeenCalled();
+  it("does not open an editor tab without an owning session", async () => {
+    const onOpenFile = vi.fn();
+    const tree = renderCard(makePlanActions(), "", onOpenFile);
+    await findByClass(tree, "plan-card-title")!.props.onClick();
+    expect(onOpenFile).not.toHaveBeenCalled();
   });
 });
 describe("plan-marker history reload persistence", () => {

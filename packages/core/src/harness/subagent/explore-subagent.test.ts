@@ -120,3 +120,19 @@ test("Explore prompt 范围纪律：命名锚点之外即越界（对齐 Codex w
     assert.ok(prompt.includes(text), text);
   }
 });
+
+test("Explore prompt 任务 intake：收到上游 brief 先细化，锚点修正回写报告", () => {
+  const prompt = buildExploreSubagentPrompt();
+  for (const text of [
+    "Task intake (mandatory — refine the upstream brief before acting)",
+    "restate the delegated question in one sentence",
+    "Split the question into the core",
+    "Verify the brief's named anchors",
+    "relocate it and report the correction explicitly",
+    "Decide your first targeted action before acting",
+  ]) {
+    assert.ok(prompt.includes(text), text);
+  }
+  // 报告契约要求锚点修正显式可见，父级据此修正计划。
+  assert.ok(/a silent correction is wasted work/.test(prompt));
+});

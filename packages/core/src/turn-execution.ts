@@ -26,6 +26,17 @@ import type { SessionRuntime } from "./session-runtime.ts";
 import { buildSessionPersistPayload, enqueueSessionPersist } from "./session-persist.ts";
 import { compactHistory } from "./history-compact.ts";
 
+export const INTERRUPT_MARKER_SOURCE = "interrupt_marker";
+
+/**
+ * 用户手动中断后写入历史的一条合成 user 消息。它对 LLM 可见（历史注入
+ * 时作为 `[HISTORY] user: …` 出现在最新位置），让下一轮明确知道：本任务
+ * 被用户中断、尚未完成、上面的助理回复只是部分结果。UI 依据
+ * metadata.source === "interrupt_marker" 对用户隐藏此合成行。
+ */
+export const INTERRUPT_MARKER_TEXT =
+  "[本任务被用户手动中断，尚未完成（interrupted by user）。以上助理回复仅为部分结果，请勿当作完成态；等待用户的新指示。]";
+
 export interface AgentTurnContext {
   sessionId: string;
   text: string;
@@ -338,6 +349,17 @@ export async function executeAgentTurn(ctx: AgentTurnContext): Promise<AgentLoop
         content: errorMsg,
         parts: [{ type: "text", text: errorMsg }],
         metadata,
+      });
+    }
+    // 用户手动中断：紧跟一条合成 user 消息，把「未完成 + 用户中断」写进
+    // 送给 LLM 的历史（下一轮的历史注入块最新位置），界面隐藏。
+    if (isAborted) {
+      r.history.push({
+        role: "user",
+        content: INTERRUPT_MARKER_TEXT,
+        // 归属同一轮次：整轮删除 / 重新生成时随轮次一并处理。
+        turnId,
+        metadata: { source: INTERRUPT_MARKER_SOURCE, aborted: true },
       });
     }
 
