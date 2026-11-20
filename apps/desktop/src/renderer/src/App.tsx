@@ -76,10 +76,10 @@ export function App() {
   const bySession = useChatStore((s) => s.bySession);
 
   const {
-    editorTabs, editorPath, diffDataByPath, editorWidth, isEditorDragging, sidebarWidth, isSidebarDragging,
+    editorTabs, editorPath, diffDataByPath, sidebarWidth, isSidebarDragging,
     sidebarCollapsed, settingsOpen, settingsTab,
     searchOpen, modeMenuOpen, drafts, busy, keepAllBusy,
-    setEditorPath, openEditorDiff, setActiveEditorTab, closeEditorTab, setEditorWidth, setIsEditorDragging, setSidebarWidth, setIsSidebarDragging,
+    setEditorPath, openEditorDiff, setActiveEditorTab, showChatView, closeEditorTab, setSidebarWidth, setIsSidebarDragging,
     setSidebarCollapsed, setSettingsOpen, setSettingsTab, setSearchOpen, setModeMenuOpen,
     setDraft, openSettings,
   } = useUiStore();
@@ -140,10 +140,7 @@ export function App() {
     }, 700);
   }, []);
 
-  const bodyRef = useRef<HTMLDivElement | null>(null);
   const shellRef = useRef<HTMLDivElement | null>(null);
-  const resizeFrameRef = useRef<number | null>(null);
-  const pendingEditorWidthRef = useRef<number | null>(null);
   const sidebarResizeFrameRef = useRef<number | null>(null);
   const pendingSidebarWidthRef = useRef<number | null>(null);
   /** 页签行右侧操作区宿主，供 EditorPane 通过 portal 挂载保存/重新加载。 */
@@ -293,48 +290,6 @@ export function App() {
     const parts = path.replace(/\\/g, "/").split("/");
     return parts[parts.length - 1] || path;
   }, []);
-
-  // Drag-resize handler for the editor column (width measured from left edge).
-  useEffect(() => {
-    if (!isEditorDragging) return;
-
-    const onMove = (e: MouseEvent) => {
-      if (!bodyRef.current) return;
-      const rect = bodyRef.current.getBoundingClientRect();
-      const widthPx = e.clientX - rect.left;
-      const pct = (widthPx / rect.width) * 100;
-      pendingEditorWidthRef.current = pct;
-      if (resizeFrameRef.current !== null) return;
-
-      resizeFrameRef.current = requestAnimationFrame(() => {
-        resizeFrameRef.current = null;
-        if (pendingEditorWidthRef.current !== null) {
-          setEditorWidth(pendingEditorWidthRef.current);
-        }
-      });
-    };
-
-    const onUp = () => {
-      setIsEditorDragging(false);
-      document.body.style.cursor = "";
-      document.body.style.userSelect = "";
-    };
-
-    document.addEventListener("mousemove", onMove);
-    document.addEventListener("mouseup", onUp);
-    document.body.style.cursor = "col-resize";
-    document.body.style.userSelect = "none";
-
-    return () => {
-      document.removeEventListener("mousemove", onMove);
-      document.removeEventListener("mouseup", onUp);
-      if (resizeFrameRef.current !== null) {
-        cancelAnimationFrame(resizeFrameRef.current);
-        resizeFrameRef.current = null;
-      }
-      pendingEditorWidthRef.current = null;
-    };
-  }, [isEditorDragging, setEditorWidth, setIsEditorDragging]);
 
   // Drag-resize handler for left sidebar.
   useEffect(() => {
@@ -651,124 +606,144 @@ export function App() {
 
         <main className="agent-main">
 
-          <div ref={bodyRef} className={`agent-body${editorTabs.length > 0 ? " with-editor" : ""}`}>
-            {editorTabs.length > 0 && editorPath ? (
-              <>
-                <div className="editor-shell" style={{ width: `${editorWidth}%` }}>
-                  <div className="editor-tabs-row">
-                    <div className="editor-tabs" role="tablist" aria-label={t("已打开文件")}>
-                      {editorTabs.map((tabPath) => {
-                        const active = tabPath === editorPath;
-                        const dirty = Boolean(editorDirtyByPath[tabPath]);
-                        const isDiff = Boolean(diffDataByPath[tabPath]);
-                        return (
-                          <div
-                            key={tabPath}
-                            className={`editor-tab${active ? " active" : ""}`}
-                            role="presentation"
-                          >
-                            <button
-                              type="button"
-                              role="tab"
-                              aria-selected={active}
-                              className="editor-tab-main"
-                              title={tabPath}
-                              onClick={() => setActiveEditorTab(tabPath)}
-                            >
-                              <span className="editor-tab-name">{fileNameOf(tabPath)}</span>
-                              {isDiff ? <span className="editor-tab-badge">{t("对比")}</span> : null}
-                              {dirty ? <span className="editor-dirty">●</span> : null}
-                            </button>
-                            <button
-                              type="button"
-                              className="editor-tab-close"
-                              title={t("关闭")}
-                              aria-label={t("关闭 {{name}}", { name: fileNameOf(tabPath) })}
-                              onClick={() => void requestCloseEditorTab(tabPath)}
-                            >
-                              ×
-                            </button>
-                          </div>
-                        );
-                      })}
-                    </div>
+          <div className="agent-body">
+            <div className="main-tabs-row">
+              <div className="editor-tabs" role="tablist" aria-label={t("主视图页签")}>
+                {/* 「AI 对话」固定页签：不可关闭；打开文件只是在它后面新增文件页签。 */}
+                <div className={`editor-tab chat-tab${editorPath === null ? " active" : ""}`} role="presentation">
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={editorPath === null}
+                    aria-label={t("AI 对话")}
+                    title={t("AI 对话")}
+                    className="editor-tab-main"
+                    onClick={showChatView}
+                  >
+                    <svg className="chat-tab-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <circle cx="12" cy="3.2" r="1.1" />
+                      <path d="M12 4.4v2.2" />
+                      <path d="M5 6.6h14a2.4 2.4 0 0 1 2.4 2.4v7a2.4 2.4 0 0 1-2.4 2.4H11l-3.6 3.4v-3.4H5a2.4 2.4 0 0 1-2.4-2.4V9A2.4 2.4 0 0 1 5 6.6Z" />
+                      <circle cx="9.2" cy="11.6" r="1" />
+                      <circle cx="14.8" cy="11.6" r="1" />
+                      <path d="M9.2 15h5.6" />
+                    </svg>
+                  </button>
+                </div>
+                {editorTabs.map((tabPath) => {
+                  const active = tabPath === editorPath;
+                  const dirty = Boolean(editorDirtyByPath[tabPath]);
+                  const isDiff = Boolean(diffDataByPath[tabPath]);
+                  return (
                     <div
-                      ref={setEditorTabActionsHost}
-                      className="editor-tab-actions-host"
-                      aria-label={t("编辑器操作")}
+                      key={tabPath}
+                      className={`editor-tab${active ? " active" : ""}`}
+                      role="presentation"
+                    >
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={active}
+                        className="editor-tab-main"
+                        title={tabPath}
+                        onClick={() => setActiveEditorTab(tabPath)}
+                      >
+                        <span className="editor-tab-name">{fileNameOf(tabPath)}</span>
+                        {isDiff ? <span className="editor-tab-badge">{t("对比")}</span> : null}
+                        {dirty ? <span className="editor-dirty">●</span> : null}
+                      </button>
+                      <button
+                        type="button"
+                        className="editor-tab-close"
+                        title={t("关闭")}
+                        aria-label={t("关闭 {{name}}", { name: fileNameOf(tabPath) })}
+                        onClick={() => void requestCloseEditorTab(tabPath)}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+              <div
+                ref={setEditorTabActionsHost}
+                className="editor-tab-actions-host"
+                aria-label={t("编辑器操作")}
+              />
+            </div>
+            <div className="main-tab-content">
+              {/* 对话页签常驻挂载（切页签只切换 display），避免后台 streaming 的会话
+                  在切回来时因 ChatLog/Virtuoso 重挂而丢失已输出内容。 */}
+              <div
+                className="main-tab-pane"
+                style={editorPath === null ? undefined : { display: "none" }}
+                aria-hidden={editorPath !== null}
+              >
+                <div className="agent-chat">
+                  {chatPanel}
+                </div>
+              </div>
+              {editorTabs.map((tabPath) => {
+                const active = tabPath === editorPath;
+                const diff = diffDataByPath[tabPath];
+                return (
+                  <div
+                    key={tabPath}
+                    className="main-tab-pane editor-tab-pane"
+                    style={{ display: active ? "flex" : "none" }}
+                    aria-hidden={!active}
+                  >
+                    {active && editorPlan ? (
+                      /* 批准入口悬浮在计划正文上方（对齐 ZCode plan_approval 卡片式动作层）。 */
+                      <div className="editor-plan-float">
+                        {editorPlan.kind === "document" ? (
+                          <span className="editor-plan-float-note">{t("文档交付物 · 无需批准（如需执行请生成实施计划）")}</span>
+                        ) : editorPlanApproved ? (
+                          <span className="editor-plan-float-note">{t("已批准")}</span>
+                        ) : (
+                          <button
+                            type="button"
+                            className="plan-approve-cta"
+                            disabled={busy || sending || editorPlanApproving}
+                            onClick={() => {
+                              if (editorPath && activeSessionId) {
+                                void handleApprovePlan(editorPath, activeSessionId).catch(() => {});
+                              }
+                            }}
+                          >
+                            {editorPlanApproving ? t("批准中…") : t("批准此计划并自动执行")}
+                          </button>
+                        )}
+                      </div>
+                    ) : null}
+                    <EditorPane
+                      path={tabPath}
+                      active={active}
+                      revealLine={editorLocation?.path === tabPath ? editorLocation : undefined}
+                      hidePathTitle
+                      actionsHost={active ? editorTabActionsHost : null}
+                      {...(diff
+                        ? {
+                            diffMode: true as const,
+                            content: diff.after,
+                            originalContent: diff.before,
+                          }
+                        : {
+                            diffMode: false as const,
+                            content: undefined,
+                          })}
+                      onSaved={() => void refreshChanges()}
+                      onDirtyChange={(dirty) => handleEditorDirtyChange(tabPath, dirty)}
+                      activePlanMeta={activePlanMetaBySession[activeSessionId ?? ""] as import("../../preload/index").ActivePlanMetaDto | undefined}
+                      taskBusy={busy || sending}
+                      sessionId={activeSessionId ?? undefined}
+                      onExecutePlan={() => activeSessionId && onExecutePlan(activeSessionId)}
+                      onExecuteSpecTasks={activeSessionId ? (document, taskId) => void onExecuteSpecTasks(activeSessionId, document, taskId) : undefined}
+                      onUpdateTask={(taskId, status, document) => activeSessionId && void onUpdateTask(taskId, status, activeSessionId, document)}
                     />
                   </div>
-                  {editorTabs.map((tabPath) => {
-                    const active = tabPath === editorPath;
-                    const diff = diffDataByPath[tabPath];
-                    return (
-                      <div
-                        key={tabPath}
-                        className="editor-tab-pane"
-                        style={{ display: active ? "flex" : "none" }}
-                        aria-hidden={!active}
-                      >
-                        {active && editorPlan ? (
-                          /* 批准入口悬浮在计划正文上方（对齐 ZCode plan_approval 卡片式动作层）。 */
-                          <div className="editor-plan-float">
-                            {editorPlan.kind === "document" ? (
-                              <span className="editor-plan-float-note">{t("文档交付物 · 无需批准（如需执行请生成实施计划）")}</span>
-                            ) : editorPlanApproved ? (
-                              <span className="editor-plan-float-note">{t("已批准")}</span>
-                            ) : (
-                              <button
-                                type="button"
-                                className="plan-approve-cta"
-                                disabled={busy || sending || editorPlanApproving}
-                                onClick={() => {
-                                  if (editorPath && activeSessionId) {
-                                    void handleApprovePlan(editorPath, activeSessionId).catch(() => {});
-                                  }
-                                }}
-                              >
-                                {editorPlanApproving ? t("批准中…") : t("批准此计划并自动执行")}
-                              </button>
-                            )}
-                          </div>
-                        ) : null}
-                        <EditorPane
-                          path={tabPath}
-                          active={active}
-                          revealLine={editorLocation?.path === tabPath ? editorLocation : undefined}
-                          hidePathTitle
-                          actionsHost={active ? editorTabActionsHost : null}
-                          {...(diff
-                            ? {
-                                diffMode: true as const,
-                                content: diff.after,
-                                originalContent: diff.before,
-                              }
-                            : {
-                                diffMode: false as const,
-                                content: undefined,
-                              })}
-                          onSaved={() => void refreshChanges()}
-                          onDirtyChange={(dirty) => handleEditorDirtyChange(tabPath, dirty)}
-                          activePlanMeta={activePlanMetaBySession[activeSessionId ?? ""] as import("../../preload/index").ActivePlanMetaDto | undefined}
-                          taskBusy={busy || sending}
-                          sessionId={activeSessionId ?? undefined}
-                          onExecutePlan={() => activeSessionId && onExecutePlan(activeSessionId)}
-                          onExecuteSpecTasks={activeSessionId ? (document, taskId) => void onExecuteSpecTasks(activeSessionId, document, taskId) : undefined}
-                          onUpdateTask={(taskId, status, document) => activeSessionId && void onUpdateTask(taskId, status, activeSessionId, document)}
-                        />
-                      </div>
-                    );
-                  })}
-                </div>
-                <div
-                  className="editor-resize-handle"
-                  onMouseDown={() => setIsEditorDragging(true)}
-                  title={t("拖动调整文件区域宽度")}
-                />
-              </>
-            ) : null}
-            <div className="agent-chat">
-              {chatPanel}
+                );
+              })}
             </div>
           </div>
 

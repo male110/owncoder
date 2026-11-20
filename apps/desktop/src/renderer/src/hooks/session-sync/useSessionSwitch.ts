@@ -69,6 +69,9 @@ export function useSessionSwitch(
             const targetWorkspace = { root: targetRoot, name: targetProject?.name ?? targetRoot };
             session.setWorkspace(targetWorkspace);
             session.setSessions(useSessionStore.getState().sessionsByProject[targetRoot] ?? []);
+            // 手风琴侧栏：聚焦某个会话时必须同时打开它所属的项目，
+            // 否则 sidebar 停留在项目列表模式，用户看不到刚切到的会话。
+            session.setExpanded((e) => ({ ...e, [targetRoot]: true }));
             workspaceRef.current = targetWorkspace;
           }
           const backendData = await window.owncoder.switchChatSession(id, targetRoot);

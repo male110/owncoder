@@ -31,6 +31,35 @@ function deliverPlan(ctx: PlanContext, plan: PlannerPlan, content: string): void
   ctx.opts.onEvent?.({ type: "assistant_delta", text: ctx.state.lastAssistant });
 }
 
+/**
+ * 计划待批准期间的普通对话（桌面 UI 有独立批准按钮）：不再重发计划卡片，
+ * 而是注入历史后做一次无工具补全来回答用户。回答完仍保持待批准状态——
+ * 不进入执行流水线，计划未批准不实施任何代码。
+ * 从 "./index.js" 动态导入以避开循环依赖（index.ts 导入本模块）。
+ */
+async function answerPlanPendingChat(
+  ctx: Omit<StageHandlerContext, "node">,
+  plan: PlannerPlan,
+): Promise<void> {
+  const { opts, state } = ctx;
+  if (opts.signal?.aborted) { state.aborted = true; return; }
+  state.plannerPlan = plan;
+  state.planApproval = "pending_approval";
+  state.approvedAgentPlan = undefined;
+  const { injectHistoryAndUserMessage, doPlainCompletion } = await import("./index.js");
+  if (!state.userMessageInjected) {
+    await injectHistoryAndUserMessage(ctx);
+    state.userMessageInjected = true;
+  }
+  // 明确本轮边界：只回答，不实施；批准由 UI 按钮或下一轮批准令牌完成。
+  ctx.messages.push({
+    role: "system",
+    content: `当前有计划待批准（${plan.path}，v${plan.version}）。本轮只需回答用户的问题或澄清计划内容，不要承诺或实施任何代码变更；批准后才会进入执行。`,
+  });
+  state.lastAssistant = await doPlainCompletion(ctx);
+  state.awaitingUserConfirmation = true;
+}
+
 export async function requestAgentPlanApproval(ctx: PlanContext, planText: string): Promise<void> {
   const { opts, state } = ctx;
   if (opts.signal?.aborted) {
@@ -139,7 +168,9 @@ export async function resumeAgentPlan(ctx: Omit<StageHandlerContext, "node">): P
         ctx.history.push({ role: "assistant", content: state.lastAssistant });
         opts.onEvent?.({ type: "assistant_delta", text: state.lastAssistant });
       } else {
-        deliverPlan(ctx, plan, content);
+        // 桌面 UI 有独立批准按钮：非批准/拒绝/修订的输入按普通对话回答，
+        // 不重发计划卡片，也不进入未批准计划的执行流水线。
+        await answerPlanPendingChat(ctx, plan);
       }
       return;
     }

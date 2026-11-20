@@ -13,13 +13,11 @@ import {
 } from "../theme";
 
 export interface UiState {
-  // Editor pane（多 tab：editorTabs 为已打开文件，editorPath 为当前激活）
+  // 主区域页签（会话对话是固定、不可关闭的第一个页签；editorTabs 为已打开文件，
+  // editorPath 为当前激活的文件页签；editorPath 为 null 时激活的是「AI 对话」页签）
   editorTabs: string[];
   editorPath: string | null;
   diffDataByPath: Record<string, { before: string; after: string }>;
-  /** 右侧编辑器栏占工作区宽度的百分比（三栏布局：左栏项目 / 中栏对话 / 右栏编辑器） */
-  editorWidth: number;
-  isEditorDragging: boolean;
 
   // Sidebar
   sidebarWidth: number;
@@ -50,10 +48,10 @@ export interface UiActions {
   openEditorDiff: (path: string, before: string, after: string) => void;
   /** 仅切换当前激活 tab（不增删）。 */
   setActiveEditorTab: (path: string) => void;
-  /** 关闭指定 tab；若关闭的是当前激活，则激活相邻 tab。 */
+  /** 切换到固定的「AI 对话」页签（保留所有已打开文件页签）。 */
+  showChatView: () => void;
+  /** 关闭指定 tab；若关闭的是当前激活，则激活相邻 tab，全部关闭后回到对话页签。 */
   closeEditorTab: (path: string) => void;
-  setEditorWidth: (width: number) => void;
-  setIsEditorDragging: (v: boolean) => void;
   setSidebarWidth: (width: number) => void;
   setIsSidebarDragging: (v: boolean) => void;
   setSidebarCollapsed: (v: boolean) => void;
@@ -160,8 +158,6 @@ export const useUiStore = create<UiState & UiActions>()((set) => ({
   editorTabs: [],
   editorPath: null,
   diffDataByPath: {},
-  editorWidth: 70,
-  isEditorDragging: false,
   sidebarWidth: 260,
   isSidebarDragging: false,
   sidebarCollapsed: false,
@@ -194,6 +190,8 @@ export const useUiStore = create<UiState & UiActions>()((set) => ({
     })),
   setActiveEditorTab: (path) =>
     set((s) => (s.editorTabs.includes(path) ? { editorPath: path } : s)),
+  showChatView: () =>
+    set((s) => (s.editorPath === null ? s : { editorPath: null })),
   closeEditorTab: (path) =>
     set((s) => {
       const idx = s.editorTabs.indexOf(path);
@@ -206,8 +204,6 @@ export const useUiStore = create<UiState & UiActions>()((set) => ({
         editorTabs[Math.min(idx, editorTabs.length - 1)] ?? null;
       return { editorTabs, editorPath: next, diffDataByPath };
     }),
-  setEditorWidth: (editorWidth) => set({ editorWidth: Math.min(75, Math.max(60, editorWidth)) }),
-  setIsEditorDragging: (isEditorDragging) => set({ isEditorDragging }),
   setSidebarWidth: (sidebarWidth) => set({ sidebarWidth }),
   setIsSidebarDragging: (isSidebarDragging) => set({ isSidebarDragging }),
   setSidebarCollapsed: (sidebarCollapsed) => set({ sidebarCollapsed }),

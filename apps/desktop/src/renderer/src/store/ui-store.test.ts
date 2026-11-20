@@ -29,24 +29,36 @@ const {
   useUiStore,
 } = await import("./ui-store");
 
-describe("editor column width", () => {
+describe("chat tab view", () => {
   afterEach(() => {
-    useUiStore.getState().setEditorWidth(70);
+    useUiStore.getState().setEditorPath(null);
   });
 
-  it("defaults to a wider file column", () => {
-    expect(useUiStore.getState().editorWidth).toBe(70);
+  it("默认激活对话页签（editorPath 为 null）", () => {
+    useUiStore.getState().setEditorPath(null);
+    expect(useUiStore.getState().editorPath).toBeNull();
   });
 
-  it.each([
-    [25, 60],
-    [60, 60],
-    [70, 70],
-    [75, 75],
-    [90, 75],
-  ])("keeps the file column wider when resizing to %s percent", (width, expected) => {
-    useUiStore.getState().setEditorWidth(width);
-    expect(useUiStore.getState().editorWidth).toBe(expected);
+  it("切换到对话页签时保留已打开文件页签", () => {
+    useUiStore.getState().setEditorPath(null);
+    useUiStore.getState().setEditorPath("src/a.ts");
+    useUiStore.getState().setEditorPath("src/b.ts");
+
+    useUiStore.getState().showChatView();
+
+    expect(useUiStore.getState()).toMatchObject({
+      editorTabs: ["src/a.ts", "src/b.ts"],
+      editorPath: null,
+    });
+  });
+
+  it("关闭最后一个文件页签后回到对话页签", () => {
+    useUiStore.getState().setEditorPath(null);
+    useUiStore.getState().setEditorPath("src/a.ts");
+
+    useUiStore.getState().closeEditorTab("src/a.ts");
+
+    expect(useUiStore.getState()).toMatchObject({ editorTabs: [], editorPath: null });
   });
 });
 

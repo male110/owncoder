@@ -185,6 +185,9 @@ export function usePendingSession(
     pendingNewSessionRef.current = true;
     pendingProjectRef.current = null;
     setPendingNewSession(true);
+    // 手风琴侧栏：确保当前项目处于展开状态，新建会话不会被列表模式隐藏。
+    const currentRoot = workspaceRef.current?.root;
+    if (currentRoot) session.setExpanded((e) => ({ ...e, [currentRoot]: true }));
 
     // Detach the chat-store focus so the Composer's `sending` prop reads
     // from a clean empty runtime. Without this, when session A still has

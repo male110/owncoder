@@ -190,7 +190,7 @@ describe("会话右键菜单复制", () => {
 });
 
 describe("项目标题栏拖动", () => {
-  it("不显示拖动手柄，名称仍可拖动、选择，箭头仍可展开折叠", async () => {
+  it("不显示拖动手柄，名称仍可拖动、选择，点击行切换项目", async () => {
     const onSelectProject = vi.fn(async () => {});
     const onToggleExpand = vi.fn();
     const onMoveProject = vi.fn(async () => {});
@@ -210,32 +210,68 @@ describe("项目标题栏拖动", () => {
     header.props.onDragStart({ dataTransfer: transfer });
     expect(transfer.effectAllowed).toBe("move");
     expect(setData).toHaveBeenCalledWith("text/plain", "a");
-    // 非当前项目且原本已展开（expanded 缺省视为展开）：点击只切换展开/折叠，不切换当前项目
+    // workspaces 为 null 时是手风琴列表模式：点击任意项目行都切换/打开该项目
     await row.props.onClick();
-    expect(onSelectProject).not.toHaveBeenCalled();
-    expect(onToggleExpand).toHaveBeenLastCalledWith("a");
+    expect(onSelectProject).toHaveBeenCalledWith("a");
+    expect(onToggleExpand).not.toHaveBeenCalled();
   });
 
-  it("点击其他已折叠项目时才切换当前项目", async () => {
+  it("详情模式只渲染打开的项目，点击标题行收回列表", async () => {
     const onSelectProject = vi.fn(async () => {});
     const onToggleExpand = vi.fn();
     const tree = AgentSidebar({
       projects: [{ root: "a", name: "a" }, { root: "b", name: "b" }],
       sessions: [], sessionsByProject: {}, workspace: { root: "a" }, activeSessionId: null,
-      expanded: { b: false },
+      expanded: { a: true },
+      onNewSession: vi.fn(), onAddProject: vi.fn(), onOpenSettings: vi.fn(),
+      onSelectProject, onToggleExpand, onRemoveProject: vi.fn(async () => {}),
+      onMoveProject: vi.fn(async () => {}),
+      onSwitchSession: vi.fn(async () => {}), onDeleteSession: vi.fn(),
+    });
+    // 手风琴：打开的项目独占列表，其它项目整块隐藏
+    const rows = find(tree, "project-row");
+    expect(rows).toHaveLength(1);
+    expect(rows[0].props.title).toBe("a");
+    await rows[0].props.onClick();
+    expect(onToggleExpand).toHaveBeenLastCalledWith("a");
+    expect(onSelectProject).not.toHaveBeenCalled();
+  });
+
+  it("列表模式渲染全部项目标题，点击任意项目都打开它", async () => {
+    const onSelectProject = vi.fn(async () => {});
+    const onToggleExpand = vi.fn();
+    const tree = AgentSidebar({
+      projects: [{ root: "a", name: "a" }, { root: "b", name: "b" }],
+      sessions: [], sessionsByProject: {}, workspace: { root: "a" }, activeSessionId: null,
+      expanded: { a: false },
       onNewSession: vi.fn(), onAddProject: vi.fn(), onOpenSettings: vi.fn(),
       onSelectProject, onToggleExpand, onRemoveProject: vi.fn(async () => {}),
       onMoveProject: vi.fn(async () => {}),
       onSwitchSession: vi.fn(async () => {}), onDeleteSession: vi.fn(),
     });
     const [rowA, rowB] = find(tree, "project-row");
-    // 当前项目：切换展开/折叠
-    await rowA.props.onClick();
-    expect(onSelectProject).not.toHaveBeenCalled();
-    expect(onToggleExpand).toHaveBeenLastCalledWith("a");
-    // 非当前项目且已折叠：切换当前项目
     await rowB.props.onClick();
-    expect(onSelectProject).toHaveBeenCalledWith("b");
-    expect(onToggleExpand).toHaveBeenCalledTimes(1);
+    expect(onSelectProject).toHaveBeenLastCalledWith("b");
+    // 当前项目在列表模式中点击同样走 onSelectProject（快路径会重新打开它）
+    await rowA.props.onClick();
+    expect(onSelectProject).toHaveBeenLastCalledWith("a");
+    expect(onToggleExpand).not.toHaveBeenCalled();
+  });
+
+  it("列表模式下折叠项目行聚合显示会话状态点", async () => {
+    const tree = AgentSidebar({
+      projects: [{ root: "a", name: "a" }, { root: "b", name: "b" }],
+      sessions: [],
+      sessionsByProject: { b: [{ id: "s1", title: "s1", projectRoot: "b", updatedAt: "2026-01-01" }] } as never,
+      workspace: { root: "a" }, activeSessionId: null, expanded: { a: false },
+      getSessionStatus: (id: string) => (id === "s1" ? "running" : "idle"),
+      onNewSession: vi.fn(), onAddProject: vi.fn(), onOpenSettings: vi.fn(),
+      onSelectProject: vi.fn(async () => {}), onRemoveProject: vi.fn(async () => {}),
+      onMoveProject: vi.fn(async () => {}),
+      onSwitchSession: vi.fn(async () => {}), onDeleteSession: vi.fn(),
+    });
+    const dots = find(tree, "project-status-dot");
+    expect(dots).toHaveLength(1);
+    expect(dots[0].props.className).toContain("running");
   });
 });

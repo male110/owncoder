@@ -108,6 +108,8 @@ export const en = {
   "拖动调整文件区域宽度": "Drag to resize the file pane",
   "拖动排序项目；方向键调整位置": "Drag to reorder; use arrow keys to move",
   "调整项目顺序": "Reorder project",
+  "主视图页签": "Main view tabs",
+  "AI 对话": "AI Chat",
   "已打开文件": "Open files",
   "对比": "Diff",
   "关闭 {{name}}": "Close {{name}}",

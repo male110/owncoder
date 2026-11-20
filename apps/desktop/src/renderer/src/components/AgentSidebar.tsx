@@ -174,6 +174,15 @@ export function AgentSidebar({
   const setViewMode = (root: string, mode: ProjectViewMode) => {
     setViewModeByProject((prev) => (prev[root] === mode ? prev : { ...prev, [root]: mode }));
   };
+
+  // 手风琴（ARDM 风格）：同一时间只打开一个项目。展开状态由「当前工作区 +
+  // 其 expanded 标记」派生；非当前项目的 expanded 不再参与渲染，打开某个
+  // 项目时其它项目整块隐藏，再次点击该项目标题行则收回为完整项目列表。
+  const openRoot =
+    workspace && expanded[workspace.root] !== false ? workspace.root : null;
+  const visibleProjects = openRoot
+    ? projects.filter((p) => p.root === openRoot)
+    : projects;
   const toggleExpandedDir = (projectRoot: string, dirPath: string) => {
     setExpandedDirsByProject((prev) => {
       const current = prev[projectRoot] ?? {};
@@ -242,13 +251,6 @@ export function AgentSidebar({
         </>
       ) : (
         <>
-          <div className="nav-header">
-            <button type="button" className="nav-icon-btn" onClick={onToggleCollapse} title={t("收缩侧边栏")}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="m15 18-6-6 6-6" />
-              </svg>
-            </button>
-          </div>
           <nav className="nav-menu">
             <button type="button" className="nav-item" onClick={() => void onNewSession()} disabled={disabled}>
               <svg className="nav-item-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -273,10 +275,26 @@ export function AgentSidebar({
             {projects.length === 0 ? (
               <p className="nav-empty">{t("内置 OwnCoderProject 将自动出现；也可点击「添加项目」打开本地仓库。")}</p>
             ) : (
-              projects.map((p) => {
-                const open = expanded[p.root] !== false;
+              visibleProjects.map((p) => {
+                const open = openRoot === p.root;
                 const isCurrent = workspace?.root === p.root;
                 const projectSessions = isCurrent ? sessions : (sessionsByProject[p.root] ?? []);
+                // 列表模式下其它项目的会话状态图标不可见，在标题行聚合出一个
+                // 状态小圆点（running > needs_confirmation > completed），避免
+                // 后台活动被手风琴隐藏后完全没有提示。详情模式下行内已有图标。
+                const projectActivity = !open
+                  ? projectSessions.reduce<"running" | "needs_confirmation" | "completed" | null>(
+                      (acc, s) => {
+                        const st = getSessionStatus?.(s.id) ?? "idle";
+                        if (st === "running") return "running";
+                        if (acc === "running") return acc;
+                        if (st === "needs_confirmation") return "needs_confirmation";
+                        if (st === "completed") return acc ?? "completed";
+                        return acc;
+                      },
+                      null,
+                    )
+                  : null;
                 const activeIndex = isCurrent && activeSessionId
                   ? projectSessions.findIndex((s) => s.id === activeSessionId)
                   : -1;
@@ -329,13 +347,12 @@ export function AgentSidebar({
                         title={p.root}
                         draggable={!disabled}
                         onClick={() => {
-                          // 点击当前项目：同步切换展开/折叠。
-                          // 不能走 onSelectProject（它进入导航队列，需等首次切换的
-                          // 多次 IPC/状态机结束后才执行折叠，表现为“再次点击不折叠”）。
-                          // 点击其他项目且原本已展开：只做折叠/展开，不切换当前项目
-                          // （参考 .tmp/ZCode：项目节点点击只负责展开/折叠）。
-                          // 点击其他项目且原本已折叠：onSelectProject 切换工作区与会话。
-                          if (isCurrent || open) onToggleExpand?.(p.root);
+                          // 手风琴语义：已打开的项目点击后收回列表（其它项目
+                          // 重新出现）；列表模式下点击任意项目都打开它——
+                          // 当前项目走 onSelectProject 的快路径 toggle，其它
+                          // 项目切换工作区并展开。不走 onSelectProject 的折叠
+                          // 路径是因为它进入导航队列，表现为“再次点击不折叠”。
+                          if (open) onToggleExpand?.(p.root);
                           else void onSelectProject(p.root);
                         }}
                         disabled={disabled}
@@ -370,7 +387,7 @@ export function AgentSidebar({
                           onClick={(e) => {
                             e.stopPropagation();
                             setViewMode(p.root, "sessions");
-                            if (!open) onToggleExpand?.(p.root);
+                            if (!open) void onSelectProject(p.root);
                           }}
                         >
                           <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
@@ -391,7 +408,7 @@ export function AgentSidebar({
                           onClick={(e) => {
                             e.stopPropagation();
                             setViewMode(p.root, "files");
-                            if (!open) onToggleExpand?.(p.root);
+                            if (!open) void onSelectProject(p.root);
                           }}
                         >
                           <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
@@ -405,6 +422,19 @@ export function AgentSidebar({
                           </svg>
                         </button>
                       </div>
+                      {projectActivity ? (
+                        <span
+                          className={`project-status-dot ${projectActivity}`}
+                          title={
+                            projectActivity === "running"
+                              ? t("运行中")
+                              : projectActivity === "needs_confirmation"
+                                ? t("需要确认命令（点击查看）")
+                                : t("任务完成（点击清除）")
+                          }
+                          aria-hidden="true"
+                        />
+                      ) : null}
                       <button
                         type="button"
                         className="project-remove"

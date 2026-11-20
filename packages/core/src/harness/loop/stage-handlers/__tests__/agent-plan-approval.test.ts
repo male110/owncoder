@@ -7,6 +7,18 @@ import { approvePlannerPlan, readPlannerPlan, readPlanFile, revisePlannerPlan, s
 import type { StageHandlerContext } from "../types.ts";
 import { BUILTIN_WORKFLOW } from "@owncoder/settings";
 
+// 待批准期间的普通对话走无工具补全：mock 掉流式调用，断言返回固定文本。
+vi.mock("@owncoder/llm", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@owncoder/llm")>();
+  return {
+    ...actual,
+    chatCompletionStream: vi.fn(async () => ({
+      choices: [{ message: { content: "这是待批准期间的普通对话回复" } }],
+      usage: undefined,
+    })),
+  };
+});
+
 const report = [
   "## Final Report", "### 目标", "实现登录重试", "### 步骤",
   "1. 检查认证边界", "2. 修复登录重试并测试",
@@ -20,11 +32,15 @@ function makeContext(history: StageHandlerContext["history"] = [], input = "批�
   return {
     opts: {
       workspaceRoot: root, sessionId: "session-a", mode: "agent", activePlan: null, history, userMessage: input,
+      workflow: BUILTIN_WORKFLOW,
       askUser: vi.fn(async (request) => request.options![0].value), onEvent: vi.fn(),
     },
     toolCtx: { workflow: BUILTIN_WORKFLOW, availableTools: new Set(["dispatch_agent"]), dispatchSubagent: vi.fn().mockResolvedValue(report) },
+    // 本地 baseUrl 绕过 assertLlmAuth；doPlainCompletion 只用到 tracer 的三个方法。
+    model: { id: "test-model", providerId: "test", name: "test-model", baseUrl: "http://127.0.0.1:9999" },
+    tracer: { startSpan: () => "span", endSpan: vi.fn(), recordTokenUsage: vi.fn() },
     messages: [], history: [...history],
-    state: { planRequested: true, planApproval: null, blocked: false, aborted: false },
+    state: { planRequested: true, planApproval: null, blocked: false, aborted: false, userMessageInjected: false },
   } as unknown as StageHandlerContext;
 }
 const call = {
@@ -167,11 +183,16 @@ describe("版本化计划保存与审批", () => {
     expect(ctx.state.blocked).toBe(true); expect(ctx.opts.askUser).not.toHaveBeenCalled();
   });
 
-  it("普通对话和查看请求不构成批准", async () => {
+  it("普通对话和查看请求不构成批准，改为普通对话回答（不重发计划卡片）", async () => {
     const first = makeContext(); await runAgentPlanner(first, call);
     const ctx = makeContext(first.history, "我想再看看"); await resumeAgentPlan(ctx);
     expect(ctx.state.planApproval).toBe("pending_approval");
     expect(ctx.opts.askUser).not.toHaveBeenCalled(); expect(ctx.state.awaitingUserConfirmation).toBe(true);
+    // 待批准期间的输入由无工具补全回答，不再把整份计划再贴一遍。
+    expect(ctx.state.lastAssistant).toBe("这是待批准期间的普通对话回复");
+    expect(ctx.history.at(-1)).toMatchObject({ role: "assistant", content: "这是待批准期间的普通对话回复" });
+    expect(ctx.state.lastAssistant).not.toContain("<!--plan_saved:");
+    expect(ctx.history.filter((turn) => turn.role === "assistant" && turn.content.includes("<!--plan_saved:")).length).toBe(1);
   });
 
   it("非版本令牌批准无效，缺少确认通道也阻断", async () => {

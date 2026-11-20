@@ -780,6 +780,36 @@ body,
   color: var(--danger-text);
 }
 
+/* 手风琴列表模式：折叠项目行上的聚合状态点。定位在悬停时视图切换按钮
+   所在的右侧槽位，悬停时由按钮覆盖，不产生布局跳动。 */
+.project-status-dot {
+  position: absolute;
+  top: 50%;
+  right: 30px;
+  transform: translateY(-50%);
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.project-status-dot.running {
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid var(--accent);
+  border-top-color: transparent;
+  background: transparent;
+  animation: toolSpin 0.7s linear infinite;
+}
+
+.project-status-dot.completed {
+  background: var(--success);
+}
+
+.project-status-dot.needs_confirmation {
+  background: var(--error);
+}
+
 .file-tree-wrap {
   padding-left: 10px;
   padding-bottom: 4px;
@@ -1764,26 +1794,48 @@ button.ghost.accent {
   font-weight: 400;
 }
 
+/* 固定两列布局：左栏项目/会话列表，右侧主区域为页签容器。
+   第一个页签「AI 对话」固定且不可关闭；打开文件只是追加文件页签。 */
 .agent-body {
   flex: 1;
   min-height: 0;
   overflow: hidden;
-  padding: 8px 24px;
+  padding: 0;
   display: flex;
   flex-direction: column;
 }
 
-/* 文件打开时按项目、文件、对话排列；关闭最后一个文件后恢复单列对话。 */
-.agent-body.with-editor {
-  overflow: hidden;
-  padding: 0;
-  gap: 0;
-  flex-direction: row;
+.main-tabs-row {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  padding: 4px 8px 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--editor-head);
+  flex-shrink: 0;
+  min-width: 0;
 }
 
-.agent-body.with-editor .agent-chat {
-  flex: 1 1 0;
-  min-width: 0;
+.main-tab-content {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+}
+
+.main-tab-pane {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+}
+
+.main-tab-pane .agent-chat {
+  flex: 1;
   min-height: 0;
   overflow: hidden;
   display: flex;
@@ -1791,46 +1843,32 @@ button.ghost.accent {
   padding: 8px 24px;
 }
 
-.agent-body.with-editor .agent-chat .chat-log.wide,
-.agent-body.with-editor .agent-chat .hero-empty {
+.main-tab-pane .agent-chat .chat-log.wide,
+.main-tab-pane .agent-chat .hero-empty {
   flex: 1;
   min-height: 0;
   overflow: auto;
 }
 
-.agent-body.with-editor .editor-shell {
-  flex: none;
-  min-width: 300px;
-  min-height: 0;
-  max-height: 100%;
-  border-bottom: none;
+/* 「AI 对话」固定页签：仅显示主页图标，保留在页签行首位，无关闭按钮。 */
+.chat-tab .editor-tab-main {
+  padding: 5px 9px;
+  border-radius: 6px 6px 0 0;
+  transition: color 0.15s, background 0.15s;
 }
 
-/* 分隔条：命中区域默认隐形；悬停/拖动时显示居中细条。 */
-.editor-resize-handle {
-  position: relative;
-  width: 5px;
-  cursor: col-resize;
-  background: transparent;
+.chat-tab .editor-tab-main:hover {
+  color: var(--text);
+  background: var(--chip);
+}
+
+.chat-tab.active .editor-tab-main {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.chat-tab-icon {
   flex-shrink: 0;
-  z-index: 10;
-}
-
-.editor-resize-handle::after {
-  content: "";
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 50%;
-  width: 1px;
-  transform: translateX(-50%);
-  background: transparent;
-  transition: background 0.15s;
-}
-
-.editor-resize-handle:hover::after,
-.editor-resize-handle:active::after {
-  background: var(--accent);
 }
 
 .agent-chat {
@@ -1861,30 +1899,6 @@ button.ghost.accent {
   flex: 1;
   min-height: 0;
   overflow: hidden;
-}
-
-.editor-shell {
-  flex: 1;
-  min-width: 0;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  background: var(--editor-bg);
-}
-
-.with-editor .editor-shell {
-  border-right: 1px solid var(--border);
-}
-
-.editor-tabs-row {
-  display: flex;
-  align-items: stretch;
-  gap: 8px;
-  padding: 4px 8px 0;
-  border-bottom: 1px solid var(--border);
-  background: var(--editor-head);
-  flex-shrink: 0;
-  min-width: 0;
 }
 
 .editor-tabs {
@@ -2206,40 +2220,37 @@ button.ghost.accent {
   width: 100%;
 }
 
-.agent-body:not(.with-editor) {
-  padding-inline: 0;
-}
-
-.agent-body:not(.with-editor) .chat-log.wide {
+/* 对话页签内容：全宽布局，内部正文/输入区居中限宽。 */
+.agent-body .chat-log.wide {
   max-width: none;
 }
 
-.agent-body:not(.with-editor) .chat-log-scroller {
+.agent-body .chat-log-scroller {
   scrollbar-gutter: stable;
 }
 
-.agent-body:not(.with-editor) .chat-log-scroller > .chat-log-virtuoso,
-.agent-body:not(.with-editor) .chat-log-scroller > .chat-log-live-footer {
+.agent-body .chat-log-scroller > .chat-log-virtuoso,
+.agent-body .chat-log-scroller > .chat-log-live-footer {
   width: calc(100% - 48px);
   max-width: 860px;
   margin-inline: auto;
   flex-shrink: 0;
 }
 
-.agent-body:not(.with-editor) .session-chat-panel > .error-banner,
-.agent-body:not(.with-editor) .agent-chat > .review-bar {
+.agent-body .session-chat-panel > .error-banner,
+.agent-body .agent-chat > .review-bar {
   width: calc(100% - 48px);
 }
 
-.agent-body:not(.with-editor) .agent-chat > .composer,
-.agent-body:not(.with-editor) .agent-chat > .agent-status-bar,
-.agent-body:not(.with-editor) .agent-chat > .danger-confirm-bar,
-.agent-body:not(.with-editor) .agent-chat > .ask-user-card,
-.agent-body:not(.with-editor) .session-chat-panel > .queued-messages-bar {
+.agent-body .agent-chat > .composer,
+.agent-body .agent-chat > .agent-status-bar,
+.agent-body .agent-chat > .danger-confirm-bar,
+.agent-body .agent-chat > .ask-user-card,
+.agent-body .session-chat-panel > .queued-messages-bar {
   width: calc(100% - 96px);
 }
 
-.agent-body:not(.with-editor) .hero-empty {
+.agent-body .hero-empty {
   max-width: min(560px, calc(100% - 48px));
 }
 
@@ -8528,10 +8539,6 @@ button.ghost.model-copy-btn.copied {
   outline-offset: -2px;
 }
 
-
-:root[data-theme="light"] .agent-body.with-editor .editor-shell {
-  border-right-color: var(--border);
-}
 
 :root[data-theme="light"] .chat-log-scroller {
   gap: 12px;
