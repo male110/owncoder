@@ -69,7 +69,9 @@ export async function prepareSpecTaskExecution(host: SpecsHost, path: string, ex
   const document = await getSpecTaskDocument(host, path, sessionId);
   if (!document || document.version !== expectedVersion) throw new Error("任务清单已修改，请重新加载后执行");
   if (document.tasks.some((task) => task.status === "in_progress")) throw new Error("任务正在执行");
-  const runnable = selectNextPendingTask(document.tasks.map((task) => task.status === "failed" ? { ...task, status: "pending" } : task));
+  // Failed / partially completed tasks are runnable again, so treat them as pending here.
+  const runnable = selectNextPendingTask(document.tasks.map((task) =>
+    task.status === "failed" || task.status === "partial" ? { ...task, status: "pending" as const } : task));
   if (!runnable) throw new Error("没有可执行的任务，请检查任务状态和依赖");
   if (!document.approvedAt) {
     const body = await readSpecPhase(root, feature, "tasks", r.id);

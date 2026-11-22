@@ -42,7 +42,7 @@ export const SAVE_DESIGN_TOOL_DEF: ToolDef = {
             "Save a concrete implementation design, not just options: use the verified existing stack when applicable, or recommend one stack with reasons and assumptions for a new project without a prescribed stack. " +
             "Explain module boundaries, key flows, interfaces, data models, error handling, implementation order and verification. " +
             "Include all remaining implementation-relevant open questions in this same document (假设与待确认), with their impact, proposed defaults if any, and when confirmation is needed. Do not leave them only in research notes or chat, and do not treat unanswered questions as decisions. " +
-            "Use any suitable Markdown structure. If the requirements define R/FR identifiers, trace each in the design (unknown or missing references are rejected).",
+            "Organize the document with Markdown headings or another clear structure. It must contain a concrete technical design covering architecture and module boundaries, key flows, interfaces, data models, error handling, implementation order, and verification; equivalent Chinese or English headings are acceptable, and do not omit these details even if the document uses a different section layout. If the requirements define R/FR identifiers, trace each in the design (unknown or missing references are rejected).",
         },
       },
       required: ["feature", "content"],

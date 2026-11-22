@@ -19,6 +19,7 @@ import { AssistantBubble } from "./chat-log/AssistantBubble";
 import { DecomposeCard } from "./chat-log/DecomposeCard";
 import { LiveEventStream } from "./chat-log/LiveEventStream";
 import { LlmRetryNotice } from "./chat-log/LlmRetryNotice";
+import { ProcessSteps } from "./chat-log/ProcessSteps";
 import { UserBubble } from "./chat-log/UserBubble";
 import { useCopyMenu } from "./chat-log/useCopyMenu";
 
@@ -152,6 +153,7 @@ export function ChatLog({
           onDiscardInflight={onDiscardInflight}
         />
       );
+    if (b.kind === "process") return <ProcessSteps items={b.items} />;
     if (b.kind === "assistant") {
       return (
         <AssistantBubble

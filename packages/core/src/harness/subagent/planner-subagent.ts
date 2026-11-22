@@ -6,8 +6,8 @@
  * 风险与不确定性 / 验证方式五段），供父智能体提交用户审批。
  * 报告标题由 runner 统一包装，子代理只负责内容。
  *
- * 与 Explore 的区别：Explore 是通用只读调研，报告格式自由；Planner 的
- * 报告必须满足计划结构契约（validatePlannerReport），否则父级会暂停执行。
+ * 与 Explore 的区别：Explore 是通用只读调研；Planner 的报告用于计划审批，
+ * 建议按五段组织，但父级不以章节或编号判定报告是否可用。
  *
  * 防跑题与 Explore 同构、来源相同（Codex well-scoped delegation）：委派侧
  * 的五段式 brief（改动目标 / 已知锚点 / 已有结论与依据 / 约束条件 /
@@ -63,7 +63,11 @@ export function buildPlannerSubagentPrompt(env: PlannerPromptEnv = {}, relevantH
     "Evidence-first discipline (mandatory):",
     "- Read only files and symbols needed to ground the plan. Index hits are pointers, not a checklist.",
     "- Reuse fresh evidence already returned by tools; do not repeat an unchanged read or equivalent search.",
-    "- Stop as soon as the plan is grounded. Report the gap instead of expanding the search speculatively.",
+    "- Reuse the background history and confirmed anchors as starting evidence; do not relocate them unless a specific contradiction blocks planning.",
+    "- For each planning step, investigate only its required implementation landing point, directly relevant caller or test evidence, and open questions explicitly raised by the user.",
+    "- Every additional file you inspect must answer a concrete question tied to a planning step or an explicitly named open question.",
+    "- Prefer targeted workspace-relative `glob` / `grep` patterns and symbol-level reads; stay within the brief's named target directory, start with the narrowest relevant path and pattern, and expand to one explicitly relevant directory only when needed to answer a concrete planning question.",
+    "- Skip out-of-scope hits and directory enumeration. Stop as soon as the plan is grounded. Put anything you could not verify under 风险与不确定性 and submit the plan instead of expanding the search speculatively.",
     "Task intake (mandatory — refine the upstream brief before acting):",
     "- First restate the delegated goal in one sentence: what the plan must enable the parent to do, and which deliverable the parent takes from it. If the brief is vague, narrow it to the smallest plan that achieves that goal.",
     "- Verify the brief's confirmed anchors (paths, symbols) with one cheap targeted read before planning on them. If an anchor is wrong or missing, relocate it and list the correction under 相关文件 — the parent's steps and the user's approval are built on those anchors being real.",

@@ -117,7 +117,7 @@ const EXPLORE_MAX_ITERATIONS = 40;
  * 100 次的旧预算只会在"模型永不自发停止"的失败模式上烧满 token 后
  * 以 partial result 判死刑——预算大小不解决收口，机制才解决。
  */
-const PLANNER_MAX_ITERATIONS = 25;
+const PLANNER_MAX_ITERATIONS = 35;
 
 /** 转发给父回合的事件：工具执行流（用于状态展示）与 warning/error。 */
 const FORWARDED_EVENT_TYPES = new Set(["tool_start", "tool_end", "warning", "error"]);
@@ -196,7 +196,10 @@ export async function runExploreSubagent(
     ...(isPlanner ? { subagentInput: { userMessage: redact(userMessage), systemPromptOverride: redact(systemPromptOverride ?? "") } } : {}),
   });
 
-  let plannerSucceeded = false;
+  let ok = false;
+  let finalReport: string | undefined;
+  let failureReason: string | undefined;
+  let diagnosticForwarded = false;
   try {
     const result = await runAgentLoop({
       mode: deps.mode === "spec" ? "spec" : "agent",
@@ -237,6 +240,7 @@ export async function runExploreSubagent(
       // id 避免与父循环冲突，其余事件（delta/气泡）不污染主 UI。
       onEvent: (ev: TurnEventInput) => {
         if (!FORWARDED_EVENT_TYPES.has(ev.type)) return;
+        if (ev.type === "warning" || ev.type === "error") diagnosticForwarded = true;
         if (ev.type === "tool_start" || ev.type === "tool_end") {
           const provenance: SubagentProvenance = {
             agentType: isPlanner ? PLANNER_SUBAGENT_TYPE : EXPLORE_SUBAGENT_TYPE,
@@ -253,48 +257,53 @@ export async function runExploreSubagent(
       },
     });
 
-    const report = result.assistantText?.trim();
-    if (!report) {
-      // 空报告时优先透传子循环的真实失败原因（如 LLM HTTP 429 配额耗尽），
-      // 而不是一句无信息量的占位语——用户此前只能看到"未产出报告"，
-      // 无法定位是配额/网络问题还是模型行为问题。
-      const failureReason = result.blockedReason?.trim();
-      return {
-        report: isPlanner
-          ? `[Planner partial result: ${failureReason ?? "subagent finished without producing a report"}]`
-          : `## Final Report\n\nExplore subagent finished without producing a report${failureReason ? ` (${failureReason})` : ""}.`,
-      };
+    const report = result.assistantText?.trim() ?? "";
+    const heading = /^## Final Report[^\S\r\n]*(?:\r?\n|$)/i;
+    const body = report.replace(heading, "").trim();
+    const partial = /^\[(?:Planner|Explore) partial result\b/i.test(body);
+    const aborted = result.aborted === true || deps.signal?.aborted === true;
+    const blockedReason = result.blockedReason?.trim() || undefined;
+    if (!body) {
+      if (isPlanner && !result.blocked && !aborted && !blockedReason) {
+        ok = true;
+        finalReport = report;
+        return { report: finalReport, transcript: result.agentMessages };
+      }
+      const reason = blockedReason ?? (aborted ? "loop terminated early" : undefined);
+      failureReason = reason ?? "subagent finished without producing a report";
+      finalReport = isPlanner
+        ? `[Planner partial result: ${failureReason}]`
+        : `## Final Report\n\nExplore subagent finished without producing a report${reason ? ` (${reason})` : ""}.`;
+      return { report: finalReport };
     }
-    plannerSucceeded =
-      !result.blocked && result.aborted !== true && !report.startsWith("[Planner partial result");
-    // 硬限制终态：显式标注为部分结果，让父智能体知道发现可能不完整，
-    // 而不是把它误当成完整结论。
-    // aborted 同样标注：工具循环检测（no-progress）与用户/LLM 中断原本
-    // 不带 blocked，会被误当成完整报告交付（过渡文本 + 无 partial 标注的
-    // 假成功）——这里统一按未完成处理。
-    if (result.blocked || result.aborted === true) {
-      const reason = result.blockedReason?.trim()
-        ?? (result.aborted ? "loop terminated early" : "reached the iteration limit");
-      const notice = `[${isPlanner ? "Planner" : "Explore"} partial result: ${reason}; findings below may be incomplete]`;
-      const raw = report.startsWith("[Explore partial result") || report.startsWith("[Planner partial result")
-        ? report
-        : `${notice}\n\n${report.startsWith("## Final Report") ? report : `## Final Report\n\n${report}`}`;
-      return { report: raw, transcript: result.agentMessages };
+    const wrappedReport = heading.test(report) ? report : `## Final Report\n\n${report}`;
+    ok = !result.blocked && !aborted && !partial;
+    if (partial) {
+      // 即使子循环在外层加了报告标题，也要让 partial 标记留在首位。
+      finalReport = body;
+      failureReason = blockedReason ?? (aborted ? "loop terminated early" : "subagent produced only a partial report");
+    } else if (!ok) {
+      failureReason = blockedReason ?? (aborted ? "loop terminated early" : "reached the iteration limit");
+      finalReport = `[${isPlanner ? "Planner" : "Explore"} partial result: ${failureReason}; findings below may be incomplete]\n\n${wrappedReport}`;
+    } else {
+      finalReport = wrappedReport;
     }
-    // Ensure the report starts with a Final Report heading so the parent LLM
-    // knows this is the complete exploration output to use directly for the next step.
-    return {
-      report: report.startsWith("## Final Report") ? report : `## Final Report\n\n${report}`,
-      transcript: result.agentMessages,
-    };
+    return { report: finalReport, transcript: result.agentMessages };
+  } catch (error) {
+    failureReason = error instanceof Error ? error.message || "subagent failed" : String(error);
+    throw error;
   } finally {
     deps.onEvent?.({
       type: "stage_done",
       id: stageId,
       nodeType: "subagent",
       label: `${isPlanner ? "Planner" : "Explore"} finished`,
-      ...(isPlanner ? { ok: plannerSucceeded } : {}),
+      ok,
+      ...(finalReport !== undefined ? { report: redact(finalReport) } : {}),
     });
+    if (!isPlanner && !ok && !diagnosticForwarded && failureReason) {
+      deps.onEvent?.({ type: "warning", message: `Explore 未完成：${redact(failureReason)}` });
+    }
   }
 }
 

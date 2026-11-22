@@ -44,7 +44,7 @@ const specTask = (id: string, sourceLine: number, status: TaskItemDto["status"],
   id, sourceLine, status, dependsOn, executionGuidance: id, retryCount: 0, maxRetries: 2,
 });
 const specDocument: SpecTaskDocumentDto = {
-  path: ".owncoder/specs/sessions/scope/login/tasks.md", version: "version", approvedAt: meta.approvedAt,
+  path: ".owncoder/specs/sessions/scope/login/tasks.md", version: "version", sourceDigest: "source", approvedAt: meta.approvedAt,
   currentTaskId: "second",
   tasks: [specTask("fourth", 14, "failed", ["first"]), specTask("second", 12, "pending", ["first"]),
     specTask("first", 11, "completed"), specTask("third", 13, "pending", ["second"]),
@@ -163,6 +163,25 @@ describe("Spec task documents", () => {
       expect(buttons(result, "全部执行")[0]?.props.disabled).toBe(true);
       expect(result.some((node) => node.props["aria-current"])).toBe(true);
     }
+  });
+
+  it("renders live execution and terminal states on the persisted Spec markers", () => {
+    const document = {
+      ...specDocument,
+      tasks: [specTask("second", 12, "partial"), specTask("fourth", 14, "failed")],
+    };
+    const taskMeta: ActivePlanMetaDto = {
+      ...meta, path: document.path, documentDigest: document.version, currentTaskId: "second",
+      tasks: [specTask("second", 12, "in_progress"), specTask("fourth", 14, "failed")],
+    };
+    const persisted = specContent.replace("[ ] Second", "[/] Second").replace("[ ] Fourth", "[-] Fourth");
+    const props = { content: persisted, specTaskDocument: document, onExecuteSpecTasks: vi.fn() };
+    const live = renderMarkdown({ ...props, taskMeta });
+    expect(live.find((node) => node.props["aria-current"])?.props.className).toContain("md-task-item--in_progress");
+    const statuses = (result: Element[]) => result.filter((node) => node.props.className?.startsWith("md-task-status "))
+      .map((node) => node.props.children);
+    expect(statuses(live)).toEqual(["执行中", "失败"]);
+    expect(statuses(renderMarkdown(props))).toEqual(["部分完成", "失败"]);
   });
 
   it("offers manual batch relaunch when a failed task is the only eligible task", () => {

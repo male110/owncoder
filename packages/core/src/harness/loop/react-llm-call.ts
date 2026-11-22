@@ -50,6 +50,10 @@ export async function callModelForIteration(
             ctx.currentTask,
             ctx.opts.singleSpecTask,
             ctx.upstreamRelays?.get(ctx.currentTask.id),
+            // 正在执行已批准的计划（activePlan 仅由 planner 批准分支赋值）：
+            // 分解阶段遗留的只读类约束与计划正文不得再注入执行上下文，
+            // 否则执行 agent 只朗读计划而不实施。
+            Boolean(ctx.opts.activePlan),
           ),
         ),
       }

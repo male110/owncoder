@@ -19,7 +19,7 @@ import {
   deleteCheckpoint,
 } from "./harness/checkpoint.ts";
 import { buildChangesFromCheckpoint, restoreSingleFile, type ChangeFile } from "./changes.ts";
-import { isSpecTaskPath, readApprovedSpecTask, type SpecTaskRef } from "./spec-task-document.ts";
+import { isSpecTaskPath, readApprovedSpecTask, writeSpecTaskProgress, type SpecTaskRef } from "./spec-task-document.ts";
 import {
   extractTitle,
   isPlanPath,
@@ -122,6 +122,9 @@ export async function updateTask(
         ? (next?.id ?? null)
         : meta.currentTaskId;
     }
+    // Keep manual progress (skip / reset) visible in the document itself, then
+    // record the matching batch fingerprint.
+    if (isSpecTaskPath(meta.path) && sid) meta.documentDigest = await writeSpecTaskProgress(root, sid, meta);
     await writeActiveMeta(root, meta, sid ?? undefined);
     return meta;
   }, sessionId);

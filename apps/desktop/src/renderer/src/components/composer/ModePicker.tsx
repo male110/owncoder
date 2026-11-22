@@ -6,12 +6,13 @@ import { useMenuDismiss } from "./useMenuDismiss";
 interface ModePickerProps {
   mode: AgentMode;
   open: boolean;
+  pending: boolean;
   onOpenChange: (open: boolean) => void;
   onMode: (mode: AgentMode) => void;
 }
 
 /** Spec / Agent 模式选择菜单；打开状态由父组件（App）控制。 */
-export function ModePicker({ mode, open, onOpenChange, onMode }: ModePickerProps) {
+export function ModePicker({ mode, open, pending, onOpenChange, onMode }: ModePickerProps) {
   const { t } = useI18n();
   const modeMenuRef = useRef<HTMLDivElement | null>(null);
   useMenuDismiss(open, modeMenuRef, () => onOpenChange(false));
@@ -23,12 +24,14 @@ export function ModePicker({ mode, open, onOpenChange, onMode }: ModePickerProps
         className="mode-trigger"
         aria-haspopup="listbox"
         aria-expanded={open}
+        disabled={pending}
         onClick={() => onOpenChange(!open)}
       >
         <span className="mode-icon" aria-hidden>
           {mode === "spec" ? "📋" : "∞"}
         </span>
         {mode === "spec" ? "Spec" : "Agent"}
+        {pending ? <span role="status">处理中…</span> : null}
         <span className="mode-chevron" aria-hidden>
           ▾
         </span>
@@ -41,6 +44,7 @@ export function ModePicker({ mode, open, onOpenChange, onMode }: ModePickerProps
               role="option"
               aria-selected={mode === "agent"}
               className={mode === "agent" ? "selected" : ""}
+              disabled={pending}
               onClick={() => onMode("agent")}
             >
               <span className="mode-icon" aria-hidden>
@@ -59,6 +63,7 @@ export function ModePicker({ mode, open, onOpenChange, onMode }: ModePickerProps
               role="option"
               aria-selected={mode === "spec"}
               className={mode === "spec" ? "selected" : ""}
+              disabled={pending}
               onClick={() => onMode("spec")}
             >
               <span className="mode-icon" aria-hidden>

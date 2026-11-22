@@ -329,6 +329,7 @@ export function runCommand(
     let stdout = "";
     let stderr = "";
     let settled = false;
+    let cancelled = false;
 
     const cleanup = () => {
       clearTimeout(t);
@@ -344,9 +345,13 @@ export function runCommand(
       if (settled) return;
       if (IS_WINDOWS && child.pid) {
         // Killing only powershell.exe can leave its child command running.
-        spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
+        const killer = spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
           windowsHide: true,
           stdio: "ignore",
+        });
+        killer.on("error", () => child.kill());
+        killer.on("close", (code) => {
+          if (code !== 0) child.kill();
         });
       } else if (child.pid) {
         try {
@@ -359,18 +364,16 @@ export function runCommand(
       }
     };
     const onAbort = () => {
+      if (cancelled || settled) return;
+      cancelled = true;
       terminate();
-      finish({ stdout, stderr: stderr + "\n(cancelled)", code: -1 });
     };
     const t = setTimeout(() => {
       terminate();
       finish({ stdout, stderr: stderr + "\n(timeout)", code: -1 });
     }, timeoutMs);
 
-    if (signal?.aborted) {
-      onAbort();
-      return;
-    }
+    if (signal?.aborted) onAbort();
     signal?.addEventListener("abort", onAbort, { once: true });
     child.stdout?.on("data", (d: Buffer) => {
       outChunks.push(d);
@@ -383,7 +386,11 @@ export function runCommand(
 
     });
     child.on("close", (code) => {
-      finish({ stdout, stderr, code: code ?? 1 });
+      finish({
+        stdout,
+        stderr: cancelled ? stderr + "\n(cancelled)" : stderr,
+        code: cancelled ? -1 : code ?? 1,
+      });
     });
     child.on("error", (err) => {
       finish({ stdout, stderr: String(err), code: 1 });

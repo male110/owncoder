@@ -11,8 +11,8 @@ test("Explore prompt: 角色与工具能力保留，命令搜索引导全部移�
     "READ-ONLY MODE",
     "One principle: read less",
     "read_outline` / `read_symbol`",
-    "search_symbols",
-    "repo_map` / `graph_search` / `project_deps`",
+    "Use symbol or semantic search only when a specific unresolved question calls for it",
+    "do not use `repo_map`, `graph_search`, or `project_deps` for broad context gathering",
     "run_script` lets you program it",
     "workspace-relative file paths and line numbers",
   ]) {
@@ -114,7 +114,12 @@ test("Explore prompt 范围纪律：命名锚点之外即越界（对齐 Codex w
     "Stay inside the task's named scope",
     "out of scope unless the question cannot be answered without it",
     "Search hits outside the named scope are noise",
-    "Do not tour the repository to build context first",
+    "Do not enumerate directories or run untargeted repository-wide searches",
+    "exact, narrow glob/grep pattern",
+    "search one explicitly relevant directory only",
+    "Default to one or two confirming reads",
+    "state the gap in the report and call submit_report rather than continuing to search",
+    "Do not enumerate directories or run untargeted repository-wide searches",
     "node_modules, dist, build output, .git",
   ]) {
     assert.ok(prompt.includes(text), text);

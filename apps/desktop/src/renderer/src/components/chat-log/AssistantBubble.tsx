@@ -3,6 +3,7 @@ import type { ChatTurnDto, PlanInfoDto } from "../../../../preload/index";
 import { Markdown } from "../Markdown";
 import { useI18n } from "../../i18n";
 import { extractPlanPath, stripPlanMarker } from "./plan-marker";
+import { stripToolCallBlocks } from "./tool-call-display";
 
 export const PlanActionsContext = createContext<{
   plans: PlanInfoDto[];
@@ -125,8 +126,9 @@ function AssistantBubbleImpl({
   const [copied, setCopied] = useState(false);
   const [confirming, setConfirming] = useState(false);
 
-  const planPath      = extractPlanPath(turn.content);
-  const displayContent = planPath ? stripPlanMarker(turn.content) : turn.content;
+  const planPath = extractPlanPath(turn.content);
+  const contentWithoutToolCalls = stripToolCallBlocks(turn.content);
+  const displayContent = planPath ? stripPlanMarker(contentWithoutToolCalls) : contentWithoutToolCalls;
   const [validatedPlan, setValidatedPlan] = useState<string | null>(null);
   const validationKey = `${sessionId}:${planPath}`;
   useEffect(() => {

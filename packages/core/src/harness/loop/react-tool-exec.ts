@@ -119,7 +119,7 @@ async function runOne(
       ctx.specTaskReport = report;
       result = { ok: true, output: "Task outcome submitted. The harness will apply the verification gates." };
     } else {
-      result = { ok: false, output: "Submit a completed or failed status and a non-empty result for the selected Spec task." };
+      result = { ok: false, output: "Submit a completed, partial or failed status and a non-empty result for the selected Spec task." };
     }
   } else if (call.name === "dispatch_agent" && (call.arguments as Record<string, unknown> | undefined)?.agent_type === "Planner") {
     result = {
@@ -136,10 +136,10 @@ async function runOne(
       };
     } else {
       exec.askUserExecutedInBatch = true;
-      result = await executeTool(ctx.toolCtx, { ...call, id });
+      result = await executeTool({ ...ctx.toolCtx, signal: ctx.opts.signal ?? ctx.toolCtx.signal }, { ...call, id });
     }
   } else {
-    result = await executeTool(ctx.toolCtx, { ...call, id });
+    result = await executeTool({ ...ctx.toolCtx, signal: ctx.opts.signal ?? ctx.toolCtx.signal }, { ...call, id });
   }
   if (!result.ok) {
     const recovery = classifyRecoveryError(result.output);

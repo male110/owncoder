@@ -29,6 +29,7 @@ export interface UiState {
   settingsTab: TabId;
   searchOpen: boolean;
   modeMenuOpen: boolean;
+  modeSwitchPending: boolean;
 
   /** App chrome theme: dark (default) or muted professional light. */
   theme: UiTheme;
@@ -59,6 +60,7 @@ export interface UiActions {
   setSettingsTab: (tab: TabId) => void;
   setSearchOpen: (v: boolean) => void;
   setModeMenuOpen: (v: boolean) => void;
+  setModeSwitchPending: (v: boolean) => void;
   setTheme: (theme: UiTheme) => void;
   setDraft: (text: string, sessionId: string) => void;
   clearDraft: (sessionId: string) => void;
@@ -165,6 +167,7 @@ export const useUiStore = create<UiState & UiActions>()((set) => ({
   settingsTab: "harness",
   searchOpen: false,
   modeMenuOpen: false,
+  modeSwitchPending: false,
   theme: readStoredTheme(),
   drafts: loadDrafts(),
   busy: false,
@@ -211,6 +214,7 @@ export const useUiStore = create<UiState & UiActions>()((set) => ({
   setSettingsTab: (settingsTab) => set({ settingsTab }),
   setSearchOpen: (searchOpen) => set({ searchOpen }),
   setModeMenuOpen: (modeMenuOpen) => set({ modeMenuOpen }),
+  setModeSwitchPending: (modeSwitchPending) => set({ modeSwitchPending }),
   setTheme: (theme) => {
     applyThemeToDocument(theme);
     persistTheme(theme);

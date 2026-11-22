@@ -233,7 +233,7 @@ export class SessionRunCoordinator<T = any, TContext = any> {
     }
 
     // 取消当前执行
-    if (entry.abortController) {
+    if (entry.abortController && !entry.abortController.signal.aborted) {
       entry.abortController.abort();
     }
 

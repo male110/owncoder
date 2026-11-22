@@ -227,6 +227,21 @@ test("run_script stops on timeout and returns partial output", async () => {
   });
 });
 
+test("run_script abort interrupts sleep and prevents subsequent script statements", async () => {
+  await withWorkspace(async () => {}, async (root) => {
+    const controller = new AbortController();
+    const ctx = { ...ctxFor(root), signal: controller.signal };
+    const execution = toolRunScript(ctx, 'await sleep(60_000); console.log("after sleep");');
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    controller.abort();
+    const result = await execution;
+    assert.equal(result.ok, false);
+    assert.match(result.output, /停止/);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.doesNotMatch(result.output, /after sleep/);
+  });
+});
+
 test("run_script rejects non-object args", async () => {
   await withWorkspace(async () => {}, async (root) => {
     const code = `

@@ -214,7 +214,7 @@ export interface PlanInfoDto {
   sessionId?: string | null;
 }
 
-export type TaskStatusDto = "pending" | "in_progress" | "completed" | "failed" | "skipped";
+export type TaskStatusDto = "pending" | "in_progress" | "partial" | "completed" | "failed" | "skipped";
 
 export type PlanStatusDto = "pending_approval" | "approved" | "executing" | "completed";
 
@@ -240,7 +240,10 @@ export interface SpecTaskRefDto {
 
 export interface SpecTaskDocumentDto {
   path: string;
+  /** Batch fingerprint (progress markers normalized); stable across progress writes. */
   version: string;
+  /** Raw sha256 of the document body, for "editor matches disk" checks. */
+  sourceDigest: string;
   approvedAt: string | null;
   tasks: TaskItemDto[];
   currentTaskId: string | null;

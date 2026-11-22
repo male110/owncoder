@@ -360,7 +360,21 @@ export async function toolRunScript(
     },
     /** 受限 sleep：上限 MAX_SLEEP_MS，只用于重试退避。 */
     sleep: (ms: number): Promise<void> =>
-      new Promise((resolve) => setTimeout(resolve, Math.min(Math.max(ms | 0, 0), MAX_SLEEP_MS))),
+      new Promise((resolve, reject) => {
+        if (ctx.signal?.aborted) {
+          reject(new ScriptAborted());
+          return;
+        }
+        const timer = setTimeout(() => {
+          ctx.signal?.removeEventListener("abort", onAbort);
+          resolve();
+        }, Math.min(Math.max(ms | 0, 0), MAX_SLEEP_MS));
+        const onAbort = () => {
+          clearTimeout(timer);
+          reject(new ScriptAborted());
+        };
+        ctx.signal?.addEventListener("abort", onAbort, { once: true });
+      }),
   };
 
   // vm 上下文只含注入的 API + 标准内建（Object/JSON/Promise/Math…）：

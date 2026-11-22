@@ -67,7 +67,7 @@ export function summarizeToolActionForUser(
  * explore 模式（Explore 子代理循环）同构：submit_report 出口 + 收尾区
  * 递进收口压力（未确认缺口显式写为 gap，而不是继续搜索）。
  */
-export const PLANNER_WRAP_UP_TURNS = 6;
+export const PLANNER_WRAP_UP_TURNS = 8;
 
 /** Explore 子代理收尾区阈值：剩余迭代少于该值即开始递进收口压力。 */
 export const EXPLORE_WRAP_UP_TURNS = 6;
@@ -80,6 +80,9 @@ export function formatIterationBudgetHint(
   const remaining = Math.max(0, max - current);
   if (remaining === 0 && mode === "single_spec_task") {
     return `Final iteration. Call ${SPEC_TASK_OUTCOME_TOOL} or report_blocker now. Do not make any other tool calls.`;
+  }
+  if (remaining === 0 && mode === "planner") {
+    return `当前第 ${current} 次迭代，上限 ${max} 次，剩余 0 次。这是最后一次迭代：停止调研，必须立即调用 submit_plan 提交完整计划（目标/编号步骤/相关文件/风险与不确定性/验证方式五段）；无法确认的点写入风险与不确定性。不得只输出文本或调用其他工具。`;
   }
   if (remaining === 0) {
     return `当前第 ${current} 次迭代，上限 ${max} 次，剩余 0 次。这是最后一次迭代：本轮不得再调用任何工具，必须直接输出最终计划/结论文本（含已完成工作、证据与剩余风险），不要再发起工具调用。`;
@@ -119,7 +122,13 @@ export function formatCurrentTaskContext(
   task: TaskItem,
   singleSpecTask = false,
   upstreamRelay?: string,
+  executingApprovedPlan = false,
 ): string {
+  // 计划已获批准并进入执行时，任务分解阶段产出的 `userConstraints` 与
+  // `relevantHistory` 属于「待审批」语境：它们往往写着"本轮不得实施计划内容、
+  // 只读呈现""不得修改任何文件"，或是把整份计划正文当成待审阅材料。把这些
+  // 文本注入执行 agent 会让它只朗读计划而不实施（计划批准后不执行的根因）。
+  // 批准即授权按计划执行，执行轮只以 executionGuidance 为唯一指令来源。
   // Keep this contract short and mechanical. The model needs an explicit stop
   // condition, while detailed exploration prose belongs in the base prompt.
   return [
@@ -141,8 +150,8 @@ export function formatCurrentTaskContext(
     task.dependsOn.length > 0 ? `Depends on: ${task.dependsOn.join(", ")}` : "",
     task.acceptance ? `Acceptance criteria: ${task.acceptance}` : "",
     task.progressStatus ? `Progress status: ${task.progressStatus}` : "",
-    formatTaskConstraints(task),
-    formatPackedHistory(task),
+    !executingApprovedPlan && formatTaskConstraints(task),
+    !executingApprovedPlan && formatPackedHistory(task),
     singleSpecTask
       ? `Do not execute another task or change the plan/task list. After doing the work and checking acceptance, call ${SPEC_TASK_OUTCOME_TOOL} with completed or failed and the result. If user action is needed, call report_blocker. Plain text cannot complete the task.`
       : "Use tools to execute this task. When done, stop calling tools and report the result concisely.",

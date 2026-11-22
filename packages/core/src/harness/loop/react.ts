@@ -59,7 +59,7 @@ import { callModelForIteration } from "./react-llm-call.ts";
 import { handleTerminationCheck } from "./react-termination-check.ts";
 import { handleTextResponse } from "./react-text-branch.ts";
 import { executeIterationTools, recordSkippedCall } from "./react-tool-exec.ts";
-import { forcedFinalReport, forcedFinalReportWithStatus, PLANNER_FORCED_REPORT_INSTRUCTION } from "./react-forced-report.ts";
+import { forcedFinalReport, forcedFinalReportWithStatus, PLANNER_FORCED_REPORT_INSTRUCTION, PLANNER_BUDGET_DEGRADED_MARKER } from "./react-forced-report.ts";
 import { appendGeneratedFileLinks, formatGeneratedFileLinks } from "./generated-files.ts";
 
 // ── ReAct Loop (Enhanced Tool-Calling Stage) ───────────────
@@ -650,11 +650,8 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<ReActReturn> {
     // 子代理调研循环：过渡性文本（"现在读取X…"）不算报告，一律按报告契约
     // 强制收口（Planner 五段计划 / Explore Searched-Findings-Gaps），保证
     // 打满上限时交付的是真报告而不是一句过渡文本。
-    // Planner：模型真的产出计划（fromModel）→ 成功降级收尾——partial 前缀会
-    // 让父级整轮作废，而计划已把未知点显式写入风险段。
-    // Explore：维持 blocked → 父级看到 partial 标注（发现可能不完整是事实），
-    // 但拿到的已是强制总结的真发现。
-    // 强制调用失败（fromModel=false）时两者都维持 blocked，交由父级报真实原因。
+    // Planner 拿到新的非空报告即可降级收口；调用失败后的历史文本不算新报告。
+    // Explore 维持 blocked，让父级看到 partial 标注（发现可能不完整是事实）。
     const forced = await forcedFinalReportWithStatus(
       ctx,
       blockedReason,
@@ -662,6 +659,7 @@ export async function runReActLoop(args: ReActLoopArgs): Promise<ReActReturn> {
     );
     finalText = forced.text;
     reportRecovered = isPlannerLoop && forced.fromModel && forced.text.trim().length > 0;
+    if (reportRecovered) finalText = `${finalText}\n\n${PLANNER_BUDGET_DEGRADED_MARKER}`;
   } else if (opts.forcedFinalReportOnLimit && !ctx.lastAssistant.trim()) {
     finalText = await forcedFinalReport(ctx, blockedReason);
   } else {

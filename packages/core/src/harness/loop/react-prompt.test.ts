@@ -130,6 +130,28 @@ describe("任务上下文：短硬执行纪律", () => {
     expect(withoutRelay).not.toContain("Upstream results");
   });
 
+  it("执行已批准计划时，不注入分解期遗留的只读约束与计划正文", () => {
+    const task = makeTask({
+      userConstraints: ["本轮不得实施计划内容，只读呈现", "不得修改任何文件"],
+      relevantHistory: "计划已保存：plan_1，版本 v1。Plan state: 0/16 tasks completed，本轮未实施计划内容。",
+    });
+
+    // 待审批语境（executingApprovedPlan=false，默认）：约束与历史照旧注入。
+    const pending = formatCurrentTaskContext(task);
+    expect(pending).toContain("### Task constraints");
+    expect(pending).toContain("本轮不得实施计划内容，只读呈现");
+    expect(pending).toContain("### Reusable history");
+
+    // 已批准执行态：只读类约束与计划正文都不再进入执行上下文，
+    // 执行指引仍是唯一指令来源（否则模型只朗读计划、不实施）。
+    const executing = formatCurrentTaskContext(task, false, undefined, true);
+    expect(executing).not.toContain("### Task constraints");
+    expect(executing).not.toContain("本轮不得实施计划内容，只读呈现");
+    expect(executing).not.toContain("不得修改任何文件");
+    expect(executing).not.toContain("### Reusable history");
+    expect(executing).toContain("Execution guidance (how to carry out this task): 修改示例文件");
+  });
+
   it("迭代预算提示给出当前序号、上限与剩余次数，剩余 0 时改为强制收尾指令", () => {
     expect(formatIterationBudgetHint(1, 39)).toContain("当前第 1 次迭代，上限 39 次，剩余 38 次");
     expect(formatIterationBudgetHint(1, 39)).toContain("请据此安排工具调用预算");
@@ -158,19 +180,21 @@ describe("任务上下文：短硬执行纪律", () => {
     expect(normal).not.toContain("核心改动与验证");
 
     // 收尾区（剩余 ≤ PLANNER_WRAP_UP_TURNS）：停止调研、基于已有证据写计划并立即提交。
-    const wrapUp = formatIterationBudgetHint(20, 25, "planner");
-    expect(wrapUp).toContain("仅剩 5 次迭代");
+    const wrapUp = formatIterationBudgetHint(18, 25, "planner");
+    expect(wrapUp).toContain("仅剩 7 次迭代");
     expect(wrapUp).toContain("停止进一步调研");
     expect(wrapUp).toContain("立即调用 submit_plan");
     expect(wrapUp).toContain("风险与不确定性");
 
     // 边界：剩余恰好等于 PLANNER_WRAP_UP_TURNS 时已进入收尾区。
-    expect(formatIterationBudgetHint(19, 25, "planner")).toContain("停止进一步调研");
+    expect(formatIterationBudgetHint(17, 25, "planner")).toContain("停止进一步调研");
 
-    // 最后一轮与 executor 共用强制收尾指令。
+    // Planner 最后一轮必须通过提交工具交付五段计划。
     const last = formatIterationBudgetHint(25, 25, "planner");
     expect(last).toContain("这是最后一次迭代");
-    expect(last).toContain("不得再调用任何工具");
+    expect(last).toContain("必须立即调用 submit_plan");
+    expect(last).toContain("不得只输出文本");
+    expect(last).toContain("风险与不确定性");
 
     // executor 模式不受 planner 措辞影响（默认模式仍引导工具调用预算）。
     expect(formatIterationBudgetHint(20, 25)).toContain("请据此安排工具调用预算");

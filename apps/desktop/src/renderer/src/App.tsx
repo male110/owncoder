@@ -78,7 +78,7 @@ export function App() {
   const {
     editorTabs, editorPath, diffDataByPath, sidebarWidth, isSidebarDragging,
     sidebarCollapsed, settingsOpen, settingsTab,
-    searchOpen, modeMenuOpen, drafts, busy, keepAllBusy,
+    searchOpen, modeMenuOpen, modeSwitchPending, drafts, busy, keepAllBusy,
     setEditorPath, openEditorDiff, setActiveEditorTab, showChatView, closeEditorTab, setSidebarWidth, setIsSidebarDragging,
     setSidebarCollapsed, setSettingsOpen, setSettingsTab, setSearchOpen, setModeMenuOpen,
     setDraft, openSettings,
@@ -400,8 +400,8 @@ export function App() {
       // 进入「正在停止…」窗口：此窗口内乐观用户行尚无 turnId，单独放开
       // 删除入口，让用户能删掉刚发出的这条消息。
       chatActions.setStopping(true, sid);
-      // 请求停止队列循环：runQueue 在当前消息结束后会检查停止标志并
-      // break 出循环，但保留剩余的待执行消息，用户可继续手动发送。
+      // 同步阻止队列继续 dequeue；当前轮次由 cancelChat 中断，
+      // 尚未取出的消息保留，用户之后可继续发送。
       requestStop(sid);
     } else {
       chatActions.resetTurnState();
@@ -409,7 +409,7 @@ export function App() {
     }
     // 2) 显式带 sid 调用；后端 cancelTurn 在 sid 缺失时会回退到 activeSessionId，
     //    但显式传值避免渲染/主进程活跃会话不一致时打错对象。
-    void window.owncoder.cancelChat(sid ?? undefined);
+    void window.owncoder.cancelChat(sid ?? undefined).catch(() => undefined);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const handleNewSession = useCallback(() => { void onNewSession(); }, [onNewSession]);
   const handleMode = useCallback((m: import("@owncoder/shared").AgentMode) => { void onMode(m); }, [onMode]);
@@ -515,6 +515,7 @@ export function App() {
         isEmptySession={historyLength === 0}
         pendingNewSession={pendingNewSession}
         modeMenuOpen={modeMenuOpen}
+        modeSwitchPending={modeSwitchPending}
         onDraft={handleDraft}
         onSend={handleSend}
         onCancel={handleCancel}

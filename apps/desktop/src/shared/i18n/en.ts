@@ -55,6 +55,7 @@ export const en = {
   "运行中": "Running",
   "失败": "Failed",
   "已完成": "Completed",
+  "部分完成": "Partially completed",
   "已跳过": "Skipped",
   "待执行": "Pending",
   "执行中": "In progress",

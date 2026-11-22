@@ -10,6 +10,9 @@
 import { chatCompletionStream, type ChatMessage } from "@owncoder/llm";
 import type { ReActLoopContext } from "./react-loop-context.ts";
 
+export const PLANNER_BUDGET_DEGRADED_MARKER = "<!--planner-budget-degraded-->";
+
+
 const FORCED_REPORT_INSTRUCTION = [
   "Your search budget is exhausted. Stop searching now.",
   "Write your final report immediately in Markdown based ONLY on the evidence already gathered above. Do not call any tools. Do not create files.",

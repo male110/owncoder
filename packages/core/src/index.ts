@@ -1472,7 +1472,9 @@ export class SessionOrchestrator {
     // 为 null，旧 controller 也不再被任何运行中的 turn 引用。
     const sid = sessionId ?? this.state.activeSessionId;
     if (!sid) return;
-    void this.coordinator.interrupt(sid);
+    void this.coordinator.interrupt(sid).catch((error) => {
+      console.error(`[OwnCoder] Failed to interrupt session ${sid}:`, error);
+    });
     const r = this.rtOpt(sid);
     if (r) {
       // 双保险：executeAgentTurn 把 coordinator 的 controller 也镜像到了 r.abort，

@@ -21,6 +21,10 @@ vi.mock("./chat-log/AssistantBubble", async () => {
   const { createElement } = await import("react");
   return { AssistantBubble: ({ turn }: { turn: ChatTurnDto }) => createElement("div", null, turn.content) };
 });
+vi.mock("./chat-log/ProcessSteps", async () => {
+  const { createElement } = await import("react");
+  return { ProcessSteps: ({ items }: { items: ChatTurnDto[] }) => createElement("div", { className: "process-block" }, `执行步骤：${items.length}`) };
+});
 
 const user: ChatTurnDto = { id: "u1", role: "user", content: "用户提问" };
 const liveEvents = [
@@ -86,6 +90,18 @@ describe("ChatLog visible conversation", () => {
       expect(html).toMatch(/class="chat-log-live-footer"[^>]*>.*class="current-turn-bubble"/s);
       expect(html).toContain(`tool-card live ${status}`);
     }
+  });
+
+  it("renders completed execution steps before the final answer", () => {
+    const html = renderToStaticMarkup(createElement(ChatLog, {
+      turns: [user, { id: "step", role: "assistant", content: "中间过程" }, { id: "final", role: "assistant", content: "最终答复" }],
+      liveEvents: [],
+      liveStatus: "",
+      sending: false,
+    }));
+    expect(html).toContain("执行步骤：1");
+    expect(html).toContain("最终答复");
+    expect(html.indexOf("process-block")).toBeLessThan(html.indexOf("最终答复"));
   });
 
   it("renders the completed answer and terminal error, not intermediate history", () => {

@@ -29,6 +29,7 @@ export interface ComposerProps {
   isEmptySession: boolean;
   pendingNewSession: boolean;
   modeMenuOpen: boolean;
+  modeSwitchPending: boolean;
   onDraft: (v: string) => void;
   onSend: (attachments?: ChatAttachmentDto[]) => void;
   onCancel: () => void;

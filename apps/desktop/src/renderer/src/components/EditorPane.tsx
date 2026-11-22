@@ -196,7 +196,10 @@ export function EditorPane({
   const taskSessionId = isSpecTasks ? sessionId : undefined;
   const taskScope = taskSessionId ? JSON.stringify([path, taskSessionId]) : null;
   const matchingPlan = activePlanMeta?.path === path ? activePlanMeta : null;
-  const taskRevision = JSON.stringify([taskRefresh, matchingPlan?.approvedAt, matchingPlan?.documentDigest]);
+  const planApprovedAt = matchingPlan?.approvedAt;
+  const planVersion = matchingPlan?.documentDigest;
+  const taskRevision = JSON.stringify([taskRefresh, planApprovedAt, planVersion]);
+  const taskProgress = taskScope && matchingPlan ? JSON.stringify(matchingPlan.tasks.map(({ id, status }) => [id, status])) : null;
   const taskDocument = taskSnapshot && taskSnapshot.scope === taskScope ? taskSnapshot.document : null;
   const taskStale = Boolean(taskDocument && (
     loading || !taskSnapshot?.matchesSource || taskSnapshot.revision !== taskRevision || taskSnapshot.source !== original
@@ -207,6 +210,7 @@ export function EditorPane({
   )) ? matchingPlan : null;
   const saveRef = useRef<() => Promise<void>>(async () => {});
   const loadRequestRef = useRef(0);
+  const sourceEditRef = useRef(0);
 
   useEffect(() => {
     onDirtyChange?.(dirty);
@@ -293,20 +297,38 @@ export function EditorPane({
   useEffect(() => {
     if (!taskScope || !taskSessionId || diffMode || !active || !sourceLoaded || loading) return;
     let cancelled = false;
+    const loadRequest = loadRequestRef.current;
+    const sourceEdit = sourceEditRef.current;
+    const isCurrent = () => !cancelled && loadRequest === loadRequestRef.current;
     void (async () => {
       let document: SpecTaskDocumentDto | null = null;
+      let source = original;
       let matchesSource = false;
       try {
         document = await window.owncoder.getSpecTaskDocument(path, taskSessionId);
         if (document?.path !== path) document = null;
-        if (document) matchesSource = document.version === await textDigest(original);
+        if (document) {
+          matchesSource = document.sourceDigest === await textDigest(source);
+          // 批次指纹不会随进度变化；只在同一批次内同步校验过的磁盘内容，且不覆盖未保存的编辑。
+          if (isCurrent() && !matchesSource && !dirty && !saving && content === undefined
+            && document.approvedAt && document.approvedAt === planApprovedAt && document.version === planVersion) {
+            const updated = await window.owncoder.readWorkspaceFile(path);
+            if (document.sourceDigest === await textDigest(updated) && isCurrent() && sourceEdit === sourceEditRef.current) {
+              source = updated;
+              matchesSource = true;
+              setValue(updated);
+              setOriginal(updated);
+            }
+          }
+        }
       } catch {
-        // Keep Markdown readable, but do not enable actions without a verified source revision.
+        // 保留可读的 Markdown；若原文未经校验，则不启用任务操作。
       }
-      if (!cancelled) setTaskSnapshot({ scope: taskScope, revision: taskRevision, document, source: original, matchesSource });
+      if (isCurrent()) setTaskSnapshot({ scope: taskScope, revision: taskRevision, document, source, matchesSource });
     })();
     return () => { cancelled = true; };
-  }, [active, diffMode, loading, original, path, sourceLoaded, taskRevision, taskScope, taskSessionId]);
+  }, [active, content, diffMode, dirty, loading, original, path, planApprovedAt, planVersion, saving, sourceLoaded,
+    taskProgress, taskRevision, taskScope, taskSessionId]);
 
   const save = useCallback(async () => {
     setSaving(true);
@@ -531,7 +553,11 @@ export function EditorPane({
             language={languageForPath(path)}
             value={value}
             keepCurrentModel
-            onChange={(v) => { if (sourceVisibleRef.current) setValue(v ?? ""); }}
+            onChange={(v) => {
+              if (!sourceVisibleRef.current) return;
+              sourceEditRef.current += 1;
+              setValue(v ?? "");
+            }}
             options={{
               fontSize: 13,
               minimap: { enabled: false },

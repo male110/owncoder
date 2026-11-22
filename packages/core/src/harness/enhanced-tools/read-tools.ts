@@ -12,7 +12,7 @@ export const READ_TOOL_DEFS: ToolDef[] = [
     function: {
       name: "glob",
       description:
-        "Find workspace-relative files by a glob pattern. The search path is relative to the active workspace (default '.'); do not use /workspace or /e/... container/MSYS paths. Automatically skips .gitignore paths, dot directories, generated/vendor directories, and returns at most max_results paths. Skip it when the path is already named or known — call read_file on that path instead. This is a top-level tool: call it directly, and never wrap a single search in run_script to forward its output.",
+        "Find workspace-relative files by a glob pattern. The search path is relative to the active workspace (default '.'); do not use /workspace or /e/... container/MSYS paths. Automatically skips .gitignore paths, dot directories, generated/vendor directories, and returns at most max_results paths. Keep searches within the task's named target directory; start with the narrowest relevant path and pattern, broadening only when needed to answer the task. Skip it when the path is already named or known — call read_file on that path instead. This is a top-level tool: call it directly, and never wrap a single search in run_script to forward its output.",
       parameters: {
         type: "object",
         properties: {
@@ -30,7 +30,7 @@ export const READ_TOOL_DEFS: ToolDef[] = [
     function: {
       name: "grep",
       description:
-        "Search workspace file contents with a regex or literal string. file_path is workspace-relative; do not use /workspace or /e/... paths. Automatically skips .gitignore paths, dot/generated/vendor directories, lockfiles, binaries, and files over 2MB. output_mode 'content' returns matched lines, 'files_with_matches' only their paths, 'count' only totals; use glob when only a filename pattern is known. Skip it when the target file or range is already known — read that file directly. This is a top-level tool: call it directly, and never wrap a single search in run_script to forward its output.",
+        "Search workspace file contents with a regex or literal string. file_path is workspace-relative; do not use /workspace or /e/... paths. Automatically skips .gitignore paths, dot/generated/vendor directories, lockfiles, binaries, and files over 2MB. output_mode 'content' returns matched lines, 'files_with_matches' only their paths, 'count' only totals; use glob when only a filename pattern is known. Keep searches within the task's named target directory; start with the narrowest relevant path and pattern, broadening only when needed to answer the task. Skip it when the target file or range is already known — read that file directly. This is a top-level tool: call it directly, and never wrap a single search in run_script to forward its output.",
       parameters: {
         type: "object",
         properties: {
@@ -59,7 +59,7 @@ export const READ_TOOL_DEFS: ToolDef[] = [
     readOnly: true,
     function: {
       name: "read_file",
-      description: "Read a text file at a known path and return its full content with line numbers, or a specified line range. offset is the starting line number (1-based) and limit is the number of lines to read (not the ending line number); a line range requires both, otherwise the entire file is read. When you need more than a small window, request a large limit in one call rather than repeatedly reading tiny increments of the same file. Returns an error when the file does not exist or the path is inaccessible.",
+      description: "Read a text file at a known path and return a specified line range with line numbers; prefer the smallest range that answers the question. offset is the starting line number (1-based) and limit is the number of lines to read (not the ending line number); a line range requires both. Omit both only when the full file is specifically needed. Returns an error when the file does not exist or the path is inaccessible.",
       parameters: {
         type: "object",
         properties: {

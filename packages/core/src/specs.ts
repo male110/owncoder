@@ -338,6 +338,12 @@ export function validateDesignContent(content: string, specContent?: string): vo
   const text = content.trim();
   if (!text) throw new Error("design.md must not be empty");
 
+  const hasTechnicalDesign =
+    /\b(architecture|architectural|component|module|interface|data model|workflow|flow|sequence|api|implementation)\b|架构|组件|模块|接口|数据模型|流程|时序|实现方案/i.test(text);
+  if (!hasTechnicalDesign) {
+    throw new Error("design.md must include substantive technical design content (e.g. architecture, modules, interfaces, data models, or flows)");
+  }
+
   const ids = extractReqIds(text);
 
   if (specContent !== undefined) {
@@ -360,8 +366,8 @@ export function validateDesignContent(content: string, specContent?: string): vo
   }
 }
 
-/** Checkbox task line: `- [ ] …` / `1. [ ] …` (Kiro-style). */
-const TASK_LINE = /^\s*(?:[-*]|\d+[.、)])\s+\[[ xX]\]\s+(.+)$/;
+/** Checkbox task line: `- [ ] …` / `1. [ ] …` (Kiro-style), plus progress markers `[x]` done, `[-]` failed, `[/]` running. */
+const TASK_LINE = /^\s*(?:[-*]|\d+[.、)])\s+\[[ xX\-\/]\]\s+(.+)$/;
 
 /** Field labels a Kiro-style task must carry (依赖 / 文件 / 实现 / 验收 / 需求). */
 const TASK_FIELD_PATTERNS: Array<{ re: RegExp; label: string }> = [
@@ -689,8 +695,9 @@ export function formatSpecStatus(status: SpecStatus): string {
     `- tasks: ${status.hasTasks ? "✅" : "⬜"}`,
   ];
   if (status.tasks.length > 0) {
-    const done = status.tasks.filter((t) => t.status === "completed").length;
-    parts.push(`- task progress: ${done}/${status.tasks.length}`);
+    const done = status.tasks.filter((t) => t.status === "completed" || t.status === "skipped").length;
+    const partial = status.tasks.filter((t) => t.status === "partial").length;
+    parts.push(`- task progress: ${done}/${status.tasks.length}${partial > 0 ? ` (partial: ${partial})` : ""}`);
   }
   return parts.join("\n");
 }

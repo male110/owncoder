@@ -678,8 +678,23 @@ function isRetryableStatus(status: number, text?: string): boolean {
 /**
  * 延迟指定毫秒数
  */
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function delay(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) {
+    return Promise.reject(signal.reason ?? new DOMException("The operation was aborted", "AbortError"));
+  }
+
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+      reject(signal?.reason ?? new DOMException("The operation was aborted", "AbortError"));
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 /** 流式不活跃超时（2 分钟）：字节/事件停止到达多久后判定连接死亡。 */
@@ -890,7 +905,7 @@ export async function chatCompletion(
               delayMs: retryDelay,
               reason: `http_${res.status}`,
             });
-            await delay(retryDelay);
+            await delay(retryDelay, opts?.signal);
             lastError = err;
             continue; // 重试
           }
@@ -1020,7 +1035,7 @@ export async function chatCompletion(
               delayMs: retryDelay,
               reason: "timeout",
             });
-            await delay(retryDelay);
+            await delay(retryDelay, opts?.signal);
             lastError = err;
             continue;
           }
@@ -1052,7 +1067,7 @@ export async function chatCompletion(
             delayMs: retryDelay,
             reason: "network",
           });
-          await delay(retryDelay);
+          await delay(retryDelay, opts?.signal);
           lastError = err;
           continue;
         }
@@ -1123,7 +1138,7 @@ export async function chatCompletionStream(
               delayMs: retryDelay,
               reason: "timeout",
             });
-            await delay(retryDelay);
+            await delay(retryDelay, opts?.signal);
             continue;
           }
           writeCallLog({
@@ -1154,7 +1169,7 @@ export async function chatCompletionStream(
             delayMs: retryDelay,
             reason: "network",
           });
-          await delay(retryDelay);
+          await delay(retryDelay, opts?.signal);
           continue;
         }
 
@@ -1179,7 +1194,7 @@ export async function chatCompletionStream(
             delayMs: retryDelay,
             reason: `http_${res.status}`,
           });
-          await delay(retryDelay);
+          await delay(retryDelay, opts?.signal);
           continue;
         }
         
@@ -1276,7 +1291,7 @@ export async function chatCompletionStream(
               delayMs: retryDelay,
               reason: "timeout",
             });
-            await delay(retryDelay);
+            await delay(retryDelay, opts?.signal);
             continue;
           }
           writeCallLog({
@@ -1328,7 +1343,7 @@ export async function chatCompletionStream(
           console.log(
             `[llm] Empty stream from ${ref.model}, retrying in ${Math.round(retryDelay)}ms (attempt ${attempt + 1}/${maxRetries})...`
           );
-          await delay(retryDelay);
+          await delay(retryDelay, opts?.signal);
           continue; // 重试整个请求
         }
         

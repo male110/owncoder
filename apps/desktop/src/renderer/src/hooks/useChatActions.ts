@@ -88,7 +88,7 @@ function selectSpecTask(document: SpecTaskDocumentDto, retryable: Set<string>, a
   const statuses = new Map(document.tasks.map((task) => [task.id, task.status]));
   return document.tasks.find((task) =>
     (taskId === undefined || task.id === taskId) && !attempted.has(task.id) &&
-    (task.status === "pending" || (task.status === "failed" && retryable.has(task.id))) &&
+    (task.status === "pending" || ((task.status === "failed" || task.status === "partial") && retryable.has(task.id))) &&
     task.dependsOn.every((id) => statuses.get(id) === "completed" || statuses.get(id) === "skipped"),
   );
 }
@@ -759,7 +759,9 @@ export function useChatActions(deps: {
 
       await depsRef.current.refreshPlans(sid);
       const meta = await depsRef.current.refreshActivePlan(sid);
-      if (meta && meta.tasks.length > 0) {
+      if (!meta || meta.tasks.length === 0) {
+        chat.setLiveStatus(t("计划已批准，但没有可执行任务；请修订计划并补充具体实施步骤与验证要求。"), sid);
+      } else {
         // 批准即执行：自动发送一条消息触发 Agent 的任务 step-driver，
         // loop 会在同一轮内顺序执行完全部任务（无需用户再手动发消息）。
         const currentSession = useSessionStore.getState();
@@ -786,7 +788,11 @@ export function useChatActions(deps: {
     if (!sid) return;
     const currentSession = useSessionStore.getState();
     const meta = currentSession.getActivePlanMetaForSession(sid);
-    if (!meta || meta.tasks.length === 0 || meta.path.startsWith(".owncoder/specs/")) return;
+    if (!meta || meta.path.startsWith(".owncoder/specs/")) return;
+    if (meta.tasks.length === 0) {
+      chat.setLiveStatus(t("计划没有可执行任务；请修订计划并补充具体实施步骤与验证要求。"), sid);
+      return;
+    }
     if (useChatStore.getState().isSessionSending(sid) || isQueueRunning(sid)) return;
     if (!currentSession.workspace) {
       chat.setLiveStatus(t("工作区尚未就绪，请稍候…"), sid);
@@ -823,7 +829,9 @@ export function useChatActions(deps: {
       if (isStopRequested(sid) || initial?.path !== path || initial.version !== version) return;
       // A fresh click can retry pre-existing failures. A task that fails during
       // this batch must not be retried automatically.
-      const retryable = new Set(initial.tasks.filter((task) => task.status === "failed").map((task) => task.id));
+      // Failed / partially completed tasks may be retried when the click is the
+      // user's explicit retry; a task that fails during a batch is not retried.
+      const retryable = new Set(initial.tasks.filter((task) => task.status === "failed" || task.status === "partial").map((task) => task.id));
       if (!selectSpecTask(initial, retryable, attempted, taskId)) return;
 
       const state = await window.owncoder.prepareSpecTaskExecution(path, version, sid);
@@ -955,10 +963,27 @@ export function useChatActions(deps: {
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const modeSwitchPendingRef = useRef(false);
   const onMode = useCallback(async (next: import("@owncoder/shared").AgentMode) => {
-    const sid = getFocusSessionId() ?? undefined;
-    session.setMode(await window.owncoder.setMode(next, sid));
+    if (modeSwitchPendingRef.current) return;
+    modeSwitchPendingRef.current = true;
+    ui.setModeSwitchPending(true);
     ui.setModeMenuOpen(false);
+    const sid = getFocusSessionId() ?? undefined;
+    if (!sid) {
+      showError(new Error("无法切换模式：当前没有活动会话。"));
+      ui.setModeSwitchPending(false);
+      modeSwitchPendingRef.current = false;
+      return;
+    }
+    try {
+      session.setMode(await window.owncoder.setMode(next, sid));
+    } catch (error) {
+      showError(error, sid);
+    } finally {
+      ui.setModeSwitchPending(false);
+      modeSwitchPendingRef.current = false;
+    }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const onSelectThinkingEffort = useCallback(async (effort: import("@owncoder/settings").ThinkingEffort) => {

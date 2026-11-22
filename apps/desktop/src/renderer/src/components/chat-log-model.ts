@@ -260,6 +260,11 @@ export function buildChatItems(blocks: LogBlock[]): ChatItem[] {
   const items: ChatItem[] = [];
   for (let i = 0; i < blocks.length; i++) {
     const b = blocks[i]!;
+    if (b.kind === "process") {
+      const firstId = b.items[0]?.id;
+      items.push({ kind: "block", block: b, key: firstId ? `process-${firstId}` : `process-${i}` });
+      continue;
+    }
     if (b.kind !== "user" && b.kind !== "assistant") continue;
     const key = b.turn.id ?? `b-${b.kind}-${i}-${b.turn.content.slice(0, 24)}`;
     items.push({ kind: "block", block: b, key });

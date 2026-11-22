@@ -1,0 +1,27 @@
+{
+  "lists": [
+    {
+      "id": "default",
+      "name": "Changes",
+      "comment": ""
+    }
+  ],
+  "active": "default",
+  "files": {
+    "apps/desktop/src/renderer/src/App.tsx": "default",
+    "apps/desktop/src/renderer/src/hooks/useChatActions.ts": "default",
+    "apps/desktop/src/renderer/src/settings/ProviderDetail.test.ts": "default",
+    "apps/desktop/src/renderer/src/settings/ProviderDetail.tsx": "default",
+    "apps/desktop/src/renderer/src/styles.css": "default",
+    "apps/desktop/src/shared/i18n/en.ts": "default",
+    "packages/core/src/harness/enhanced-tools/read-tools.ts": "default",
+    "packages/core/src/harness/enhanced-tools/subagent.ts": "default",
+    "packages/core/src/harness/execute.ts": "default",
+    "packages/core/src/harness/loop/react-tool-exec.ts": "default",
+    "packages/core/src/harness/loop/termination.test.ts": "default",
+    "packages/core/src/harness/loop/termination.ts": "default",
+    "packages/core/src/harness/tools/read-file.test.ts": "default",
+    "packages/core/src/harness/tools/read-file.ts": "default",
+    "packages/settings/src/task-decompose-prompt.ts": "default"
+  }
+}

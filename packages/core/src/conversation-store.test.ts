@@ -254,6 +254,29 @@ describe("conversation store", () => {
     ]);
   });
 
+  it("does not project a previous reply when legacy history lacks the current user anchor", () => {
+    const turns = [
+      {
+        turnId: "failed-legacy",
+        turnSeq: 2,
+        status: "failed" as const,
+        startedAt: "t2",
+        completedAt: "t3",
+        user: user("b"),
+        taskDecomposition: null,
+        report: null,
+        events: [],
+        final: {
+          history: [user("a"), assistant("aaaaa")],
+        },
+      },
+    ];
+
+    expect(projectConversationTurns(turns)).toEqual([
+      { ...user("b"), turnId: "failed-legacy" },
+    ]);
+  });
+
   it("does not replay the previous assistant reply for a failed turn without a reply", () => {
     const turns = [
       {
@@ -431,6 +454,20 @@ describe("conversation store", () => {
       { role: "tool", id: "t1", toolName: "bash", toolArgs: {}, content: "ok", turnId: turn.turnId },
       { ...assistant("done"), turnId: turn.turnId },
     ]);
+  });
+
+  it("slimTurnFinal does not inherit the previous turn's reply for an empty turn", async () => {
+    // history 是整段会话记录，不是本轮。本轮 user 行之后没有助手正文时
+    // 必须落空串，否则界面会把上一轮的回复当成这一轮的答复重放。
+    const history = [user("a"), assistant("aaaaa"), user("b")];
+    expect(slimTurnFinal({ assistantText: "", history })).toMatchObject({
+      role: "assistant",
+      content: "",
+    });
+    expect(slimTurnFinal({ history })).toMatchObject({
+      role: "assistant",
+      content: "",
+    });
   });
 
   it("slimTurnFinal keeps the reply when a successful result carries aborted: false / empty error", async () => {

@@ -17,7 +17,7 @@ import { appendTurnEvent, completeTurn } from "./conversation-store.ts";
 import { saveSessionById } from "./session-store.ts";
 import { newCheckpointId, persistCheckpoint, type FileSnapshot } from "./harness/checkpoint.ts";
 import { readActiveMeta, readPlanFile, selectNextPendingTask, writeActiveMeta, type TaskItem } from "./plans.ts";
-import { assertSpecTaskReady, isSpecTaskPath, readApprovedSpecTask, type SpecTaskRef } from "./spec-task-document.ts";
+import { assertSpecTaskReady, isSpecTaskPath, readApprovedSpecTask, writeSpecTaskProgress, type SpecTaskRef } from "./spec-task-document.ts";
 import { applyTaskEvent, taskRunMetricsSnapshot, taskRunPhaseLabel, taskRunTotalDurationMs } from "./task-run.ts";
 import type { McpManager } from "./mcp/client.ts";
 import type { UserMemoryStore } from "./user-memories.ts";
@@ -219,6 +219,9 @@ export async function executeAgentTurn(ctx: AgentTurnContext): Promise<AgentLoop
       task.status = status;
       task.result = report?.slice(0, 8000);
       meta.currentTaskId = status === "in_progress" ? task.id : selectNextPendingTask(meta.tasks)?.id ?? null;
+      // Mirror progress into tasks.md so the document itself shows 已完成/失败,
+      // then keep the batch digest in sync with what is now on disk.
+      meta.documentDigest = await writeSpecTaskProgress(workspaceRoot, sessionId, meta);
       await writeActiveMeta(workspaceRoot, meta, sessionId);
       return meta;
     });
@@ -305,6 +308,7 @@ export async function executeAgentTurn(ctx: AgentTurnContext): Promise<AgentLoop
       historyVector: ctx.historyVector,
       sessionChanges: ctx.sessionChanges,
       });
+    ctx.abortController.signal.throwIfAborted();
   } catch (error) {
     const finalizeStarted = performance.now();
     const messageStarted = performance.now();
@@ -449,6 +453,14 @@ export async function executeAgentTurn(ctx: AgentTurnContext): Promise<AgentLoop
     const lastMsg = r.history[r.history.length - 1];
     if (lastMsg && lastMsg.role === "assistant") {
       lastMsg.metadata = metadata;
+      if (taskRef && specTaskStarted && result.specTaskOutcome?.status === "completed" && !ctx.abortController.signal.aborted) {
+        const link = `[tasks.md](${taskRef.path})`;
+        const report = (lastMsg.content?.trim() ? lastMsg.content : result.assistantText).trimEnd();
+        lastMsg.content = report === link || report.endsWith(`\n\n${link}`)
+          ? report
+          : report ? `${report}\n\n${link}` : link;
+        result.assistantText = lastMsg.content;
+      }
       if (!lastMsg.content || !lastMsg.content.trim()) {
         lastMsg.parts = parts;
         lastMsg.content = MessageProjector.partsToContent(parts);
@@ -515,11 +527,13 @@ export async function executeAgentTurn(ctx: AgentTurnContext): Promise<AgentLoop
   }
   const outcome = taskRef ? result.specTaskOutcome : undefined;
   const terminal = outcome?.status === "cancelled" ? "cancelled"
-    : outcome && outcome.status !== "completed" ? "failed" : undefined;
+    : outcome && outcome.status !== "completed" && outcome.status !== "partial" ? "failed" : undefined;
   try {
     await timed("completeTurn", () => completeTurn(capturedRoot, sessionId, turnId, result, terminal));
     if (outcome && specTaskStarted) {
-      await updateSpecTask(outcome.status === "completed" ? "completed" : outcome.status === "failed" ? "failed" : "pending", outcome.result);
+      await updateSpecTask(outcome.status === "completed" ? "completed"
+        : outcome.status === "partial" ? "partial"
+        : outcome.status === "failed" ? "failed" : "pending", outcome.result);
       await eventPersist;
     }
   } catch (error) {

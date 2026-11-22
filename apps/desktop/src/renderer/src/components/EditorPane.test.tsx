@@ -269,6 +269,7 @@ const specProps = { path: scopedPath, sessionId: "session-a" };
 const specDocument = (text: string, approvedAt: string | null = null): SpecTaskDocumentDto => ({
   path: scopedPath,
   version: createHash("sha256").update(text).digest("hex"),
+  sourceDigest: createHash("sha256").update(text).digest("hex"),
   approvedAt,
   tasks: [],
   currentTaskId: null,
@@ -363,6 +364,58 @@ describe("Spec task document preview", () => {
     expect(preview.props.specTaskDocument).toBe(nextDocument);
     expect(preview.props.specTasksStale).toBe(false);
     expect(preview.props.taskMeta).toBeNull();
+  });
+
+  it("follows on-disk Spec progress without reloading the tab or discarding edits", async () => {
+    const { getSpecTaskDocument, readWorkspaceFile } = setupTasks();
+    await loadSource(specProps);
+    runTaskEffect();
+    await flushTasks();
+
+    const version = specDocument(savedText).version;
+    const approvedAt = "2026-01-01T00:00:00.000Z";
+    const withProgress = (marker: string, status: ActivePlanMetaDto["tasks"][number]["status"]) => {
+      const text = savedText.replace("[ ]", `[${marker}]`);
+      const tasks: ActivePlanMetaDto["tasks"] = [{ id: "task_1", status, sourceLine: 3, dependsOn: [],
+        executionGuidance: "登录", retryCount: 0, maxRetries: 2 }];
+      const currentTaskId = status === "in_progress" ? "task_1" : null;
+      readWorkspaceFile.mockResolvedValue(text);
+      getSpecTaskDocument.mockResolvedValue({ ...specDocument(text, approvedAt), version, tasks, currentTaskId });
+      const activePlanMeta: ActivePlanMetaDto = { path: scopedPath, approvedAt, documentDigest: version, tasks, currentTaskId };
+      return { ...specProps, activePlanMeta };
+    };
+
+    const running = withProgress("/", "in_progress");
+    render(running);
+    const runningDeps = hooks.effectDeps[4];
+    runTaskEffect();
+    await flushTasks();
+    let preview = findMarkdown(render(running))!;
+    expect(preview.props.content).toContain("[/]");
+    expect(preview.props.specTasksStale).toBe(false);
+    expect(preview.props.taskMeta).toBe(running.activePlanMeta);
+
+    const completed = withProgress("x", "completed");
+    render(completed);
+    expect(hooks.effectDeps[4]).not.toEqual(runningDeps);
+    runTaskEffect();
+    await flushTasks();
+    preview = findMarkdown(render(completed))!;
+    expect(preview.props.content).toContain("[x]");
+    expect(preview.props.taskMeta).toBe(completed.activePlanMeta);
+
+    findButton(render(completed), "原码")!.props.onClick();
+    const unsaved = `${savedText}- [ ] 未保存的任务\n`;
+    findEditor(render(completed))!.props.onChange(unsaved);
+    findButton(render(completed), "预览")!.props.onClick();
+    const failed = withProgress("-", "failed");
+    render(failed);
+    runTaskEffect();
+    await flushTasks();
+    preview = findMarkdown(render(failed))!;
+    expect(preview.props.tasksDirty).toBe(true);
+    expect(preview.props.content).toBe(unsaved);
+    expect(readWorkspaceFile).toHaveBeenCalledTimes(3);
   });
 
   it("forwards the verified document and batch callback without approval, and preserves busy and dirty flags", async () => {

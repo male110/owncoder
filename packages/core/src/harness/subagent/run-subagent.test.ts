@@ -53,7 +53,7 @@ describe("runExploreSubagent — Planner 输入可见", () => {
     { assistantText: "## Final Report\n\n计划", partial: false },
     { assistantText: "", partial: true },
   ])("在子代理返回前发送实际输入，失败时仍保留：$partial", async ({ assistantText, partial }) => {
-    mockedRunAgentLoop.mockResolvedValueOnce({ assistantText } as AgentLoopResult);
+    mockedRunAgentLoop.mockResolvedValueOnce({ assistantText, blocked: partial } as AgentLoopResult);
     const onEvent = vi.fn();
     const task = "跨文件计划\n第二行 ghp_abcdefghijklmnopqrstuvwxyz0123456789\n" + "后续信息".repeat(2000);
     const result = await runExploreSubagent({ agentType: "Planner", task }, { ...baseDeps(fakeIndex([])), onEvent });
@@ -91,14 +91,14 @@ describe("runExploreSubagent — 分解历史注入", () => {
 });
 
 describe("runExploreSubagent — Planner 循环配置", () => {
-  it("Planner：plannerLoop 标志 + submit_plan 白名单 + 小预算（25）", async () => {
+  it("Planner：plannerLoop 标志 + submit_plan 白名单，预算固定 35", async () => {
     await runExploreSubagent({ agentType: "Planner", task: "制定跨文件改动计划" }, baseDeps(fakeIndex([])));
     const opts = mockedRunAgentLoop.mock.calls[0]![0];
     expect(opts.plannerLoop).toBe(true);
     expect(opts.exploreLoop).toBeUndefined();
     expect(opts.allowedTools).toContain("submit_plan");
     expect(opts.allowedTools).not.toContain("submit_report");
-    expect(opts.maxIterations).toBe(25);
+    expect(opts.maxIterations).toBe(35);
     expect(opts.forcedFinalReportOnLimit).toBe(true);
   });
 
@@ -140,11 +140,19 @@ describe("runExploreSubagent — 假成功修复（aborted 终态）", () => {
 });
 
 describe("runExploreSubagent — Planner 部分结果", () => {
+  it.each(["", "## Final Report"])("正常结束但无正文时原样返回：%j", async (assistantText) => {
+    mockedRunAgentLoop.mockResolvedValueOnce({ assistantText, blocked: false } as AgentLoopResult);
+    const onEvent = vi.fn();
+    const result = await runExploreSubagent({ agentType: "Planner", task: "制定计划" }, { ...baseDeps(fakeIndex([])), onEvent });
+    expect(result.report).toBe(assistantText);
+    expect(onEvent.mock.calls.at(-1)![0]).toMatchObject({ type: "stage_done", ok: true });
+  });
+
   it.each([
-    { assistantText: "", blocked: false, marker: "without producing a report" },
+    { assistantText: "", blocked: true, marker: "without producing a report" },
     { assistantText: "## Final Report\n### 目标\n未完成", blocked: true, marker: "reached the iteration limit" },
   ])("不会把未完成的报告伪装为完整计划：$marker", async ({ assistantText, blocked, marker }) => {
-    mockedRunAgentLoop.mockResolvedValueOnce({ assistantText, blocked, blockedReason: blocked ? marker : undefined } as AgentLoopResult);
+    mockedRunAgentLoop.mockResolvedValueOnce({ assistantText, blocked, blockedReason: assistantText ? marker : undefined } as AgentLoopResult);
     const result = await runExploreSubagent({ agentType: "Planner", task: "计划跨文件改动" }, baseDeps(fakeIndex([])));
     expect(result.report).toMatch(/^\[Planner partial result:/);
     expect(result.report).toContain(marker);

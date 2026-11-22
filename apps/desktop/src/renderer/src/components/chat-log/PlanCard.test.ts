@@ -52,6 +52,7 @@ vi.mock("../Markdown", () => ({ Markdown: "mock-markdown" }));
 
 // ── 被测组件 ──────────────────────────────────────────────────────────────────────
 import { PlanActionsContext, PlanCard } from "./AssistantBubble";
+import { stripToolCallBlocks } from "./tool-call-display";
 
 // ── 测试辅助 ──────────────────────────────────────────────────────────────────────
 type Element = ReactElement<Record<string, any>>;
@@ -132,6 +133,20 @@ function renderCard(actions: ReturnType<typeof makePlanActions>, sessionId = "s1
 }
 
 // ── 测试用例 ──────────────────────────────────────────────────────────────────────
+describe("stripToolCallBlocks", () => {
+  it("removes a standalone tool call block", () => {
+    expect(stripToolCallBlocks('<tool_call>{"name":"search"}</tool_call>')).toBe("");
+  });
+
+  it("removes tool calls while preserving surrounding assistant text", () => {
+    expect(stripToolCallBlocks('Before <tool_call>{"name":"search"}</tool_call> After')).toBe("Before  After");
+  });
+
+  it("preserves ordinary assistant text", () => {
+    expect(stripToolCallBlocks("A normal answer.")).toBe("A normal answer.");
+  });
+});
+
 describe("PlanCard", () => {
   beforeEach(() => {
     hooks.states = [];

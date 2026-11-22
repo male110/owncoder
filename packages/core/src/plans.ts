@@ -16,7 +16,66 @@ export interface PlanInfo {
   sessionId: string | null;
 }
 
-export type TaskStatus = "pending" | "in_progress" | "completed" | "failed" | "skipped";
+export type TaskStatus = "pending" | "in_progress" | "partial" | "completed" | "failed" | "skipped";
+
+/** Checkbox markers recognized in task documents. */
+const CHECKBOX_PATTERN = "[ xX\\-/]";
+/** One checkbox task line: `- [ ] …`, `1. [x] …`, `- [-] …`, `- [/] …`. */
+const TASK_CHECKBOX_LINE = new RegExp(`^\\s*(?:[-*]|\\d+[.、)])\\s+\\[(${CHECKBOX_PATTERN})\\]\\s+(.+)$`);
+/** Same line split as (bullet prefix, marker, rest) so only the marker is rewritten. */
+const TASK_CHECKBOX_PARTS = new RegExp(`^(\\s*(?:[-*]|\\d+[.、)])\\s+)\\[(${CHECKBOX_PATTERN})\\](\\s.*)?$`);
+
+/**
+ * Map a checkbox marker to a task status so execution progress survives in the
+ * document itself: `[ ]` pending, `[/]` partial, `[x]` completed, `[-]` failed.
+ */
+export function taskStatusFromCheckbox(marker: string): TaskStatus {
+  switch (marker.toLowerCase()) {
+    case "x": return "completed";
+    case "-": return "failed";
+    case "/": return "partial";
+    default: return "pending";
+  }
+}
+
+/** Inverse of {@link taskStatusFromCheckbox}; skipped tasks stay unchecked. */
+export function checkboxFromTaskStatus(status: TaskStatus): string {
+  switch (status) {
+    case "completed": return "x";
+    case "failed": return "-";
+    case "in_progress":
+    case "partial": return "/";
+    default: return " ";
+  }
+}
+
+/**
+ * Reset every task checkbox to unchecked, keeping the rest of the document
+ * untouched. Used to fingerprint a task document: execution progress is stored
+ * in the document, so the same batch must stay valid across its own updates.
+ */
+export function normalizeTaskCheckboxes(content: string): string {
+  let fence: string | undefined;
+  return content.split(/\r?\n/).map((line) => {
+    const marker = line.match(/^\s*(`{3,}|~{3,})(.*)$/);
+    if (fence) {
+      if (marker && marker[1]!.startsWith(fence) && !marker[2]!.trim()) fence = undefined;
+      return line;
+    }
+    if (marker) { fence = marker[1]; return line; }
+    const parts = line.match(TASK_CHECKBOX_PARTS);
+    return parts ? `${parts[1]}[ ]${parts[3] ?? ""}` : line;
+  }).join("\n");
+}
+
+/**
+ * Fingerprint of a task document for batch approval. Progress markers are
+ * normalized away so writing progress never invalidates the running batch,
+ * while any edit to task text, order or fields still does.
+ */
+export function taskDocumentDigest(content: string): string {
+  return createHash("sha256").update(normalizeTaskCheckboxes(content)).digest("hex");
+}
 
 /** 计划生命周期状态。旧 .active.json 无此字段时按 "approved" 处理（向后兼容）。 */
 export type PlanStatus = "pending_approval" | "approved" | "executing" | "completed";
@@ -528,7 +587,7 @@ function normalizeTask(t: Partial<TaskItem>): TaskItem {
     id: typeof t.id === "string" ? t.id : `task_${Math.random().toString(36).slice(2, 8)}`,
     ...(typeof t.sourceLine === "number" && Number.isSafeInteger(t.sourceLine) && t.sourceLine > 0 ? { sourceLine: t.sourceLine } : {}),
     executionGuidance: foldExecutionGuidance(t),
-    status: t.status === "in_progress" || t.status === "completed" || t.status === "failed" || t.status === "skipped"
+    status: t.status === "in_progress" || t.status === "partial" || t.status === "completed" || t.status === "failed" || t.status === "skipped"
       ? t.status
       : "pending",
     acceptance: typeof t.acceptance === "string" ? t.acceptance : undefined,
@@ -654,7 +713,7 @@ export function truncatePlanForContext(content: string, maxChars = 2500): string
 export function parseTasksFromMarkdown(content: string, specDocument = false): TaskItem[] {
   const lines = content.split(/\r?\n/);
   const tasks: TaskItem[] = [];
-  const taskEntries: Array<{ index: number; title: string; checked: boolean }> = [];
+  const taskEntries: Array<{ index: number; title: string; marker: string }> = [];
   let fence: string | undefined;
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]!;
@@ -666,14 +725,14 @@ export function parseTasksFromMarkdown(content: string, specDocument = false): T
       }
       if (marker) { fence = marker[1]; continue; }
     }
-    const checkbox = line.match(/^\s*(?:[-*]|\d+[.、)])\s+\[([ xX])\]\s+(.+)$/);
+    const checkbox = line.match(TASK_CHECKBOX_LINE);
     if (checkbox) {
-      taskEntries.push({ index: i, title: checkbox[2]!.trim(), checked: checkbox[1]!.toLowerCase() === "x" });
+      taskEntries.push({ index: i, title: checkbox[2]!.trim(), marker: checkbox[1]! });
       continue;
     }
     // Compatibility with older plan files; newly saved Spec files still require checkboxes.
     const ordered = specDocument ? null : line.match(/^\s*\d+[.、)]\s+(.+)$/);
-    if (ordered) taskEntries.push({ index: i, title: ordered[1]!.trim(), checked: false });
+    if (ordered) taskEntries.push({ index: i, title: ordered[1]!.trim(), marker: " " });
   }
 
   const fieldPattern = /^\s*(?:[-*+]\s+|>\s*)?(依赖|depends?\s*on|前置|文件|模块|files?|modules?|实现(?:要求)?|implementation|验收|验证|acceptance|verification|需求|requirement)\s*[:：]\s*(.*)$/i;
@@ -735,7 +794,7 @@ export function parseTasksFromMarkdown(content: string, specDocument = false): T
       id,
       ...(specDocument ? { sourceLine: entry.index + 1 } : {}),
       executionGuidance: guidance,
-      status: entry.checked ? "completed" : "pending",
+      status: taskStatusFromCheckbox(entry.marker),
       acceptance: acceptance || undefined,
       dependsOn: hasDependencyField ? explicitDeps : tasks.length > 0 ? [`task_${tasks.length}`] : [],
       retryCount: 0,

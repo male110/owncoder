@@ -282,8 +282,10 @@ describe("spec task orchestration", () => {
     syncFocusSession(sid);
     latest = doc(task("first"), task("second", "pending", ["first"]));
     ipc = {
-      getSpecTaskDocument: vi.fn(async () => latest),
+      keepAllChanges: vi.fn(async () => {}),
+      approvePlan: vi.fn(async () => ({ mode: "agent", activePlanPath: "plans/empty.md" })),
       getChatHistory: vi.fn(async () => []),
+      getSpecTaskDocument: vi.fn(async () => latest),
       getChatHistoryPage: vi.fn(async () => ({ turns: [], hasMore: false })),
       prepareSpecTaskExecution: vi.fn(async () => {
         if (latest && !latest.approvedAt) latest = { ...latest, approvedAt };
@@ -374,6 +376,20 @@ describe("spec task orchestration", () => {
     expect(ipc.sendChat).toHaveBeenCalledTimes(3);
     expect(ipc.sendChat).toHaveBeenNthCalledWith(2, expect.any(String), sid, undefined, ref("retry"));
     expect(ipc.sendChat).toHaveBeenNthCalledWith(3, expect.any(String), sid, undefined, ref("unrelated"));
+  });
+
+  it("shows a recoverable status when an approved plan has no executable tasks", async () => {
+    deps.refreshActivePlan.mockResolvedValue({ path: "plans/empty.md", tasks: [] } as never);
+    await actions.onApprovePlan();
+    expect(useChatStore.getState().bySession[sid]?.liveStatus).toContain("没有可执行任务");
+    expect(ipc.sendChat).not.toHaveBeenCalled();
+  });
+
+  it("shows a recoverable status when executing an active plan with no tasks", () => {
+    useSessionStore.setState({ activePlanMetaBySession: { [sid]: { path: "plans/empty.md", tasks: [] } } });
+    actions.onExecutePlan(sid);
+    expect(useChatStore.getState().bySession[sid]?.liveStatus).toContain("没有可执行任务");
+    expect(useChatStore.getState().isSessionSending(sid)).toBe(false);
   });
 
   it.each([

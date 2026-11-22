@@ -67,8 +67,8 @@ export function isStopRequested(sid: string): boolean {
 }
 
 /**
- * Request a stop for a session. The running queue loop (if any) will break
- * after the in-flight turn settles, leaving remaining queued messages intact.
+ * Request a stop for a session. The running loop will not dequeue another
+ * message; cancellation of the in-flight turn is handled by cancelChat.
  */
 export function requestStop(sid: string): void {
   stopRequested.add(sid);

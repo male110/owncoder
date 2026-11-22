@@ -78,7 +78,7 @@ describe("validateSpecContent", () => {
 
   it("中文 feature 使用 docs 根目录扁平文件名", async () => {
     await saveSpec(root, "养生馆", "# 需求\n\n用户可以预约课程。", SID);
-    await saveDesign(root, "养生馆", "# 设计\n\n预约服务负责处理课程预约。", SID);
+    await saveDesign(root, "养生馆", "# 设计\n\n## 预约流程\n预约服务接收课程请求，并调用课程模块完成预约。", SID);
     expect(await fs.readFile(join(root, "docs/养生馆-requirement.md"), "utf8")).toContain("预约课程");
     expect(await fs.readFile(join(root, "docs/养生馆-design.md"), "utf8")).toContain("预约服务");
   });
@@ -105,8 +105,24 @@ describe("validateSpecContent", () => {
 });
 
 describe("validateDesignContent", () => {
-  it("接受带追踪矩阵的设计", () => {
+  it("接受带追踪矩阵和中文技术设计的设计", () => {
     expect(() => validateDesignContent(validDesign, validSpec)).not.toThrow();
+  });
+
+  it("接受英文技术设计和不同标题表达", () => {
+    const design = [
+      "# Design",
+      "## System components",
+      "The authentication module calls the session API and stores a session data model.",
+      "## Requirement mapping",
+      "R1 is handled by authentication; R2 returns an error response.",
+    ].join("\n");
+    expect(() => validateDesignContent(design, "R1: Login\nR2: Invalid credentials")).not.toThrow();
+  });
+
+  it("拒绝只有需求追踪而没有技术设计内容", () => {
+    const traceOnly = "# 设计\n\n## 需求追踪矩阵\n| R1 | R1 |\n| R2 | R2 |";
+    expect(() => validateDesignContent(traceOnly, validSpec)).toThrow(/substantive technical design/i);
   });
 
   it("拒绝空文档", () => {
@@ -177,6 +193,13 @@ describe("三阶段落盘校验", () => {
     await saveSpec(root, "login", validSpec, SID);
     const missing = validDesign.replace("| R2 | 错误提示 |", "");
     await expect(saveDesign(root, "login", missing, SID)).rejects.toThrow(/does not cover/i);
+    await expect(fs.access(join(root, "docs/login-design.md"))).rejects.toThrow();
+  });
+
+  it("设计阶段拒绝只有需求追踪的内容，不落盘", async () => {
+    await saveSpec(root, "login", validSpec, SID);
+    const traceOnly = "# 设计\n\n## 需求追踪矩阵\n| R1 | 已覆盖 |\n| R2 | 已覆盖 |";
+    await expect(saveDesign(root, "login", traceOnly, SID)).rejects.toThrow(/substantive technical design/i);
     await expect(fs.access(join(root, "docs/login-design.md"))).rejects.toThrow();
   });
 

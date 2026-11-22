@@ -12,9 +12,11 @@ describe("Spec save tool guidance", () => {
     expect(guidance).toContain("use the verified existing stack");
     expect(guidance).toContain("recommend one stack with reasons and assumptions");
     expect(guidance).toContain("implementation order and verification");
+    expect(guidance).toContain("architecture and module boundaries, key flows, interfaces, data models, error handling");
+    expect(guidance).toContain("equivalent Chinese or English headings are acceptable");
     expect(guidance).toContain("in this same document (假设与待确认)");
     expect(guidance).toContain("Do not leave them only in research notes or chat");
-    expect(guidance).toContain("Use any suitable Markdown structure");
+    expect(guidance).toContain("If the requirements define R/FR identifiers, trace each in the design");
   });
 
   it("bases tasks on the recommendation without assuming unresolved decisions are approved", () => {

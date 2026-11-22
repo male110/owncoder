@@ -35,6 +35,7 @@ function ComposerImpl({
   isEmptySession,
   pendingNewSession,
   modeMenuOpen,
+  modeSwitchPending,
   onDraft,
   onSend,
   onCancel,
@@ -158,7 +159,13 @@ function ComposerImpl({
           ＋
         </button>
 
-        <ModePicker mode={mode} open={modeMenuOpen} onOpenChange={onModeMenuOpen} onMode={onMode} />
+        <ModePicker
+          mode={mode}
+          open={modeMenuOpen}
+          pending={modeSwitchPending}
+          onOpenChange={onModeMenuOpen}
+          onMode={onMode}
+        />
 
         {/* 任务分解：模型 + 思考等级紧贴为一个整体，共用圆弧边框（分阶段和非分阶段都显示） */}
         <div className="model-group model-group-decomposer">

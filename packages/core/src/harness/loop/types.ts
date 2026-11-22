@@ -505,7 +505,7 @@ export interface AgentLoopOpts {
 }
 
 export interface SpecTaskOutcome {
-  status: "completed" | "failed" | "blocked" | "cancelled";
+  status: "completed" | "partial" | "failed" | "blocked" | "cancelled";
   result?: string;
 }
 

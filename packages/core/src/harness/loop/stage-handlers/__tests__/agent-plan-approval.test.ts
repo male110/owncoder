@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { runAgentPlanner, resumeAgentPlan, needsAgentPlanApproval, requireAgentPlanApproval, validatePlannerReport } from "../planner.ts";
+import { runAgentPlanner, resumeAgentPlan, needsAgentPlanApproval, requireAgentPlanApproval } from "../planner.ts";
 import { approvePlannerPlan, readPlannerPlan, readPlanFile, revisePlannerPlan, savePlannerPlan, validatePlannerPlan } from "../../../../plans.ts";
 import type { StageHandlerContext } from "../types.ts";
 import { BUILTIN_WORKFLOW } from "@owncoder/settings";
@@ -89,6 +89,24 @@ describe("版本化计划保存与审批", () => {
     expect(plan.approval).toMatchObject({ planId: plan.planId, version: 1, digest: plan.digest, path: plan.path });
     await fs.writeFile(join(root, plan.path), "被外部改写");
     expect(await requireAgentPlanApproval(ctx)).toBe(false);
+  });
+
+  it("纯文本计划可以保存、批准并作为任务分解输入", async () => {
+    const plain = "先检查登录重试逻辑，再补回归测试。";
+    const saved = `## Final Report\n\n${plain}\n`;
+    const first = makeContext();
+    vi.mocked(first.toolCtx.dispatchSubagent!).mockResolvedValue(plain);
+    await runAgentPlanner(first, call);
+    expect(first.state.blocked).toBe(false);
+    expect(first.state.planApproval).toBe("pending_approval");
+    expect(first.state.awaitingUserConfirmation).toBe(true);
+    expect(await validatePlannerPlan(root, "session-a", first.state.plannerPlan!)).toBe(saved);
+
+    const approved = makeContext(first.history);
+    await resumeAgentPlan(approved);
+    expect(approved.state.planApproval).toBe("approved");
+    expect(approved.opts.userMessage).toBe(saved);
+    expect(await requireAgentPlanApproval(approved)).toBe(true);
   });
 
   it("Spec never dispatches the approval Planner or saves a plan for approval", async () => {
@@ -236,23 +254,27 @@ describe("版本化计划保存与审批", () => {
     expect(ctx.state.lastAssistant).not.toContain("<!--plan_saved:");
   });
 
-  it("工具失败、参数或报告无效均不保存或执行", async () => {
+  it("工具失败或参数无效时不保存或执行", async () => {
     const failed = makeContext(); vi.mocked(failed.toolCtx.dispatchSubagent!).mockRejectedValue(new Error("offline"));
     await runAgentPlanner(failed, call); expect(failed.state.blocked).toBe(true);
+    expect(failed.state.blockedReason).toContain("只读 Planner 失败");
     const invalid = makeContext(); await runAgentPlanner(invalid, { ...call, function: { ...call.function, arguments: "{}" } });
     expect(invalid.toolCtx.dispatchSubagent).not.toHaveBeenCalled();
     const missingType = makeContext();
     await runAgentPlanner(missingType, { ...call, function: { ...call.function, arguments: JSON.stringify({ task: "调研" }) } });
     expect(missingType.state.blockedReason).toContain("只允许调用计划子代理");
     expect(missingType.toolCtx.dispatchSubagent).not.toHaveBeenCalled();
-    const bad = makeContext(); vi.mocked(bad.toolCtx.dispatchSubagent!).mockResolvedValue("## Final Report\n### 目标\n无步骤");
-    await runAgentPlanner(bad, call); expect(bad.state.blocked).toBe(false);
-    expect(validatePlannerReport("## Final Report\n### 目标\n无步骤").missing).toEqual([]);
-    expect(await readPlannerPlan(root, "session-a")).not.toBeNull();
-    const empty = makeContext(); vi.mocked(empty.toolCtx.dispatchSubagent!).mockResolvedValue("   ");
-    await runAgentPlanner(empty, call); expect(empty.state.blocked).toBe(true);
-    expect(empty.state.blockedReason).toContain("只读 Planner 未返回有效计划");
-    expect(await readPlannerPlan(root, "session-b")).toBeNull();
+    expect(await readPlannerPlan(root, "session-a")).toBeNull();
+  });
+
+  it.each(["", "   \n\t  ", "## Final Report\n\n"])("正常返回但没有计划正文时，提交占位说明而不因格式暂停：%j", async (output) => {
+    const ctx = makeContext();
+    vi.mocked(ctx.toolCtx.dispatchSubagent!).mockResolvedValue(output);
+    await runAgentPlanner(ctx, call);
+    expect(ctx.state.blocked).toBe(false);
+    expect(ctx.state.planApproval).toBe("pending_approval");
+    const plan = (await readPlannerPlan(root, "session-a"))!;
+    expect(await validatePlannerPlan(root, "session-a", plan)).toContain("Planner 未提供计划正文");
   });
 
   it("跨会话卡片、批准令牌和缓存执行状态不能复用", async () => {
@@ -299,6 +321,20 @@ describe("版本化计划保存与审批", () => {
     expect(ctx.opts.activePlan).toEqual({ path: plan.path, content: `${report}\n` });
     expect(ctx.opts.askUser).not.toHaveBeenCalled();
     expect(await requireAgentPlanApproval(ctx)).toBe(true);
+
+    const freshExecution = makeContext(uiHistory, "请继续处理下一步");
+    await resumeAgentPlan(freshExecution);
+    expect(freshExecution.state.planApproval).toBe("approved");
+    expect(await requireAgentPlanApproval(freshExecution)).toBe(true);
+  });
+
+  it("未批准计划在执行边界仍被阻止", async () => {
+    const first = makeContext();
+    await runAgentPlanner(first, call);
+    const unapproved = makeContext(first.history, "开始执行");
+    unapproved.state.planRequested = true;
+    await expect(requireAgentPlanApproval(unapproved)).resolves.toBe(false);
+    expect(unapproved.state.blocked).toBe(true);
   });
 
   it("UI 批准按钮路径：磁盘批准过期或被替换时仍拒绝", async () => {
@@ -324,82 +360,21 @@ describe("版本化计划保存与审批", () => {
   });
 });
 
-describe("validatePlannerReport — 内容非空即有效", () => {
-  const fullBody = [
-    "### 目标", "实现登录重试",
-    "### 步骤", "1. 检查认证边界", "2. 修复登录重试并测试",
-    "### 相关文件", "packages/auth/src/login.ts: 检索到入口",
-    "### 风险与不确定性", "重试语义需要核对",
-    "### 验证方式", "运行相关测试",
-  ].join("\n");
+describe("Planner 报告消费", () => {
 
-  it("标准五段式计划通过校验", () => {
-    const { normalized, missing } = validatePlannerReport(`## Final Report\n${fullBody}`);
-    expect(missing).toEqual([]);
-    expect(normalized).toContain("### 目标");
-  });
 
-  it("英文标题、h1 总标题、编号前缀标题均通过", () => {
-    const english = [
-      "# Final Report",
-      "## Goal", "Implement login retry.",
-      "## Steps", "1. Inspect auth boundary", "2) Fix retry and test",
-      "## Related Files", "packages/auth/src/login.ts: entry",
-      "## Risks and Uncertainties", "Retry semantics need review",
-      "## Verification", "Run related tests",
-    ].join("\n");
-    expect(validatePlannerReport(english).missing).toEqual([]);
-    const numbered = `## Final Report\n${fullBody.replace("### 目标", "## 1. 目标").replace("### 相关文件", "#### 相关文件与证据")}`;
-    expect(validatePlannerReport(numbered).missing).toEqual([]);
-    const deepEnglish = english.replace("## Related Files", "##### 3. Related Files and Evidence")
-      .replace("## Steps", "#### (2) Steps").replace("## Verification", "###### Verification:");
-    expect(validatePlannerReport(deepEnglish).missing).toEqual([]);
-  });
-
-  it("中文编号变体（1、与（1））与加粗伪标题通过", () => {
-    const variant = [
-      "## Final Report",
-      "**目标**", "实现登录重试",
-      "**步骤**", "1、检查认证边界", "（2）修复登录重试并测试",
-      "**相关文件**", "packages/auth/src/login.ts: 检索到入口",
-      "**风险与不确定性**", "重试语义需要核对",
-      "**验证方式**", "运行相关测试",
-    ].join("\n");
-    expect(validatePlannerReport(variant).missing).toEqual([]);
-  });
-
-  it("章节内更深层小节与代码围栏中的 # 不截断章节", () => {
-    const nested = [
-      "## Final Report",
-      "## 目标", "实现登录重试",
-      "## 步骤", "1. 检查认证边界", "#### 阶段一：定位", "继续属于步骤章节的内容",
-      "## 相关文件", "示例：", "```ts", "# 注释不是标题", "const x = 1;", "```", "packages/auth/src/login.ts: 入口",
-      "## 风险与不确定性", "重试语义需要核对",
-      "## 验证方式", "运行相关测试",
-    ].join("\n");
-    const { missing } = validatePlannerReport(nested);
-    expect(missing).toEqual([]);
-  });
-
-  it("缺 Final Report 总标题或部分章节：内容非空即通过，不再补标题", () => {
-    const { normalized, missing } = validatePlannerReport(fullBody);
-    expect(missing).toEqual([]);
-    expect(normalized).toBe(fullBody);
-    const noRisk = fullBody.replace("### 风险与不确定性\n重试语义需要核对\n", "");
-    expect(validatePlannerReport(`## Final Report\n${noRisk}`).missing).toEqual([]);
-    const unnumbered = fullBody.replace("1. 检查认证边界", "- 检查认证边界").replace("2. 修复登录重试并测试", "- 修复登录重试并测试");
-    expect(validatePlannerReport(`## Final Report\n${unnumbered}`).missing).toEqual([]);
-  });
-
-  it("完全无结构的报告只要非空即通过", () => {
-    const { normalized, missing } = validatePlannerReport("随便一段文字");
-    expect(missing).toEqual([]);
-    expect(normalized).toBe("随便一段文字");
-  });
-
-  it("空字符串与纯空白仍判无效", () => {
-    expect(validatePlannerReport("").missing).toEqual(["计划内容为空"]);
-    expect(validatePlannerReport("   \n\t  ").missing).toEqual(["计划内容为空"]);
+  it.each([
+    ["## Final Report\n### 思路\n- 检查认证边界\n- 修复登录重试并测试", ""],
+    ["先检查登录重试逻辑，再补回归测试。", "## Final Report\n\n"],
+    ["先查现状。\n\n## Final Report\n\n- 补回归测试", "## Final Report\n\n"],
+  ])("不要求固定章节、标题或编号，并保留正文：%j", async (output, heading) => {
+    const ctx = makeContext();
+    vi.mocked(ctx.toolCtx.dispatchSubagent!).mockResolvedValue(` \n${output}\n `);
+    await runAgentPlanner(ctx, call);
+    expect(ctx.state.blocked).toBe(false);
+    expect(ctx.state.planApproval).toBe("pending_approval");
+    const plan = (await readPlannerPlan(root, "session-a"))!;
+    expect(await validatePlannerPlan(root, "session-a", plan)).toBe(`${heading}${output}\n`);
   });
 
   it("向 Planner 调用转发分解阶段相关历史", async () => {
@@ -428,7 +403,7 @@ describe("validatePlannerReport — 内容非空即有效", () => {
   it.each([
     "[Planner partial result: subagent budget exhausted; no plan was produced]",
     `[Planner partial result: reached the iteration limit; findings below may be incomplete]\n\n${report}`,
-    "[Planner partial result: subagent finished without producing a report]",
+    "[Planner partial result: request timed out]",
   ])("Planner 不完整结果明确暂停：%s", async (partial) => {
     const ctx = makeContext();
     vi.mocked(ctx.toolCtx.dispatchSubagent!).mockResolvedValue(partial);

@@ -48,7 +48,23 @@ describe("Planner 白名单与提示词契约", () => {
       expect(prompt).toContain(section);
     }
     // 未知点显式进入风险段，而不是继续调研。
-    expect(prompt).toMatch(/submit the plan anyway rather than researching further/);
+    expect(prompt).toMatch(/submit the plan instead of expanding the search speculatively/);
+  });
+
+  it("提示词要求按计划步骤窄化研究，并在无法证实时停止并提交风险", () => {
+    const prompt = buildPlannerSubagentPrompt({}, "已确认锚点：src/a.ts:12");
+    for (const text of [
+      "Reuse the background history and confirmed anchors as starting evidence",
+      "For each planning step, investigate only its required implementation landing point",
+      "Every additional file you inspect must answer a concrete question tied to a planning step",
+      "Prefer targeted workspace-relative `glob` / `grep` patterns and symbol-level reads",
+      "stay within the brief's named target directory",
+      "expand to one explicitly relevant directory only when needed",
+      "Skip out-of-scope hits and directory enumeration",
+      "Put anything you could not verify under 风险与不确定性 and submit the plan",
+    ]) {
+      expect(prompt).toContain(text);
+    }
   });
 
   it("relevantHistory 注入仍标注为背景证据而非当前指令", () => {

@@ -100,8 +100,21 @@ export function slimTurnFinal(result: unknown): unknown {
   let assistantText =
     typeof row.assistantText === "string" ? row.assistantText : "";
   if (!assistantText && Array.isArray(row.history)) {
-    for (let i = row.history.length - 1; i >= 0; i--) {
-      const item = slimChatTurn(row.history[i]);
+    // result.history is the whole session transcript, not just this turn.
+    // Scope the fallback to the current user boundary so an empty turn cannot
+    // inherit the previous turn's assistant message (same guard as the legacy
+    // read path in projectConversationTurns).
+    const history = row.history;
+    let anchor = -1;
+    for (let i = history.length - 1; i >= 0; i--) {
+      const item = slimChatTurn(history[i]);
+      if (item?.role === "user") {
+        anchor = i;
+        break;
+      }
+    }
+    for (let i = history.length - 1; i > anchor; i--) {
+      const item = slimChatTurn(history[i]);
       if (item?.role === "assistant" && item.content.trim()) {
         assistantText = item.content;
         break;
@@ -563,7 +576,7 @@ export function projectConversationTurns(turns: ConversationTurn[]): ChatTurn[] 
         : -1;
       const scopedHistory = anchor >= 0
         ? history.slice(anchor + 1, nextUser >= 0 ? nextUser : undefined)
-        : history;
+        : [];
       for (const row of scopedHistory) {
         if (!row || typeof row !== "object" || typeof row.content !== "string") continue;
         if (row.role === "tool" || row.role === "assistant" || row.role === "system") {

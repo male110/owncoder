@@ -5,7 +5,12 @@ import type { ToolCall } from "@owncoder/llm";
 import { PLANNER_SUBAGENT_TYPE } from "../../subagent/planner-subagent.ts";
 import { approvePlannerPlan, readPlannerPlan, revisePlannerPlan, savePlannerPlan, validatePlannerPlan, type PlannerPlan } from "../../../plans.ts";
 
-type PlanContext = Pick<StageHandlerContext, "opts" | "state" | "history">;
+// `toolCtx` 是必需成员：planner 交付计划走非工具路径（直接调 savePlannerPlan），
+// 不会经过 save-plan/write-file 等工具的 `ctx.lastPlanPath` 赋值点。若不在这里
+// 补写，`AgentLoopResult.lastPlanPath`（loop.ts 中 `finish()` 读取 toolCtx）恒为空，
+// 渲染端 `useChatActions` 的 `refreshPlans(sid)` 就不会被触发，计划卡片拿不到
+// 计划元数据，「批准计划」按钮只能靠切换会话重新枚举磁盘才出现。
+type PlanContext = Pick<StageHandlerContext, "opts" | "state" | "history" | "toolCtx">;
 
 function failPlan(ctx: PlanContext, error: unknown): void {
   ctx.state.planApproval = "unavailable";
@@ -27,6 +32,10 @@ function deliverPlan(ctx: PlanContext, plan: PlannerPlan, content: string): void
     content.trim(),
     "请打开计划查看；下一轮明确批准执行或提出修改意见。本轮未实施计划内容。",
   ].join("\n\n") + `\n\n<!--plan_saved:${plan.path}-->`;
+  // 计划刚刚保存成功：把路径记到本轮 toolCtx 上，`AgentLoopResult.lastPlanPath`
+  // 会随之带值返回渲染端，触发 plansBySession 的即时刷新，使计划卡片的
+  // 「批准计划」按钮无需切换会话即可出现。
+  ctx.toolCtx.lastPlanPath = plan.path;
   ctx.history.push({ role: "assistant", content: ctx.state.lastAssistant });
   ctx.opts.onEvent?.({ type: "assistant_delta", text: ctx.state.lastAssistant });
 }
@@ -152,12 +161,30 @@ export async function resumeAgentPlan(ctx: Omit<StageHandlerContext, "node">): P
     const content = await validatePlannerPlan(opts.workspaceRoot, opts.sessionId, plan, false, true);
     if (opts.signal?.aborted) { state.aborted = true; return; }
     const input = opts.userMessage.trim();
-    const approve = /^(?:approve|approved|批准(?:执行|计划)?|同意(?:执行|计划)?|实施|继续|开始执行|按计划执行|执行计划)[。！!\s]*$/i.test(input);
     const revision = /修改|调整|补充|纠正|更正|改成|改为|增加|删除|修订|revise|change|update/i.test(input);
     if (revision) {
       await generatePlanRevision(ctx, plan, content, input);
       return;
     }
+    // Desktop approval is persisted before the follow-up execution turn. Restore that
+    // exact revision without requiring the user to repeat an approval phrase.
+    if (plan.status === "approved") {
+      const approvedContent = await validatePlannerPlan(opts.workspaceRoot, opts.sessionId, plan, true);
+      if (opts.signal?.aborted) { state.aborted = true; return; }
+      state.approvedAgentPlan = approvedContent;
+      state.planApproval = "approved";
+      state.plannerPlan = plan;
+      if (opts.activePlan?.path !== plan.path) {
+        opts.activeTasks = undefined;
+        opts.currentTaskId = null;
+        opts.taskRunState = null;
+        state.taskRunState = null;
+      }
+      opts.activePlan = { path: plan.path, content: approvedContent };
+      opts.userMessage = approvedContent;
+      return;
+    }
+    const approve = /^(?:approve|approved|批准(?:执行|计划)?|同意(?:执行|计划)?|实施|继续|开始执行|按计划执行|执行计划)[。！!\s]*$/i.test(input);
     if (!approve) {
       if (/^(?:reject|拒绝(?:计划)?|不同意|取消)[。！!\s]*$/i.test(input)) {
         await revisePlannerPlan(opts.workspaceRoot, opts.sessionId, plan);
@@ -172,28 +199,6 @@ export async function resumeAgentPlan(ctx: Omit<StageHandlerContext, "node">): P
         // 不重发计划卡片，也不进入未批准计划的执行流水线。
         await answerPlanPendingChat(ctx, plan);
       }
-      return;
-    }
-    // UI 批准按钮路径：session-plans.approvePlan 已通过 approvePlannerPlan 在锁内
-    // 把当前版本的有效批准写入磁盘（版本、摘要、批准引用一致）。此时会话里最后
-    // 一条助手消息是「✅ 计划已批准…」确认而非计划卡片，不能再用 plan_saved 标记
-    // 判定“用户看过该版本”；直接采信磁盘批准。过期或被替换的版本仍会被
-    // validatePlannerPlan(approved=true) 拒绝，不绕过版本校验。
-    if (plan.status === "approved") {
-      const approvedContent = await validatePlannerPlan(opts.workspaceRoot, opts.sessionId, plan, true);
-      if (opts.signal?.aborted) { state.aborted = true; return; }
-      state.approvedAgentPlan = approvedContent;
-      state.planApproval = "approved";
-      state.plannerPlan = plan;
-      if (opts.activePlan?.path !== plan.path) {
-        opts.activeTasks = undefined;
-        opts.currentTaskId = null;
-        opts.taskRunState = null;
-        state.taskRunState = null;
-      }
-      opts.activePlan = { path: plan.path, content: approvedContent };
-      // 既定契约：批准后把获批计划的完整内容作为用户输入送入任务分解。
-      opts.userMessage = approvedContent;
       return;
     }
     const viewed = [...opts.history].reverse().find((turn) => turn.role === "assistant");
@@ -242,29 +247,6 @@ export async function resumeAgentPlan(ctx: Omit<StageHandlerContext, "node">): P
   }
 }
 
-/** Final Report 总标题：任意标题层级、大小写不敏感、允许短后缀。 */
-const FINAL_REPORT_HEADING = /^#{1,6}[ \t]*(?:\d+[.)、．][ \t]*)?final[ \t]+report\b.*$/i;
-
-function normalizePlannerReport(report: string): { body: string } {
-  const trimmed = report.trim();
-  const lines = trimmed.split(/\r?\n/);
-  let inFence = false;
-  const index = lines.findIndex((line) => {
-    if (/^\s*(```|~~~)/.test(line)) { inFence = !inFence; return false; }
-    return !inFence && FINAL_REPORT_HEADING.test(line.trim());
-  });
-  return { body: index >= 0 ? lines.slice(index).join("\n").trim() : trimmed };
-}
-
-/**
- * 计划内容校验：只要返回内容非空即视为有效，不再要求五段结构。
- * 空白或空字符串仍判无效，避免把空报告当作计划交付审批。
- */
-export function validatePlannerReport(report: string): { normalized: string; missing: string[] } {
-  const { body } = normalizePlannerReport(report);
-  if (!body) return { normalized: "", missing: ["计划内容为空"] };
-  return { normalized: body, missing: [] };
-}
 
 export async function runAgentPlanner(ctx: Omit<StageHandlerContext, "node">, call: ToolCall): Promise<void> {
   const { opts, state } = ctx;
@@ -281,7 +263,7 @@ export async function runAgentPlanner(ctx: Omit<StageHandlerContext, "node">, ca
     const args = JSON.parse(call.function.arguments) as Record<string, unknown>;
     if (!args || typeof args !== "object" || Array.isArray(args)) throw new Error("无效工具参数");
     // 任务分解阶段只允许计划子代理（Planner）；Explore 等其他类型直接拒绝，
-    // 避免误调度只读调研代理导致计划结构校验失败后暂停执行。
+    // 避免把只读调研结果当作计划交付。
     if (args.agent_type !== PLANNER_SUBAGENT_TYPE) {
       throw new Error(`任务分解阶段只允许调用计划子代理（agent_type="${PLANNER_SUBAGENT_TYPE}"），不允许调用 "${String(args.agent_type)}"`);
     }
@@ -320,17 +302,11 @@ export async function runAgentPlanner(ctx: Omit<StageHandlerContext, "node">, ca
     state.blockedReason = `只读 Planner 未完成计划，执行已暂停${detail ? `（${detail.slice(1, -1)}）` : ""}`;
     return;
   }
-  const validation = validatePlannerReport(report);
-  if (validation.missing.length > 0) {
-    state.planApproval = "unavailable";
-    state.blocked = true;
-    state.blockedReason = `只读 Planner 未返回有效计划（${validation.missing.join("、")}），执行已暂停`;
-    opts.onEvent?.({
-      type: "warning",
-      message: state.blockedReason,
-    });
-    return;
-  }
-
-  await requestAgentPlanApproval(ctx, validation.normalized);
+  const reportText = report.trim();
+  const content = !reportText || /^## Final Report$/i.test(reportText)
+    ? "Planner 未提供计划正文；批准后将按原任务要求继续。"
+    : reportText;
+  // 提前补上标题，避免写入器自动加标题后与保存时的摘要、回读校验不一致。
+  const plan = content.startsWith("#") ? content : `## Final Report\n\n${content}`;
+  await requestAgentPlanApproval(ctx, plan);
 }

@@ -417,6 +417,7 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
       const agentId = `explore-${++subagentThreadSeq}`;
       const { report, transcript } = await runExploreSubagent(
         { ...request, relevantHistory }, subagentDeps);
+      if (request.agentType === "Planner") return report;
       if (transcript) subagentThreads.set(agentId, withClosingReport(transcript, report));
       // id 尾注是父智能体发现续接通道的唯一入口（工具结果为纯文本）。
       return `${report}\n\n---\n[Explore agent id: ${agentId} · dispatch again with continueAgentId="${agentId}" to ask follow-ups with its full context intact]`;
@@ -504,7 +505,9 @@ export async function runAgentLoop(opts: AgentLoopOpts): Promise<AgentLoopResult
       : state.specTaskSubmission?.status === "completed" && state.taskRunState?.phase === "completed"
         && !state.aborted && !state.blocked && !state.awaitingUserConfirmation
         ? { status: "completed", result: state.specTaskSubmission.result }
-        : { status: "failed", result: state.blockedReason ?? state.specTaskSubmission?.result ?? SPEC_TASK_REPORT_REQUIRED };
+        : state.specTaskSubmission?.status === "partial"
+          ? { status: "partial", result: state.specTaskSubmission.result }
+          : { status: "failed", result: state.blockedReason ?? state.specTaskSubmission?.result ?? SPEC_TASK_REPORT_REQUIRED };
 
     return {
       ...(specTaskOutcome && { specTaskOutcome }),

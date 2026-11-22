@@ -122,6 +122,13 @@ describe("forcedFinalReportWithStatus — Planner 契约强制收口", () => {
     }
   });
 
+  it("没有固定章节或编号的新文本也可作为强制报告", async () => {
+    const plan = "先检查登录重试逻辑，再补回归测试。";
+    mockResponse(plan);
+    const out = await forcedFinalReportWithStatus(makeCtx({}), "iteration cap", PLANNER_FORCED_REPORT_INSTRUCTION);
+    expect(out).toEqual({ text: plan, fromModel: true });
+  });
+
   it("强制调用失败回退到历史文本时 fromModel=false（维持 blocked 终态）", async () => {
     vi.mocked(chatCompletionStream).mockRejectedValueOnce(new Error("network down"));
     const ctx = makeCtx({ lastAssistant: "现在读取下一个文件…" });

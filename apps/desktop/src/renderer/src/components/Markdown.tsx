@@ -8,8 +8,8 @@ interface ListItem {
   sourceLine?: number;
 }
 
-// Match the Spec validator, not the more permissive legacy plan parser.
-const specCheckbox = /^\s*([-*]|\d+[.、)])\s+\[([ xX])\]\s+(.+)$/;
+// 同时识别任务生成时的复选框和执行后写回的进度标记。
+const specCheckbox = /^\s*([-*]|\d+[.、)])\s+\[([ xX/\-])\]\s+(.+)$/;
 const unorderedItem = /^[-*]\s+/;
 const orderedItem = /^\d+\.\s+/;
 const specFence = /^\s*(`{3,}|~{3,})(.*)$/;
@@ -35,6 +35,7 @@ function readListItem(line: string, sourceLine: number, spec: boolean, legacyTas
 const statusLabels: Record<TaskStatusDto, MsgId> = {
   pending: "待执行",
   in_progress: "执行中",
+  partial: "部分完成",
   completed: "已完成",
   failed: "失败",
   skipped: "已跳过",
